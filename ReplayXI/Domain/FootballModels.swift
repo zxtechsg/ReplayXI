@@ -180,6 +180,63 @@ struct PlayerMotionState: Hashable, Sendable {
     }
 }
 
+/// Seek-stable football movement semantics derived only from the authored
+/// telemetry around an absolute match timestamp. No rendered-frame history is
+/// involved, so reverse playback and SharePlay resynchronisation classify the
+/// same instant identically.
+enum PlayerLocomotionState: String, CaseIterable, Hashable, Sendable {
+    case idle
+    case walk
+    case jog
+    case sprint
+    case cut
+
+    /// The bundled imported pilot contains a forward running cycle. Jog and
+    /// sprint can safely reuse it because clip phase follows travelled distance;
+    /// standing, walking and direction changes require different body mechanics.
+    var supportsImportedRunClip: Bool {
+        self == .jog || self == .sprint
+    }
+}
+
+struct PlayerLocomotionSample: Hashable, Sendable {
+    let motion: PlayerMotionState
+    let speedMetresPerSecond: Float
+    let accelerationMetresPerSecondSquared: Float
+    let turnRateDegreesPerSecond: Float
+    let state: PlayerLocomotionState
+
+    var effort: Float {
+        min(max(speedMetresPerSecond / 7.2, 0), 1)
+    }
+
+    var turnResponse: Float {
+        min(max(turnRateDegreesPerSecond / 180, -1), 1)
+    }
+
+    var accelerationResponse: Float {
+        min(max(accelerationMetresPerSecondSquared / 8, -1), 1)
+    }
+
+    static func classify(
+        speedMetresPerSecond rawSpeed: Float,
+        turnRateDegreesPerSecond rawTurnRate: Float
+    ) -> PlayerLocomotionState {
+        let speed = rawSpeed.isFinite ? max(rawSpeed, 0) : 0
+        let turnRate = rawTurnRate.isFinite ? abs(rawTurnRate) : 0
+
+        // A cut is a moving change of direction, not a stationary scan. Test it
+        // before the pace bands so a fast turn never presents as a straight run.
+        if speed >= 1.10, turnRate >= 70 {
+            return .cut
+        }
+        if speed < 0.22 { return .idle }
+        if speed < 1.65 { return .walk }
+        if speed < 3.80 { return .jog }
+        return .sprint
+    }
+}
+
 struct PlayerTrack: Identifiable, Codable, Hashable, Sendable {
     let id: String
     let displayName: String
@@ -402,6 +459,80 @@ struct PlayerTrack: Identifiable, Codable, Hashable, Sendable {
             distanceTravelled: distanceTravelled,
             locomotionPhase: (distanceTravelled * 3.10) + stablePhaseOffset
         )
+    }
+
+    /// A centered, allocation-free motion descriptor for animation selection.
+    /// Incoming and outgoing velocity capture acceleration and sharp path turns
+    /// that a single interpolated pose cannot express. The fixed sampling window
+    /// also prevents classification from depending on display refresh cadence.
+    func locomotion(at time: TimeInterval) -> PlayerLocomotionSample {
+        let baseMotion = motion(at: time)
+        guard time.isFinite, keyframes.count > 1 else {
+            let speed = baseMotion.speedMetresPerSecond.isFinite
+                ? max(baseMotion.speedMetresPerSecond, 0)
+                : 0
+            return PlayerLocomotionSample(
+                motion: baseMotion,
+                speedMetresPerSecond: speed,
+                accelerationMetresPerSecondSquared: 0,
+                turnRateDegreesPerSecond: 0,
+                state: PlayerLocomotionSample.classify(
+                    speedMetresPerSecond: speed,
+                    turnRateDegreesPerSecond: 0
+                )
+            )
+        }
+
+        let halfWindow: TimeInterval = 0.12
+        let before = pose(at: time - halfWindow)
+        let centre = pose(at: time)
+        let after = pose(at: time + halfWindow)
+        let seconds = Float(halfWindow)
+
+        let incomingX = centre.position.x - before.position.x
+        let incomingZ = centre.position.z - before.position.z
+        let outgoingX = after.position.x - centre.position.x
+        let outgoingZ = after.position.z - centre.position.z
+        let incomingDistance = hypot(incomingX, incomingZ)
+        let outgoingDistance = hypot(outgoingX, outgoingZ)
+        let incomingSpeed = incomingDistance / seconds
+        let outgoingSpeed = outgoingDistance / seconds
+        let speed = max((incomingSpeed + outgoingSpeed) * 0.5, 0)
+        let acceleration = min(max((outgoingSpeed - incomingSpeed) / seconds, -30), 30)
+
+        let facingTurn = Self.shortestAngleDelta(
+            from: before.facingDegrees,
+            to: after.facingDegrees
+        ) / Float(halfWindow * 2)
+        var pathTurn: Float = 0
+        if incomingDistance > 0.005, outgoingDistance > 0.005 {
+            let cross = (incomingX * outgoingZ) - (incomingZ * outgoingX)
+            let dot = (incomingX * outgoingX) + (incomingZ * outgoingZ)
+            pathTurn = atan2(cross, dot) * 180 / .pi / seconds
+        }
+        let strongestTurn = abs(pathTurn) > abs(facingTurn) ? pathTurn : facingTurn
+        let turnRate = min(max(strongestTurn, -360), 360)
+
+        return PlayerLocomotionSample(
+            motion: baseMotion,
+            speedMetresPerSecond: speed,
+            accelerationMetresPerSecondSquared: acceleration,
+            turnRateDegreesPerSecond: turnRate,
+            state: PlayerLocomotionSample.classify(
+                speedMetresPerSecond: speed,
+                turnRateDegreesPerSecond: turnRate
+            )
+        )
+    }
+
+    private static func shortestAngleDelta(from start: Float, to end: Float) -> Float {
+        var delta = (end - start).truncatingRemainder(dividingBy: 360)
+        if delta > 180 {
+            delta -= 360
+        } else if delta < -180 {
+            delta += 360
+        }
+        return delta
     }
 
     private var locomotionPhaseOffset: Float {

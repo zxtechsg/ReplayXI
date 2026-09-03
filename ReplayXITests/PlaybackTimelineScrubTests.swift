@@ -2,6 +2,36 @@ import XCTest
 @testable import ReplayXI
 
 final class PlaybackTimelineScrubTests: XCTestCase {
+    func testPinchCanStartAnywhereOnRailAndClamps() {
+        XCTAssertEqual(
+            PlaybackTimelineScrub.begin(
+                atRailLocation: 50,
+                duration: 120,
+                railWidth: 200
+            ).time,
+            30,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            PlaybackTimelineScrub.begin(
+                atRailLocation: 400,
+                duration: 120,
+                railWidth: 200
+            ).time,
+            120,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            PlaybackTimelineScrub.begin(
+                atRailLocation: -.infinity,
+                duration: 120,
+                railWidth: 200
+            ).time,
+            0,
+            accuracy: 0.000_001
+        )
+    }
+
     func testHorizontalTravelUsesCoarseFineAndFrameGain() {
         var state = PlaybackTimelineScrub.begin(at: 20, duration: 100)
         state = PlaybackTimelineScrub.update(
@@ -62,6 +92,42 @@ final class PlaybackTimelineScrubTests: XCTestCase {
         XCTAssertEqual(PlaybackTimelineScrub.precision(forVerticalTravel: 42), .fine)
         XCTAssertEqual(PlaybackTimelineScrub.precision(forVerticalTravel: 95), .fine)
         XCTAssertEqual(PlaybackTimelineScrub.precision(forVerticalTravel: 96), .frame)
+    }
+
+    func testFramePrecisionSnapsOnlyAfterHorizontalTravel() {
+        var state = PlaybackTimelineScrub.begin(at: 10.017, duration: 100)
+        state = PlaybackTimelineScrub.update(
+            state,
+            duration: 100,
+            railWidth: 300,
+            horizontalTranslation: 0,
+            verticalTranslation: 110
+        )
+        XCTAssertEqual(
+            state.time,
+            10.017,
+            accuracy: 0.000_001,
+            "Lifting into frame mode must not move the playhead"
+        )
+
+        state = PlaybackTimelineScrub.update(
+            state,
+            duration: 100,
+            railWidth: 300,
+            horizontalTranslation: 7,
+            verticalTranslation: 110
+        )
+        XCTAssertEqual(state.precision, .frame)
+        XCTAssertEqual(
+            state.time * PlaybackTimelineScrub.frameRate,
+            (state.time * PlaybackTimelineScrub.frameRate).rounded(),
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            PlaybackTimelineScrub.snappedToFrame(99.999, duration: 100),
+            100,
+            accuracy: 0.000_001
+        )
     }
 
     func testGestureSamplesClampAndRejectInvalidGeometry() {

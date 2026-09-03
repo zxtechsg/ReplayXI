@@ -85,13 +85,17 @@ final class PitchSceneAthleteBindingCacheTests: XCTestCase {
     func testImportedAthleteSkipsHiddenProceduralMotionAndRagdollFallbackIsImmediateAndDeterministic() throws {
         let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay))
         let player = try XCTUnwrap(scenario.player(id: scenario.defaultPerspectiveID))
+        let supportedTime: TimeInterval = 11.8
+        let secondSupportedTime: TimeInterval = 12.0
+        XCTAssertTrue(player.locomotion(at: supportedTime).state.supportsImportedRunClip)
+        XCTAssertTrue(player.locomotion(at: secondSupportedTime).state.supportsImportedRunClip)
         _ = try ReplayImportedAthleteProvider.prewarm(in: .main, featureEnabled: true)
         let root = PitchSceneFactory.makeMatchRoot(for: scenario)
 
         update(
             root: root,
             scenario: scenario,
-            time: 2,
+            time: supportedTime,
             perspectiveID: player.id
         )
         let playerEntity = try XCTUnwrap(root.findEntity(named: "player-\(player.id)"))
@@ -103,26 +107,28 @@ final class PitchSceneAthleteBindingCacheTests: XCTestCase {
         let bindPosition = body.position
         let bindOrientation = body.orientation.vector
 
-        XCTAssertNotNil(
+        let importedVisual = try XCTUnwrap(
             playerEntity.children.first {
                 $0.name == ReplayImportedAthleteProvider.visualRootName
             }
         )
+        XCTAssertTrue(importedVisual.isEnabled)
         XCTAssertFalse(torso.isEnabled)
 
         update(
             root: root,
             scenario: scenario,
-            time: 11,
+            time: secondSupportedTime,
             perspectiveID: player.id
         )
         XCTAssertEqual(body.position, bindPosition)
         XCTAssertEqual(body.orientation.vector, bindOrientation)
+        XCTAssertTrue(importedVisual.isEnabled)
         XCTAssertFalse(torso.isEnabled)
 
         let cue = PlayerRagdollCue(
             playerID: player.id,
-            impactTime: 10,
+            impactTime: 11,
             duration: 3,
             impactDirection: SIMD2<Float>(0.45, 0.89),
             impulse: 1.1
@@ -130,7 +136,7 @@ final class PitchSceneAthleteBindingCacheTests: XCTestCase {
         update(
             root: root,
             scenario: scenario,
-            time: 11,
+            time: secondSupportedTime,
             perspectiveID: player.id,
             ragdollCue: cue
         )
@@ -149,7 +155,7 @@ final class PitchSceneAthleteBindingCacheTests: XCTestCase {
         update(
             root: root,
             scenario: scenario,
-            time: 11,
+            time: secondSupportedTime,
             perspectiveID: player.id,
             ragdollCue: cue
         )

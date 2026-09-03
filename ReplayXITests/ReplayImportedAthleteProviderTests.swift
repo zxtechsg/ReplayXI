@@ -193,6 +193,53 @@ final class ReplayImportedAthleteProviderTests: XCTestCase {
         XCTAssertEqual(importedVisualCount(in: root), 1)
     }
 
+    func testImportedRunPilotYieldsToProceduralPoseForIdleAndCutStates() throws {
+        let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay))
+        let player = try XCTUnwrap(scenario.player(id: scenario.defaultPerspectiveID))
+        let supportedTime: TimeInterval = 11.8
+        XCTAssertTrue(player.locomotion(at: supportedTime).state.supportsImportedRunClip)
+        XCTAssertEqual(player.locomotion(at: scenario.duration).state, .idle)
+        _ = try ReplayImportedAthleteProvider.prewarm(in: .main, featureEnabled: true)
+        let root = PitchSceneFactory.makeMatchRoot(for: scenario)
+
+        func update(at time: TimeInterval) {
+            PitchSceneFactory.update(
+                root: root,
+                scenario: scenario,
+                time: time,
+                viewMode: .tacticalTable,
+                perspectiveID: player.id,
+                marks: scenario.coachMarks,
+                showsLaneLens: false,
+                isDrawing: false,
+                positionalOriginTransform: nil
+            )
+        }
+
+        update(at: supportedTime)
+        let playerEntity = try XCTUnwrap(root.findEntity(named: "player-\(player.id)"))
+        let imported = try XCTUnwrap(
+            playerEntity.findEntity(named: ReplayImportedAthleteProvider.visualRootName)
+        )
+        let proceduralTorso = try XCTUnwrap(
+            playerEntity.findEntity(named: "full-rig")?.findEntity(named: "torso")
+        )
+        XCTAssertTrue(imported.isEnabled)
+        XCTAssertFalse(proceduralTorso.isEnabled)
+
+        update(at: scenario.duration)
+        XCTAssertTrue(
+            playerEntity.findEntity(named: ReplayImportedAthleteProvider.visualRootName) === imported,
+            "Changing motion state must not clone the imported visual"
+        )
+        XCTAssertFalse(imported.isEnabled)
+        XCTAssertTrue(proceduralTorso.isEnabled)
+
+        update(at: supportedTime)
+        XCTAssertTrue(imported.isEnabled)
+        XCTAssertFalse(proceduralTorso.isEnabled)
+    }
+
     private func importedVisualCount(in entity: Entity) -> Int {
         (entity.name == ReplayImportedAthleteProvider.visualRootName ? 1 : 0)
             + entity.children.reduce(0) { $0 + importedVisualCount(in: $1) }

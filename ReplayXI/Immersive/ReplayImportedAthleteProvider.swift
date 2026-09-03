@@ -80,12 +80,29 @@ final class ReplayImportedAthleteInstance {
     }
 
     /// Uses Replay XI's telemetry-distance locomotion clock, so animation pose
-    /// is independent of playback rate and update cadence.
-    func seek(to playhead: TimeInterval, using track: PlayerTrack) {
-        let phaseRadians = track.motion(at: playhead).locomotionPhase
+    /// is independent of playback rate and update cadence. The current pilot
+    /// contains only a forward run, so unsupported football states expose the
+    /// procedural rig instead of freezing a sprint frame in place.
+    @discardableResult
+    func updateMotionPresentation(
+        at playhead: TimeInterval,
+        using track: PlayerTrack,
+        locomotion suppliedLocomotion: PlayerLocomotionSample? = nil
+    ) -> Bool {
+        let locomotion = suppliedLocomotion ?? track.locomotion(at: playhead)
+        let isSupported = locomotion.state.supportsImportedRunClip
+        root.isEnabled = isSupported
+        guard isSupported else { return false }
+
+        let phaseRadians = locomotion.motion.locomotionPhase
         let turns = Double(phaseRadians) / (Double.pi * 2)
         let phase = Float(turns - floor(turns))
         seek(toNormalizedClipPhase: phase)
+        return true
+    }
+
+    func seek(to playhead: TimeInterval, using track: PlayerTrack) {
+        updateMotionPresentation(at: playhead, using: track)
     }
 
     func seek(toNormalizedClipPhase rawPhase: Float) {
@@ -266,15 +283,22 @@ enum ReplayImportedAthleteProvider {
     static func makeNearFieldVisualIfReady(
         for player: PlayerTrack,
         slot: Int = 0,
-        at playhead: TimeInterval = 0
+        at playhead: TimeInterval = 0,
+        locomotion: PlayerLocomotionSample? = nil
     ) -> ReplayImportedAthleteInstance? {
-        try? makeNearFieldVisual(for: player, slot: slot, at: playhead)
+        try? makeNearFieldVisual(
+            for: player,
+            slot: slot,
+            at: playhead,
+            locomotion: locomotion
+        )
     }
 
     static func makeNearFieldVisual(
         for player: PlayerTrack,
         slot: Int = 0,
-        at playhead: TimeInterval = 0
+        at playhead: TimeInterval = 0,
+        locomotion: PlayerLocomotionSample? = nil
     ) throws -> ReplayImportedAthleteInstance {
         guard (0..<maximumConcurrentNearFieldInstances).contains(slot) else {
             throw ReplayImportedAthleteError.invalidSlot(slot)
@@ -325,7 +349,11 @@ enum ReplayImportedAthleteProvider {
             playerID: player.id,
             animationControllers: controllers
         )
-        instance.seek(to: playhead, using: player)
+        instance.updateMotionPresentation(
+            at: playhead,
+            using: player,
+            locomotion: locomotion
+        )
         return instance
     }
 

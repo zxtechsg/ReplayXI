@@ -663,6 +663,7 @@ enum PitchSceneFactory {
                 guard let entity = playerEntitiesByID[player.id] else { continue }
                 let isSelected = player.id == perspectiveID
                 let pose = playerPosesByID[player.id] ?? player.pose(at: time)
+                let locomotion = player.locomotion(at: time)
                 // A cue is explicit and singular, so normal telemetry remains
                 // the only animation source for every uncued player. Shape Lab
                 // intentionally ignores impacts because it presents authored
@@ -786,19 +787,33 @@ enum PitchSceneFactory {
                     if let imported = ReplayImportedAthleteProvider.makeNearFieldVisualIfReady(
                         for: player,
                         slot: 0,
-                        at: time
+                        at: time,
+                        locomotion: locomotion
                     ) {
                         entity.addChild(imported.root)
                         sceneState?.importedAthlete = imported
                     }
                 }
-                let usesImportedAthlete = sceneState?.importedAthlete?.playerID == player.id
-                    && sceneState?.importedAthlete?.root.parent === entity
+                let attachedImportedAthlete = sceneState?.importedAthlete
+                let importedBelongsToPlayer = attachedImportedAthlete?.playerID == player.id
+                    && attachedImportedAthlete?.root.parent === entity
+                let hasImportedAthlete = importedBelongsToPlayer
                     && needsDetailedRig
                     && activeRagdollCue == nil
-                if usesImportedAthlete {
-                    sceneState?.importedAthlete?.seek(to: time, using: player)
+                let importedMotionIsSupported: Bool
+                if hasImportedAthlete, let imported = attachedImportedAthlete {
+                    importedMotionIsSupported = imported.updateMotionPresentation(
+                        at: time,
+                        using: player,
+                        locomotion: locomotion
+                    )
+                } else {
+                    if importedBelongsToPlayer {
+                        attachedImportedAthlete?.root.isEnabled = false
+                    }
+                    importedMotionIsSupported = false
                 }
+                let usesImportedAthlete = hasImportedAthlete && importedMotionIsSupported
                 // Player POV retains only its capped visible-neighbour set;
                 // the wearer's hidden avatar must never be built or cached.
                 // Other views keep the default rig plus the current selection,
@@ -837,6 +852,7 @@ enum PitchSceneFactory {
                         of: entity,
                         track: player,
                         time: time,
+                        locomotion: locomotion,
                         cache: sceneState
                     )
                     if let activeRagdollCue {
@@ -852,6 +868,7 @@ enum PitchSceneFactory {
                         of: entity,
                         track: player,
                         time: time,
+                        locomotion: locomotion,
                         cache: sceneState
                     )
                 }
@@ -1295,6 +1312,16 @@ enum PitchSceneFactory {
             )
         )
         interactionTarget.components.set(HoverEffectComponent())
+        var playerAccessibility = AccessibilityComponent()
+        playerAccessibility.isAccessibilityElement = true
+        playerAccessibility.label = LocalizedStringResource(
+            stringLiteral: "Number \(player.shirtNumber), \(player.displayName)"
+        )
+        playerAccessibility.value = LocalizedStringResource(
+            stringLiteral: "\(player.team.shortTitle), \(player.role)"
+        )
+        playerAccessibility.systemActions = [.activate]
+        interactionTarget.components.set(playerAccessibility)
         root.addChild(interactionTarget)
 
         // Fictional, high-contrast kits keep team and body orientation legible
@@ -3234,6 +3261,7 @@ enum PitchSceneFactory {
         of entity: Entity,
         track: PlayerTrack,
         time: TimeInterval,
+        locomotion: PlayerLocomotionSample,
         cache: AnnotationSceneCache?
     ) {
         guard let marker = directChild(named: "table-marker", of: entity),
@@ -3244,7 +3272,13 @@ enum PitchSceneFactory {
         // same seek-stable gait as the near athlete instead of a second,
         // visibly different background animation.
         if directChild(named: "body-root", of: marker) != nil {
-            animateAthleteRig(marker, track: track, time: time, cache: cache)
+            animateAthleteRig(
+                marker,
+                track: track,
+                time: time,
+                locomotion: locomotion,
+                cache: cache
+            )
             return
         }
 
@@ -3258,8 +3292,8 @@ enum PitchSceneFactory {
               let rightArm = directChild(named: "table-marker-right-arm", of: marker)
         else { return }
 
-        let motion = track.motion(at: time)
-        let effort = gaitEffort(for: track, at: time)
+        let motion = locomotion.motion
+        let effort = locomotion.effort
         let cycle = sin(motion.locomotionPhase)
         let doubleCycle = sin(motion.locomotionPhase * 2)
         let movingScale: Float = effort > 0.015 ? 1 : 0
@@ -3294,11 +3328,18 @@ enum PitchSceneFactory {
         of entity: Entity,
         track: PlayerTrack,
         time: TimeInterval,
+        locomotion: PlayerLocomotionSample,
         cache: AnnotationSceneCache?
     ) {
         guard let fullRig = directChild(named: "full-rig", of: entity),
               fullRig.isEnabled else { return }
-        animateAthleteRig(fullRig, track: track, time: time, cache: cache)
+        animateAthleteRig(
+            fullRig,
+            track: track,
+            time: time,
+            locomotion: locomotion,
+            cache: cache
+        )
     }
 
     /// Keeps one high-fidelity pilot attached to the currently admitted track.
@@ -3352,10 +3393,15 @@ enum PitchSceneFactory {
         _ fullRig: Entity,
         track: PlayerTrack,
         time: TimeInterval,
+        locomotion: PlayerLocomotionSample,
         cache: AnnotationSceneCache?
     ) {
         guard let binding = athleteBinding(for: fullRig, cache: cache) else { return }
-        let pose = ReplayAthleteMotion.locomotionPose(for: track, at: time)
+        let pose = ReplayAthleteMotion.locomotionPose(
+            for: track,
+            at: time,
+            locomotion: locomotion
+        )
         ReplayAthleteMotion.apply(pose, to: binding)
     }
 
@@ -3441,28 +3487,14 @@ enum PitchSceneFactory {
     /// jumps at authored keyframes. It is independent of render cadence and
     /// playback direction, so seeking to an instant always yields one pose.
     static func gaitEffort(for track: PlayerTrack, at time: TimeInterval) -> Float {
-        let halfWindow: TimeInterval = 0.12
-        let start = track.pose(at: time - halfWindow).position
-        let end = track.pose(at: time + halfWindow).position
-        let sampledSpeed = ReplayGeometry.distance(start, end) / Float(halfWindow * 2)
-        return min(max(sampledSpeed / 7.2, 0), 1)
+        track.locomotion(at: time).effort
     }
 
     /// Normalized signed turn rate sampled symmetrically around playback time.
     /// It adds a subtle pelvis bank and anticipatory head turn while remaining
     /// stable under reverse playback and arbitrary seeks.
     static func turningResponse(for track: PlayerTrack, at time: TimeInterval) -> Float {
-        let halfWindow: TimeInterval = 0.12
-        let start = track.pose(at: time - halfWindow).facingDegrees
-        let end = track.pose(at: time + halfWindow).facingDegrees
-        var delta = (end - start).truncatingRemainder(dividingBy: 360)
-        if delta > 180 {
-            delta -= 360
-        } else if delta < -180 {
-            delta += 360
-        }
-        let degreesPerSecond = delta / Float(halfWindow * 2)
-        return min(max(degreesPerSecond / 180, -1), 1)
+        track.locomotion(at: time).turnResponse
     }
 
     private static func directChild(named name: String, of entity: Entity) -> Entity? {

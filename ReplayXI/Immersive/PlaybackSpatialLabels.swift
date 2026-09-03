@@ -248,12 +248,15 @@ enum PlaybackSpatialLabels {
         root.components.set(HoverEffectComponent())
 
         var accessibility = AccessibilityComponent()
-        accessibility.isAccessibilityElement = true
+        // The player's body capsule is the canonical accessible element and
+        // exists at every visible LOD. Keep metadata on the floating tag for
+        // inspection, but do not announce the same player twice when this
+        // optional label is also visible.
+        accessibility.isAccessibilityElement = false
         accessibility.label = LocalizedStringResource(
             stringLiteral: "Number \(player.shirtNumber), \(player.displayName)"
         )
         accessibility.value = LocalizedStringResource(stringLiteral: player.role)
-        accessibility.systemActions = [.activate]
         root.components.set(accessibility)
 
         let selection = ModelEntity(

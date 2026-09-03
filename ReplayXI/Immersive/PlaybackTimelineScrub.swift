@@ -21,6 +21,7 @@ enum PlaybackTimelineScrub {
     }
 
     static let accessibilityStep: TimeInterval = 1
+    static let frameRate: Double = 30
 
     static func begin(
         at time: TimeInterval,
@@ -33,6 +34,23 @@ enum PlaybackTimelineScrub {
             precision: .coarse,
             previousHorizontalTranslation: 0
         )
+    }
+
+    /// Starts a gesture at the pinched rail position instead of requiring the
+    /// coach to acquire the tiny playhead first. Subsequent updates remain
+    /// incremental, so lifting into fine/frame control never changes time by
+    /// itself.
+    static func begin(
+        atRailLocation rawLocation: CGFloat,
+        duration: TimeInterval,
+        railWidth: CGFloat
+    ) -> GestureState {
+        let safeDuration = duration.isFinite ? max(duration, 0) : 0
+        guard rawLocation.isFinite, railWidth.isFinite, railWidth > 0 else {
+            return begin(at: 0, duration: safeDuration)
+        }
+        let progress = min(max(Double(rawLocation / railWidth), 0), 1)
+        return begin(at: progress * safeDuration, duration: safeDuration)
     }
 
     /// Integrates only the horizontal distance since the previous gesture
@@ -67,8 +85,12 @@ enum PlaybackTimelineScrub {
         let translatedSeconds = incrementalHorizontalTranslation / Double(railWidth)
             * safeDuration
             * gain
+        var updatedTime = min(max(safeTime + translatedSeconds, 0), safeDuration)
+        if precision == .frame, abs(incrementalHorizontalTranslation) > .ulpOfOne {
+            updatedTime = snappedToFrame(updatedTime, duration: safeDuration)
+        }
         return GestureState(
-            time: min(max(safeTime + translatedSeconds, 0), safeDuration),
+            time: updatedTime,
             precision: precision,
             previousHorizontalTranslation: currentHorizontalTranslation
         )
@@ -121,5 +143,15 @@ enum PlaybackTimelineScrub {
             max(safeTime + directionSign * accessibilityStep, 0),
             safeDuration
         )
+    }
+
+    static func snappedToFrame(
+        _ time: TimeInterval,
+        duration: TimeInterval
+    ) -> TimeInterval {
+        let safeDuration = duration.isFinite ? max(duration, 0) : 0
+        let safeTime = time.isFinite ? min(max(time, 0), safeDuration) : 0
+        let frame = (safeTime * frameRate).rounded()
+        return min(max(frame / frameRate, 0), safeDuration)
     }
 }

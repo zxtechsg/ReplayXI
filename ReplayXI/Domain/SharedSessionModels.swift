@@ -103,6 +103,73 @@ struct SharedCommand: Codable, Hashable, Sendable {
     let mark: CoachMark?
 }
 
+/// Converts a coach's send-time playback snapshot into the match instant that
+/// should be visible when the packet reaches another headset.
+///
+/// SharePlay transports semantic state rather than per-frame transforms. A
+/// playing snapshot therefore needs a small, bounded transit correction before
+/// every participant resumes its local deterministic sampler. Paused snapshots
+/// are exact review instants and intentionally ignore transport age.
+enum SharedTimelineProjector {
+    /// Three missed two-second heartbeat windows indicate that a playing packet
+    /// is no longer a trustworthy representation of current coach intent.
+    static let maximumTransitAge: TimeInterval = 6
+
+    /// Small clock skew must not move playback backwards. Larger future-dated
+    /// packets are rejected so a badly skewed clock cannot establish authority.
+    static let futureTimestampTolerance: TimeInterval = 0.5
+
+    static func project(
+        _ snapshot: SharedPlaybackSnapshot,
+        sentAt: Date,
+        receivedAt: Date,
+        duration: TimeInterval
+    ) -> SharedPlaybackSnapshot? {
+        // Pause, seek and annotation review points are exact coach choices. They
+        // remain applicable even if an old device encoded an unusual timestamp.
+        guard snapshot.isPlaying else { return snapshot }
+
+        let sentTime = sentAt.timeIntervalSinceReferenceDate
+        let receivedTime = receivedAt.timeIntervalSinceReferenceDate
+        guard sentTime.isFinite,
+              receivedTime.isFinite,
+              duration.isFinite,
+              duration >= 0,
+              snapshot.playhead.isFinite,
+              snapshot.playbackRate.isFinite else { return nil }
+
+        let rawTransitAge = receivedTime - sentTime
+        guard rawTransitAge.isFinite,
+              rawTransitAge >= -futureTimestampTolerance,
+              rawTransitAge <= maximumTransitAge else { return nil }
+
+        let transitAge = max(rawTransitAge, 0)
+        let playbackRate = min(max(snapshot.playbackRate, 0.25), 4)
+        let basePlayhead = min(max(snapshot.playhead, 0), duration)
+        let remaining = max(duration - basePlayhead, 0)
+        let requestedAdvance = transitAge >= remaining / playbackRate
+            ? remaining
+            : transitAge * playbackRate
+        let projectedPlayhead = min(basePlayhead + requestedAdvance, duration)
+
+        return SharedPlaybackSnapshot(
+            scenarioID: snapshot.scenarioID,
+            playhead: projectedPlayhead,
+            isPlaying: projectedPlayhead < duration,
+            playbackRate: snapshot.playbackRate,
+            viewMode: snapshot.viewMode,
+            coachFocusPerspectiveID: snapshot.coachFocusPerspectiveID,
+            coachLockEnabled: snapshot.coachLockEnabled,
+            marks: snapshot.marks,
+            seatAssignments: snapshot.seatAssignments,
+            showsLaneLens: snapshot.showsLaneLens,
+            sharedPitchAnchorID: snapshot.sharedPitchAnchorID,
+            triangleLockMode: snapshot.triangleLockMode,
+            shapeFocusStage: snapshot.shapeFocusStage
+        )
+    }
+}
+
 struct SequenceGate: Sendable {
     private(set) var lastSequenceByAuthor: [UUID: UInt64] = [:]
 

@@ -310,8 +310,7 @@ struct FootballImmersiveView: View {
                     handleAnnotationStrokeChanged(value)
                 }
                 .onEnded { value in
-                    handleAnnotationDragEnded(value)
-                    handleAnnotationStrokeEnded(value)
+                    handleSpatialDragEnded(value)
                 }
             )
     }
@@ -529,6 +528,72 @@ struct FootballImmersiveView: View {
         }
     }
 
+    private func handleSpatialDragEnded(
+        _ value: EntityTargetValue<DragGesture.Value>
+    ) {
+        if draggedAnnotationTarget != nil {
+            handleAnnotationDragEnded(value)
+            return
+        }
+        if annotationStroke != nil {
+            handleAnnotationStrokeEnded(value)
+            return
+        }
+        recoverTapIntentFromShortDrag(value)
+    }
+
+    private func recoverTapIntentFromShortDrag(
+        _ value: EntityTargetValue<DragGesture.Value>
+    ) {
+        guard let matchRoot = matchRootAncestor(of: value.entity),
+              let start = pitchPoint(
+                for: value,
+                fallback3D: value.startLocation3D,
+                in: matchRoot
+              ),
+              let end = pitchPoint(
+                for: value,
+                fallback3D: value.location3D,
+                in: matchRoot
+              ),
+              SpatialPlaybackIntentRouter.shouldRecoverTapIntent(from: start, to: end)
+        else { return }
+
+        if let annotationTarget = AnnotationSceneAffordance.targetAncestor(of: value.entity),
+           let mark = store.marks.first(where: { $0.id == annotationTarget.markID }) {
+            selectedAnnotationID = annotationTarget.markID
+            reviewSpatialAnnotation(mark)
+            return
+        }
+
+        if let playerID = playerIDAncestor(of: value.entity),
+           let player = store.selectedScenario.player(id: playerID) {
+            if store.isDrawing {
+                if store.selectedTool == .playerLabel {
+                    store.labelPlayer(playerID)
+                } else {
+                    _ = store.registerPitchTap(player.pose(at: store.playhead).position)
+                }
+            } else {
+                openPlayerPOV(playerID)
+            }
+            return
+        }
+
+        guard value.entity.name == "annotation-surface" else { return }
+        if store.isDrawing, store.selectedTool == .playerLabel {
+            if let player = nearestPlayer(to: end, maximumDistance: 5.5) {
+                store.labelPlayer(player.id)
+            } else {
+                _ = store.registerPitchTap(end)
+            }
+        } else if store.isDrawing {
+            _ = store.registerPitchTap(end)
+        } else if let player = nearestPlayer(to: end, maximumDistance: 3.2) {
+            openPlayerPOV(player.id)
+        }
+    }
+
     /// Maps the system's gaze-and-pinch spatial location onto the fixed pitch.
     /// EntityTargetValue supplies the gesture in the RealityView's local 3D
     /// coordinate space. Converting into `matchRoot` keeps player-origin and
@@ -663,12 +728,32 @@ private enum PlaybackReviewEvent: Identifiable {
     }
 }
 
+/// Only event-rail metadata participates in this signature. Endpoint drags
+/// replace a `CoachMark` many times per second, but changing spatial geometry
+/// cannot change timeline order or labels and must not trigger a sort/rebuild.
+struct PlaybackReviewIndexKey: Equatable, Sendable {
+    let id: UUID
+    let kind: String
+    let label: String
+    let revealTime: TimeInterval
+    let hideTime: TimeInterval?
+
+    nonisolated init(mark: CoachMark) {
+        id = mark.id
+        kind = mark.kind.rawValue
+        label = mark.label
+        revealTime = mark.revealTime
+        hideTime = mark.hideTime
+    }
+}
+
 private struct ImmersiveControlDeck: View {
     @Environment(ReplayStore.self) private var store
     @Environment(SquadSessionCoordinator.self) private var squadSession
     @State private var wasPlayingBeforeScrub = false
     @State private var annotationConfirmation: String?
     @State private var showsEventStrip = false
+    @State private var showsPlayerGrid = false
     @State private var eventPage = 0
     @State private var orderedReviewMarks: [CoachMark] = []
     @State private var indexedReviewEvents: [PlaybackReviewEvent] = []
@@ -676,7 +761,6 @@ private struct ImmersiveControlDeck: View {
     @State private var isClearAnnotationsPending = false
     @Binding var selectedAnnotationID: UUID?
     @Binding var showsDecisionStrip: Bool
-    @State private var pendingAnnotationTime: TimeInterval?
 
     let isPinchDrawing: Bool
     let isPinchDrawingReady: Bool
@@ -832,17 +916,11 @@ private struct ImmersiveControlDeck: View {
                 .disabled(store.isDrawing)
                 .accessibilityLabel("Previous player")
 
-                Menu {
-                    Section(FootballTeam.home.shortTitle) {
-                        ForEach(store.selectedScenario.homePlayers) { player in
-                            playerMenuButton(player)
-                        }
-                    }
-                    Section(FootballTeam.away.shortTitle) {
-                        ForEach(store.selectedScenario.awayPlayers) { player in
-                            playerMenuButton(player)
-                        }
-                    }
+                Button {
+                    showsPlayerGrid = true
+                    showsEventStrip = false
+                    showsDecisionStrip = false
+                    selectedAnnotationID = nil
                 } label: {
                     if let player = store.activePerspective {
                         Label(
@@ -867,6 +945,7 @@ private struct ImmersiveControlDeck: View {
                         "Focused player, number \($0.shirtNumber), \($0.role)"
                     } ?? "Choose focused player"
                 )
+                .accessibilityHint("Opens direct point-of-view targets for all 22 players")
 
                 if store.viewMode == .firstPerson {
                     povStatusChip
@@ -893,6 +972,8 @@ private struct ImmersiveControlDeck: View {
 
             if isClearAnnotationsPending {
                 clearAnnotationsConfirmationStrip
+            } else if showsPlayerGrid {
+                playerPOVGrid
             } else if showsDecisionStrip, let decisionSnapshot {
                 PlaybackDecisionStrip(
                     snapshot: decisionSnapshot,
@@ -924,29 +1005,44 @@ private struct ImmersiveControlDeck: View {
                   newCount > store.selectedScenario.coachMarks.count,
                   let mark = store.marks.last else { return }
             annotationConfirmation = "\(mark.kind.title.uppercased()) SAVED · \(formatTime(mark.revealTime))"
-            selectedAnnotationID = mark.id
-            pendingAnnotationTime = nil
+            // Saving is the end of the spatial gesture, not an instruction to
+            // open another editing workflow. Keep the compact draw shelf ready
+            // for the coach's next mark; Events remains the explicit route to
+            // retiming, relabelling, endpoint editing or deletion.
+            selectedAnnotationID = nil
             showsDecisionStrip = false
-            showsEventStrip = true
+            showsEventStrip = false
+            showsPlayerGrid = false
         }
         .onChange(of: store.selectedScenarioID) { _, _ in
             selectedAnnotationID = nil
-            pendingAnnotationTime = nil
             timelineScrubState = nil
             showsDecisionStrip = false
             showsEventStrip = false
+            showsPlayerGrid = false
             isClearAnnotationsPending = false
             eventPage = 0
             annotationConfirmation = nil
             rebuildReviewIndex()
         }
-        .onChange(of: store.marks) { _, _ in
+        .onChange(of: reviewIndexKeys) { _, _ in
             rebuildReviewIndex()
         }
-        .onChange(of: selectedAnnotationID) { _, _ in
-            // A pending drag belongs only to the mark that created it. Directly
-            // tapping another 3D mark must not inherit the previous timestamp.
-            pendingAnnotationTime = nil
+        .onChange(of: selectedAnnotationID) { _, selectedID in
+            if selectedID != nil {
+                showsPlayerGrid = false
+            }
+        }
+        .onChange(of: store.playhead) { _, playhead in
+            guard let selectedAnnotationID,
+                  let selected = store.marks.first(where: { $0.id == selectedAnnotationID }),
+                  !isCoachCreated(selected),
+                  !selected.isVisible(at: playhead) else { return }
+            // Fixture annotations cannot be held visible for editing. Once
+            // their authored time window leaves the playhead, close the stale
+            // inspector so text never describes geometry that is no longer in
+            // the scene.
+            self.selectedAnnotationID = nil
         }
         .task {
             rebuildReviewIndex()
@@ -955,23 +1051,25 @@ private struct ImmersiveControlDeck: View {
             if arguments.contains("--replayxi-events") {
                 showsEventStrip = true
             }
+            if arguments.contains("--replayxi-player-grid") {
+                showsPlayerGrid = true
+                showsEventStrip = false
+                showsDecisionStrip = false
+            }
             if arguments.contains("--replayxi-options") {
                 selectedAnnotationID = nil
-                pendingAnnotationTime = nil
                 showsEventStrip = false
                 showsDecisionStrip = true
                 store.setPlaying(false, broadcast: false)
             }
             if arguments.contains("--replayxi-select-coach-mark") {
                 selectedAnnotationID = store.marks.last?.id
-                pendingAnnotationTime = nil
                 showsDecisionStrip = false
                 showsEventStrip = true
             }
             if arguments.contains("--replayxi-clear-confirm") {
                 isClearAnnotationsPending = true
                 selectedAnnotationID = nil
-                pendingAnnotationTime = nil
                 showsDecisionStrip = false
                 showsEventStrip = false
             }
@@ -1152,7 +1250,6 @@ private struct ImmersiveControlDeck: View {
             Button(role: .destructive) {
                 store.clearMarks()
                 selectedAnnotationID = nil
-                pendingAnnotationTime = nil
                 showsDecisionStrip = false
                 showsEventStrip = false
                 isClearAnnotationsPending = false
@@ -1183,7 +1280,6 @@ private struct ImmersiveControlDeck: View {
             if let selectedAnnotationID,
                !store.marks.contains(where: { $0.id == selectedAnnotationID }) {
                 self.selectedAnnotationID = nil
-                pendingAnnotationTime = nil
             }
             annotationConfirmation = "LAST MARK UNDONE"
         }
@@ -1196,11 +1292,136 @@ private struct ImmersiveControlDeck: View {
         }
         showsDecisionStrip = false
         showsEventStrip = false
+        showsPlayerGrid = false
         isClearAnnotationsPending = true
     }
 
     private var clearableCoachAnnotationCount: Int {
         store.marks.lazy.filter(isCoachCreated).count
+    }
+
+    /// A deliberately temporary roster replaces the platform menu's long,
+    /// serial list. Both complete XIs stay visible at once, every shirt is a
+    /// single direct pinch target, and choosing one immediately returns to the
+    /// compact transport. Tapping a player on the pitch remains an equivalent
+    /// direct shortcut.
+    private var playerPOVGrid: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 11) {
+                Button {
+                    showsPlayerGrid = false
+                } label: {
+                    Image(systemName: "xmark")
+                        .frame(width: 28, height: 48)
+                }
+                .buttonStyle(.bordered)
+                .accessibilityLabel("Close player roster")
+
+                Image(systemName: "person.crop.rectangle.stack.fill")
+                    .font(.headline.weight(.black))
+                    .foregroundStyle(ReplayTheme.signal)
+                    .frame(width: 38, height: 48)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Eyebrow(text: "22 PLAYER POV", color: ReplayTheme.signal)
+                    Text("PINCH A SHIRT")
+                        .font(.caption2.monospaced().weight(.black))
+                        .foregroundStyle(.white.opacity(0.68))
+                }
+
+                Spacer(minLength: 8)
+
+                if let player = store.activePerspective {
+                    StatusPill(
+                        text: "#\(player.shirtNumber) · \(player.positionCode)",
+                        systemImage: "viewfinder",
+                        color: ReplayTheme.signal
+                    )
+                }
+            }
+
+            perspectiveTeamRow(
+                team: .home,
+                players: store.selectedScenario.homePlayers
+            )
+            perspectiveTeamRow(
+                team: .away,
+                players: store.selectedScenario.awayPlayers
+            )
+        }
+        .padding(10)
+        .background(ReplayTheme.signal.opacity(0.055), in: RoundedRectangle(cornerRadius: 17))
+        .overlay {
+            RoundedRectangle(cornerRadius: 17)
+                .stroke(ReplayTheme.signal.opacity(0.22), lineWidth: 1)
+        }
+    }
+
+    private func perspectiveTeamRow(
+        team: FootballTeam,
+        players: [PlayerTrack]
+    ) -> some View {
+        HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(team == .home ? "HOME" : "AWAY")
+                    .font(.caption2.monospaced().weight(.black))
+                    .foregroundStyle(teamAccent(team))
+                Text("XI")
+                    .font(.title3.monospacedDigit().weight(.black))
+                    .foregroundStyle(.white)
+            }
+            .frame(width: 72, alignment: .leading)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(team.shortTitle)
+
+            ForEach(players.prefix(11)) { player in
+                perspectivePlayerButton(player)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func perspectivePlayerButton(_ player: PlayerTrack) -> some View {
+        let isSelected = player.id == store.activePerspectiveID
+        let accent = teamAccent(player.team)
+        return Button {
+            openPlayerPOV(player.id)
+        } label: {
+            VStack(spacing: 0) {
+                Text("#\(player.shirtNumber)")
+                    .font(.subheadline.monospacedDigit().weight(.black))
+                Text(player.positionCode)
+                    .font(.caption2.monospaced().weight(.black))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+            .foregroundStyle(isSelected ? Color.black : Color.white)
+            .frame(width: 72, height: 50)
+            .contentShape(RoundedRectangle(cornerRadius: 13))
+            .background(
+                isSelected ? ReplayTheme.signal : accent.opacity(0.14),
+                in: RoundedRectangle(cornerRadius: 13)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 13)
+                    .stroke(
+                        isSelected ? ReplayTheme.signal : accent.opacity(0.42),
+                        lineWidth: isSelected ? 2 : 1
+                    )
+            }
+        }
+        .buttonStyle(.plain)
+        .hoverEffect(.highlight)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            "\(player.team.shortTitle), number \(player.shirtNumber), \(player.role)"
+        )
+        .accessibilityHint("Opens this player's free-look point of view")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private func teamAccent(_ team: FootballTeam) -> Color {
+        team == .home ? ReplayTheme.cyan : ReplayTheme.orange
     }
 
     /// Once a tool is active, transport and view controls only compete with
@@ -1308,6 +1529,7 @@ private struct ImmersiveControlDeck: View {
         return Button {
             annotationConfirmation = nil
             selectedAnnotationID = nil
+            showsPlayerGrid = false
             showsDecisionStrip = false
             showsEventStrip = false
             store.beginDrawing(kind)
@@ -1336,6 +1558,10 @@ private struct ImmersiveControlDeck: View {
     private var orderedMarks: [CoachMark] { orderedReviewMarks }
 
     private var reviewEvents: [PlaybackReviewEvent] { indexedReviewEvents }
+
+    private var reviewIndexKeys: [PlaybackReviewIndexKey] {
+        store.marks.map(PlaybackReviewIndexKey.init)
+    }
 
     private func rebuildReviewIndex() {
         let marks = store.marks.sorted {
@@ -1391,6 +1617,7 @@ private struct ImmersiveControlDeck: View {
     private var isReviewShelfOpen: Bool {
         showsDecisionStrip
             || showsEventStrip
+            || showsPlayerGrid
             || selectedAnnotation != nil
             || isClearAnnotationsPending
     }
@@ -1484,10 +1711,18 @@ private struct ImmersiveControlDeck: View {
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
-                        updateTimelineScrub(value, railWidth: trackWidth)
+                        updateTimelineScrub(
+                            value,
+                            railWidth: trackWidth,
+                            railLeadingInset: trackInset
+                        )
                     }
                     .onEnded { value in
-                        finishTimelineScrub(value, railWidth: trackWidth)
+                        finishTimelineScrub(
+                            value,
+                            railWidth: trackWidth,
+                            railLeadingInset: trackInset
+                        )
                     }
             )
             .accessibilityElement(children: .ignore)
@@ -1495,7 +1730,7 @@ private struct ImmersiveControlDeck: View {
             .accessibilityValue(
                 "\(formatTime(store.playhead)) of \(formatTime(store.selectedScenario.duration))"
             )
-            .accessibilityHint("Pinch and drag sideways. Move upward for fine control.")
+            .accessibilityHint("Pinch anywhere to jump, drag sideways, and lift for frame control.")
             .accessibilityAdjustableAction { direction in
                 switch direction {
                 case .increment:
@@ -1514,9 +1749,17 @@ private struct ImmersiveControlDeck: View {
     private var annotationEventsButton: some View {
         let isOpen = showsEventStrip || selectedAnnotation != nil
         return Button {
+            let opensEvents = !showsEventStrip
             selectedAnnotationID = nil
+            showsPlayerGrid = false
             showsDecisionStrip = false
             showsEventStrip.toggle()
+            if opensEvents {
+                eventPage = PlaybackEventRailLayout.page(
+                    nearestTo: store.playhead,
+                    eventTimes: reviewEvents.map(\.time)
+                )
+            }
         } label: {
             VStack(spacing: 1) {
                 Image(systemName: "list.bullet.rectangle.fill")
@@ -1539,7 +1782,7 @@ private struct ImmersiveControlDeck: View {
     private var decisionReviewButton: some View {
         Button {
             selectedAnnotationID = nil
-            pendingAnnotationTime = nil
+            showsPlayerGrid = false
             showsEventStrip = false
             showsDecisionStrip.toggle()
             if showsDecisionStrip {
@@ -1693,7 +1936,6 @@ private struct ImmersiveControlDeck: View {
         case .mark(let mark):
             Button {
                 selectedAnnotationID = mark.id
-                pendingAnnotationTime = nil
                 showsDecisionStrip = false
                 jump(to: mark)
             } label: {
@@ -1751,8 +1993,15 @@ private struct ImmersiveControlDeck: View {
         VStack(spacing: 8) {
             HStack(spacing: 11) {
                 Button {
+                    if let index = reviewEvents.firstIndex(where: {
+                        $0.id == "mark-\(mark.id.uuidString)"
+                    }) {
+                        eventPage = PlaybackEventRailLayout.page(
+                            containing: index,
+                            eventCount: reviewEvents.count
+                        )
+                    }
                     selectedAnnotationID = nil
-                    pendingAnnotationTime = nil
                     showsEventStrip = true
                 } label: {
                     Image(systemName: "chevron.left")
@@ -1810,7 +2059,6 @@ private struct ImmersiveControlDeck: View {
                     Button(role: .destructive) {
                         if store.removeCoachMark(id: mark.id) {
                             selectedAnnotationID = nil
-                            pendingAnnotationTime = nil
                             showsEventStrip = true
                             annotationConfirmation = "MARK DELETED"
                         }
@@ -1830,7 +2078,6 @@ private struct ImmersiveControlDeck: View {
 
                 Button {
                     selectedAnnotationID = nil
-                    pendingAnnotationTime = nil
                     showsEventStrip = false
                 } label: {
                     Image(systemName: "xmark")
@@ -1842,32 +2089,39 @@ private struct ImmersiveControlDeck: View {
 
             if store.localRole == .coach, isCoachCreated(mark) {
                 HStack(spacing: 10) {
-                    Eyebrow(text: "Time", color: ReplayTheme.cyan)
-                    Slider(
-                        value: Binding(
-                            get: { pendingAnnotationTime ?? mark.revealTime },
-                            set: { value in
-                                pendingAnnotationTime = value
-                                store.seek(to: value, broadcast: false)
-                            }
-                        ),
-                        in: 0...max(store.selectedScenario.duration, 0.1),
-                        step: 0.1,
-                        onEditingChanged: { editing in
-                            store.setPlaying(false, broadcast: false)
-                            guard !editing, let pendingAnnotationTime else { return }
-                            _ = store.retimeCoachMark(id: mark.id, to: pendingAnnotationTime)
-                            self.pendingAnnotationTime = nil
-                        }
-                    )
-                    .tint(ReplayTheme.cyan)
-                    .frame(minHeight: 48)
-                    .accessibilityLabel("Annotation timestamp")
-
-                    Text(formatTime(pendingAnnotationTime ?? mark.revealTime))
-                        .font(.subheadline.monospacedDigit().weight(.black))
+                    Label("MARK · \(formatTime(mark.revealTime))", systemImage: "clock.fill")
+                        .font(.caption.monospacedDigit().weight(.black))
                         .foregroundStyle(ReplayTheme.cyan)
-                        .frame(width: 68, alignment: .trailing)
+
+                    Spacer(minLength: 8)
+
+                    Label("SCRUB ABOVE", systemImage: "hand.draw.fill")
+                        .font(.caption2.monospaced().weight(.black))
+                        .foregroundStyle(.white.opacity(0.62))
+
+                    Button {
+                        store.setPlaying(false, broadcast: false)
+                        if store.retimeCoachMark(id: mark.id, to: store.playhead) {
+                            annotationConfirmation = "MARK MOVED · \(formatTime(store.playhead))"
+                        }
+                    } label: {
+                        Label("MOVE · \(formatTime(store.playhead))", systemImage: "arrow.right.to.line")
+                            .font(.subheadline.monospacedDigit().weight(.black))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.78)
+                            .frame(minWidth: 170, minHeight: 48)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(ReplayTheme.cyan)
+                    .foregroundStyle(.black)
+                    .disabled(!canMoveAnnotation(mark, to: store.playhead))
+                    .accessibilityLabel("Move annotation to current playhead")
+                    .accessibilityValue(formatTime(store.playhead))
+                    .accessibilityHint(
+                        canMoveAnnotation(mark, to: store.playhead)
+                            ? "Commits the annotation at the time selected on the main timeline"
+                            : "Choose a different time or shorten the annotation duration"
+                    )
                 }
                 .padding(.horizontal, 8)
             }
@@ -1969,6 +2223,19 @@ private struct ImmersiveControlDeck: View {
         return duration == duration.rounded()
             ? "\(Int(duration))s"
             : "\(duration.formatted(.number.precision(.fractionLength(1))))s"
+    }
+
+    private func canMoveAnnotation(
+        _ mark: CoachMark,
+        to time: TimeInterval
+    ) -> Bool {
+        guard time.isFinite,
+              store.selectedScenario.duration.isFinite,
+              (0...store.selectedScenario.duration).contains(time),
+              abs(mark.revealTime - time) >= 0.05 else { return false }
+        guard let hideTime = mark.hideTime else { return true }
+        let visibleDuration = max(hideTime - mark.revealTime, 0)
+        return time + visibleDuration <= store.selectedScenario.duration
     }
 
     private var directPlaybackRates: [Double] { [0.5, 1, 2, 4] }
@@ -2073,6 +2340,7 @@ private struct ImmersiveControlDeck: View {
     }
 
     private func openPlayerPOV(_ playerID: String) {
+        showsPlayerGrid = false
         store.openLocalPlayerPOV(playerID)
     }
 
@@ -2096,7 +2364,8 @@ private struct ImmersiveControlDeck: View {
 
     private func updateTimelineScrub(
         _ value: DragGesture.Value,
-        railWidth: CGFloat
+        railWidth: CGFloat,
+        railLeadingInset: CGFloat
     ) {
         guard !timelineControlsAreDisabled else { return }
 
@@ -2105,8 +2374,9 @@ private struct ImmersiveControlDeck: View {
             gestureState = timelineScrubState
         } else {
             gestureState = PlaybackTimelineScrub.begin(
-                at: store.playhead,
-                duration: store.selectedScenario.duration
+                atRailLocation: value.startLocation.x - railLeadingInset,
+                duration: store.selectedScenario.duration,
+                railWidth: railWidth
             )
             wasPlayingBeforeScrub = store.isActivelyPlaying
             store.setPlaying(false, broadcast: false)
@@ -2126,13 +2396,18 @@ private struct ImmersiveControlDeck: View {
 
     private func finishTimelineScrub(
         _ value: DragGesture.Value,
-        railWidth: CGFloat
+        railWidth: CGFloat,
+        railLeadingInset: CGFloat
     ) {
         guard !timelineControlsAreDisabled else {
             resetTimelineScrubState()
             return
         }
-        updateTimelineScrub(value, railWidth: railWidth)
+        updateTimelineScrub(
+            value,
+            railWidth: railWidth,
+            railLeadingInset: railLeadingInset
+        )
         let committedTime = timelineScrubState?.time ?? store.playhead
         store.seek(to: committedTime, broadcast: false)
         if wasPlayingBeforeScrub {
@@ -2200,19 +2475,6 @@ private struct ImmersiveControlDeck: View {
         store.selectedScenario.kind == .shapeLab
             ? [.positional, .tacticalTable, .firstPerson]
             : [.firstPerson, .tacticalTable, .touchline]
-    }
-
-    @ViewBuilder
-    private func playerMenuButton(_ player: PlayerTrack) -> some View {
-        Button {
-            openPlayerPOV(player.id)
-        } label: {
-            if player.id == store.activePerspectiveID {
-                Label("#\(player.shirtNumber) \(player.role)", systemImage: "checkmark")
-            } else {
-                Text("#\(player.shirtNumber) \(player.role)")
-            }
-        }
     }
 
     private func formatTime(_ value: TimeInterval) -> String {

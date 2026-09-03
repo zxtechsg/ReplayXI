@@ -1058,7 +1058,11 @@ final class ReplayXITests: XCTestCase {
             XCTAssertNotNil(label.findEntity(named: "team-strip"), player.id)
             XCTAssertNotNil(label.components[InputTargetComponent.self], player.id)
             XCTAssertNotNil(label.components[CollisionComponent.self], player.id)
-            XCTAssertNotNil(label.components[AccessibilityComponent.self], player.id)
+            let labelAccessibility = try XCTUnwrap(
+                label.components[AccessibilityComponent.self],
+                player.id
+            )
+            XCTAssertFalse(labelAccessibility.isAccessibilityElement, player.id)
             XCTAssertEqual(
                 label.position.y,
                 PlaybackSpatialLabels.tacticalLabelHeight(
@@ -1073,6 +1077,12 @@ final class ReplayXITests: XCTestCase {
             let target = try XCTUnwrap(playerRoot.findEntity(named: "interaction-target"))
             XCTAssertNotNil(target.components[InputTargetComponent.self], player.id)
             XCTAssertNotNil(target.components[CollisionComponent.self], player.id)
+            let bodyAccessibility = try XCTUnwrap(
+                target.components[AccessibilityComponent.self],
+                player.id
+            )
+            XCTAssertTrue(bodyAccessibility.isAccessibilityElement, player.id)
+            XCTAssertTrue(bodyAccessibility.systemActions.contains(.activate), player.id)
             XCTAssertTrue(target.isEnabled, player.id)
             let worldFootprintScale = target.scale.x * playerRoot.scale.x
             XCTAssertEqual(worldFootprintScale, 2.4, accuracy: 0.000_1, player.id)

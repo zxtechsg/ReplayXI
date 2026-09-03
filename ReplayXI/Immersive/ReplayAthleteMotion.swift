@@ -37,7 +37,11 @@ enum ReplayAthleteMotion {
         at time: TimeInterval,
         ragdollCue: PlayerRagdollCue? = nil
     ) {
-        apply(locomotionPose(for: track, at: time), to: instance.joints)
+        let locomotion = track.locomotion(at: time)
+        apply(
+            locomotionPose(for: track, at: time, locomotion: locomotion),
+            to: instance.joints
+        )
         guard instance.lod.supportsRagdoll,
               let ragdollCue,
               ragdollCue.playerID == track.id,
@@ -50,28 +54,51 @@ enum ReplayAthleteMotion {
         )
     }
 
-    static func locomotionPose(for track: PlayerTrack, at time: TimeInterval) -> ReplayAthleteLocomotionPose {
-        let motion = track.motion(at: time)
-        let effort = gaitEffort(for: track, at: time)
-        let turn = turningResponse(for: track, at: time)
-        let phase = motion.locomotionPhase
+    static func locomotionPose(
+        for track: PlayerTrack,
+        at time: TimeInterval
+    ) -> ReplayAthleteLocomotionPose {
+        locomotionPose(
+            for: track,
+            at: time,
+            locomotion: track.locomotion(at: time)
+        )
+    }
+
+    /// State-specific authored posing remains a pure function of match time.
+    /// The renderer can compute a descriptor once per player and share it with
+    /// imported-asset admission and procedural fallback without transition state.
+    static func locomotionPose(
+        for track: PlayerTrack,
+        at time: TimeInterval,
+        locomotion: PlayerLocomotionSample
+    ) -> ReplayAthleteLocomotionPose {
+        let tuning = tuning(for: locomotion.state)
+        let effort = locomotion.effort
+        let turn = locomotion.turnResponse
+        let acceleration = locomotion.accelerationResponse
+        let phase = locomotion.motion.locomotionPhase
         let cycle = sin(phase)
         let doubleCycle = sin(phase * 2)
-        let isMoving = effort > (0.12 / 7.2)
-        let strideAmplitude: Float = isMoving ? 0.14 + (effort * 0.50) : 0
-        let swing = cycle * strideAmplitude
+        let swing = cycle * tuning.strideAmplitude
         let breathing = sin(Float(time) * 1.35 + Float(track.shirtNumber)) * 0.004
-        let forwardLean: Float = (effort * 0.11) + (track.isGoalkeeper ? 0.06 : 0)
+        let forwardLean = tuning.forwardLean
+            + (max(acceleration, 0) * tuning.accelerationLean)
+            + (track.isGoalkeeper ? 0.045 : 0)
+        let cutBank = locomotion.state == .cut ? turn * 0.18 : turn * 0.025 * effort
 
-        let goalkeeperStance: Float = track.isGoalkeeper ? 0.10 : 0.018
-        let leftHipSwing = swing
-        let rightHipSwing = -swing
-        let kneeBase: Float = track.isGoalkeeper ? 0.44 : 0.018 * effort
-        let kneeTravel: Float = 0.24 + (effort * 0.68)
+        let goalkeeperStance: Float = track.isGoalkeeper ? 0.10 : tuning.lateralStance
+        let cutPlant = locomotion.state == .cut ? abs(turn) * 0.12 : 0
+        let leftHipSwing = swing - (max(turn, 0) * cutPlant)
+        let rightHipSwing = -swing + (max(-turn, 0) * cutPlant)
+        let kneeBase: Float = track.isGoalkeeper ? 0.34 : tuning.kneeBase
+        let kneeTravel = tuning.kneeTravel
         let leftKneeBend = kneeBase + (max(-cycle, 0) * kneeTravel)
+            + (max(turn, 0) * cutPlant)
         let rightKneeBend = kneeBase + (max(cycle, 0) * kneeTravel)
-        let leftToeLift = max(-cycle, 0) * 0.22 * effort
-        let rightToeLift = max(cycle, 0) * 0.22 * effort
+            + (max(-turn, 0) * cutPlant)
+        let leftToeLift = max(-cycle, 0) * tuning.toeLift
+        let rightToeLift = max(cycle, 0) * tuning.toeLift
         let leftAnkleAngle = -((leftHipSwing + leftKneeBend) * 0.90) + leftToeLift
         let rightAnkleAngle = -((rightHipSwing + rightKneeBend) * 0.90) + rightToeLift
 
@@ -90,26 +117,29 @@ enum ReplayAthleteMotion {
             0.065
         )
 
-        let keeperReach: Float = track.isGoalkeeper ? 0.34 : 0.035
-        let elbowBend: Float = track.isGoalkeeper ? 0.56 : 0.68 + (effort * 0.32)
+        let keeperReach: Float = track.isGoalkeeper ? 0.34 : tuning.shoulderReach
+        let elbowBend: Float = track.isGoalkeeper ? 0.56 : tuning.elbowBend
+        let bodyBob = abs(doubleCycle) * tuning.verticalBounce
+        let sideSway = -cycle * tuning.lateralSway
 
         return ReplayAthleteLocomotionPose(
-            bodyPosition: [0, groundingOffset + breathing, effort * 0.014],
-            bodyOrientation: simd_quatf(angle: -forwardLean * 0.10, axis: [1, 0, 0]),
-            hipsPosition: [-cycle * 0.014 * effort, 0.90, 0],
+            bodyPosition: [sideSway, groundingOffset + breathing + bodyBob, effort * 0.014],
+            bodyOrientation: simd_quatf(angle: -forwardLean * 0.10, axis: [1, 0, 0])
+                * simd_quatf(angle: -cutBank * 0.20, axis: [0, 0, 1]),
+            hipsPosition: [sideSway * 0.72, 0.90, 0],
             hipsOrientation: simd_quatf(
-                angle: (doubleCycle * 0.024 * effort) - (turn * 0.030 * effort),
+                angle: (doubleCycle * tuning.pelvisRoll) - cutBank,
                 axis: [0, 0, 1]
-            ) * simd_quatf(angle: cycle * 0.030 * effort, axis: [0, 1, 0]),
+            ) * simd_quatf(angle: cycle * tuning.pelvisYaw, axis: [0, 1, 0]),
             spineOrientation: simd_quatf(angle: -forwardLean * 0.90, axis: [1, 0, 0])
                 * simd_quatf(
-                    angle: (-doubleCycle * 0.019 * effort) + (turn * 0.065 * effort),
+                    angle: (-doubleCycle * tuning.spineRoll) + (cutBank * 0.62),
                     axis: [0, 0, 1]
                 )
-                * simd_quatf(angle: -cycle * 0.050 * effort, axis: [0, 1, 0]),
+                * simd_quatf(angle: -cycle * tuning.spineYaw, axis: [0, 1, 0]),
             headOrientation: simd_quatf(angle: forwardLean * 0.58, axis: [1, 0, 0])
-                * simd_quatf(angle: doubleCycle * 0.014 * effort, axis: [0, 0, 1])
-                * simd_quatf(angle: turn * 0.15 * effort, axis: [0, 1, 0]),
+                * simd_quatf(angle: doubleCycle * tuning.headRoll, axis: [0, 0, 1])
+                * simd_quatf(angle: turn * tuning.headTurn, axis: [0, 1, 0]),
             leftHipOrientation: simd_quatf(angle: goalkeeperStance, axis: [0, 0, 1])
                 * simd_quatf(angle: leftHipSwing, axis: [1, 0, 0]),
             rightHipOrientation: simd_quatf(angle: -goalkeeperStance, axis: [0, 0, 1])
@@ -119,19 +149,19 @@ enum ReplayAthleteMotion {
             leftAnkleOrientation: simd_quatf(angle: leftAnkleAngle, axis: [1, 0, 0]),
             rightAnkleOrientation: simd_quatf(angle: rightAnkleAngle, axis: [1, 0, 0]),
             leftShoulderOrientation: simd_quatf(angle: -keeperReach, axis: [0, 0, 1])
-                * simd_quatf(angle: -swing * 0.82, axis: [1, 0, 0]),
+                * simd_quatf(angle: -swing * tuning.armSwing, axis: [1, 0, 0]),
             rightShoulderOrientation: simd_quatf(angle: keeperReach, axis: [0, 0, 1])
-                * simd_quatf(angle: swing * 0.82, axis: [1, 0, 0]),
+                * simd_quatf(angle: swing * tuning.armSwing, axis: [1, 0, 0]),
             leftElbowOrientation: simd_quatf(
-                angle: elbowBend + (max(cycle, 0) * 0.12 * effort),
+                angle: elbowBend + (max(cycle, 0) * tuning.elbowTravel),
                 axis: [1, 0, 0]
             ),
             rightElbowOrientation: simd_quatf(
-                angle: elbowBend + (max(-cycle, 0) * 0.12 * effort),
+                angle: elbowBend + (max(-cycle, 0) * tuning.elbowTravel),
                 axis: [1, 0, 0]
             ),
-            leftWristOrientation: simd_quatf(angle: -cycle * 0.10 * effort, axis: [0, 1, 0]),
-            rightWristOrientation: simd_quatf(angle: cycle * 0.10 * effort, axis: [0, 1, 0])
+            leftWristOrientation: simd_quatf(angle: -cycle * tuning.wristTravel, axis: [0, 1, 0]),
+            rightWristOrientation: simd_quatf(angle: cycle * tuning.wristTravel, axis: [0, 1, 0])
         )
     }
 
@@ -212,25 +242,88 @@ enum ReplayAthleteMotion {
     }
 
     static func gaitEffort(for track: PlayerTrack, at time: TimeInterval) -> Float {
-        let halfWindow: TimeInterval = 0.12
-        let start = track.pose(at: time - halfWindow).position
-        let end = track.pose(at: time + halfWindow).position
-        let sampledSpeed = ReplayGeometry.distance(start, end) / Float(halfWindow * 2)
-        return min(max(sampledSpeed / 7.2, 0), 1)
+        track.locomotion(at: time).effort
     }
 
     static func turningResponse(for track: PlayerTrack, at time: TimeInterval) -> Float {
-        let halfWindow: TimeInterval = 0.12
-        let start = track.pose(at: time - halfWindow).facingDegrees
-        let end = track.pose(at: time + halfWindow).facingDegrees
-        var delta = (end - start).truncatingRemainder(dividingBy: 360)
-        if delta > 180 {
-            delta -= 360
-        } else if delta < -180 {
-            delta += 360
+        track.locomotion(at: time).turnResponse
+    }
+
+    private struct LocomotionTuning {
+        let strideAmplitude: Float
+        let kneeBase: Float
+        let kneeTravel: Float
+        let toeLift: Float
+        let forwardLean: Float
+        let accelerationLean: Float
+        let lateralStance: Float
+        let lateralSway: Float
+        let verticalBounce: Float
+        let pelvisRoll: Float
+        let pelvisYaw: Float
+        let spineRoll: Float
+        let spineYaw: Float
+        let headRoll: Float
+        let headTurn: Float
+        let shoulderReach: Float
+        let armSwing: Float
+        let elbowBend: Float
+        let elbowTravel: Float
+        let wristTravel: Float
+    }
+
+    private static func tuning(for state: PlayerLocomotionState) -> LocomotionTuning {
+        switch state {
+        case .idle:
+            LocomotionTuning(
+                strideAmplitude: 0, kneeBase: 0.015, kneeTravel: 0, toeLift: 0,
+                forwardLean: 0, accelerationLean: 0, lateralStance: 0.012,
+                lateralSway: 0, verticalBounce: 0, pelvisRoll: 0,
+                pelvisYaw: 0, spineRoll: 0, spineYaw: 0, headRoll: 0,
+                headTurn: 0.08, shoulderReach: 0.025, armSwing: 0,
+                elbowBend: 0.16, elbowTravel: 0, wristTravel: 0
+            )
+        case .walk:
+            LocomotionTuning(
+                strideAmplitude: 0.22, kneeBase: 0.025, kneeTravel: 0.30,
+                toeLift: 0.12, forwardLean: 0.022, accelerationLean: 0.018,
+                lateralStance: 0.016, lateralSway: 0.008, verticalBounce: 0.004,
+                pelvisRoll: 0.012, pelvisYaw: 0.020, spineRoll: 0.010,
+                spineYaw: 0.030, headRoll: 0.007, headTurn: 0.10,
+                shoulderReach: 0.030, armSwing: 0.62, elbowBend: 0.28,
+                elbowTravel: 0.05, wristTravel: 0.04
+            )
+        case .jog:
+            LocomotionTuning(
+                strideAmplitude: 0.42, kneeBase: 0.035, kneeTravel: 0.58,
+                toeLift: 0.19, forwardLean: 0.065, accelerationLean: 0.032,
+                lateralStance: 0.018, lateralSway: 0.012, verticalBounce: 0.010,
+                pelvisRoll: 0.020, pelvisYaw: 0.034, spineRoll: 0.016,
+                spineYaw: 0.050, headRoll: 0.011, headTurn: 0.14,
+                shoulderReach: 0.035, armSwing: 0.78, elbowBend: 0.62,
+                elbowTravel: 0.10, wristTravel: 0.08
+            )
+        case .sprint:
+            LocomotionTuning(
+                strideAmplitude: 0.62, kneeBase: 0.055, kneeTravel: 0.86,
+                toeLift: 0.25, forwardLean: 0.13, accelerationLean: 0.045,
+                lateralStance: 0.020, lateralSway: 0.016, verticalBounce: 0.018,
+                pelvisRoll: 0.027, pelvisYaw: 0.043, spineRoll: 0.021,
+                spineYaw: 0.062, headRoll: 0.015, headTurn: 0.17,
+                shoulderReach: 0.040, armSwing: 0.90, elbowBend: 0.92,
+                elbowTravel: 0.15, wristTravel: 0.12
+            )
+        case .cut:
+            LocomotionTuning(
+                strideAmplitude: 0.32, kneeBase: 0.15, kneeTravel: 0.50,
+                toeLift: 0.16, forwardLean: 0.085, accelerationLean: 0.025,
+                lateralStance: 0.060, lateralSway: 0.010, verticalBounce: 0.006,
+                pelvisRoll: 0.018, pelvisYaw: 0.025, spineRoll: 0.014,
+                spineYaw: 0.035, headRoll: 0.010, headTurn: 0.24,
+                shoulderReach: 0.085, armSwing: 0.48, elbowBend: 0.72,
+                elbowTravel: 0.08, wristTravel: 0.06
+            )
         }
-        let degreesPerSecond = delta / Float(halfWindow * 2)
-        return min(max(degreesPerSecond / 180, -1), 1)
     }
 
     private static func approximateSoleHeight(

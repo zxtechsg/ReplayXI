@@ -66,10 +66,15 @@ final class SquadSessionCoordinator {
     /// slider positions from the mutable store.
     @ObservationIgnored private var lastPublishedSnapshot: SharedPlaybackSnapshot?
     @ObservationIgnored private var lastPublishedInstant: ContinuousClock.Instant?
+    @ObservationIgnored private let receiveDate: @MainActor () -> Date
     private let playbackClock = ContinuousClock()
 
-    init(store: ReplayStore) {
+    init(
+        store: ReplayStore,
+        receiveDate: @escaping @MainActor () -> Date = { Date() }
+    ) {
         self.store = store
+        self.receiveDate = receiveDate
         store.onBroadcastSnapshot = { [weak self] snapshot in
             self?.publish(snapshot: snapshot)
         }
@@ -218,7 +223,10 @@ final class SquadSessionCoordinator {
         case .sync:
             guard command.authorID == authoritativeCoachID,
                   command.authorRole == .coach,
-                  let snapshot = command.snapshot else { return }
+                  let snapshot = command.snapshot,
+                  let scenarioDuration = store?.scenarios.first(where: {
+                      $0.id == snapshot.scenarioID
+                  })?.duration else { return }
             if let coachParticipantID = authoritativeCoachParticipantID {
                 guard sourceParticipantID == coachParticipantID else { return }
             }
@@ -227,13 +235,20 @@ final class SquadSessionCoordinator {
             // must not bind the room to its source or poison the sequence gate,
             // otherwise a late joiner can never accept the coach's recovery sync.
             var candidateGate = sequenceGate
+            let receivedAt = receiveDate()
             guard candidateGate.shouldAccept(command),
-                  store?.applyRemote(snapshot) == true else { return }
+                  let projectedSnapshot = SharedTimelineProjector.project(
+                      snapshot,
+                      sentAt: command.sentAt,
+                      receivedAt: receivedAt,
+                      duration: scenarioDuration
+                  ),
+                  store?.applyRemote(projectedSnapshot) == true else { return }
             sequenceGate = candidateGate
             if authoritativeCoachParticipantID == nil {
                 authoritativeCoachParticipantID = sourceParticipantID
             }
-            lastSync = Date()
+            lastSync = receivedAt
             applyLocalSeatAssignment()
 
         case .coachAnnotation:
@@ -249,7 +264,7 @@ final class SquadSessionCoordinator {
             // ordering and prevents an older snapshot from rolling state back.
             _ = store?.appendRemoteCoachMark(mark)
             sequenceGate = candidateGate
-            lastSync = Date()
+            lastSync = receiveDate()
 
         case .requestState:
             // State requests are player-originated and carry no payload. Do not

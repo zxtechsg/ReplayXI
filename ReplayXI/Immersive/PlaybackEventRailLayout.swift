@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 /// The event shelf has a deliberately bounded layout. Spatial controls should
@@ -38,6 +39,34 @@ enum PlaybackEventRailLayout {
         let resolvedPage = clampedPage(page, eventCount: eventCount)
         let lowerBound = resolvedPage * itemsPerPage
         return lowerBound..<min(lowerBound + itemsPerPage, eventCount)
+    }
+
+    static func page(containing index: Int, eventCount: Int) -> Int {
+        guard eventCount > 0 else { return 0 }
+        let safeIndex = min(max(index, 0), eventCount - 1)
+        return clampedPage(safeIndex / itemsPerPage, eventCount: eventCount)
+    }
+
+    /// Resolves the event group nearest the current replay instant. The event
+    /// array is already timeline ordered, but this intentionally tolerates
+    /// malformed/non-finite external metadata and keeps ties on the earlier
+    /// event for stable A → B → A navigation.
+    static func page(
+        nearestTo rawTime: TimeInterval,
+        eventTimes: [TimeInterval]
+    ) -> Int {
+        guard !eventTimes.isEmpty else { return 0 }
+        let time = rawTime.isFinite ? rawTime : 0
+        var nearestIndex = 0
+        var nearestDistance = Double.greatestFiniteMagnitude
+        for (index, candidate) in eventTimes.enumerated() where candidate.isFinite {
+            let distance = abs(candidate - time)
+            if distance < nearestDistance {
+                nearestIndex = index
+                nearestDistance = distance
+            }
+        }
+        return page(containing: nearestIndex, eventCount: eventTimes.count)
     }
 
     static func rangeLabel(eventCount: Int, page: Int) -> String {

@@ -148,6 +148,74 @@ final class PlayerTrackSamplingTests: XCTestCase {
         }
     }
 
+    func testLocomotionStateBandsAndImportedRunCompatibilityAreExplicit() {
+        XCTAssertEqual(
+            PlayerLocomotionSample.classify(speedMetresPerSecond: 0, turnRateDegreesPerSecond: 0),
+            .idle
+        )
+        XCTAssertEqual(
+            PlayerLocomotionSample.classify(speedMetresPerSecond: 1.2, turnRateDegreesPerSecond: 0),
+            .walk
+        )
+        XCTAssertEqual(
+            PlayerLocomotionSample.classify(speedMetresPerSecond: 2.4, turnRateDegreesPerSecond: 0),
+            .jog
+        )
+        XCTAssertEqual(
+            PlayerLocomotionSample.classify(speedMetresPerSecond: 5.8, turnRateDegreesPerSecond: 0),
+            .sprint
+        )
+        XCTAssertEqual(
+            PlayerLocomotionSample.classify(speedMetresPerSecond: 2.4, turnRateDegreesPerSecond: -95),
+            .cut
+        )
+        XCTAssertEqual(
+            PlayerLocomotionSample.classify(speedMetresPerSecond: 0.1, turnRateDegreesPerSecond: 240),
+            .idle,
+            "A stationary scan must not be classified as a football cut"
+        )
+
+        XCTAssertFalse(PlayerLocomotionState.idle.supportsImportedRunClip)
+        XCTAssertFalse(PlayerLocomotionState.walk.supportsImportedRunClip)
+        XCTAssertTrue(PlayerLocomotionState.jog.supportsImportedRunClip)
+        XCTAssertTrue(PlayerLocomotionState.sprint.supportsImportedRunClip)
+        XCTAssertFalse(PlayerLocomotionState.cut.supportsImportedRunClip)
+    }
+
+    func testTelemetryLocomotionCapturesAccelerationAndPathCutDeterministically() {
+        let accelerating = makeTrack(keyframes: [
+            frame(0, x: 0),
+            frame(1, x: 1),
+            frame(2, x: 4),
+        ])
+        let acceleration = accelerating.locomotion(at: 1)
+        XCTAssertEqual(acceleration.state, .jog)
+        XCTAssertEqual(acceleration.speedMetresPerSecond, 2, accuracy: 0.000_1)
+        XCTAssertGreaterThan(acceleration.accelerationMetresPerSecondSquared, 10)
+
+        let cutting = makeTrack(keyframes: [
+            frame(0, x: -2, z: 0, facing: 0),
+            frame(1, x: 0, z: 0, facing: 0),
+            frame(2, x: 0, z: 2, facing: 90),
+        ])
+        let first = cutting.locomotion(at: 1)
+        _ = cutting.locomotion(at: 1.8)
+        let seeked = cutting.locomotion(at: 1)
+
+        XCTAssertEqual(first, seeked)
+        XCTAssertEqual(first.state, .cut)
+        XCTAssertEqual(first.speedMetresPerSecond, 2, accuracy: 0.000_1)
+        XCTAssertGreaterThan(abs(first.turnRateDegreesPerSecond), 300)
+
+        for time in stride(from: 2.0, through: 0.0, by: -0.05) {
+            let reverse = cutting.locomotion(at: time)
+            XCTAssertEqual(reverse, cutting.locomotion(at: time))
+            XCTAssertTrue(reverse.speedMetresPerSecond.isFinite)
+            XCTAssertTrue(reverse.accelerationMetresPerSecondSquared.isFinite)
+            XCTAssertTrue(reverse.turnRateDegreesPerSecond.isFinite)
+        }
+    }
+
     private func makeDenseTrack(frameCount: Int, duplicateStride: Int) -> PlayerTrack {
         var timestamp: TimeInterval = 0
         var keyframes: [MotionKeyframe] = []

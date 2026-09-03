@@ -133,6 +133,73 @@ final class ReplayAthleteRigTests: XCTestCase {
         XCTAssertEqual(rig.joints[.leftKnee].orientation.vector, firstKnee)
     }
 
+    func testProceduralPoseHasDistinctIdleSprintAndCutMechanicsAtOnePhase() throws {
+        let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay))
+        let player = try XCTUnwrap(scenario.player(id: "navy-rw"))
+        let phase: Float = .pi / 2
+
+        func sample(
+            state: PlayerLocomotionState,
+            speed: Float,
+            turn: Float = 0,
+            acceleration: Float = 0
+        ) -> PlayerLocomotionSample {
+            PlayerLocomotionSample(
+                motion: PlayerMotionState(
+                    speedMetresPerSecond: speed,
+                    distanceTravelled: 0,
+                    locomotionPhase: phase
+                ),
+                speedMetresPerSecond: speed,
+                accelerationMetresPerSecondSquared: acceleration,
+                turnRateDegreesPerSecond: turn,
+                state: state
+            )
+        }
+
+        let idle = ReplayAthleteMotion.locomotionPose(
+            for: player,
+            at: 12,
+            locomotion: sample(state: .idle, speed: 0)
+        )
+        let sprint = ReplayAthleteMotion.locomotionPose(
+            for: player,
+            at: 12,
+            locomotion: sample(state: .sprint, speed: 6.4, acceleration: 5)
+        )
+        let cut = ReplayAthleteMotion.locomotionPose(
+            for: player,
+            at: 12,
+            locomotion: sample(state: .cut, speed: 3, turn: 180)
+        )
+
+        let down = SIMD3<Float>(0, -1, 0)
+        XCTAssertGreaterThan(
+            simd_distance(
+                idle.leftHipOrientation.act(down),
+                sprint.leftHipOrientation.act(down)
+            ),
+            0.35,
+            "Sprint needs a visibly longer stride than idle"
+        )
+        XCTAssertGreaterThan(
+            simd_distance(
+                sprint.bodyOrientation.act(down),
+                idle.bodyOrientation.act(down)
+            ),
+            0.01,
+            "Sprint acceleration needs a distinct forward body lean"
+        )
+        XCTAssertGreaterThan(
+            simd_distance(
+                cut.hipsOrientation.act(down),
+                sprint.hipsOrientation.act(down)
+            ),
+            0.08,
+            "A cut needs a planted lateral bank rather than straight-run posing"
+        )
+    }
+
     func testNearRigGroundingKeepsAtLeastOneBootOnOrAboveTurfAcrossGait() throws {
         let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay))
         let player = try XCTUnwrap(scenario.player(id: "navy-rw"))
