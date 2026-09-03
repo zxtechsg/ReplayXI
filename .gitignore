@@ -1,0 +1,10 @@
+.DS_Store
+.derivedData*/
+.macDerivedData*/
+.codex-derived/
+DerivedData*/
+dist/
+*.xcuserstate
+xcuserdata/
+*.profraw
+*.profdata

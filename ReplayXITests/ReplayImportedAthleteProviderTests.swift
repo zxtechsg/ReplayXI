@@ -1,0 +1,201 @@
+import RealityKit
+import XCTest
+@testable import ReplayXI
+
+@MainActor
+final class ReplayImportedAthleteProviderTests: XCTestCase {
+    override func tearDown() {
+        ReplayImportedAthleteProvider.resetPrewarmForTesting()
+        super.tearDown()
+    }
+
+    func testFeatureGateHasExplicitOverridePrecedenceAndSafeReleaseDefault() {
+        XCTAssertTrue(
+            ReplayImportedAthleteFeatureGate.resolvedValue(
+                environmentValue: "ON",
+                userDefaultsValue: false,
+                debugDefault: false
+            )
+        )
+        XCTAssertFalse(
+            ReplayImportedAthleteFeatureGate.resolvedValue(
+                environmentValue: "0",
+                userDefaultsValue: true,
+                debugDefault: true
+            )
+        )
+        XCTAssertTrue(
+            ReplayImportedAthleteFeatureGate.resolvedValue(
+                environmentValue: "not-a-switch",
+                userDefaultsValue: true,
+                debugDefault: false
+            )
+        )
+        XCTAssertFalse(
+            ReplayImportedAthleteFeatureGate.resolvedValue(
+                environmentValue: nil,
+                userDefaultsValue: nil,
+                debugDefault: false
+            )
+        )
+    }
+
+    func testBundledPilotIsHashLockedAnimatedAndWithinNearFieldContract() throws {
+        let url = try XCTUnwrap(ReplayImportedAthleteProvider.resourceURL(in: .main))
+        let facts = try ReplayImportedAthleteProvider.prewarm(
+            contentsOf: url,
+            featureEnabled: true
+        )
+
+        XCTAssertEqual(facts.sha256, ReplayImportedAthleteProvider.expectedSHA256)
+        XCTAssertEqual(facts.bytes, ReplayImportedAthleteProvider.expectedBytes)
+        // The source-level USD audit has eight Mesh prims and three animation
+        // sources. RealityKit coalesces those into three ModelEntity subclasses
+        // and exposes two playable resources on the loaded root.
+        XCTAssertEqual(facts.modelEntities, 3)
+        XCTAssertEqual(facts.animationTracks, 2)
+        XCTAssertGreaterThan(facts.sourceHeight, 1.5)
+        XCTAssertLessThan(facts.sourceHeight, 2.2)
+        XCTAssertEqual(facts.decodedTextureBytes, 21_495_808)
+        XCTAssertEqual(ReplayImportedAthleteProvider.maximumConcurrentNearFieldInstances, 1)
+    }
+
+    func testNearFieldCloneHasTeamKitNumbersAndSeekableAnimationTracks() throws {
+        let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay))
+        let player = try XCTUnwrap(scenario.player(id: "navy-rw"))
+        _ = try ReplayImportedAthleteProvider.prewarm(in: .main, featureEnabled: true)
+
+        let instance = try ReplayImportedAthleteProvider.makeNearFieldVisual(
+            for: player,
+            at: 4.25
+        )
+        XCTAssertEqual(instance.root.name, ReplayImportedAthleteProvider.visualRootName)
+        XCTAssertEqual(instance.playerID, player.id)
+        for (index, shellName) in ReplayImportedAthleteProvider.requiredKitShellNames.enumerated() {
+            let marker = try XCTUnwrap(instance.root.findEntity(named: shellName))
+            XCTAssertNil(marker.components[ModelComponent.self])
+            let component = try XCTUnwrap(ReplayImportedAthleteProvider.modelComponent(
+                inKitShellNamed: shellName,
+                of: instance.root
+            ))
+            let materialSlot = try XCTUnwrap(
+                ReplayImportedAthleteProvider.materialSlot(inKitShellNamed: shellName)
+            )
+            XCTAssertEqual(materialSlot, index + 1)
+            XCTAssertEqual(component.materials.count, 6)
+            XCTAssertTrue(
+                component.materials[materialSlot] is SimpleMaterial,
+                "Kit override did not reach \(shellName)'s coalesced material slot"
+            )
+        }
+        let bodyComponent = try XCTUnwrap(ReplayImportedAthleteProvider.modelComponent(
+            inKitShellNamed: "ReplayXI_Jersey",
+            of: instance.root
+        ))
+        XCTAssertTrue(bodyComponent.materials[0] is PhysicallyBasedMaterial)
+        XCTAssertNotNil(instance.root.findEntity(named: "imported-shirt-number"))
+        XCTAssertNotNil(instance.root.findEntity(named: "imported-chest-number"))
+        XCTAssertEqual(instance.animationControllers.count, 2)
+        XCTAssertTrue(instance.animationControllers.allSatisfy(\.isValid))
+        XCTAssertTrue(instance.animationControllers.allSatisfy(\.isPaused))
+
+        let bounds = instance.root.visualBounds(relativeTo: instance.root)
+        XCTAssertGreaterThan(bounds.extents.y, 1.65)
+        XCTAssertLessThan(bounds.extents.y, 2.05)
+
+        instance.seek(toNormalizedClipPhase: 0.375)
+        let firstTimes = instance.animationControllers.map(\.time)
+        instance.seek(toNormalizedClipPhase: 1.375)
+        XCTAssertEqual(instance.normalizedClipPhase, 0.375, accuracy: 0.000_001)
+        for (first, wrapped) in zip(firstTimes, instance.animationControllers.map(\.time)) {
+            XCTAssertEqual(first, wrapped, accuracy: 0.000_001)
+        }
+    }
+
+    func testClonesShareImportedMeshesButOwnAnimationControllers() throws {
+        let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay))
+        let home = try XCTUnwrap(scenario.player(id: "navy-rw"))
+        let away = try XCTUnwrap(scenario.player(id: "red-lb"))
+        _ = try ReplayImportedAthleteProvider.prewarm(in: .main, featureEnabled: true)
+
+        let first = try ReplayImportedAthleteProvider.makeNearFieldVisual(for: home)
+        let second = try ReplayImportedAthleteProvider.makeNearFieldVisual(for: away)
+        let firstJersey = try XCTUnwrap(
+            ReplayImportedAthleteProvider.modelComponent(
+                inKitShellNamed: "ReplayXI_Jersey",
+                of: first.root
+            )
+        )
+        let secondJersey = try XCTUnwrap(
+            ReplayImportedAthleteProvider.modelComponent(
+                inKitShellNamed: "ReplayXI_Jersey",
+                of: second.root
+            )
+        )
+
+        XCTAssertTrue(firstJersey.mesh === secondJersey.mesh)
+        XCTAssertFalse(first.animationControllers[0] === second.animationControllers[0])
+    }
+
+    func testDisabledOrInvalidSlotFailsBeforeCreatingRuntimeVisual() throws {
+        let url = try XCTUnwrap(ReplayImportedAthleteProvider.resourceURL(in: .main))
+        XCTAssertThrowsError(
+            try ReplayImportedAthleteProvider.prewarm(contentsOf: url, featureEnabled: false)
+        ) { error in
+            XCTAssertEqual(error as? ReplayImportedAthleteError, .featureDisabled)
+        }
+
+        let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay))
+        let player = try XCTUnwrap(scenario.player(id: "navy-rw"))
+        _ = try ReplayImportedAthleteProvider.prewarm(
+            contentsOf: url,
+            featureEnabled: true
+        )
+        XCTAssertThrowsError(
+            try ReplayImportedAthleteProvider.makeNearFieldVisual(for: player, slot: 1)
+        ) { error in
+            XCTAssertEqual(error as? ReplayImportedAthleteError, .invalidSlot(1))
+        }
+    }
+
+    func testPitchSceneMovesTheSingleImportedPilotWithFocusedPlayer() throws {
+        let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay))
+        let first = try XCTUnwrap(scenario.player(id: scenario.defaultPerspectiveID))
+        let second = try XCTUnwrap(
+            scenario.players.first(where: { $0.id != first.id })
+        )
+        _ = try ReplayImportedAthleteProvider.prewarm(in: .main, featureEnabled: true)
+        let root = PitchSceneFactory.makeMatchRoot(for: scenario)
+
+        func update(focus playerID: String) {
+            PitchSceneFactory.update(
+                root: root,
+                scenario: scenario,
+                time: 2,
+                viewMode: .tacticalTable,
+                perspectiveID: playerID,
+                marks: scenario.coachMarks,
+                showsLaneLens: false,
+                isDrawing: false,
+                positionalOriginTransform: nil
+            )
+        }
+
+        update(focus: first.id)
+        let firstEntity = try XCTUnwrap(root.findEntity(named: "player-\(first.id)"))
+        XCTAssertNotNil(firstEntity.findEntity(named: ReplayImportedAthleteProvider.visualRootName))
+        XCTAssertEqual(importedVisualCount(in: root), 1)
+
+        update(focus: second.id)
+        let secondEntity = try XCTUnwrap(root.findEntity(named: "player-\(second.id)"))
+        XCTAssertNil(firstEntity.findEntity(named: ReplayImportedAthleteProvider.visualRootName))
+        XCTAssertNotNil(secondEntity.findEntity(named: ReplayImportedAthleteProvider.visualRootName))
+        XCTAssertEqual(importedVisualCount(in: root), 1)
+    }
+
+    private func importedVisualCount(in entity: Entity) -> Int {
+        (entity.name == ReplayImportedAthleteProvider.visualRootName ? 1 : 0)
+            + entity.children.reduce(0) { $0 + importedVisualCount(in: $1) }
+    }
+
+}
