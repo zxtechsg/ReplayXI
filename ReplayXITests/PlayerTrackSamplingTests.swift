@@ -238,30 +238,40 @@ final class PlayerTrackSamplingTests: XCTestCase {
         }
     }
 
-    func testTelemetryLocomotionCapturesAccelerationAndPathCutDeterministically() {
+    func testPresentationLocomotionCapturesAccelerationAndPlantedCutDeterministically() {
         let accelerating = makeTrack(keyframes: [
             frame(0, x: 0),
             frame(1, x: 1),
             frame(2, x: 4),
         ])
-        let acceleration = accelerating.locomotion(at: 1)
+        let acceleration = accelerating.locomotion(at: 1.2)
         XCTAssertEqual(acceleration.state, .jog)
-        XCTAssertEqual(acceleration.speedMetresPerSecond, 2, accuracy: 0.000_1)
-        XCTAssertGreaterThan(acceleration.accelerationMetresPerSecondSquared, 10)
+        XCTAssertEqual(acceleration.speedMetresPerSecond, 2.4984, accuracy: 0.000_1)
+        XCTAssertGreaterThan(acceleration.accelerationMetresPerSecondSquared, 4)
+        XCTAssertEqual(acceleration, accelerating.locomotion(at: 1.2))
 
         let cutting = makeTrack(keyframes: [
             frame(0, x: -2, z: 0, facing: 0),
             frame(1, x: 0, z: 0, facing: 0),
             frame(2, x: 0, z: 2, facing: 90),
         ])
-        let first = cutting.locomotion(at: 1)
+        // Monotone presentation interpolation deliberately eases into the
+        // authored corner instead of teleporting between two linear velocity
+        // vectors. At the knot the player is in a brief planted slowdown; the
+        // cut classification becomes active as the player drives away.
+        let planted = cutting.locomotion(at: 1)
+        XCTAssertEqual(planted.state, .walk)
+        XCTAssertLessThan(planted.speedMetresPerSecond, 0.5)
+        XCTAssertGreaterThan(abs(planted.turnRateDegreesPerSecond), 300)
+
+        let first = cutting.locomotion(at: 1.3)
         _ = cutting.locomotion(at: 1.8)
-        let seeked = cutting.locomotion(at: 1)
+        let seeked = cutting.locomotion(at: 1.3)
 
         XCTAssertEqual(first, seeked)
         XCTAssertEqual(first.state, .cut)
-        XCTAssertEqual(first.speedMetresPerSecond, 2, accuracy: 0.000_1)
-        XCTAssertGreaterThan(abs(first.turnRateDegreesPerSecond), 300)
+        XCTAssertEqual(first.speedMetresPerSecond, 1.8312, accuracy: 0.000_1)
+        XCTAssertGreaterThan(abs(first.turnRateDegreesPerSecond), 80)
 
         for time in stride(from: 2.0, through: 0.0, by: -0.05) {
             let reverse = cutting.locomotion(at: time)
