@@ -42,15 +42,16 @@ struct ReplayDashboardView: View {
             let clock = ContinuousClock()
             var previous = clock.now
             while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(33))
+                let shouldAdvance = store.isActivelyPlaying && !store.isImmersiveOpen
+                try? await Task.sleep(
+                    for: ReplayPresentationClock.interval(shouldAdvance: shouldAdvance)
+                )
+                guard !Task.isCancelled else { return }
                 let now = clock.now
                 let duration = previous.duration(to: now)
                 previous = now
-                if !store.isImmersiveOpen {
-                    let seconds = Double(duration.components.seconds)
-                        + (Double(duration.components.attoseconds) / 1e18)
-                    store.advance(by: seconds)
-                }
+                guard shouldAdvance else { continue }
+                store.advance(by: ReplayPresentationClock.seconds(duration))
             }
         }
         .task {

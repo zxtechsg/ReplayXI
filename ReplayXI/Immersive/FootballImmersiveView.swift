@@ -206,13 +206,20 @@ struct FootballImmersiveView: View {
             let clock = ContinuousClock()
             var previous = clock.now
             while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(33))
+                // Sample the ownership state before sleeping. If playback is
+                // started during an idle poll, the next active frame begins
+                // from that wake instant rather than charging paused time to
+                // the transport and producing a visible jump.
+                let shouldAdvance = store.isActivelyPlaying
+                try? await Task.sleep(
+                    for: ReplayPresentationClock.interval(shouldAdvance: shouldAdvance)
+                )
+                guard !Task.isCancelled else { return }
                 let now = clock.now
                 let duration = previous.duration(to: now)
                 previous = now
-                let seconds = Double(duration.components.seconds)
-                    + (Double(duration.components.attoseconds) / 1e18)
-                store.advance(by: seconds)
+                guard shouldAdvance else { continue }
+                store.advance(by: ReplayPresentationClock.seconds(duration))
             }
         }
         .onDisappear {
