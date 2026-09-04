@@ -52,6 +52,10 @@ struct ReplayAthleteFootfall: Equatable, Sendable {
     let stanceCompression: Float
     /// World-relative boot pitch after the leg chain has been compensated.
     let footPitch: Float
+    /// Continuous confidence that this boot is carrying the athlete's weight.
+    /// It eases in after heel strike and out before toe-off so grounding never
+    /// snaps from one leg to the other, even during reverse playback.
+    let contactWeight: Float
     let isStance: Bool
 }
 
@@ -136,7 +140,12 @@ enum ReplayAthleteMotion {
         let rightFootfall = footfall(at: phase + .pi, tuning: tuning.footfall)
         let cycle = (leftFootfall.stride - rightFootfall.stride) * 0.5
         let doubleCycle = sin(phase * 2)
-        let breathing = sin(Float(time) * 1.35 + Float(track.shirtNumber)) * 0.004
+        // Breathing belongs above the pelvis. Translating the complete body
+        // made planted boots pulse through the turf; a small chest pitch keeps
+        // idle athletes alive while the neck/head counter-rotation preserves
+        // the authored gaze direction.
+        let breathingPitch = sin(Float(time) * 1.35 + Float(track.shirtNumber))
+            * (0.008 * (1 - (effort * 0.72)))
         let braking = max(-acceleration, 0)
         let forwardLean = tuning.forwardLean
             + (max(acceleration, 0) * tuning.accelerationLean)
@@ -182,9 +191,11 @@ enum ReplayAthleteMotion {
             kneeAngle: rightKneeBend,
             ankleAngle: rightAnkleAngle
         )
-        let groundingOffset = min(
-            max(0.006 - min(leftSoleHeight, rightSoleHeight), -0.070),
-            0.065
+        let grounding = groundingReference(
+            leftSoleHeight: leftSoleHeight,
+            leftContactWeight: leftFootfall.contactWeight,
+            rightSoleHeight: rightSoleHeight,
+            rightContactWeight: rightFootfall.contactWeight
         )
 
         let keeperReach: Float = track.isGoalkeeper ? 0.34 : tuning.shoulderReach
@@ -201,7 +212,22 @@ enum ReplayAthleteMotion {
             + (doubleCycle * tuning.headRoll * 0.18)
 
         return ReplayAthleteLocomotionPose(
-            bodyPosition: [sideSway, groundingOffset + breathing + bodyBob, effort * 0.014],
+            // A planted boot owns vertical placement. During the flight phase,
+            // the same absolute-phase solver restores a restrained clearance
+            // and the authored COM bounce. Breathing no longer translates the
+            // feet through the turf; upper-body articulation carries that life.
+            bodyPosition: [
+                sideSway,
+                min(
+                    max(
+                        grounding.clearance - grounding.soleHeight
+                            + (bodyBob * (1 - grounding.supportWeight)),
+                        -0.095
+                    ),
+                    0.075
+                ),
+                effort * 0.014,
+            ],
             bodyOrientation: simd_quatf(angle: -forwardLean * 0.10, axis: [1, 0, 0])
                 * simd_quatf(angle: -cutBank * 0.20, axis: [0, 0, 1]),
             hipsPosition: [sideSway * 0.72, 0.90, 0],
@@ -209,14 +235,18 @@ enum ReplayAthleteMotion {
                 angle: (doubleCycle * tuning.pelvisRoll) - cutBank,
                 axis: [0, 0, 1]
             ) * simd_quatf(angle: cycle * tuning.pelvisYaw, axis: [0, 1, 0]),
-            spineOrientation: simd_quatf(angle: -forwardLean * 0.90, axis: [1, 0, 0])
+            spineOrientation: simd_quatf(
+                angle: (-forwardLean * 0.90) + breathingPitch,
+                axis: [1, 0, 0]
+            )
                 * simd_quatf(
                     angle: (-doubleCycle * tuning.spineRoll) + (cutBank * 0.62),
                     axis: [0, 0, 1]
                 )
                 * simd_quatf(angle: -cycle * tuning.spineYaw, axis: [0, 1, 0]),
             neckOrientation: simd_quatf(
-                angle: (forwardLean * 0.30) + look.neckPitchRadians,
+                angle: (forwardLean * 0.30) + look.neckPitchRadians
+                    - (breathingPitch * 0.55),
                 axis: [1, 0, 0]
             ) * simd_quatf(angle: stabilizedHeadRoll * 0.38, axis: [0, 0, 1])
                 * simd_quatf(
@@ -224,7 +254,8 @@ enum ReplayAthleteMotion {
                     axis: [0, 1, 0]
                 ),
             headOrientation: simd_quatf(
-                angle: (forwardLean * 0.54) + look.headPitchRadians,
+                angle: (forwardLean * 0.54) + look.headPitchRadians
+                    - (breathingPitch * 0.45),
                 axis: [1, 0, 0]
             ) * simd_quatf(angle: stabilizedHeadRoll * 0.62, axis: [0, 0, 1])
                 * simd_quatf(
@@ -646,7 +677,11 @@ enum ReplayAthleteMotion {
                 shoulderReach: 0.035, armSwing: 0.78, elbowBend: 0.62,
                 elbowTravel: 0.10, wristTravel: 0.08,
                 footfall: .init(
-                    stanceFraction: 0.50, stanceKneeCompression: 0.075,
+                    // A running foot is loaded for materially less than half of
+                    // a full left-to-left cycle. The old 0.50 window asked the
+                    // 0.74 m leg chain to cancel more than a metre of track
+                    // travel, which could only present as boot skating.
+                    stanceFraction: 0.34, stanceKneeCompression: 0.075,
                     heelStrike: 0.105, toeOff: 0.165, swingDorsiflexion: 0.105
                 )
             )
@@ -660,7 +695,10 @@ enum ReplayAthleteMotion {
                 shoulderReach: 0.040, armSwing: 0.90, elbowBend: 0.92,
                 elbowTravel: 0.15, wristTravel: 0.12,
                 footfall: .init(
-                    stanceFraction: 0.40, stanceKneeCompression: 0.095,
+                    // At match sprint cadence this is roughly 145 ms of support,
+                    // leaving a readable flight phase and keeping root travel
+                    // inside the procedural leg's attainable stance sweep.
+                    stanceFraction: 0.22, stanceKneeCompression: 0.095,
                     heelStrike: 0.135, toeOff: 0.220, swingDorsiflexion: 0.165
                 )
             )
@@ -674,7 +712,7 @@ enum ReplayAthleteMotion {
                 shoulderReach: 0.085, armSwing: 0.48, elbowBend: 0.72,
                 elbowTravel: 0.08, wristTravel: 0.06,
                 footfall: .init(
-                    stanceFraction: 0.68, stanceKneeCompression: 0.160,
+                    stanceFraction: 0.58, stanceKneeCompression: 0.160,
                     heelStrike: 0.065, toeOff: 0.125, swingDorsiflexion: 0.085
                 )
             )
@@ -691,6 +729,7 @@ enum ReplayAthleteMotion {
                 swingLift: 0,
                 stanceCompression: 0,
                 footPitch: 0,
+                contactWeight: 1,
                 isStance: true
             )
         }
@@ -710,11 +749,14 @@ enum ReplayAthleteMotion {
             let compression = sin(.pi * stanceProgress) * tuning.stanceKneeCompression
             let heelWeight = 1 - smootherStep(stanceProgress / 0.22)
             let toeWeight = smootherStep((stanceProgress - 0.66) / 0.34)
+            let loadWeight = smootherStep(stanceProgress / 0.14)
+                * (1 - smootherStep((stanceProgress - 0.78) / 0.22))
             return ReplayAthleteFootfall(
                 stride: stride,
                 swingLift: 0,
                 stanceCompression: compression,
                 footPitch: (-tuning.heelStrike * heelWeight) + (tuning.toeOff * toeWeight),
+                contactWeight: loadWeight,
                 isStance: true
             )
         }
@@ -733,7 +775,54 @@ enum ReplayAthleteMotion {
             swingLift: quickRecovery,
             stanceCompression: 0,
             footPitch: transitionPitch - (tuning.swingDorsiflexion * boundedRecovery),
+            contactWeight: 0,
             isStance: false
+        )
+    }
+
+    private struct GroundingReference {
+        let soleHeight: Float
+        let clearance: Float
+        let supportWeight: Float
+    }
+
+    /// Resolves the support plane without mutable foot-lock state. A weighted
+    /// hand-off during walking double support removes the old hard lower-sole
+    /// swap; a soft minimum keeps the airborne pair clear during running flight.
+    private static func groundingReference(
+        leftSoleHeight: Float,
+        leftContactWeight: Float,
+        rightSoleHeight: Float,
+        rightContactWeight: Float
+    ) -> GroundingReference {
+        let leftWeight = min(max(leftContactWeight.isFinite ? leftContactWeight : 0, 0), 1)
+        let rightWeight = min(max(rightContactWeight.isFinite ? rightContactWeight : 0, 0), 1)
+        let totalWeight = leftWeight + rightWeight
+        let supportWeight = smootherStep(min(totalWeight, 1))
+
+        // Differentiable minimum: unlike `min`, its velocity does not kink when
+        // the lower airborne boot changes during the centre of the flight phase.
+        let difference = leftSoleHeight - rightSoleHeight
+        let flightSoleHeight = (
+            leftSoleHeight + rightSoleHeight
+                - sqrt((difference * difference) + (0.010 * 0.010))
+        ) * 0.5
+        let supportSoleHeight = totalWeight > 0.000_1
+            ? ((leftSoleHeight * leftWeight) + (rightSoleHeight * rightWeight)) / totalWeight
+            : flightSoleHeight
+        let soleHeight = flightSoleHeight
+            + ((supportSoleHeight - flightSoleHeight) * supportWeight)
+        let flightClearance: Float = 0.020
+        // Keep one additional millimetre of numerical headroom for the boot's
+        // authored sole thickness across blended jog/cut states. The visual
+        // contact still reads as planted, while dense rig-bound sampling stays
+        // clear of the turf instead of relying on a looser test tolerance.
+        let plantedClearance: Float = 0.007
+        return GroundingReference(
+            soleHeight: soleHeight,
+            clearance: flightClearance
+                + ((plantedClearance - flightClearance) * supportWeight),
+            supportWeight: supportWeight
         )
     }
 

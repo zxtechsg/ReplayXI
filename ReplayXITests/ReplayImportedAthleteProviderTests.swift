@@ -1,6 +1,9 @@
+import CryptoKit
 import RealityKit
 import XCTest
 @testable import ReplayXI
+
+private final class RocketboxQualificationBundleToken {}
 
 @MainActor
 final class ReplayImportedAthleteProviderTests: XCTestCase {
@@ -37,6 +40,85 @@ final class ReplayImportedAthleteProviderTests: XCTestCase {
                 userDefaultsValue: nil,
                 debugDefault: false
             )
+        )
+    }
+
+    /// A local, opt-in admission probe for the pinned Microsoft Rocketbox
+    /// build. The fixture is never checked in or copied to the application
+    /// bundle: qualification temporarily places the exact candidate in the
+    /// XCTest bundle as `ReplayXIRocketboxQualification.usdz`, runs only this
+    /// test in the visionOS simulator, and then deletes the staging copy.
+    func testTransientRocketboxCandidateLoadsAndExposesFiniteSeekableAnimationResources() throws {
+        let fixtureBundle = Bundle(for: RocketboxQualificationBundleToken.self)
+        guard let url = fixtureBundle.url(
+            forResource: "ReplayXIRocketboxQualification",
+            withExtension: "usdz",
+            subdirectory: "Fixtures/Qualification"
+        ) ?? fixtureBundle.url(
+            forResource: "ReplayXIRocketboxQualification",
+            withExtension: "usdz"
+        ) else {
+            throw XCTSkip("Transient Rocketbox qualification fixture is not staged")
+        }
+
+        let payload = try Data(contentsOf: url, options: .mappedIfSafe)
+        let digest = SHA256.hash(data: payload)
+            .map { String(format: "%02x", $0) }
+            .joined()
+        let expectedDigest = "e338d6a3a4547920a658fea6f9240cefbb0c10c58d4049854ffd0d27b7edd76f"
+        guard digest == expectedDigest else {
+            XCTFail("Transient Rocketbox fixture failed its SHA-256 identity gate")
+            return
+        }
+        guard payload.count == 3_439_236 else {
+            XCTFail("Transient Rocketbox fixture failed its byte-count identity gate")
+            return
+        }
+
+        let athlete = try Entity.load(contentsOf: url)
+        let bounds = athlete.visualBounds(relativeTo: nil)
+        XCTAssertTrue(bounds.min.allFinite)
+        XCTAssertTrue(bounds.max.allFinite)
+        XCTAssertGreaterThan(bounds.extents.y, 1.7)
+        XCTAssertLessThan(bounds.extents.y, 2.1)
+        // RealityKit coalesces the two USD Mesh prims into one ModelEntity and
+        // exposes two finite resources for the one audited UsdSkel clip.
+        XCTAssertEqual(recursiveModelCount(in: athlete), 1)
+        XCTAssertEqual(athlete.availableAnimations.count, 2)
+
+        let controllers = athlete.availableAnimations.map {
+            athlete.playAnimation($0, transitionDuration: 0, startsPaused: true)
+        }
+        XCTAssertEqual(controllers.count, 2)
+        for controller in controllers {
+            XCTAssertTrue(controller.isValid)
+            XCTAssertTrue(controller.isPaused)
+            XCTAssertEqual(controller.duration, 0.6, accuracy: 0.01)
+        }
+
+        let sampleTimes = [0.001, 0.15, 0.30, 0.45, 0.599]
+        var observedTimes: [[TimeInterval]] = []
+        for controller in controllers {
+            var controllerTimes: [TimeInterval] = []
+            for sampleTime in sampleTimes {
+                controller.time = sampleTime
+                controller.pause()
+                controllerTimes.append(controller.time)
+                XCTAssertTrue(controller.isValid)
+                XCTAssertTrue(controller.isPaused)
+            }
+            for (expected, observed) in zip(sampleTimes, controllerTimes) {
+                XCTAssertEqual(observed, expected, accuracy: 0.002)
+            }
+            observedTimes.append(controllerTimes)
+        }
+
+        print(
+            "Rocketbox RealityKit qualification: bytes=\(payload.count) "
+                + "sha256=\(digest) models=\(recursiveModelCount(in: athlete)) "
+                + "animations=\(athlete.availableAnimations.count) "
+                + "durations=\(controllers.map(\.duration)) bounds=\(bounds.extents) "
+                + "seekTimes=\(observedTimes)"
         )
     }
 
@@ -245,4 +327,13 @@ final class ReplayImportedAthleteProviderTests: XCTestCase {
             + entity.children.reduce(0) { $0 + importedVisualCount(in: $1) }
     }
 
+    private func recursiveModelCount(in entity: Entity) -> Int {
+        (entity is ModelEntity ? 1 : 0)
+            + entity.children.reduce(0) { $0 + recursiveModelCount(in: $1) }
+    }
+
+}
+
+private extension SIMD3 where Scalar == Float {
+    var allFinite: Bool { x.isFinite && y.isFinite && z.isFinite }
 }

@@ -456,27 +456,33 @@ final class ReplayAthleteRigTests: XCTestCase {
                 XCTAssertTrue(first.swingLift.isFinite)
                 XCTAssertTrue(first.stanceCompression.isFinite)
                 XCTAssertTrue(first.footPitch.isFinite)
+                XCTAssertTrue(first.contactWeight.isFinite)
+                XCTAssertGreaterThanOrEqual(first.contactWeight, 0)
+                XCTAssertLessThanOrEqual(first.contactWeight, 1)
             }
         }
     }
 
     func testSprintFootfallRollsFromHeelStrikeThroughToeOffIntoTuckedRecovery() {
         let turn = Float.pi * 2
-        let touchdown = ReplayAthleteMotion.footfall(for: .sprint, phase: turn * 0.851)
-        let lateStance = ReplayAthleteMotion.footfall(for: .sprint, phase: turn * 0.21)
-        let midRecovery = ReplayAthleteMotion.footfall(for: .sprint, phase: turn * 0.55)
+        let touchdown = ReplayAthleteMotion.footfall(for: .sprint, phase: turn * 0.031)
+        let lateStance = ReplayAthleteMotion.footfall(for: .sprint, phase: turn * 0.24)
+        let midRecovery = ReplayAthleteMotion.footfall(for: .sprint, phase: turn * 0.64)
 
         XCTAssertTrue(touchdown.isStance)
         XCTAssertLessThan(touchdown.stride, -0.95)
         XCTAssertLessThan(touchdown.footPitch, -0.10, "heel strike should leave the toe lifted")
+        XCTAssertLessThan(touchdown.contactWeight, 0.02, "heel strike must load without a support pop")
 
         XCTAssertTrue(lateStance.isStance)
         XCTAssertGreaterThan(lateStance.stride, 0.90)
         XCTAssertGreaterThan(lateStance.footPitch, 0.15, "toe-off should roll through the forefoot")
+        XCTAssertLessThan(lateStance.contactWeight, 0.10, "toe-off must unload before flight")
 
         XCTAssertFalse(midRecovery.isStance)
         XCTAssertGreaterThan(midRecovery.swingLift, 0.95, "recovery leg should fold quickly for clearance")
         XCTAssertLessThan(midRecovery.footPitch, -0.10, "swing boot should dorsiflex for turf clearance")
+        XCTAssertEqual(midRecovery.contactWeight, 0)
     }
 
     func testNearRigGroundingKeepsAtLeastOneBootOnOrAboveTurfAcrossGait() throws {
@@ -494,6 +500,154 @@ final class ReplayAthleteRigTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(stanceSole, -0.012, "turf penetration at \(time)s")
             XCTAssertLessThanOrEqual(stanceSole, 0.045, "both feet float at \(time)s")
         }
+    }
+
+    func testLoadedSprintBootStaysWithinThirtyPercentOfTrackTravelDuringSupport() throws {
+        let track = PlayerTrack(
+            id: "contact-sprint-seven",
+            displayName: "Contact Sprint",
+            role: "Right winger",
+            shirtNumber: 7,
+            team: .home,
+            isGoalkeeper: false,
+            keyframes: [
+                MotionKeyframe(time: 0, position: .init(x: 0, z: 0), facingDegrees: 0),
+                MotionKeyframe(time: 3, position: .init(x: 0, z: 18), facingDegrees: 0),
+            ]
+        )
+        let rig = try ReplayAthleteFactory.make(for: track, lod: .near)
+        let leftBoot = try XCTUnwrap(rig.root.findEntity(named: "left-boot"))
+
+        struct Episode {
+            let rootTravel: Float
+            let bootTravel: Float
+        }
+        var episodes: [Episode] = []
+        var startRootZ: Float?
+        var startBootZ: Float?
+        var latestRootZ: Float = 0
+        var latestBootZ: Float = 0
+
+        func finishEpisode() {
+            guard let startRootZ, let startBootZ else { return }
+            episodes.append(
+                Episode(
+                    rootTravel: abs(latestRootZ - startRootZ),
+                    bootTravel: abs(latestBootZ - startBootZ)
+                )
+            )
+        }
+
+        for frame in 0 ... 360 {
+            let time = Double(frame) / 120
+            let pose = track.pose(at: time)
+            ReplayAthleteMotion.update(rig, from: track, at: time)
+            let phase = track.gaitPhase(at: time)
+            let footfall = ReplayAthleteMotion.footfall(for: .sprint, phase: phase)
+            let bounds = leftBoot.visualBounds(relativeTo: rig.root)
+            let worldBootZ = pose.position.z + ((bounds.min.z + bounds.max.z) * 0.5)
+
+            if footfall.contactWeight >= 0.35 {
+                if startRootZ == nil {
+                    startRootZ = pose.position.z
+                    startBootZ = worldBootZ
+                }
+                latestRootZ = pose.position.z
+                latestBootZ = worldBootZ
+            } else if startRootZ != nil {
+                finishEpisode()
+                startRootZ = nil
+                startBootZ = nil
+            }
+        }
+        finishEpisode()
+
+        let representative = try XCTUnwrap(episodes.max { $0.rootTravel < $1.rootTravel })
+        XCTAssertGreaterThan(representative.rootTravel, 0.50)
+        XCTAssertLessThan(
+            representative.bootTravel / representative.rootTravel,
+            0.30,
+            "The loaded boot should stay visually planted while the telemetry root advances"
+        )
+    }
+
+    func testSupportGroundingLoadsOneBootAndPreservesRunningFlightClearance() throws {
+        let track = PlayerTrack(
+            id: "ground-contact-eleven",
+            displayName: "Ground Contact",
+            role: "Left winger",
+            shirtNumber: 11,
+            team: .home,
+            isGoalkeeper: false,
+            keyframes: [
+                MotionKeyframe(time: 0, position: .init(x: 0, z: 0), facingDegrees: 0),
+                MotionKeyframe(time: 3, position: .init(x: 0, z: 18), facingDegrees: 0),
+            ]
+        )
+        let rig = try ReplayAthleteFactory.make(for: track, lod: .near)
+        let leftBoot = try XCTUnwrap(rig.root.findEntity(named: "left-boot"))
+        let rightBoot = try XCTUnwrap(rig.root.findEntity(named: "right-boot"))
+        var loadedSoleHeights: [Float] = []
+        var flightSoleHeights: [Float] = []
+        var forwardBodyHeights: [SIMD3<Float>] = []
+
+        let sampleTimes = stride(from: 0.0, through: 2.0, by: 1.0 / 180)
+        for time in sampleTimes {
+            ReplayAthleteMotion.update(rig, from: track, at: time)
+            let phase = track.gaitPhase(at: time)
+            let left = ReplayAthleteMotion.footfall(for: .sprint, phase: phase)
+            let right = ReplayAthleteMotion.footfall(for: .sprint, phase: phase + .pi)
+            let leftMinimum = leftBoot.visualBounds(relativeTo: rig.root).min.y
+            let rightMinimum = rightBoot.visualBounds(relativeTo: rig.root).min.y
+
+            if max(left.contactWeight, right.contactWeight) >= 0.85 {
+                loadedSoleHeights.append(
+                    left.contactWeight >= right.contactWeight ? leftMinimum : rightMinimum
+                )
+            } else if !left.isStance, !right.isStance {
+                flightSoleHeights.append(min(leftMinimum, rightMinimum))
+            }
+            forwardBodyHeights.append(rig.joints[.bodyRoot].position)
+        }
+
+        XCTAssertFalse(loadedSoleHeights.isEmpty)
+        XCTAssertFalse(flightSoleHeights.isEmpty)
+        XCTAssertGreaterThanOrEqual(loadedSoleHeights.min() ?? -.infinity, -0.012)
+        XCTAssertLessThanOrEqual(loadedSoleHeights.max() ?? .infinity, 0.035)
+
+        let loadedMean = loadedSoleHeights.reduce(0, +) / Float(loadedSoleHeights.count)
+        let flightMean = flightSoleHeights.reduce(0, +) / Float(flightSoleHeights.count)
+        XCTAssertGreaterThan(
+            flightMean,
+            loadedMean + 0.008,
+            "Both boots should visibly clear the turf during the sprint flight phase"
+        )
+
+        let reverseBodyHeights = sampleTimes.reversed().map {
+            ReplayAthleteMotion.locomotionPose(for: track, at: $0).bodyPosition
+        }.reversed()
+        XCTAssertEqual(Array(reverseBodyHeights), forwardBodyHeights)
+    }
+
+    func testIdleBreathingArticulatesTorsoWithoutMovingBodyRoot() {
+        let track = PlayerTrack(
+            id: "breathing-six",
+            displayName: "Breathing Six",
+            role: "Centre back",
+            shirtNumber: 6,
+            team: .home,
+            isGoalkeeper: false,
+            keyframes: [
+                MotionKeyframe(time: 0, position: .zero, facingDegrees: 0),
+                MotionKeyframe(time: 6, position: .zero, facingDegrees: 0),
+            ]
+        )
+
+        let first = ReplayAthleteMotion.locomotionPose(for: track, at: 0)
+        let second = ReplayAthleteMotion.locomotionPose(for: track, at: 2.3)
+
+        XCTAssertEqual(first.bodyPosition, second.bodyPosition)
+        XCTAssertNotEqual(first.spineOrientation, second.spineOrientation)
     }
 
     func testRagdollProxyContractHasUniqueMappedJointsAndHumanScaleMass() {

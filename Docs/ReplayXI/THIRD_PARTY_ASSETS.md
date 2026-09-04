@@ -17,14 +17,25 @@ textures and exact Microsoft MIT notice remain governed by that notice. The
 builder consumes only private hash-verified input and converter snapshots,
 neutralises source kit artwork, preserves skin pixels, strips horizontal root
 motion, audits both mesh bindings and packages an ARKit-valid deterministic
-USDZ. Its 45-test suite includes licence, texture, topology, skin-weight,
+USDZ. Its 43-test suite includes licence, texture, topology, skin-weight,
 publication and source-race coverage.
 
-The reviewed temporary output has SHA-256
+Three independent temporary builds produced SHA-256
 `e338d6a3a4547920a658fea6f9240cefbb0c10c58d4049854ffd0d27b7edd76f`.
-No Rocketbox binary is checked in or bundled. Admission requires a successful
-RealityKit render/deformation review and simulator plus physical-device
-performance profiling; until then the procedural athlete remains the default.
+The latest output is 3,439,236 bytes. A disposable visionOS 27.0 simulator
+XCTest load admitted that exact hash, measured 1.348 × 1.821 × 0.338-metre
+bounds, observed one RealityKit-coalesced `ModelEntity`, exposed two finite
+0.6000000238-second animation resources, and deterministically sought both at
+five clip times. The focused test passed 1/1. The transient fixture was removed
+immediately afterward; no Rocketbox binary is checked in or bundled.
+All 43 acquisition, conversion, archive and packaged-skinning tests also pass
+when this temporary output is supplied through the integration-test gate.
+
+OpenUSD proves non-static skinning transforms, but the RealityKit unit-test API
+does not expose deformed vertex positions. Admission still requires rendered
+frame review, dynamic team-kit separation, authored LODs, 22-player profiling,
+and physical Vision Pro validation. Until then the procedural athlete remains
+the default and Rocketbox remains quarantined.
 
 The Quaternius pages identify both packs as CC0 and explicitly permit personal,
 educational, and commercial use. The character pack is humanoid-rigged,

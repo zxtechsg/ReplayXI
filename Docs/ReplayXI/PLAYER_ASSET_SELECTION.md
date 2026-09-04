@@ -78,9 +78,12 @@ python3 Scripts/fetch_replayxi_rocketbox_pilot.py \
   /tmp/replayxi-rocketbox --verify-only
 ```
 
-The pilot uses `Sports_Male_02`, `m_idle_breathe_01`, and `m_run_fast_01` plus
-the exact upstream MIT notice and six textures. It intentionally downloads to a
-staging directory and does not silently replace an invalid existing file.
+The pinned acquisition contains `Sports_Male_02`, `m_idle_breathe_01`, and
+`m_run_fast_01` plus the exact upstream MIT notice and six textures. The current
+candidate emits the run clip only; the idle file is retained as an audited
+future input rather than being misrepresented as a playable resource. The
+fetcher intentionally downloads to a staging directory and does not silently
+replace an invalid existing file.
 
 Measured from the pinned files with Assimp 6.0.5:
 
@@ -108,14 +111,41 @@ and embeds the exact Microsoft MIT notice in both USD metadata and the build
 report. The converter also rejects non-finite settings, source/converter races,
 unsafe output aliases, symlink publication and invalid per-mesh skinning.
 
-Two independent end-to-end builds were byte-identical at SHA-256
+Three independent end-to-end builds were byte-identical at SHA-256
 `e338d6a3a4547920a658fea6f9240cefbb0c10c58d4049854ffd0d27b7edd76f`.
 The temporary 3.28 MiB USDZ contains two bound meshes with 5,012 total points,
 one 80-joint skeleton, one 19-sample / 0.6-second run animation, four neutral
 textures and at most four normalized influences per point. `usdchecker --arkit`
-and the legacy structural audit pass. The asset remains outside the repository
-and app bundle until RealityKit load, animated deformation, visual identity,
-LOD and performance gates pass in the simulator and on physical Vision Pro.
+and the OpenUSD skinning audit pass.
+
+### 2026-09-05 RealityKit qualification
+
+A fresh acquisition into `/private/tmp` verified all 11 pinned inputs and a
+third independent build reproduced the same 3,439,236-byte output and SHA-256.
+The build report measured two directly bound meshes, 80 joints, four normalized
+influences per point, 19 animation samples, zero residual horizontal root
+travel, and a non-zero OpenUSD skinning-transform delta of
+`202.1090957682905`.
+
+The exact candidate was then staged only in a disposable XCTest bundle and
+loaded on an Apple Vision Pro simulator running visionOS 27.0. RealityKit
+decoded it as one coalesced `ModelEntity`, reported bounds of 1.348 × 1.821 ×
+0.338 metres, exposed two finite animation resources of
+0.6000000238 seconds each, and accepted deterministic paused seeks at 0.001,
+0.15, 0.30, 0.45 and 0.599 seconds on both controllers. The focused test passed
+1/1 in 0.46 seconds; that is whole-test duration, not an isolated decode
+benchmark. The staged binary and Derived Data were removed from the worktree
+after the run. The opt-in test remains in
+`ReplayImportedAthleteProviderTests.swift`; without the exact transient fixture
+it reports a skip rather than weakening its hash lock.
+
+This clears source identity, deterministic build, USD skinning, RealityKit
+decode, finite-controller and seek gates. It does **not** prove rendered
+deformation quality: the simulator unit-test API cannot inspect post-skinning
+vertices, and no frame-by-frame visual capture or physical Vision Pro run was
+performed. The candidate therefore remains outside the repository and app
+bundle until animated visual identity, dynamic team-kit separation, authored
+LODs, 22-player performance and physical-device gates pass.
 
 The repaired CC0 `ReplayXIPlayerKitPilot.usdz` remains bundled as a converter
 and importer diagnostic, but `ReplayImportedAthleteProvider` does not admit it
@@ -193,9 +223,11 @@ and simulator-test claims, not a claim of captured professional mocap.
 
 The higher-fidelity asset requirement is **not yet complete**. The bundled CC0
 pilot is still a one-player, run-only diagnostic that falls back to the
-procedural athlete for idle, walk, cut and ragdoll states. The selected Rocketbox
-candidate is not in the app bundle and has not passed RealityKit deformation,
-authored LOD, 22-player memory/frame-time, or physical Vision Pro review. No
+procedural athlete for idle, walk, cut and ragdoll states. The selected
+Rocketbox candidate is not in the app bundle. Its deterministic RealityKit load
+and seek probe now passes, but rendered deformation, authored
+idle/cut/football-action clips, dynamic team-kit separation, authored LOD,
+22-player memory/frame-time, and physical Vision Pro review remain open. No
 Sketchfab candidate has passed the authenticated acquisition and rights gates.
 
 ## Admission gates
