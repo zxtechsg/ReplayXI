@@ -6,6 +6,7 @@ enum ExperienceKind: String, Codable, CaseIterable, Identifiable, Sendable {
     case shapeLab
     case passingChannels
     case perspectiveMatrix
+    case realWorldReplay
 
     var id: String { rawValue }
 
@@ -16,6 +17,7 @@ enum ExperienceKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .shapeLab: "03"
         case .passingChannels: "04"
         case .perspectiveMatrix: "05"
+        case .realWorldReplay: "06"
         }
     }
 
@@ -26,6 +28,7 @@ enum ExperienceKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .shapeLab: "Shape lab"
         case .passingChannels: "Passing lanes"
         case .perspectiveMatrix: "Perspective matrix"
+        case .realWorldReplay: "World replay"
         }
     }
 
@@ -36,6 +39,7 @@ enum ExperienceKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .shapeLab: "triangle"
         case .passingChannels: "arrow.triangle.branch"
         case .perspectiveMatrix: "rectangle.split.2x2"
+        case .realWorldReplay: "cube.transparent"
         }
     }
 }
@@ -253,10 +257,12 @@ struct PlayerTrack: Identifiable, Codable, Hashable, Sendable {
     private struct SamplingIndex: Sendable {
         let supportsBinaryLookup: Bool
         let cumulativeDistances: [Float]
+        let cumulativeGaitPhases: [Float]
 
         init(keyframes: [MotionKeyframe]) {
             var supportsBinaryLookup = true
             var cumulativeDistances = Array(repeating: Float.zero, count: keyframes.count)
+            var cumulativeGaitPhases = Array(repeating: Float.zero, count: keyframes.count)
 
             for index in keyframes.indices {
                 let timestamp = keyframes[index].time
@@ -273,11 +279,17 @@ struct PlayerTrack: Identifiable, Codable, Hashable, Sendable {
                             keyframes[previousIndex].position,
                             keyframes[index].position
                         )
+                    cumulativeGaitPhases[index] = cumulativeGaitPhases[previousIndex]
+                        + PlayerTrack.gaitPhaseIncrement(
+                            from: keyframes[previousIndex],
+                            to: keyframes[index]
+                        )
                 }
             }
 
             self.supportsBinaryLookup = supportsBinaryLookup
             self.cumulativeDistances = cumulativeDistances
+            self.cumulativeGaitPhases = cumulativeGaitPhases
         }
     }
 
@@ -461,6 +473,44 @@ struct PlayerTrack: Identifiable, Codable, Hashable, Sendable {
         )
     }
 
+    /// Seek-stable gait phase integrated from time and segment velocity.
+    ///
+    /// `motion(at:)` intentionally retains its original distance clock because
+    /// it is part of the replay sampling contract. Rendering uses this cadence
+    /// clock instead: a walk takes shorter, slower steps while a sprint lengthens
+    /// its stride without producing an implausibly frantic leg cycle. The
+    /// cumulative index keeps the phase continuous at every keyframe and O(log n)
+    /// to sample, even when a dense real-world telemetry track is scrubbed.
+    func gaitPhase(at time: TimeInterval) -> Float {
+        let phaseOffset = locomotionPhaseOffset
+        guard keyframes.count > 1, let first = keyframes.first else {
+            return phaseOffset
+        }
+        guard samplingIndex.supportsBinaryLookup else {
+            return motion(at: time).locomotionPhase
+        }
+
+        let clampedTime = max(time, first.time)
+        guard !clampedTime.isNaN else { return phaseOffset }
+        let nextIndex = upperBoundKeyframeIndex(for: clampedTime)
+        guard nextIndex < keyframes.count else {
+            return (samplingIndex.cumulativeGaitPhases.last ?? 0) + phaseOffset
+        }
+
+        let startIndex = nextIndex - 1
+        let start = keyframes[startIndex]
+        let end = keyframes[nextIndex]
+        let duration = end.time - start.time
+        guard duration.isFinite, duration > 0 else {
+            return samplingIndex.cumulativeGaitPhases[startIndex] + phaseOffset
+        }
+        let fraction = Float((clampedTime - start.time) / duration)
+        let segmentPhase = Self.gaitPhaseIncrement(from: start, to: end)
+        return samplingIndex.cumulativeGaitPhases[startIndex]
+            + (segmentPhase * min(max(fraction, 0), 1))
+            + phaseOffset
+    }
+
     /// A centered, allocation-free motion descriptor for animation selection.
     /// Incoming and outgoing velocity capture acceleration and sharp path turns
     /// that a single interpolated pose cannot express. The fixed sampling window
@@ -541,6 +591,25 @@ struct PlayerTrack: Identifiable, Codable, Hashable, Sendable {
                 (partial ^ UInt32(byte)) &* 16_777_619
             } % 628
         ) / 100
+    }
+
+    private static func gaitPhaseIncrement(
+        from start: MotionKeyframe,
+        to end: MotionKeyframe
+    ) -> Float {
+        let duration = end.time - start.time
+        guard duration.isFinite, duration > 0 else { return 0 }
+        let distance = ReplayGeometry.distance(start.position, end.position)
+        guard distance.isFinite, distance > 0.000_1 else { return 0 }
+        let speed = distance / Float(duration)
+        guard speed.isFinite, speed > 0 else { return 0 }
+
+        // Empirical football cadence envelope: roughly 115 total steps/minute
+        // around 1.2 m/s and 180 around 6 m/s. One phase turn is a complete
+        // left-to-left gait cycle (two footfalls), hence cycles/second here.
+        let boundedSpeed = min(speed, 10)
+        let gaitCyclesPerSecond = 0.58 + (0.38 * sqrt(boundedSpeed))
+        return Float(duration) * gaitCyclesPerSecond * (2 * .pi)
     }
 
     /// First keyframe whose time is greater than or equal to the sample.
@@ -771,6 +840,13 @@ struct CoachMark: Identifiable, Codable, Hashable, Sendable {
     /// Stable authored track identity for a player-attached annotation. This is
     /// optional so marks encoded before player labels existed still decode.
     let playerID: String?
+    /// Optional telemetry anchors for the two authored pitch points. Each
+    /// anchor stores its offset from a stable player track, allowing a run or
+    /// pass to stay attached while the replay is scrubbed without serializing
+    /// per-frame world transforms. Missing anchors preserve legacy fixed-pitch
+    /// annotation behavior.
+    let startTrackAnchor: CoachMarkTrackAnchor?
+    let endTrackAnchor: CoachMarkTrackAnchor?
 
     init(
         id: UUID = UUID(),
@@ -781,7 +857,9 @@ struct CoachMark: Identifiable, Codable, Hashable, Sendable {
         revealTime: TimeInterval = 0,
         hideTime: TimeInterval? = nil,
         author: String = "Coach",
-        playerID: String? = nil
+        playerID: String? = nil,
+        startTrackAnchor: CoachMarkTrackAnchor? = nil,
+        endTrackAnchor: CoachMarkTrackAnchor? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -792,11 +870,32 @@ struct CoachMark: Identifiable, Codable, Hashable, Sendable {
         self.hideTime = hideTime
         self.author = author
         self.playerID = playerID
+        self.startTrackAnchor = startTrackAnchor
+        self.endTrackAnchor = endTrackAnchor
     }
 
     func isVisible(at time: TimeInterval) -> Bool {
         revealTime <= time && (hideTime.map { time < $0 } ?? true)
     }
+}
+
+/// A compact, deterministic attachment between one annotation endpoint and a
+/// player's authored telemetry. The pitch-space offset is intentional: a run
+/// destination can follow its runner without collapsing onto the player's feet,
+/// while a pass endpoint can independently attach to a moving receiver.
+struct CoachMarkTrackAnchor: Codable, Hashable, Sendable {
+    let playerID: String
+    let offset: PitchPoint
+
+    init(playerID: String, offset: PitchPoint = .zero) {
+        self.playerID = playerID
+        self.offset = offset
+    }
+}
+
+struct ResolvedCoachMarkGeometry: Hashable, Sendable {
+    let start: PitchPoint
+    let end: PitchPoint
 }
 
 struct CueMoment: Identifiable, Codable, Hashable, Sendable {
@@ -903,6 +1002,87 @@ struct ReplayScenario: Identifiable, Codable, Hashable, Sendable {
                 active = candidate
             }
         }
+    }
+}
+
+extension CoachMark {
+    /// Resolves track-relative endpoints at one replay instant. The result is a
+    /// pure function of the shared mark, scenario telemetry and timestamp, so
+    /// every participant renders the same geometry after a seek or late join.
+    func resolvedGeometry(
+        in scenario: ReplayScenario,
+        at time: TimeInterval
+    ) -> ResolvedCoachMarkGeometry {
+        let sampleTime = time.isFinite
+            ? min(max(time, 0), max(scenario.duration, 0))
+            : min(max(revealTime, 0), max(scenario.duration, 0))
+
+        func resolve(
+            fallback: PitchPoint,
+            anchor: CoachMarkTrackAnchor?
+        ) -> PitchPoint {
+            guard let anchor,
+                  let player = scenario.player(id: anchor.playerID) else {
+                return fallback
+            }
+            let playerPosition = player.pose(at: sampleTime).position
+            return PitchPoint(
+                x: playerPosition.x + anchor.offset.x,
+                z: playerPosition.z + anchor.offset.z
+            )
+        }
+
+        // Legacy player labels already carry one attached identity. Treat that
+        // as a zero-offset endpoint anchor so existing files gain the same
+        // deterministic resolution path without changing their payload.
+        if kind == .playerLabel,
+           let playerID,
+           let player = scenario.player(id: playerID) {
+            let position = player.pose(at: sampleTime).position
+            return ResolvedCoachMarkGeometry(start: position, end: position)
+        }
+
+        return ResolvedCoachMarkGeometry(
+            start: resolve(fallback: start, anchor: startTrackAnchor),
+            end: resolve(fallback: end, anchor: endTrackAnchor)
+        )
+    }
+
+    var followsPlayerTracks: Bool {
+        playerID != nil || startTrackAnchor != nil || endTrackAnchor != nil
+    }
+
+    var anchoredPlayerIDs: Set<String> {
+        var result = Set<String>()
+        if let playerID { result.insert(playerID) }
+        if let startTrackAnchor { result.insert(startTrackAnchor.playerID) }
+        if let endTrackAnchor { result.insert(endTrackAnchor.playerID) }
+        return result
+    }
+
+    /// Returns a render-only value with current resolved endpoints while
+    /// preserving identity, timing and anchor metadata. Shared state continues
+    /// to store the compact authored geometry; RealityKit can consume this
+    /// value directly with its existing mark cache and hit-target code.
+    func resolvingTrackGeometry(
+        in scenario: ReplayScenario,
+        at time: TimeInterval
+    ) -> CoachMark {
+        let geometry = resolvedGeometry(in: scenario, at: time)
+        guard geometry.start != start || geometry.end != end else { return self }
+        return CoachMark(
+            id: id,
+            kind: kind,
+            start: geometry.start,
+            end: geometry.end,
+            label: label,
+            revealTime: revealTime,
+            hideTime: hideTime,
+            author: author,
+            playerID: playerID,
+            startTrackAnchor: startTrackAnchor,
+            endTrackAnchor: endTrackAnchor
+        )
     }
 }
 

@@ -10,6 +10,7 @@ struct ReplayAthleteLocomotionPose: Sendable {
     let hipsPosition: SIMD3<Float>
     let hipsOrientation: simd_quatf
     let spineOrientation: simd_quatf
+    let neckOrientation: simd_quatf
     let headOrientation: simd_quatf
     let leftHipOrientation: simd_quatf
     let rightHipOrientation: simd_quatf
@@ -23,6 +24,19 @@ struct ReplayAthleteLocomotionPose: Sendable {
     let rightElbowOrientation: simd_quatf
     let leftWristOrientation: simd_quatf
     let rightWristOrientation: simd_quatf
+}
+
+/// Biomechanically bounded local gaze distributed across the cervical chain.
+/// Values are exposed independently of RealityKit transforms so the seek-stable
+/// intent can be verified without relying on rendered pixels.
+struct ReplayAthleteLookPose: Equatable, Sendable {
+    let neckYawRadians: Float
+    let headYawRadians: Float
+    let neckPitchRadians: Float
+    let headPitchRadians: Float
+
+    var combinedYawRadians: Float { neckYawRadians + headYawRadians }
+    var combinedPitchRadians: Float { neckPitchRadians + headPitchRadians }
 }
 
 /// A compact, allocation-free sample of one boot's gait cycle.  Keeping this
@@ -51,11 +65,18 @@ enum ReplayAthleteMotion {
         _ instance: ReplayAthleteInstance,
         from track: PlayerTrack,
         at time: TimeInterval,
+        lookTargetWorldPosition: SIMD3<Float>? = nil,
         ragdollCue: PlayerRagdollCue? = nil
     ) {
         let locomotion = track.locomotion(at: time)
         apply(
-            locomotionPose(for: track, at: time, locomotion: locomotion),
+            locomotionPose(
+                for: track,
+                at: time,
+                locomotion: locomotion,
+                gaitPhase: track.gaitPhase(at: time),
+                lookTargetWorldPosition: lookTargetWorldPosition
+            ),
             to: instance.joints
         )
         guard instance.lod.supportsRagdoll,
@@ -72,12 +93,15 @@ enum ReplayAthleteMotion {
 
     static func locomotionPose(
         for track: PlayerTrack,
-        at time: TimeInterval
+        at time: TimeInterval,
+        lookTargetWorldPosition: SIMD3<Float>? = nil
     ) -> ReplayAthleteLocomotionPose {
         locomotionPose(
             for: track,
             at: time,
-            locomotion: track.locomotion(at: time)
+            locomotion: track.locomotion(at: time),
+            gaitPhase: track.gaitPhase(at: time),
+            lookTargetWorldPosition: lookTargetWorldPosition
         )
     }
 
@@ -87,13 +111,18 @@ enum ReplayAthleteMotion {
     static func locomotionPose(
         for track: PlayerTrack,
         at time: TimeInterval,
-        locomotion: PlayerLocomotionSample
+        locomotion: PlayerLocomotionSample,
+        gaitPhase suppliedGaitPhase: Float? = nil,
+        lookTargetWorldPosition: SIMD3<Float>? = nil
     ) -> ReplayAthleteLocomotionPose {
         let tuning = tuning(for: locomotion.state)
         let effort = locomotion.effort
         let turn = locomotion.turnResponse
         let acceleration = locomotion.accelerationResponse
-        let phase = locomotion.motion.locomotionPhase
+        // Explicitly supplied phases come from PlayerTrack's integrated cadence
+        // clock. Tests and external callers that author a one-off descriptor can
+        // still use its embedded phase without reconstructing a telemetry track.
+        let phase = suppliedGaitPhase ?? locomotion.motion.locomotionPhase
         let leftFootfall = footfall(at: phase, tuning: tuning.footfall)
         let rightFootfall = footfall(at: phase + .pi, tuning: tuning.footfall)
         let cycle = (leftFootfall.stride - rightFootfall.stride) * 0.5
@@ -105,6 +134,12 @@ enum ReplayAthleteMotion {
             - (braking * (0.08 + (effort * 0.08)))
             + (track.isGoalkeeper ? 0.045 : 0)
         let cutBank = locomotion.state == .cut ? turn * 0.18 : turn * 0.025 * effort
+        let look = lookPose(
+            for: track,
+            at: time,
+            locomotion: locomotion,
+            targetWorldPosition: lookTargetWorldPosition
+        )
 
         let goalkeeperStance: Float = track.isGoalkeeper ? 0.10 : tuning.lateralStance
         let cutPlant = locomotion.state == .cut ? abs(turn) * 0.12 : 0
@@ -146,6 +181,13 @@ enum ReplayAthleteMotion {
         let bodyBob = abs(doubleCycle) * tuning.verticalBounce
         let sideSway = -cycle * tuning.lateralSway
         let balanceReach = braking * (0.025 + (effort * 0.07))
+        // Counter most of the roll inherited from the body/hips/spine chain.
+        // The eyes stay comparatively level while the planted body banks into
+        // a cut, avoiding the metronomic head wobble of a copied gait sine.
+        let inheritedGaitRoll = doubleCycle * (tuning.pelvisRoll - tuning.spineRoll)
+        let stabilizedHeadRoll = (-inheritedGaitRoll * 0.72)
+            + (cutBank * 0.40)
+            + (doubleCycle * tuning.headRoll * 0.18)
 
         return ReplayAthleteLocomotionPose(
             bodyPosition: [sideSway, groundingOffset + breathing + bodyBob, effort * 0.014],
@@ -162,9 +204,22 @@ enum ReplayAthleteMotion {
                     axis: [0, 0, 1]
                 )
                 * simd_quatf(angle: -cycle * tuning.spineYaw, axis: [0, 1, 0]),
-            headOrientation: simd_quatf(angle: forwardLean * 0.58, axis: [1, 0, 0])
-                * simd_quatf(angle: doubleCycle * tuning.headRoll, axis: [0, 0, 1])
-                * simd_quatf(angle: turn * tuning.headTurn, axis: [0, 1, 0]),
+            neckOrientation: simd_quatf(
+                angle: (forwardLean * 0.30) + look.neckPitchRadians,
+                axis: [1, 0, 0]
+            ) * simd_quatf(angle: stabilizedHeadRoll * 0.38, axis: [0, 0, 1])
+                * simd_quatf(
+                    angle: look.neckYawRadians + (cycle * tuning.spineYaw * 0.30),
+                    axis: [0, 1, 0]
+                ),
+            headOrientation: simd_quatf(
+                angle: (forwardLean * 0.54) + look.headPitchRadians,
+                axis: [1, 0, 0]
+            ) * simd_quatf(angle: stabilizedHeadRoll * 0.62, axis: [0, 0, 1])
+                * simd_quatf(
+                    angle: look.headYawRadians + (cycle * tuning.spineYaw * 0.70),
+                    axis: [0, 1, 0]
+                ),
             leftHipOrientation: simd_quatf(angle: goalkeeperStance, axis: [0, 0, 1])
                 * simd_quatf(angle: leftHipSwing, axis: [1, 0, 0]),
             rightHipOrientation: simd_quatf(angle: -goalkeeperStance, axis: [0, 0, 1])
@@ -216,12 +271,112 @@ enum ReplayAthleteMotion {
         footfall(at: phase, tuning: tuning(for: state).footfall)
     }
 
+    /// Produces a continuous, absolute-time football gaze rather than making
+    /// the head mirror the instantaneous turn-rate. The player prioritises the
+    /// ball when it is in the scene, glances toward travel when carrying it at
+    /// their feet, and retains a low-amplitude deterministic scan. Wide looks
+    /// are split across neck and head and remain inside comfortable human ranges.
+    static func lookPose(
+        for track: PlayerTrack,
+        at time: TimeInterval,
+        locomotion: PlayerLocomotionSample? = nil,
+        targetWorldPosition: SIMD3<Float>? = nil
+    ) -> ReplayAthleteLookPose {
+        let sample = locomotion ?? track.locomotion(at: time)
+        let finiteTime = time.isFinite ? min(max(time, -1_000_000), 1_000_000) : 0
+        let current = track.pose(at: finiteTime)
+        let facing = current.facingDegrees.isFinite ? current.facingDegrees : 0
+
+        let directionWindow: TimeInterval = 0.24
+        let before = track.pose(at: finiteTime - directionWindow).position
+        let after = track.pose(at: finiteTime + directionWindow).position
+        let travelX = after.x - before.x
+        let travelZ = after.z - before.z
+        let travelDistance = hypot(travelX, travelZ)
+        let travelBearing = travelDistance > 0.025
+            ? atan2(travelX, travelZ) * 180 / .pi
+            : facing
+        let travelDelta = clampAngleDelta(
+            shortestAngleDelta(from: facing, to: travelBearing),
+            limit: 100
+        )
+
+        let scan = interpolatedScanTarget(for: track.id, at: finiteTime)
+        let scanAmplitude = 27 - (15 * sample.effort)
+        let turnLead = sample.turnResponse * (8 - (3 * sample.effort))
+        let isMoving = min(max((sample.speedMetresPerSecond - 0.18) / 1.5, 0), 1)
+
+        var desiredYawDegrees = travelDelta * (0.30 + (0.43 * isMoving))
+        var desiredPitchDegrees: Float = 0
+        var scanWeight: Float = 0.22
+
+        if let target = finiteTarget(targetWorldPosition) {
+            let targetX = target.x - current.position.x
+            let targetZ = target.z - current.position.z
+            let horizontalDistance = hypot(targetX, targetZ)
+            if horizontalDistance > 0.04 {
+                let targetBearing = atan2(targetX, targetZ) * 180 / .pi
+                let targetDelta = clampAngleDelta(
+                    shortestAngleDelta(from: facing, to: targetBearing),
+                    limit: 112
+                )
+                // A ball at the player's feet should not pin their gaze down:
+                // footballers alternate between touch and the next picture.
+                let targetWeight: Float
+                if horizontalDistance < 1.25 {
+                    targetWeight = 0.28
+                    scanWeight = 0.34
+                } else if horizontalDistance < 4 {
+                    targetWeight = 0.52
+                    scanWeight = 0.16
+                } else {
+                    targetWeight = 0.72
+                    scanWeight = 0.10
+                }
+                desiredYawDegrees = (travelDelta * isMoving * (1 - targetWeight))
+                    + (targetDelta * targetWeight)
+
+                let downwardPitch = atan2(max(1.70 - target.y, -0.30), horizontalDistance)
+                    * 180 / .pi
+                let pitchWeight: Float = horizontalDistance < 1.25 ? 0.52 : 0.72
+                desiredPitchDegrees = min(max(downwardPitch * pitchWeight, -7), 24)
+            }
+        }
+
+        desiredYawDegrees += (scan * scanAmplitude * scanWeight) + turnLead
+        let yawLimit = 64 - (18 * sample.effort)
+        // Player roots use Replay XI's pitch-bearing convention (positive
+        // bearing is a negative RealityKit Y rotation), so local cervical yaw
+        // carries the same sign conversion.
+        let boundedYawRadians = -min(max(desiredYawDegrees, -yawLimit), yawLimit) * .pi / 180
+
+        let pitchScan = interpolatedScanTarget(
+            for: track.id,
+            at: finiteTime + 0.47,
+            salt: 0x9E37_79B9
+        ) * 1.8
+        let boundedPitchRadians = min(
+            max(desiredPitchDegrees + pitchScan, -9),
+            25
+        ) * .pi / 180
+
+        let neckYawShare: Float = 0.42
+        let neckPitchShare: Float = 0.34
+        return ReplayAthleteLookPose(
+            neckYawRadians: boundedYawRadians * neckYawShare,
+            headYawRadians: boundedYawRadians * (1 - neckYawShare),
+            neckPitchRadians: boundedPitchRadians * neckPitchShare,
+            headPitchRadians: boundedPitchRadians * (1 - neckPitchShare)
+        )
+    }
+
     static func apply(_ pose: ReplayAthleteLocomotionPose, to binding: ReplayAthleteJointBinding) {
         binding[.bodyRoot].position = pose.bodyPosition
         binding[.bodyRoot].orientation = pose.bodyOrientation
         binding[.hips].position = pose.hipsPosition
         binding[.hips].orientation = pose.hipsOrientation
         binding[.spine].orientation = pose.spineOrientation
+        binding[.neck].orientation = pose.neckOrientation
         binding[.headRoot].orientation = pose.headOrientation
         binding[.leftHip].orientation = pose.leftHipOrientation
         binding[.rightHip].orientation = pose.rightHipOrientation
@@ -264,6 +419,10 @@ enum ReplayAthleteMotion {
             .spine,
             toward: simd_quatf(angle: pose.spineRoll, axis: [0, 0, 1])
                 * simd_quatf(angle: pose.spinePitch, axis: [1, 0, 0])
+        )
+        blend(
+            .neck,
+            toward: simd_quatf()
         )
         blend(
             .headRoot,
@@ -465,6 +624,67 @@ enum ReplayAthleteMotion {
     private static func smootherStep(_ rawValue: Float) -> Float {
         let value = min(max(rawValue, 0), 1)
         return value * value * value * (value * ((value * 6) - 15) + 10)
+    }
+
+    private static func shortestAngleDelta(from start: Float, to end: Float) -> Float {
+        var delta = (end - start).truncatingRemainder(dividingBy: 360)
+        if delta > 180 {
+            delta -= 360
+        } else if delta < -180 {
+            delta += 360
+        }
+        return delta
+    }
+
+    private static func clampAngleDelta(_ value: Float, limit: Float) -> Float {
+        guard value.isFinite else { return 0 }
+        return min(max(value, -limit), limit)
+    }
+
+    private static func finiteTarget(_ target: SIMD3<Float>?) -> SIMD3<Float>? {
+        guard let target,
+              target.x.isFinite,
+              target.y.isFinite,
+              target.z.isFinite else { return nil }
+        return target
+    }
+
+    /// Smoothly interpolated scan intentions avoid the mechanical perpetual
+    /// sine-wave nod of the old rig.  The hash supplies per-player direction;
+    /// smoother-step supplies zero velocity at each 1.55 second intention.
+    private static func interpolatedScanTarget(
+        for playerID: String,
+        at time: TimeInterval,
+        salt: UInt32 = 0
+    ) -> Float {
+        let interval: TimeInterval = 1.55
+        let coordinate = time / interval
+        let startIndex = Int64(floor(coordinate))
+        let fraction = Float(coordinate - floor(coordinate))
+        let blend = smootherStep(fraction)
+        let seed = stableSeed(playerID) ^ salt
+        let start = scanTarget(seed: seed, index: startIndex)
+        let end = scanTarget(seed: seed, index: startIndex + 1)
+        return start + ((end - start) * blend)
+    }
+
+    private static func stableSeed(_ value: String) -> UInt32 {
+        value.utf8.reduce(UInt32(2_166_136_261)) { partial, byte in
+            (partial ^ UInt32(byte)) &* 16_777_619
+        }
+    }
+
+    private static func scanTarget(seed: UInt32, index: Int64) -> Float {
+        var value = seed ^ (UInt32(truncatingIfNeeded: index) &* 0x9E37_79B9)
+        value ^= value >> 16
+        value &*= 0x7FEB_352D
+        value ^= value >> 15
+        value &*= 0x846C_A68B
+        value ^= value >> 16
+        let unit = (Float(value & 0xFFFF) / 32_767.5) - 1
+        // Bias most scan intentions toward the central visual field while still
+        // allowing occasional shoulder checks.
+        return unit * abs(unit)
     }
 
     private static func approximateSoleHeight(

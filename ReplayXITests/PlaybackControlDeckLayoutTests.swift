@@ -51,4 +51,40 @@ final class PlaybackControlDeckLayoutTests: XCTestCase {
             XCTAssertLessThanOrEqual(accessible.uniformScale, 1.31)
         }
     }
+
+    func testViewHUDStaysInUpperLeftComfortQuadrant() {
+        for preset in PlaybackControlDeckPreset.allCases {
+            let layout = PlaybackViewHUDLayout.resolve(
+                preset: preset,
+                usesAccessibilityText: false
+            )
+
+            XCTAssertGreaterThanOrEqual(layout.attachmentWidth, 500)
+            XCTAssertLessThanOrEqual(layout.attachmentWidth, 600)
+            XCTAssertLessThan(layout.horizontalOffset, -0.45)
+            XCTAssertGreaterThan(layout.verticalOffset, 0.15)
+            XCTAssertTrue((-1.25 ... -0.90).contains(layout.forwardOffset))
+            XCTAssertTrue((0.90 ... 1.15).contains(layout.uniformScale))
+        }
+    }
+
+    func testAccessibleViewHUDGrowsTowardTheWearerWithoutCrossingCentre() {
+        for preset in PlaybackControlDeckPreset.allCases {
+            let normal = PlaybackViewHUDLayout.resolve(
+                preset: preset,
+                usesAccessibilityText: false
+            )
+            let accessible = PlaybackViewHUDLayout.resolve(
+                preset: preset,
+                usesAccessibilityText: true
+            )
+
+            XCTAssertGreaterThan(accessible.attachmentWidth, normal.attachmentWidth)
+            XCTAssertGreaterThan(accessible.uniformScale, normal.uniformScale)
+            XCTAssertGreaterThan(accessible.horizontalOffset, normal.horizontalOffset)
+            XCTAssertLessThan(accessible.horizontalOffset, -0.45)
+            XCTAssertGreaterThan(accessible.forwardOffset, normal.forwardOffset)
+            XCTAssertLessThan(accessible.verticalOffset, normal.verticalOffset)
+        }
+    }
 }

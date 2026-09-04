@@ -74,3 +74,55 @@ struct PlaybackControlDeckLayout: Equatable, Sendable {
         )
     }
 }
+
+/// A small, independent head-following surface for view and overlay choices.
+/// Its negative horizontal offset keeps it in the upper-left comfort quadrant
+/// without covering either the replayed player's sightline or the transport.
+struct PlaybackViewHUDLayout: Equatable, Sendable {
+    let attachmentWidth: CGFloat
+    let horizontalOffset: Float
+    let verticalOffset: Float
+    let forwardOffset: Float
+    let uniformScale: Float
+
+    static func resolve(
+        preset: PlaybackControlDeckPreset,
+        usesAccessibilityText: Bool
+    ) -> PlaybackViewHUDLayout {
+        let base: PlaybackViewHUDLayout = switch preset {
+        case .near:
+            PlaybackViewHUDLayout(
+                attachmentWidth: 500,
+                horizontalOffset: -0.54,
+                verticalOffset: 0.20,
+                forwardOffset: -1.00,
+                uniformScale: 0.96
+            )
+        case .standard:
+            PlaybackViewHUDLayout(
+                attachmentWidth: 500,
+                horizontalOffset: -0.64,
+                verticalOffset: 0.22,
+                forwardOffset: -1.18,
+                uniformScale: 1
+            )
+        case .large:
+            PlaybackViewHUDLayout(
+                attachmentWidth: 540,
+                horizontalOffset: -0.62,
+                verticalOffset: 0.21,
+                forwardOffset: -1.10,
+                uniformScale: 1.10
+            )
+        }
+
+        guard usesAccessibilityText else { return base }
+        return PlaybackViewHUDLayout(
+            attachmentWidth: max(base.attachmentWidth, 600),
+            horizontalOffset: base.horizontalOffset + 0.04,
+            verticalOffset: base.verticalOffset - 0.02,
+            forwardOffset: base.forwardOffset + 0.04,
+            uniformScale: min(base.uniformScale * 1.08, 1.20)
+        )
+    }
+}

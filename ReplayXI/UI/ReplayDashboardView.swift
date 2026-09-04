@@ -61,7 +61,8 @@ struct ReplayDashboardView: View {
                 "--replayxi-coach-focus": "everyone-with-seven",
                 "--replayxi-shape-lab": "triangle-lock",
                 "--replayxi-lane-lens": "lane-lens",
-                "--replayxi-four-minds": "four-minds"
+                "--replayxi-four-minds": "four-minds",
+                "--replayxi-world-replay": "real-world-match-replay"
             ]
             if let scenarioID = scenarioArguments.first(where: { arguments.contains($0.key) })?.value {
                 store.selectScenario(id: scenarioID, broadcast: false)
@@ -75,7 +76,8 @@ struct ReplayDashboardView: View {
                         "eleven-eyes": 13.6,
                         "everyone-with-seven": 9.8,
                         "lane-lens": 13.2,
-                        "four-minds": 12.8
+                        "four-minds": 12.8,
+                        "real-world-match-replay": 13.6
                     ]
                     store.seek(to: showcaseTimes[scenarioID] ?? 0, broadcast: false)
                 }
@@ -268,6 +270,19 @@ private struct ScenarioWorkspace: View {
                         MetricTile(value: "1", label: "Shared origin")
                         MetricTile(value: "0", label: "Running required")
                     }
+                }
+
+                if scenario.kind == .realWorldReplay {
+                    HStack(spacing: 10) {
+                        MetricTile(value: "SYNTH", label: "Source clip")
+                        MetricTile(value: "TRACKS", label: "Tactical truth")
+                        MetricTile(value: "SHA-256", label: "Asset gate")
+                        MetricTile(value: "4", label: "Batched shells")
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel(
+                        "Original synthetic source, deterministic tracking truth, hash-locked assets, four batched reconstruction preview shells"
+                    )
                 }
 
                 TacticalPreview(

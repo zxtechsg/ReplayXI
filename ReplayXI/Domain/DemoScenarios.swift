@@ -25,7 +25,8 @@ enum DemoScenarios {
             coachFocus,
             shapeLab,
             passingChannels,
-            perspectiveMatrix
+            perspectiveMatrix,
+            realWorldReplay
         ]
     }
 
@@ -241,6 +242,80 @@ enum DemoScenarios {
         )
     }
 
+    // MARK: - Scenario 06
+
+    /// The visible reconstruction shell is an original deterministic preview,
+    /// ready to be replaced by a rights-cleared, manifest-validated LingBot-Map
+    /// handoff. Tracking remains the source of tactical truth in both cases.
+    private static var realWorldReplay: ReplayScenario {
+        ReplayScenario(
+            id: "real-world-match-replay",
+            kind: .realWorldReplay,
+            title: "Real World Match Replay",
+            strapline: "Generated context. Tracking-grounded truth.",
+            matchContext: "ORIGINAL SYNTHETIC CAPTURE • RECONSTRUCTION PREVIEW",
+            objective: "Review a reconstructed match environment while player IDs, ball state, POV and annotations stay locked to authoritative tracks.",
+            coachPrompt: "Freeze the release. Link the run to two, the pass to seven and two, then scrub to prove every mark follows the play.",
+            proofPoint: "A generated visual world can add match context without being trusted to invent player identity, position or tactical measurements.",
+            duration: sequenceDuration,
+            defaultViewMode: .tacticalTable,
+            defaultPerspectiveID: "navy-rw",
+            featuredPerspectiveIDs: ["navy-rw", "navy-rb", "navy-rcm", "red-lb"],
+            players: commonPlayers,
+            ball: commonBall,
+            moments: [
+                cue("world-source", 0, "ORIGINAL SOURCE", "Rights-safe generated clip", "No broadcast footage, real-club marks or player likenesses enter this reconstruction preview."),
+                cue("world-register", 8.8, "TRACK REGISTRATION", "Visuals meet the match clock", "The generated environment is aligned to the canonical pitch while deterministic tracking remains authoritative."),
+                cue("world-overlap", 11.3, "TRACKED RUN", "Two accelerates outside", "The run arrow is attached to the right-back's telemetry rather than baked into one video frame."),
+                cue("world-release", 13.6, "TRACKED PASS", "Seven finds the outside lane", "Both pass endpoints can follow their identified players through a frame-by-frame review."),
+                cue("world-cutback", 17.5, "SECOND ACTION", "Eight arrives behind the line", "The coach can pause, label and compare the reconstructed context from any player translation with free head look."),
+                cue("world-proof", 24.0, "AUDITABLE HANDOFF", "Visual context, tactical truth separated", "Source rights, generator stages and reconstruction files remain hash-locked in the world manifest.")
+            ],
+            coachMarks: [
+                mark(
+                    "00000000-0000-4000-8000-000000000601",
+                    .run,
+                    28, 14, 31, 35,
+                    "#2 tracked overlap",
+                    11.3,
+                    startPlayerID: "navy-rb",
+                    endPlayerID: "navy-rb"
+                ),
+                mark(
+                    "00000000-0000-4000-8000-000000000602",
+                    .pass,
+                    27, 23, 31, 29,
+                    "#7 → #2 release",
+                    13.6,
+                    startPlayerID: "navy-rw",
+                    endPlayerID: "navy-rb"
+                ),
+                mark(
+                    "00000000-0000-4000-8000-000000000603",
+                    .danger,
+                    27, 24, 30, 30,
+                    "#3 recovery line",
+                    13.6,
+                    startPlayerID: "red-lb",
+                    endPlayerID: "red-lb"
+                ),
+                mark(
+                    "00000000-0000-4000-8000-000000000604",
+                    .space,
+                    12, 24, 17, 31,
+                    "Cut-back pocket",
+                    16.2
+                )
+            ],
+            formationTargets: [
+                target("world-rw", "navy-rw", 27, 23, 1.5, "Tracked source #7"),
+                target("world-rb", "navy-rb", 31, 29, 1.5, "Tracked receiver #2"),
+                target("world-rcm", "navy-rcm", 15, 29, 1.8, "Tracked arrival #8"),
+                target("world-lb", "red-lb", 28, 27, 1.8, "Tracked defender #3")
+            ]
+        )
+    }
+
     // MARK: - Shared 22-player sequence
 
     private static func makeCommonPlayers() -> [PlayerTrack] {
@@ -252,9 +327,10 @@ enum DemoScenarios {
             ]),
             player("navy-rb", "Eli Ward", "Right back", 2, .home, false, [
                 k(0, 23, -7, 5), k(3, 24, -4, 0), k(6, 25, 1, 0),
-                k(8, 26, 8, 0), k(10, 27, 11, 0), k(11.5, 28, 14, 0),
-                k(13, 30, 20, 5), k(14.5, 31, 25, 0), k(16, 31.5, 29, 0),
-                k(18, 30.5, 35, -10), k(20, 29.5, 36, -120),
+                k(8, 26, 8, 0), k(10.5, 27, 11, 0), k(11.3, 28, 14, 2),
+                k(12.5, 30, 20, 7), k(13.5, 31, 25, 5), k(14.4, 31.5, 26, 0),
+                k(15.6, 30.8, 32.7, -7), k(17.5, 30.5, 35, -12),
+                k(20, 29.5, 36, -120),
                 k(24, 28, 35, 180), k(27, 27, 33, 180), k(32, 26, 30, 180)
             ]),
             player("navy-rcb", "Noah Mercer", "Right centre-back", 4, .home, false, [
@@ -277,8 +353,8 @@ enum DemoScenarios {
             ]),
             player("navy-rcm", "Jae Okoro", "Right midfielder", 8, .home, false, [
                 k(0, 11, 7, 0), k(6, 12, 10, 0), k(10, 14, 13, 0),
-                k(13, 13, 18, 0), k(16, 14, 23, 0), k(18, 15, 27, 0),
-                k(20, 15, 29, 40), k(21.5, 13, 31, 0), k(24, 11, 34, 0),
+                k(13.5, 13, 23, 0), k(15.5, 14, 23, 5), k(16.5, 15, 27, 3),
+                k(18, 15, 29, 35), k(21.5, 13, 31, 0), k(24, 11, 34, 0),
                 k(27, 10, 34, 180), k(32, 10, 31, 180)
             ]),
             player("navy-lcm", "Milo Arden", "Left midfielder", 10, .home, false, [
@@ -287,8 +363,9 @@ enum DemoScenarios {
             ]),
             player("navy-rw", "Ari Quinn", "Right winger", 7, .home, false, [
                 k(0, 28, 19, 180), k(6, 28, 20, 170), k(8, 27, 18, 180),
-                k(10, 27, 18, 175), k(11.2, 27.5, 20, 5), k(12.5, 26.5, 22, -25),
-                k(14.2, 27, 23, 45), k(16, 27, 24, 0), k(20, 26, 28, 0),
+                k(10.4, 27, 18, 165), k(11.0, 27.4, 19.5, 135),
+                k(11.8, 26.8, 21.2, 110), k(12.7, 26.45, 22.9, 60),
+                k(13.6, 27, 23, 20), k(16, 27, 24, 0), k(20, 26, 28, 0),
                 k(24, 25, 32, 0), k(27, 25, 33, 180), k(32, 24, 32, 180)
             ]),
             player("navy-cf", "Leon Pike", "Centre forward", 9, .home, false, [
@@ -324,8 +401,10 @@ enum DemoScenarios {
             ]),
             player("red-lb", "Remy Cole", "Left back", 3, .away, false, [
                 k(0, 25, 28, 180), k(6, 25, 27, 180), k(8, 26, 25, 180),
-                k(10, 25.5, 24, 180), k(11.5, 26, 22, 180), k(13, 27, 24, 170),
-                k(14.5, 28.5, 27, 90), k(16, 30, 30, 0), k(18, 29, 34, 0),
+                k(10, 25.5, 24, 180), k(11.2, 25.8, 22.4, 170),
+                k(12.2, 26.4, 22.5, 145), k(13.2, 27.2, 24.4, 110),
+                k(14.0, 28.4, 27, 65), k(15.0, 30, 30, 15),
+                k(16.4, 29.2, 34, -5),
                 k(20, 25, 35, 180), k(24, 23, 37, 180), k(27, 24, 38, 0),
                 k(32, 24, 35, 0)
             ]),
@@ -355,8 +434,10 @@ enum DemoScenarios {
             ]),
             player("red-lw", "Eden Frost", "Left winger", 11, .away, false, [
                 k(0, 24, 10, 180), k(6, 24, 8, 180), k(8, 24.5, 9, 90),
-                k(10, 25, 11, 0), k(12, 27, 14, 0), k(14, 28.5, 18, 0),
-                k(16, 29.5, 23, 0), k(18, 29, 27, 0), k(20, 27, 29, 180),
+                k(10, 25, 11, 20), k(12.4, 27, 14, 10),
+                k(13.4, 28.5, 18, 5), k(14.5, 29.5, 23, 0),
+                k(15.4, 29, 27, -15), k(16.3, 27, 29, -60),
+                k(20, 27, 29, 180),
                 k(24, 24, 30, 180), k(27, 24, 31, 0), k(32, 23, 28, 0)
             ])
         ]
@@ -373,10 +454,11 @@ enum DemoScenarios {
             ball(9.0, 26.5, 11, 0.18),
             ball(10.1, 27, 18, 0.11),
             ball(11.8, 27, 20.5, 0.11),
-            ball(13.8, 27, 23, 0.11),
-            ball(14.4, 28.5, 25, 0.18),
-            ball(15.8, 31.5, 29, 0.11),
-            ball(17.6, 30.5, 35, 0.11),
+            ball(13.6, 27, 23, 0.11),
+            ball(14.15, 28, 24.2, 0.28),
+            ball(14.8, 31.2, 30, 0.11),
+            ball(16.2, 30.6, 34.2, 0.11),
+            ball(17.5, 30.5, 35, 0.11),
             ball(18.2, 28, 34.5, 0.16),
             ball(19.8, 15, 29, 0.11),
             ball(21.2, 13, 31, 0.11),
@@ -458,19 +540,41 @@ enum DemoScenarios {
         _ endX: Float,
         _ endZ: Float,
         _ label: String,
-        _ revealTime: TimeInterval
+        _ revealTime: TimeInterval,
+        startPlayerID: String? = nil,
+        endPlayerID: String? = nil
     ) -> CoachMark {
         guard let identifier = UUID(uuidString: id) else {
             preconditionFailure("Invalid deterministic coach-mark UUID: \(id)")
         }
+        let start = PitchPoint(x: startX, z: startZ)
+        let end = PitchPoint(x: endX, z: endZ)
+
+        func anchor(playerID: String?, endpoint: PitchPoint) -> CoachMarkTrackAnchor? {
+            guard let playerID,
+                  let player = commonPlayers.first(where: { $0.id == playerID }) else {
+                return nil
+            }
+            let playerPosition = player.pose(at: revealTime).position
+            return CoachMarkTrackAnchor(
+                playerID: playerID,
+                offset: PitchPoint(
+                    x: endpoint.x - playerPosition.x,
+                    z: endpoint.z - playerPosition.z
+                )
+            )
+        }
+
         return CoachMark(
             id: identifier,
             kind: kind,
-            start: PitchPoint(x: startX, z: startZ),
-            end: PitchPoint(x: endX, z: endZ),
+            start: start,
+            end: end,
             label: label,
             revealTime: revealTime,
-            author: "Coach Vale"
+            author: "Coach Vale",
+            startTrackAnchor: anchor(playerID: startPlayerID, endpoint: start),
+            endTrackAnchor: anchor(playerID: endPlayerID, endpoint: end)
         )
     }
 

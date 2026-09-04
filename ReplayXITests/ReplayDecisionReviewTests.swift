@@ -145,6 +145,105 @@ final class ReplayDecisionReviewTests: XCTestCase {
         XCTAssertNil(cleared.coachSuggestedOption)
     }
 
+    func testTrackedCoachMarkSourceResolvesAtRevealTime() throws {
+        let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .coachFocus))
+        let revealTime: TimeInterval = 14
+        let source = try XCTUnwrap(scenario.player(id: "navy-rw"))
+        let receiver = try XCTUnwrap(scenario.player(id: "navy-rcm"))
+        var configuration = ReplayDecisionConfiguration.standard
+        configuration.coachMarkStartRadiusMetres = 0.05
+        let targetTime = revealTime + configuration.outcomeLookAhead
+        let mark = CoachMark(
+            kind: .pass,
+            start: PitchPoint(x: -34, z: -51),
+            end: receiver.pose(at: targetTime).position,
+            label: "Tracked source",
+            revealTime: revealTime,
+            hideTime: 16,
+            startTrackAnchor: CoachMarkTrackAnchor(playerID: source.id)
+        )
+
+        let snapshot = try XCTUnwrap(
+            scenario.decisionReview(
+                at: 15.9,
+                playerID: source.id,
+                currentMarks: [mark],
+                configuration: configuration
+            )
+        )
+
+        XCTAssertEqual(snapshot.coachSuggestion?.coachMarkID, mark.id)
+        XCTAssertEqual(snapshot.coachSuggestion?.receiverID, receiver.id)
+    }
+
+    func testTrackedCoachMarkTargetResolvesAtOutcomeTime() throws {
+        let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .coachFocus))
+        let revealTime: TimeInterval = 14
+        let source = try XCTUnwrap(scenario.player(id: "navy-rw"))
+        let receiver = try XCTUnwrap(scenario.player(id: "navy-rcm"))
+        var configuration = ReplayDecisionConfiguration.standard
+        configuration.coachMarkTargetRadiusMetres = 0.05
+        let mark = CoachMark(
+            kind: .pass,
+            start: source.pose(at: revealTime).position,
+            end: PitchPoint(x: -34, z: -51),
+            label: "Tracked target",
+            revealTime: revealTime,
+            hideTime: 16,
+            endTrackAnchor: CoachMarkTrackAnchor(playerID: receiver.id)
+        )
+
+        let snapshot = try XCTUnwrap(
+            scenario.decisionReview(
+                at: 14.1,
+                playerID: source.id,
+                currentMarks: [mark],
+                configuration: configuration
+            )
+        )
+
+        XCTAssertEqual(snapshot.coachSuggestion?.coachMarkID, mark.id)
+        XCTAssertEqual(snapshot.coachSuggestion?.receiverID, receiver.id)
+    }
+
+    func testTacticalPreviewResolvesTrackedMarkAtDisplayedTime() throws {
+        let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .coachFocus))
+        let source = try XCTUnwrap(scenario.player(id: "navy-rw"))
+        let receiver = try XCTUnwrap(scenario.player(id: "navy-rcm"))
+        let startOffset = PitchPoint(x: 0.75, z: -0.5)
+        let endOffset = PitchPoint(x: -0.25, z: 1.25)
+        let mark = CoachMark(
+            kind: .pass,
+            start: PitchPoint(x: -34, z: -51),
+            end: PitchPoint(x: 34, z: 51),
+            label: "Live preview",
+            startTrackAnchor: CoachMarkTrackAnchor(
+                playerID: source.id,
+                offset: startOffset
+            ),
+            endTrackAnchor: CoachMarkTrackAnchor(
+                playerID: receiver.id,
+                offset: endOffset
+            )
+        )
+        let displayedTime: TimeInterval = 17.25
+
+        let geometry = TacticalPreview.resolvedMarkGeometry(
+            for: mark,
+            in: scenario,
+            at: displayedTime
+        )
+        let sourceAtDisplay = source.pose(at: displayedTime).position
+        let receiverAtDisplay = receiver.pose(at: displayedTime).position
+
+        XCTAssertEqual(geometry.start.x, sourceAtDisplay.x + startOffset.x, accuracy: 0.000_001)
+        XCTAssertEqual(geometry.start.z, sourceAtDisplay.z + startOffset.z, accuracy: 0.000_001)
+        XCTAssertEqual(geometry.end.x, receiverAtDisplay.x + endOffset.x, accuracy: 0.000_001)
+        XCTAssertEqual(geometry.end.z, receiverAtDisplay.z + endOffset.z, accuracy: 0.000_001)
+        XCTAssertNotEqual(geometry.start, mark.start)
+        XCTAssertNotEqual(geometry.end, mark.end)
+    }
+
     func testPassingOptionsAreBoundedDeterministicAndDescriptive() throws {
         let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .coachFocus))
         let first = try XCTUnwrap(

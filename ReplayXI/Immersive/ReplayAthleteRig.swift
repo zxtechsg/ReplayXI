@@ -217,6 +217,7 @@ enum ReplayAthleteJoint: String, CaseIterable, Sendable {
     case bodyRoot = "body-root"
     case hips
     case spine
+    case neck
     case headRoot = "head-root"
     case leftHip = "left-hip"
     case rightHip = "right-hip"
@@ -236,7 +237,8 @@ enum ReplayAthleteJoint: String, CaseIterable, Sendable {
         case .bodyRoot: "full-rig"
         case .hips: Self.bodyRoot.rawValue
         case .spine, .leftHip, .rightHip: Self.hips.rawValue
-        case .headRoot, .leftShoulder, .rightShoulder: Self.spine.rawValue
+        case .neck, .leftShoulder, .rightShoulder: Self.spine.rawValue
+        case .headRoot: Self.neck.rawValue
         case .leftKnee: Self.leftHip.rawValue
         case .rightKnee: Self.rightHip.rawValue
         case .leftAnkle: Self.leftKnee.rawValue
@@ -447,21 +449,28 @@ enum ReplayAthleteFactory {
             }
         }
 
+        // Give the neck its own pivot instead of leaving a static cylinder on
+        // the torso while the head rotates independently.  The two-joint chain
+        // lets the motion solver distribute a footballer's gaze naturally and
+        // keeps the head/neck silhouette connected through wide scans.
+        let neck = Entity()
+        neck.name = ReplayAthleteJoint.neck.rawValue
+        neck.position = [0, 0.585, 0]
+        spine.addChild(neck)
         if lod != .far {
-            let neck = try addCustomModel(
+            let neckShell = try addCustomModel(
                 .neck,
-                named: "neck",
-                to: spine,
-                material: skinMaterial,
-                position: [0, 0.585, 0]
+                named: "neck-shell",
+                to: neck,
+                material: skinMaterial
             )
-            neck.scale = [1, 1, 0.96]
+            neckShell.scale = [1, 1, 0.96]
         }
 
         let headRoot = Entity()
         headRoot.name = ReplayAthleteJoint.headRoot.rawValue
-        headRoot.position = [0, 0.755, 0]
-        spine.addChild(headRoot)
+        headRoot.position = [0, 0.170, 0]
+        neck.addChild(headRoot)
         try addCustomModel(.head, named: "head", to: headRoot, material: skinMaterial)
         if lod != .far {
             try addCustomModel(.hair, named: "hair", to: headRoot, material: hairMaterial)

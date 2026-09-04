@@ -15,6 +15,11 @@ final class ReplayStore {
     static let availablePlaybackRates: [Double] = [0.25, 0.5, 0.75, 1, 1.5, 2, 4]
     static let coachAnnotationDisplayDuration: TimeInterval = 8
     static let maximumCoachAnnotationDuration: TimeInterval = 30
+    /// A pitch pinch that begins close to a footballer is treated as authored
+    /// from that track. The radius is deliberately tighter than the broad
+    /// player-selection target so a coach can still draw a fixed-space mark
+    /// beside a player without it unexpectedly moving through time.
+    static let coachMarkTrackSnapDistance: Float = 1.65
     /// Bounds independently rendered annotation hierarchies in shared state.
     static let maximumSharedCoachMarks = 128
     static let maximumCoachMarkLabelLength = 96
@@ -95,6 +100,8 @@ final class ReplayStore {
     private struct CoachMarkGeometry {
         let start: PitchPoint
         let end: PitchPoint
+        let startTrackAnchor: CoachMarkTrackAnchor?
+        let endTrackAnchor: CoachMarkTrackAnchor?
     }
 
     convenience init() {
@@ -461,13 +468,21 @@ final class ReplayStore {
         case .playerLabel: return nil
         }
 
+        let anchors = automaticTrackAnchors(
+            for: selectedTool,
+            start: start,
+            end: point,
+            at: playhead
+        )
         let mark = CoachMark(
             kind: selectedTool,
             start: start,
             end: point,
             label: label,
             revealTime: playhead,
-            hideTime: playhead + Self.coachAnnotationDisplayDuration
+            hideTime: playhead + Self.coachAnnotationDisplayDuration,
+            startTrackAnchor: anchors.start,
+            endTrackAnchor: anchors.end
         )
         marks.append(mark)
         pendingDrawStart = nil
@@ -527,19 +542,39 @@ final class ReplayStore {
             labelPlayer(playerID)
             return
         }
-        let focus = Self.clampedPitchPoint(
-            activePerspective?.pose(at: playhead).position ?? .zero
-        )
+        let sampledFocus = activePerspective?.pose(at: playhead).position ?? .zero
+        let focus = Self.clampedPitchPoint(sampledFocus)
         let destination = Self.clampedPitchPoint(
             PitchPoint(x: focus.x + 7, z: focus.z + 10)
         )
+        let activePlayerAnchor = activePerspective.map {
+            CoachMarkTrackAnchor(
+                playerID: $0.id,
+                offset: PitchPoint(
+                    x: focus.x - sampledFocus.x,
+                    z: focus.z - sampledFocus.z
+                )
+            )
+        }
         let mark = CoachMark(
             kind: selectedTool,
             start: focus,
             end: destination,
             label: selectedTool == .pass ? "Open channel" : "Next movement",
             revealTime: playhead,
-            hideTime: playhead + Self.coachAnnotationDisplayDuration
+            hideTime: playhead + Self.coachAnnotationDisplayDuration,
+            startTrackAnchor: selectedTool == .space ? nil : activePlayerAnchor,
+            endTrackAnchor: selectedTool == .run
+                ? activePlayerAnchor.map {
+                    CoachMarkTrackAnchor(
+                        playerID: $0.playerID,
+                        offset: PitchPoint(
+                            x: destination.x - sampledFocus.x,
+                            z: destination.z - sampledFocus.z
+                        )
+                    )
+                }
+                : nil
         )
         marks.append(mark)
         statusMessage = "Coach annotation added"
@@ -615,7 +650,9 @@ final class ReplayStore {
             revealTime: revealTime,
             hideTime: shiftedHideTime,
             author: mark.author,
-            playerID: mark.playerID
+            playerID: mark.playerID,
+            startTrackAnchor: mark.startTrackAnchor,
+            endTrackAnchor: mark.endTrackAnchor
         )
         guard isValidSharedMark(replacement, for: selectedScenario) else {
             statusMessage = "That annotation window does not fit the replay"
@@ -661,7 +698,9 @@ final class ReplayStore {
             revealTime: mark.revealTime,
             hideTime: duration.map { mark.revealTime + $0 },
             author: mark.author,
-            playerID: mark.playerID
+            playerID: mark.playerID,
+            startTrackAnchor: mark.startTrackAnchor,
+            endTrackAnchor: mark.endTrackAnchor
         )
         guard isValidSharedMark(replacement, for: selectedScenario) else {
             statusMessage = "That annotation window does not fit the replay"
@@ -714,7 +753,9 @@ final class ReplayStore {
             revealTime: mark.revealTime,
             hideTime: mark.hideTime,
             author: mark.author,
-            playerID: mark.playerID
+            playerID: mark.playerID,
+            startTrackAnchor: mark.startTrackAnchor,
+            endTrackAnchor: mark.endTrackAnchor
         )
         guard isValidSharedMark(replacement, for: selectedScenario) else {
             statusMessage = "Choose a valid annotation label"
@@ -723,6 +764,88 @@ final class ReplayStore {
 
         marks[index] = replacement
         statusMessage = "Annotation label updated"
+        emitSnapshot()
+        return true
+    }
+
+    /// Links both endpoints of a coach-created mark to one player's telemetry,
+    /// or freezes the currently resolved geometry back onto the pitch when
+    /// `playerID` is nil. Offsets are sampled at the current replay instant, so
+    /// toggling tracking never makes an annotation visibly jump.
+    @discardableResult
+    func setCoachMarkTracking(id: UUID, playerID: String?) -> Bool {
+        guard localRole == .coach else { return false }
+        let authoredIDs = Set(selectedScenario.coachMarks.map(\.id))
+        guard !authoredIDs.contains(id),
+              let index = marks.firstIndex(where: { $0.id == id }),
+              marks[index].kind.requiresTwoPitchPoints else {
+            statusMessage = authoredIDs.contains(id)
+                ? "Authored match overlay kept"
+                : "That annotation cannot track a player"
+            return false
+        }
+        guard pendingCoachMarkGeometryBaselines[id] == nil else {
+            statusMessage = "Finish the current annotation move first"
+            return false
+        }
+        if let playerID, selectedScenario.player(id: playerID) == nil {
+            statusMessage = "Choose a player in this replay"
+            return false
+        }
+
+        let mark = marks[index]
+        let resolved = mark.resolvedGeometry(in: selectedScenario, at: playhead)
+        let playerPosition = playerID.flatMap {
+            selectedScenario.player(id: $0)?.pose(at: playhead).position
+        }
+        let startTrackAnchor = playerID.flatMap { playerID in
+            playerPosition.map {
+                CoachMarkTrackAnchor(
+                    playerID: playerID,
+                    offset: PitchPoint(
+                        x: resolved.start.x - $0.x,
+                        z: resolved.start.z - $0.z
+                    )
+                )
+            }
+        }
+        let endTrackAnchor = playerID.flatMap { playerID in
+            playerPosition.map {
+                CoachMarkTrackAnchor(
+                    playerID: playerID,
+                    offset: PitchPoint(
+                        x: resolved.end.x - $0.x,
+                        z: resolved.end.z - $0.z
+                    )
+                )
+            }
+        }
+        let replacement = CoachMark(
+            id: mark.id,
+            kind: mark.kind,
+            start: resolved.start,
+            end: resolved.end,
+            label: mark.label,
+            revealTime: mark.revealTime,
+            hideTime: mark.hideTime,
+            author: mark.author,
+            playerID: mark.playerID,
+            startTrackAnchor: startTrackAnchor,
+            endTrackAnchor: endTrackAnchor
+        )
+        guard isValidSharedMark(replacement, for: selectedScenario) else {
+            statusMessage = "Player tracking unavailable"
+            return false
+        }
+
+        marks[index] = replacement
+        isPlaying = false
+        if let playerID,
+           let player = selectedScenario.player(id: playerID) {
+            statusMessage = "Annotation follows #\(player.shirtNumber)"
+        } else {
+            statusMessage = "Annotation fixed to the pitch"
+        }
         emitSnapshot()
         return true
     }
@@ -750,16 +873,11 @@ final class ReplayStore {
         }
 
         let mark = marks[index]
-        let replacement = CoachMark(
-            id: mark.id,
-            kind: mark.kind,
+        let replacement = markReplacingGeometry(
+            mark,
             start: start,
             end: end,
-            label: mark.label,
-            revealTime: mark.revealTime,
-            hideTime: mark.hideTime,
-            author: mark.author,
-            playerID: mark.playerID
+            resolvingTrackOffsetsAt: playhead
         )
         guard isValidSharedMark(replacement, for: selectedScenario) else {
             if broadcast { rollbackCoachMarkGeometryPreview(id: id, index: index) }
@@ -787,7 +905,9 @@ final class ReplayStore {
         } else if beginsPreviewTransaction {
             pendingCoachMarkGeometryBaselines[id] = CoachMarkGeometry(
                 start: mark.start,
-                end: mark.end
+                end: mark.end,
+                startTrackAnchor: mark.startTrackAnchor,
+                endTrackAnchor: mark.endTrackAnchor
             )
         }
         marks[index] = replacement
@@ -840,8 +960,9 @@ final class ReplayStore {
         }
 
         let mark = marks[index]
-        var start = mark.start
-        var end = mark.end
+        let resolved = mark.resolvedGeometry(in: selectedScenario, at: playhead)
+        var start = resolved.start
+        var end = resolved.end
         switch endpoint {
         case .start:
             let proposed = PitchPoint(x: start.x + delta.x, z: start.z + delta.z)
@@ -859,7 +980,7 @@ final class ReplayStore {
             end = Self.clampedPitchPoint(proposed)
         }
 
-        guard start != mark.start || end != mark.end else {
+        guard start != resolved.start || end != resolved.end else {
             statusMessage = "Annotation did not move"
             return false
         }
@@ -872,7 +993,12 @@ final class ReplayStore {
             return false
         }
 
-        let replacement = markReplacingGeometry(mark, start: start, end: end)
+        let replacement = markReplacingGeometry(
+            mark,
+            start: start,
+            end: end,
+            resolvingTrackOffsetsAt: playhead
+        )
         guard isValidSharedMark(replacement, for: selectedScenario) else {
             statusMessage = "Keep the annotation on the pitch"
             return false
@@ -900,11 +1026,7 @@ final class ReplayStore {
               let index = marks.firstIndex(where: { $0.id == id }) else {
             return false
         }
-        marks[index] = markReplacingGeometry(
-            marks[index],
-            start: baseline.start,
-            end: baseline.end
-        )
+        marks[index] = markRestoringGeometry(marks[index], from: baseline)
         statusMessage = "Annotation move cancelled"
         return true
     }
@@ -913,11 +1035,7 @@ final class ReplayStore {
         guard let baseline = pendingCoachMarkGeometryBaselines.removeValue(forKey: id) else {
             return
         }
-        marks[index] = markReplacingGeometry(
-            marks[index],
-            start: baseline.start,
-            end: baseline.end
-        )
+        marks[index] = markRestoringGeometry(marks[index], from: baseline)
     }
 
     /// Clears only the transient first point after an interrupted spatial
@@ -1247,11 +1365,7 @@ final class ReplayStore {
         let publishesPhysicalPlacement = triangleLockMode == .place && !isLocalTrianglePreview
         let sharedMarks = marks.map { mark in
             guard let baseline = pendingCoachMarkGeometryBaselines[mark.id] else { return mark }
-            return markReplacingGeometry(
-                mark,
-                start: baseline.start,
-                end: baseline.end
-            )
+            return markRestoringGeometry(mark, from: baseline)
         }
         return SharedPlaybackSnapshot(
             scenarioID: selectedScenarioID,
@@ -1383,15 +1497,84 @@ final class ReplayStore {
     /// Shared marks become RealityKit entity trees, so bound both geometry and
     /// presentation data before accepting them. Collection-level duplicate ID
     /// rejection happens in `applyRemote` to keep scene dictionary keys unique.
+    private func automaticTrackAnchors(
+        for kind: CoachMarkKind,
+        start: PitchPoint,
+        end: PitchPoint,
+        at time: TimeInterval
+    ) -> (start: CoachMarkTrackAnchor?, end: CoachMarkTrackAnchor?) {
+        guard kind.requiresTwoPitchPoints, kind != .space else { return (nil, nil) }
+
+        func nearestAnchor(to point: PitchPoint) -> CoachMarkTrackAnchor? {
+            var best: (player: PlayerTrack, distance: Float)?
+            for player in selectedScenario.players {
+                let position = player.pose(at: time).position
+                let distance = ReplayGeometry.distance(position, point)
+                guard distance <= Self.coachMarkTrackSnapDistance else { continue }
+                if let current = best,
+                   distance > current.distance
+                    || (distance == current.distance && player.id >= current.player.id) {
+                    continue
+                }
+                best = (player, distance)
+            }
+            guard let player = best?.player else { return nil }
+            let position = player.pose(at: time).position
+            return CoachMarkTrackAnchor(
+                playerID: player.id,
+                offset: PitchPoint(
+                    x: point.x - position.x,
+                    z: point.z - position.z
+                )
+            )
+        }
+
+        let startAnchor = nearestAnchor(to: start)
+        if kind == .run, let startAnchor,
+           let player = selectedScenario.player(id: startAnchor.playerID) {
+            let position = player.pose(at: time).position
+            return (
+                startAnchor,
+                CoachMarkTrackAnchor(
+                    playerID: player.id,
+                    offset: PitchPoint(
+                        x: end.x - position.x,
+                        z: end.z - position.z
+                    )
+                )
+            )
+        }
+        return (startAnchor, nearestAnchor(to: end))
+    }
+
     private func isValidSharedMark(
         _ mark: CoachMark,
         for scenario: ReplayScenario
     ) -> Bool {
         let hasFiniteBoundedGeometry = Self.isPointOnPitch(mark.start)
             && Self.isPointOnPitch(mark.end)
+        let anchors = [mark.startTrackAnchor, mark.endTrackAnchor].compactMap { $0 }
+        let hasValidTrackAnchors = anchors.allSatisfy { anchor in
+            scenario.player(id: anchor.playerID) != nil
+                && anchor.offset.x.isFinite
+                && anchor.offset.z.isFinite
+                && abs(anchor.offset.x) <= Self.pitchHalfWidth * 2
+                && abs(anchor.offset.z) <= Self.pitchHalfLength * 2
+        }
         let hasValidRevealTime = mark.revealTime.isFinite
             && mark.revealTime >= 0
             && mark.revealTime <= scenario.duration
+        let hasFiniteBoundedResolvedGeometry: Bool
+        if hasValidRevealTime {
+            let resolved = mark.resolvedGeometry(
+                in: scenario,
+                at: mark.revealTime
+            )
+            hasFiniteBoundedResolvedGeometry = Self.isPointOnPitch(resolved.start)
+                && Self.isPointOnPitch(resolved.end)
+        } else {
+            hasFiniteBoundedResolvedGeometry = false
+        }
         let hasValidWindow = mark.hideTime.map {
             $0.isFinite
                 && $0 > mark.revealTime
@@ -1403,10 +1586,15 @@ final class ReplayStore {
             && mark.author.count <= Self.maximumCoachMarkLabelLength
             && mark.author.utf8.count <= Self.maximumCoachMarkLabelLength * 4
         guard hasFiniteBoundedGeometry,
+              hasValidTrackAnchors,
+              hasFiniteBoundedResolvedGeometry,
               hasValidRevealTime,
               hasValidWindow,
               hasValidText else { return false }
-        guard mark.kind == .playerLabel else { return mark.playerID == nil }
+        guard mark.kind == .playerLabel else {
+            return mark.playerID == nil
+        }
+        guard mark.startTrackAnchor == nil, mark.endTrackAnchor == nil else { return false }
         guard let playerID = mark.playerID else { return false }
         return scenario.player(id: playerID) != nil
     }
@@ -1414,9 +1602,29 @@ final class ReplayStore {
     private func markReplacingGeometry(
         _ mark: CoachMark,
         start: PitchPoint,
-        end: PitchPoint
+        end: PitchPoint,
+        resolvingTrackOffsetsAt time: TimeInterval? = nil
     ) -> CoachMark {
-        CoachMark(
+        func adjustedAnchor(
+            _ anchor: CoachMarkTrackAnchor?,
+            endpoint: PitchPoint
+        ) -> CoachMarkTrackAnchor? {
+            guard let anchor,
+                  let time,
+                  let player = selectedScenario.player(id: anchor.playerID) else {
+                return anchor
+            }
+            let playerPosition = player.pose(at: time).position
+            return CoachMarkTrackAnchor(
+                playerID: anchor.playerID,
+                offset: PitchPoint(
+                    x: endpoint.x - playerPosition.x,
+                    z: endpoint.z - playerPosition.z
+                )
+            )
+        }
+
+        return CoachMark(
             id: mark.id,
             kind: mark.kind,
             start: start,
@@ -1425,7 +1633,28 @@ final class ReplayStore {
             revealTime: mark.revealTime,
             hideTime: mark.hideTime,
             author: mark.author,
-            playerID: mark.playerID
+            playerID: mark.playerID,
+            startTrackAnchor: adjustedAnchor(mark.startTrackAnchor, endpoint: start),
+            endTrackAnchor: adjustedAnchor(mark.endTrackAnchor, endpoint: end)
+        )
+    }
+
+    private func markRestoringGeometry(
+        _ mark: CoachMark,
+        from baseline: CoachMarkGeometry
+    ) -> CoachMark {
+        CoachMark(
+            id: mark.id,
+            kind: mark.kind,
+            start: baseline.start,
+            end: baseline.end,
+            label: mark.label,
+            revealTime: mark.revealTime,
+            hideTime: mark.hideTime,
+            author: mark.author,
+            playerID: mark.playerID,
+            startTrackAnchor: baseline.startTrackAnchor,
+            endTrackAnchor: baseline.endTrackAnchor
         )
     }
 
@@ -1449,11 +1678,7 @@ final class ReplayStore {
         for index in marks.indices {
             let mark = marks[index]
             guard let baseline = pendingCoachMarkGeometryBaselines[mark.id] else { continue }
-            marks[index] = markReplacingGeometry(
-                mark,
-                start: baseline.start,
-                end: baseline.end
-            )
+            marks[index] = markRestoringGeometry(mark, from: baseline)
         }
         pendingCoachMarkGeometryBaselines.removeAll(keepingCapacity: true)
     }

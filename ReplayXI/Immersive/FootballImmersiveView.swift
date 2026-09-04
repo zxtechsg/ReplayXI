@@ -15,6 +15,11 @@ struct FootballImmersiveView: View {
     @State private var annotationStroke: PlaybackAnnotationStroke?
     @GestureState private var spatialDragIsActive = false
     @State private var showsDecisionStrip = false
+    @State private var showsPlaybackAnnotations = true
+    // Wearer-local HUD state. PitchSceneFactory owns the eventual ball-emphasis
+    // treatment; keeping this binding at the immersive root makes that scene
+    // integration explicit without coupling the control surface to the renderer.
+    @State private var emphasizesBall = true
 
     private var controlDeckPreset: PlaybackControlDeckPreset {
         PlaybackControlDeckPreset(rawValue: controlDeckPresetRawValue) ?? .standard
@@ -22,6 +27,13 @@ struct FootballImmersiveView: View {
 
     private var controlDeckLayout: PlaybackControlDeckLayout {
         PlaybackControlDeckLayout.resolve(
+            preset: controlDeckPreset,
+            usesAccessibilityText: dynamicTypeSize.isAccessibilitySize
+        )
+    }
+
+    private var viewHUDLayout: PlaybackViewHUDLayout {
+        PlaybackViewHUDLayout.resolve(
             preset: controlDeckPreset,
             usesAccessibilityText: dynamicTypeSize.isAccessibilitySize
         )
@@ -63,8 +75,10 @@ struct FootballImmersiveView: View {
                         participantID: squadSession.localParticipantID,
                         sharedSession: squadSession.state == .joined
                     ),
-                showsIdealBranch: store.showsIdealBranch
+                showsIdealBranch: store.showsIdealBranch,
+                emphasizesBall: emphasizesBall
             )
+            applyLocalOverlayVisibility(to: root)
             addAttachments(
                 to: content,
                 attachments: attachments,
@@ -107,8 +121,10 @@ struct FootballImmersiveView: View {
                             participantID: squadSession.localParticipantID,
                             sharedSession: squadSession.state == .joined
                         ),
-                    showsIdealBranch: store.showsIdealBranch
+                    showsIdealBranch: store.showsIdealBranch,
+                    emphasizesBall: emphasizesBall
                 )
+                applyLocalOverlayVisibility(to: root)
             }
             // Attachments do not inherit the match-root presentation transform.
             // Re-assert their room-space placement whenever view mode or another
@@ -126,6 +142,7 @@ struct FootballImmersiveView: View {
                 ImmersiveControlDeck(
                     selectedAnnotationID: $selectedAnnotationID,
                     showsDecisionStrip: $showsDecisionStrip,
+                    showsPlaybackAnnotations: $showsPlaybackAnnotations,
                     controlDeckPresetRawValue: $controlDeckPresetRawValue,
                     deckWidth: controlDeckLayout.contentWidth,
                     isPinchDrawing: annotationStroke != nil,
@@ -133,6 +150,16 @@ struct FootballImmersiveView: View {
                     exit: exitRoom
                 )
                     .frame(width: controlDeckLayout.attachmentWidth)
+            }
+
+            if store.selectedScenario.kind != .shapeLab {
+                Attachment(id: "playback-view-hud") {
+                    PlaybackViewOverlayHUD(
+                        showsPlaybackAnnotations: $showsPlaybackAnnotations,
+                        emphasizesBall: $emphasizesBall
+                    )
+                    .frame(width: viewHUDLayout.attachmentWidth)
+                }
             }
 
             if store.selectedScenario.kind == .perspectiveMatrix {
@@ -223,6 +250,14 @@ struct FootballImmersiveView: View {
         .onChange(of: store.selectedTool) { _, _ in
             annotationStroke = nil
         }
+        .onChange(of: showsPlaybackAnnotations) { _, isVisible in
+            guard !isVisible else { return }
+            selectedAnnotationID = nil
+            annotationStroke = nil
+            if store.isDrawing {
+                store.cancelDrawing()
+            }
+        }
         .onChange(of: spatialDragIsActive) { wasActive, isActive in
             guard wasActive, !isActive else { return }
             cancelInterruptedSpatialInteraction()
@@ -234,10 +269,16 @@ struct FootballImmersiveView: View {
         attachments: RealityViewAttachments,
         controlsAnchor: AnchorEntity
     ) {
-        for id in ["room-header", "coach-console", "perspective-matrix", "position-status"] {
+        for id in [
+            "room-header",
+            "coach-console",
+            "playback-view-hud",
+            "perspective-matrix",
+            "position-status",
+        ] {
             if let entity = attachments.entity(for: id) {
                 entity.name = id
-                if id == "coach-console" {
+                if PlaybackAttachmentPlacement.followsHead(id) {
                     controlsAnchor.addChild(entity)
                 } else {
                     content.add(entity)
@@ -257,8 +298,24 @@ struct FootballImmersiveView: View {
             console.position = [0, layout.verticalOffset, layout.forwardOffset]
             console.scale = SIMD3<Float>(repeating: layout.uniformScale)
         }
+        if let viewHUD = attachments.entity(for: "playback-view-hud") {
+            let layout = viewHUDLayout
+            viewHUD.position = [layout.horizontalOffset, layout.verticalOffset, layout.forwardOffset]
+            viewHUD.scale = SIMD3<Float>(repeating: layout.uniformScale)
+        }
         attachments.entity(for: "perspective-matrix")?.position = [0.92, 1.30, -1.55]
         attachments.entity(for: "position-status")?.position = [-1.00, 1.30, -1.30]
+    }
+
+    /// Annotation visibility is a wearer-local analysis preference. Keep the
+    /// authored marks in ReplayStore (and therefore in the shared room) while
+    /// suppressing only this headset's render and edit affordances.
+    private func applyLocalOverlayVisibility(to root: Entity) {
+        PlaybackLocalOverlayVisibility.apply(
+            to: root,
+            showsAnnotations: showsPlaybackAnnotations,
+            canOverrideMarksRoot: store.selectedScenario.kind != .shapeLab
+        )
     }
 
     private func matchRootAncestor(of entity: Entity) -> Entity? {
@@ -419,8 +476,12 @@ struct FootballImmersiveView: View {
             fallback3D: value.location3D,
             in: matchRoot
         ) else { return }
-        let start = target.role == .start ? point : mark.start
-        let end = target.role == .end ? point : mark.end
+        let geometry = mark.resolvedGeometry(
+            in: store.selectedScenario,
+            at: store.playhead
+        )
+        let start = target.role == .start ? point : geometry.start
+        let end = target.role == .end ? point : geometry.end
         guard store.updateCoachMarkGeometry(
             id: target.markID,
             start: start,
@@ -456,8 +517,12 @@ struct FootballImmersiveView: View {
             draggedAnnotationTarget = nil
             return
         }
-        let start = target.role == .start ? point : mark.start
-        let end = target.role == .end ? point : mark.end
+        let geometry = mark.resolvedGeometry(
+            in: store.selectedScenario,
+            at: store.playhead
+        )
+        let start = target.role == .start ? point : geometry.start
+        let end = target.role == .end ? point : geometry.end
         _ = store.updateCoachMarkGeometry(
             id: target.markID,
             start: start,
@@ -766,6 +831,38 @@ struct PlaybackReviewIndexKey: Equatable, Sendable {
     }
 }
 
+enum PlaybackAttachmentPlacement {
+    static func followsHead(_ attachmentID: String) -> Bool {
+        attachmentID == "coach-console" || attachmentID == "playback-view-hud"
+    }
+}
+
+/// Applies a wearer-local visibility gate after PitchSceneFactory has resolved
+/// the authored scene state. Playback marks can be restored directly on a
+/// hide/show round trip; Shape Focus retains its scene-owned marks visibility.
+/// Selection, draft and input entities are only forced off because their visible
+/// states are conditional and are restored by the next scene update when needed.
+enum PlaybackLocalOverlayVisibility {
+    static func apply(
+        to root: Entity,
+        showsAnnotations: Bool,
+        canOverrideMarksRoot: Bool
+    ) {
+        if let marksRoot = root.findEntity(named: "marks-root") {
+            if canOverrideMarksRoot {
+                marksRoot.isEnabled = showsAnnotations
+            } else if !showsAnnotations {
+                marksRoot.isEnabled = false
+            }
+        }
+
+        guard !showsAnnotations else { return }
+        root.findEntity(named: AnnotationSceneAffordance.selectionRootName)?.isEnabled = false
+        root.findEntity(named: "annotation-draft-root")?.isEnabled = false
+        root.findEntity(named: "annotation-surface")?.isEnabled = false
+    }
+}
+
 /// Immersive spaces cannot host SwiftUI's pop-up presentation controls. Keep
 /// every secondary Playback action in one mutually exclusive, in-deck shelf
 /// instead. Associated annotation IDs prevent a shelf from silently editing a
@@ -796,6 +893,351 @@ enum PlaybackInlinePanel: Equatable, Sendable {
     }
 }
 
+/// Converts a free 2D drag into predictable quarter-metre pitch steps. The
+/// dead zone prevents an eye-pinch from moving a mark before the wearer means
+/// to steer, while the bounded step count makes one gesture reversible.
+struct AnnotationJoystickMath: Equatable, Sendable {
+    struct Sample: Equatable, Sendable {
+        let knobOffset: CGSize
+        let steps: SIMD2<Int>
+
+        static let zero = Sample(knobOffset: .zero, steps: .zero)
+    }
+
+    static let deadZone: CGFloat = 12
+    static let pointsPerStep: CGFloat = 18
+    static let maximumTravel: CGFloat = 38
+    static let maximumSteps = 4
+
+    static func sample(for translation: CGSize) -> Sample {
+        guard translation.width.isFinite, translation.height.isFinite else {
+            return .zero
+        }
+
+        let magnitude = hypot(translation.width, translation.height)
+        let knobScale = magnitude > maximumTravel && magnitude > 0
+            ? maximumTravel / magnitude
+            : 1
+        let offset = CGSize(
+            width: translation.width * knobScale,
+            height: translation.height * knobScale
+        )
+
+        return Sample(
+            knobOffset: offset,
+            steps: SIMD2<Int>(
+                quantizedSteps(for: translation.width),
+                quantizedSteps(for: translation.height)
+            )
+        )
+    }
+
+    static func delta(from previous: SIMD2<Int>, to current: SIMD2<Int>) -> SIMD2<Int> {
+        SIMD2<Int>(current.x - previous.x, current.y - previous.y)
+    }
+
+    private static func quantizedSteps(for value: CGFloat) -> Int {
+        let magnitude = abs(value)
+        guard magnitude > deadZone else { return 0 }
+        let count = min(
+            1 + Int((magnitude - deadZone) / pointsPerStep),
+            maximumSteps
+        )
+        return value < 0 ? -count : count
+    }
+}
+
+/// View and overlay controls stay visible in the upper-left comfort quadrant,
+/// independent of the lower transport. Expanding this surface is an in-place
+/// shelf: immersive spaces never receive a Menu, sheet, popover, or alert.
+private struct PlaybackViewOverlayHUD: View {
+    @Environment(ReplayStore.self) private var store
+    @Environment(SquadSessionCoordinator.self) private var squadSession
+    @Binding var showsPlaybackAnnotations: Bool
+    @Binding var emphasizesBall: Bool
+    @State private var isExpanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Button {
+                withAnimation(.easeOut(duration: 0.18)) {
+                    isExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: store.viewMode.systemImage)
+                        .font(.headline.weight(.black))
+                        .foregroundStyle(ReplayTheme.signal)
+                        .frame(width: 34, height: 46)
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        Eyebrow(text: "View", color: ReplayTheme.signal)
+                        Text(store.viewMode.title)
+                            .font(.subheadline.weight(.black))
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 6)
+
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption.weight(.black))
+                        .foregroundStyle(.white.opacity(0.62))
+                        .frame(width: 34, height: 46)
+                }
+                .contentShape(RoundedRectangle(cornerRadius: 14))
+            }
+            .buttonStyle(.plain)
+            .hoverEffect(.highlight)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("View and overlays")
+            .accessibilityValue(
+                "\(store.viewMode.title), annotations \(showsPlaybackAnnotations ? "shown" : "hidden"), ball emphasis \(emphasizesBall ? "on" : "off")"
+            )
+            .accessibilityHint(isExpanded ? "Collapses controls" : "Expands controls")
+            .accessibilityAddTraits(isExpanded ? .isSelected : [])
+
+            if isExpanded {
+                Rectangle()
+                    .fill(.white.opacity(0.13))
+                    .frame(height: 1)
+                    .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Eyebrow(text: "Camera", color: ReplayTheme.signal)
+                    HStack(spacing: 6) {
+                        ForEach(playbackViewModes, id: \.self) { mode in
+                            viewChoice(mode)
+                        }
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Eyebrow(text: "Overlays", color: ReplayTheme.orange)
+                    HStack(spacing: 6) {
+                        overlayChoice(
+                            title: "Marks",
+                            systemImage: "arrow.up.right",
+                            isVisible: showsPlaybackAnnotations,
+                            color: ReplayTheme.orange
+                        ) {
+                            showsPlaybackAnnotations.toggle()
+                        }
+
+                        overlayChoice(
+                            title: "Ball",
+                            systemImage: "scope",
+                            isVisible: emphasizesBall,
+                            color: ReplayTheme.signal
+                        ) {
+                            emphasizesBall.toggle()
+                        }
+
+                        if store.selectedScenario.kind == .passingChannels {
+                            overlayChoice(
+                                title: "Lanes",
+                                systemImage: "arrow.triangle.branch",
+                                isVisible: store.showsLaneLens,
+                                color: ReplayTheme.cyan,
+                                isEnabled: canControlSharedOverlays
+                            ) {
+                                store.showsLaneLens.toggle()
+                                if store.localRole == .coach {
+                                    squadSession.broadcastCurrentState()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .padding(11)
+        .controlSize(.large)
+        .background(ReplayTheme.navy.opacity(0.50), in: RoundedRectangle(cornerRadius: 20))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(.white.opacity(0.14), lineWidth: 1)
+        }
+        .glassBackgroundEffect(in: .rect(cornerRadius: 20))
+        .task {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--replayxi-view-hud-expanded") {
+                isExpanded = true
+            }
+            #endif
+        }
+    }
+
+    private var playbackViewModes: [ReplayViewMode] {
+        [.firstPerson, .tacticalTable, .touchline]
+    }
+
+    private var canControlSharedOverlays: Bool {
+        squadSession.state != .joined || store.localRole == .coach
+    }
+
+    private func viewChoice(_ mode: ReplayViewMode) -> some View {
+        let isSelected = store.viewMode == mode
+        return Button {
+            store.setViewMode(mode)
+        } label: {
+            VStack(spacing: 2) {
+                Image(systemName: mode.systemImage)
+                    .font(.headline.weight(.bold))
+                Text(shortViewTitle(mode))
+                    .font(.caption2.monospaced().weight(.black))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+            }
+            .frame(maxWidth: .infinity, minHeight: 50)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(isSelected ? ReplayTheme.signal : .white.opacity(0.10))
+        .foregroundStyle(isSelected ? Color.black : Color.white)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(mode.title) view")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private func overlayChoice(
+        title: String,
+        systemImage: String,
+        isVisible: Bool,
+        color: Color,
+        isEnabled: Bool = true,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: isVisible ? systemImage : "eye.slash")
+                .font(.caption.weight(.black))
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, minHeight: 48)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(isVisible ? color : .white.opacity(0.10))
+        .foregroundStyle(isVisible ? Color.black : Color.white)
+        .disabled(!isEnabled)
+        .accessibilityLabel("\(isVisible ? "Hide" : "Show") \(title.lowercased())")
+        .accessibilityValue(isVisible ? "Visible" : "Hidden")
+        .accessibilityAddTraits(isVisible ? .isSelected : [])
+    }
+
+    private func shortViewTitle(_ mode: ReplayViewMode) -> String {
+        switch mode {
+        case .firstPerson: "POV"
+        case .tacticalTable: "Tactical"
+        case .touchline: "Touchline"
+        case .positional: "Position"
+        }
+    }
+}
+
+private struct AnnotationAdjustmentJoystick: View {
+    let title: String
+    let accessibilityTarget: String
+    let color: Color
+    let onNudge: (_ x: Float, _ z: Float) -> Void
+
+    @State private var sample = AnnotationJoystickMath.Sample.zero
+    @State private var appliedSteps = SIMD2<Int>.zero
+
+    private let stepMetres: Float = 0.25
+
+    var body: some View {
+        VStack(spacing: 5) {
+            Eyebrow(text: title, color: color)
+
+            ZStack {
+                Circle()
+                    .fill(.white.opacity(0.055))
+                Circle()
+                    .stroke(color.opacity(0.32), lineWidth: 1.5)
+
+                Rectangle()
+                    .fill(.white.opacity(0.12))
+                    .frame(width: 1, height: 74)
+                Rectangle()
+                    .fill(.white.opacity(0.12))
+                    .frame(width: 74, height: 1)
+
+                Image(systemName: "arrow.up")
+                    .offset(y: -42)
+                Image(systemName: "arrow.down")
+                    .offset(y: 42)
+                Image(systemName: "arrow.left")
+                    .offset(x: -42)
+                Image(systemName: "arrow.right")
+                    .offset(x: 42)
+
+                Circle()
+                    .fill(color.gradient)
+                    .frame(width: 42, height: 42)
+                    .overlay(Circle().stroke(.black.opacity(0.24), lineWidth: 2))
+                    .shadow(color: color.opacity(0.34), radius: 8)
+                    .offset(sample.knobOffset)
+            }
+            .font(.caption2.weight(.black))
+            .foregroundStyle(.white.opacity(0.54))
+            .frame(width: 112, height: 112)
+            .contentShape(Circle())
+            .gesture(joystickGesture)
+
+            Text("0.25 M STEPS")
+                .font(.caption2.monospaced().weight(.black))
+                .foregroundStyle(.white.opacity(0.58))
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 8)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Adjust \(accessibilityTarget)")
+        .accessibilityValue("Quarter metre joystick")
+        .accessibilityHint("Pinch and drag. Up moves upfield and down moves back.")
+        .accessibilityAction(named: "Move left") { nudge(x: -stepMetres, z: 0) }
+        .accessibilityAction(named: "Move right") { nudge(x: stepMetres, z: 0) }
+        .accessibilityAction(named: "Move upfield") { nudge(x: 0, z: stepMetres) }
+        .accessibilityAction(named: "Move back") { nudge(x: 0, z: -stepMetres) }
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: nudge(x: 0, z: stepMetres)
+            case .decrement: nudge(x: 0, z: -stepMetres)
+            @unknown default: break
+            }
+        }
+        .onDisappear(perform: resetJoystick)
+    }
+
+    private var joystickGesture: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                let next = AnnotationJoystickMath.sample(for: value.translation)
+                let delta = AnnotationJoystickMath.delta(
+                    from: appliedSteps,
+                    to: next.steps
+                )
+                sample = next
+                appliedSteps = next.steps
+                guard delta != .zero else { return }
+                nudge(
+                    x: Float(delta.x) * stepMetres,
+                    z: Float(-delta.y) * stepMetres
+                )
+            }
+            .onEnded { _ in
+                resetJoystick()
+            }
+    }
+
+    private func nudge(x: Float, z: Float) {
+        onNudge(x, z)
+    }
+
+    private func resetJoystick() {
+        appliedSteps = .zero
+        withAnimation(.spring(duration: 0.22, bounce: 0.22)) {
+            sample = .zero
+        }
+    }
+}
+
 private struct ImmersiveControlDeck: View {
     @Environment(ReplayStore.self) private var store
     @Environment(SquadSessionCoordinator.self) private var squadSession
@@ -811,8 +1253,10 @@ private struct ImmersiveControlDeck: View {
     @State private var timelineScrubState: PlaybackTimelineScrub.GestureState?
     @State private var isClearAnnotationsPending = false
     @State private var inlinePanel: PlaybackInlinePanel?
+    @State private var showsAnnotationTools = false
     @Binding var selectedAnnotationID: UUID?
     @Binding var showsDecisionStrip: Bool
+    @Binding var showsPlaybackAnnotations: Bool
     @Binding var controlDeckPresetRawValue: String
 
     let deckWidth: CGFloat
@@ -867,12 +1311,6 @@ private struct ImmersiveControlDeck: View {
                 .buttonStyle(.bordered)
                 .accessibilityLabel("Exit spatial replay")
 
-                Image(systemName: "play.square.stack.fill")
-                    .font(.title3.weight(.black))
-                    .foregroundStyle(ReplayTheme.signal)
-                    .frame(width: 38, height: 56)
-                    .accessibilityLabel("Match playback")
-
                 Button {
                     if let previousCue { jump(to: previousCue) }
                 } label: {
@@ -883,43 +1321,16 @@ private struct ImmersiveControlDeck: View {
                 .disabled(previousCue == nil || timelineControlsAreDisabled)
                 .accessibilityLabel("Previous cue")
 
-                Button {
-                    nudgeTimeline(by: -1)
-                } label: {
-                    Text("−1s")
-                        .font(.subheadline.monospacedDigit().weight(.black))
-                        .frame(minWidth: 40, minHeight: 56)
-                }
-                .buttonStyle(.bordered)
-                .buttonRepeatBehavior(.enabled)
-                .disabled(timelineControlsAreDisabled)
-                .accessibilityLabel("Back one second")
-                .accessibilityHint("Pinch and hold to keep stepping backward")
-
                 Button(action: handlePrimaryPlaybackAction) {
-                    Label(primaryPlaybackLabel, systemImage: primaryPlaybackSystemImage)
+                    Image(systemName: primaryPlaybackSystemImage)
                         .font(.subheadline.weight(.black))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.78)
-                        .frame(width: 108, height: 56)
+                        .frame(width: 52, height: 56)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(ReplayTheme.signal)
                 .foregroundStyle(.black)
                 .disabled(store.isDrawing)
-
-                Button {
-                    nudgeTimeline(by: 1)
-                } label: {
-                    Text("+1s")
-                        .font(.subheadline.monospacedDigit().weight(.black))
-                        .frame(minWidth: 40, minHeight: 56)
-                }
-                .buttonStyle(.bordered)
-                .buttonRepeatBehavior(.enabled)
-                .disabled(timelineControlsAreDisabled)
-                .accessibilityLabel("Forward one second")
-                .accessibilityHint("Pinch and hold to keep stepping forward")
+                .accessibilityLabel(primaryPlaybackLabel)
 
                 Button {
                     if let nextCue { jump(to: nextCue) }
@@ -933,107 +1344,14 @@ private struct ImmersiveControlDeck: View {
 
                 timelineScrubber
                     .layoutPriority(1)
+
+                compactPlayerPOVButton
                 annotationEventsButton
                 decisionReviewButton
-            }
-
-            if !isReviewShelfOpen {
-                HStack(spacing: 9) {
-                    playbackSettingsButton
-
-                    Spacer()
-
-                    Label("DRAG TIMELINE · MOVE UP FOR FINE", systemImage: "hand.point.up.left.fill")
-                        .font(.caption2.monospaced().weight(.black))
-                        // This sits over live passthrough rather than an opaque
-                        // window. Keep it clearly legible in a bright room while
-                        // retaining lower emphasis than the transport itself.
-                        .foregroundStyle(.white.opacity(0.72))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.76)
+                if store.localRole == .coach {
+                    annotationToolsButton
                 }
-
-                HStack(spacing: 9) {
-                    Label("POV", systemImage: "hand.tap.fill")
-                        .font(.caption.monospaced().weight(.black))
-                        .foregroundStyle(ReplayTheme.signal)
-                        .frame(width: 58, alignment: .leading)
-
-                    Button {
-                        openAdjacentPlayerPOV(by: -1)
-                    } label: {
-                        Image(systemName: "chevron.left")
-                            .font(.headline.weight(.black))
-                            .frame(width: 34, height: 52)
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(store.isDrawing)
-                    .accessibilityLabel("Previous player")
-
-                    Button {
-                        showsPlayerGrid = true
-                        showsEventStrip = false
-                        showsDecisionStrip = false
-                        selectedAnnotationID = nil
-                    } label: {
-                        if let player = store.activePerspective {
-                            Label(
-                                "\(player.team.compactTitle) · #\(player.shirtNumber) \(player.positionCode)",
-                                systemImage: "person.crop.rectangle.stack"
-                            )
-                            .font(.subheadline.weight(.black))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.76)
-                            .frame(width: 236, height: 52)
-                        } else {
-                            Label("Choose player", systemImage: "person.crop.rectangle.stack")
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.76)
-                                .frame(width: 236, height: 52)
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(store.isDrawing)
-                    .accessibilityLabel(
-                        store.activePerspective.map {
-                            "Focused player, number \($0.shirtNumber), \($0.role)"
-                        } ?? "Choose focused player"
-                    )
-                    .accessibilityHint(
-                        squadSession.state == .joined
-                            ? "Opens all 22 players for a private local selection"
-                            : "Opens direct point-of-view targets for all 22 players"
-                    )
-
-                    Button {
-                        openAdjacentPlayerPOV(by: 1)
-                    } label: {
-                        Image(systemName: "chevron.right")
-                            .font(.headline.weight(.black))
-                            .frame(width: 34, height: 52)
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(store.isDrawing)
-                    .accessibilityLabel("Next player")
-
-                    if squadSession.state == .joined {
-                        povSharingStatusChip
-                    }
-
-                    if store.viewMode == .firstPerson {
-                        povStatusChip
-                    }
-
-                    Spacer(minLength: 4)
-
-                    if store.localRole == .coach, squadSession.state == .joined {
-                        coachPOVShareControls
-                    }
-
-                    if hasRoomActions {
-                        roomActionsButton
-                    }
-                }
+                playbackSettingsButton
             }
 
             if isClearAnnotationsPending {
@@ -1053,7 +1371,7 @@ private struct ImmersiveControlDeck: View {
                 selectedAnnotationInspector(selectedAnnotation)
             } else if showsEventStrip {
                 annotationEventStrip
-            } else if store.localRole == .coach {
+            } else if store.localRole == .coach, showsAnnotationTools {
                 coachAnnotationStrip
             }
         }
@@ -1090,6 +1408,7 @@ private struct ImmersiveControlDeck: View {
             showsPlayerGrid = false
             isClearAnnotationsPending = false
             inlinePanel = nil
+            showsAnnotationTools = false
             eventPage = 0
             annotationConfirmation = nil
             rebuildReviewIndex()
@@ -1103,6 +1422,7 @@ private struct ImmersiveControlDeck: View {
             inlinePanel = nil
             if selectedID != nil {
                 showsPlayerGrid = false
+                showsAnnotationTools = false
             }
             rebuildTimelineTickClusters(selectionID: selectedID)
         }
@@ -1128,18 +1448,21 @@ private struct ImmersiveControlDeck: View {
             if arguments.contains("--replayxi-events") {
                 inlinePanel = nil
                 showsEventStrip = true
+                showsAnnotationTools = false
             }
             if arguments.contains("--replayxi-player-grid") {
                 inlinePanel = nil
                 showsPlayerGrid = true
                 showsEventStrip = false
                 showsDecisionStrip = false
+                showsAnnotationTools = false
             }
             if arguments.contains("--replayxi-options") {
                 inlinePanel = nil
                 selectedAnnotationID = nil
                 showsEventStrip = false
                 showsDecisionStrip = true
+                showsAnnotationTools = false
                 store.setPlaying(false, broadcast: false)
             }
             if arguments.contains("--replayxi-select-coach-mark") {
@@ -1147,6 +1470,7 @@ private struct ImmersiveControlDeck: View {
                 selectedAnnotationID = store.marks.last?.id
                 showsDecisionStrip = false
                 showsEventStrip = true
+                showsAnnotationTools = false
             }
             if arguments.contains("--replayxi-clear-confirm") {
                 inlinePanel = nil
@@ -1154,6 +1478,7 @@ private struct ImmersiveControlDeck: View {
                 selectedAnnotationID = nil
                 showsDecisionStrip = false
                 showsEventStrip = false
+                showsAnnotationTools = false
             }
             if arguments.contains("--replayxi-inline-settings") {
                 selectedAnnotationID = nil
@@ -1162,6 +1487,7 @@ private struct ImmersiveControlDeck: View {
                 showsPlayerGrid = false
                 isClearAnnotationsPending = false
                 inlinePanel = .settings
+                showsAnnotationTools = false
             }
             #endif
         }
@@ -1183,57 +1509,109 @@ private struct ImmersiveControlDeck: View {
         Button {
             toggleInlinePanel(.settings)
         } label: {
-            Label(
-                "\(rateLabel(store.playbackRate)) · \(viewLabel(for: store.viewMode))",
-                systemImage: "slider.horizontal.3"
-            )
-            .font(.subheadline.weight(.black))
-            .lineLimit(1)
-            .minimumScaleFactor(0.76)
-            .frame(width: 210, height: 52)
+            VStack(spacing: 1) {
+                Image(systemName: "ellipsis")
+                    .font(.headline.weight(.black))
+                Text("MORE")
+                    .font(.caption2.monospaced().weight(.black))
+            }
+            .frame(width: 58, height: 56)
         }
-        .buttonStyle(.bordered)
+        .buttonStyle(.borderedProminent)
+        .tint(inlinePanel == .settings ? ReplayTheme.cyan : .white.opacity(0.10))
+        .foregroundStyle(inlinePanel == .settings ? Color.black : Color.white)
         .disabled(store.isDrawing)
-        .accessibilityLabel("Playback settings")
+        .accessibilityLabel("More playback controls")
         .accessibilityValue(
-            "\(rateLabel(store.playbackRate)), \(viewLabel(for: store.viewMode))"
+            "\(rateLabel(store.playbackRate)), \(controlDeckPreset.title) controls"
         )
-        .accessibilityHint("Opens playback speed, camera view, and local control size")
+        .accessibilityHint("Opens playback speed and local control size")
         .accessibilityAddTraits(inlinePanel == .settings ? .isSelected : [])
+    }
+
+    private var compactPlayerPOVButton: some View {
+        Button {
+            let opensRoster = !showsPlayerGrid
+            inlinePanel = nil
+            selectedAnnotationID = nil
+            showsEventStrip = false
+            showsDecisionStrip = false
+            showsAnnotationTools = false
+            showsPlayerGrid = opensRoster
+        } label: {
+            VStack(spacing: 1) {
+                Image(systemName: "person.crop.rectangle.stack.fill")
+                    .font(.headline.weight(.bold))
+                Text(activePlayerCompactLabel)
+                    .font(.caption2.monospaced().weight(.black))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.70)
+            }
+            .frame(width: 92, height: 56)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(showsPlayerGrid ? ReplayTheme.signal : .white.opacity(0.10))
+        .foregroundStyle(showsPlayerGrid ? Color.black : Color.white)
+        .disabled(store.isDrawing)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            store.activePerspective.map {
+                "Player point of view, number \($0.shirtNumber), \($0.role)"
+            } ?? "Choose player point of view"
+        )
+        .accessibilityHint(
+            showsPlayerGrid
+                ? "Closes the 22-player roster"
+                : "Opens direct point-of-view targets for all 22 players"
+        )
+        .accessibilityAddTraits(showsPlayerGrid ? .isSelected : [])
+        .accessibilityAction(named: "Previous player") {
+            openAdjacentPlayerPOV(by: -1)
+        }
+        .accessibilityAction(named: "Next player") {
+            openAdjacentPlayerPOV(by: 1)
+        }
+    }
+
+    private var activePlayerCompactLabel: String {
+        guard let player = store.activePerspective else { return "PLAYER" }
+        return "#\(player.shirtNumber) · \(player.positionCode)"
+    }
+
+    private var annotationToolsButton: some View {
+        Button {
+            let opensTools = !showsAnnotationTools
+            inlinePanel = nil
+            selectedAnnotationID = nil
+            showsPlayerGrid = false
+            showsEventStrip = false
+            showsDecisionStrip = false
+            isClearAnnotationsPending = false
+            showsAnnotationTools = opensTools
+            if opensTools {
+                showsPlaybackAnnotations = true
+            }
+        } label: {
+            VStack(spacing: 1) {
+                Image(systemName: "pencil.and.outline")
+                    .font(.headline.weight(.bold))
+                Text("MARK")
+                    .font(.caption2.monospaced().weight(.black))
+            }
+            .frame(width: 58, height: 56)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(showsAnnotationTools ? ReplayTheme.orange : .white.opacity(0.10))
+        .foregroundStyle(showsAnnotationTools ? Color.black : Color.white)
+        .accessibilityLabel("Annotation tools")
+        .accessibilityHint(
+            showsAnnotationTools ? "Closes drawing tools" : "Opens run, pass, press, zone, and label tools"
+        )
+        .accessibilityAddTraits(showsAnnotationTools ? .isSelected : [])
     }
 
     private var controlDeckPreset: PlaybackControlDeckPreset {
         PlaybackControlDeckPreset(rawValue: controlDeckPresetRawValue) ?? .standard
-    }
-
-    private var hasRoomActions: Bool {
-        store.localRole == .coach
-            && store.selectedScenario.kind == .passingChannels
-    }
-
-    private var roomActionsButton: some View {
-        Button {
-            store.showsLaneLens.toggle()
-            squadSession.broadcastCurrentState()
-        } label: {
-            Label(
-                store.showsLaneLens ? "Hide lanes" : "Show lanes",
-                systemImage: store.showsLaneLens ? "eye.slash" : "arrow.triangle.branch"
-            )
-                .font(.subheadline.weight(.black))
-                .lineLimit(1)
-                .minimumScaleFactor(0.78)
-                .frame(width: 116, height: 52)
-        }
-        .buttonStyle(.bordered)
-        .tint(
-            store.showsLaneLens
-                ? ReplayTheme.orange
-                : .white.opacity(0.48)
-        )
-        .accessibilityLabel(store.showsLaneLens ? "Hide passing lanes" : "Show passing lanes")
-        .accessibilityValue(store.showsLaneLens ? "Visible" : "Hidden")
-        .accessibilityHint("Toggles the descriptive passing lanes directly")
     }
 
     private func annotationEditButton(compact: Bool) -> some View {
@@ -1322,11 +1700,10 @@ private struct ImmersiveControlDeck: View {
                 inlineChoiceDivider
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Eyebrow(text: "View", color: ReplayTheme.signal)
+                    Eyebrow(text: "Step", color: ReplayTheme.signal)
                     HStack(spacing: 6) {
-                        ForEach(viewModes, id: \.self) { mode in
-                            playbackViewChoice(mode)
-                        }
+                        timelineStepChoice(seconds: -1, title: "−1s")
+                        timelineStepChoice(seconds: 1, title: "+1s")
                     }
                 }
 
@@ -1344,6 +1721,23 @@ private struct ImmersiveControlDeck: View {
         }
     }
 
+    private func timelineStepChoice(seconds: TimeInterval, title: String) -> some View {
+        Button {
+            nudgeTimeline(by: seconds)
+        } label: {
+            Text(title)
+                .font(.subheadline.monospacedDigit().weight(.black))
+                .frame(width: 64, height: 48)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(.white.opacity(0.10))
+        .foregroundStyle(.white)
+        .buttonRepeatBehavior(.enabled)
+        .disabled(timelineControlsAreDisabled)
+        .accessibilityLabel(seconds < 0 ? "Back one second" : "Forward one second")
+        .accessibilityHint("Pinch and hold to keep stepping")
+    }
+
     private func playbackRateChoice(_ rate: Double) -> some View {
         let isSelected = store.playbackRate == rate
         return Button {
@@ -1358,30 +1752,6 @@ private struct ImmersiveControlDeck: View {
         .foregroundStyle(isSelected ? Color.black : Color.white)
         .disabled(rateControlsAreDisabled)
         .accessibilityLabel("Playback speed \(rateLabel(rate))")
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
-    }
-
-    private func playbackViewChoice(_ mode: ReplayViewMode) -> some View {
-        let isSelected = store.viewMode == mode
-        return Button {
-            store.setViewMode(mode)
-        } label: {
-            VStack(spacing: 1) {
-                Image(systemName: mode.systemImage)
-                    .font(.headline.weight(.bold))
-                Text(viewLabel(for: mode).uppercased())
-                    .font(.caption2.monospaced().weight(.black))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
-            }
-            .frame(width: 98, height: 48)
-        }
-        .buttonStyle(.borderedProminent)
-        .tint(isSelected ? ReplayTheme.signal : .white.opacity(0.10))
-        .foregroundStyle(isSelected ? Color.black : Color.white)
-        .disabled(store.isDrawing)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(viewLabel(for: mode)) view")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
@@ -1514,68 +1884,53 @@ private struct ImmersiveControlDeck: View {
         inlineShelf(color: annotationColor(for: mark.kind)) {
             HStack(spacing: 12) {
                 inlinePanelHeader(
-                    title: "Half-metre",
+                    title: "Drag to steer",
                     detail: "ADJUST",
-                    systemImage: "arrow.up.and.down.and.arrow.left.and.right",
+                    systemImage: "dot.scope",
                     color: annotationColor(for: mark.kind)
                 )
 
                 inlineChoiceDivider
 
-                annotationNudgeGroup(mark, endpoint: .start, title: "START POINT")
+                AnnotationAdjustmentJoystick(
+                    title: "START",
+                    accessibilityTarget: "start point",
+                    color: annotationColor(for: mark.kind)
+                ) { x, z in
+                    nudgeAnnotation(mark, endpoint: .start, x: x, z: z)
+                }
 
                 inlineChoiceDivider
 
-                annotationNudgeGroup(mark, endpoint: .end, title: "ARROW POINT")
+                AnnotationAdjustmentJoystick(
+                    title: annotationEndPointTitle(for: mark.kind),
+                    accessibilityTarget: annotationEndPointAccessibilityTarget(for: mark.kind),
+                    color: annotationColor(for: mark.kind)
+                ) { x, z in
+                    nudgeAnnotation(mark, endpoint: .end, x: x, z: z)
+                }
 
-                Spacer(minLength: 4)
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("PINCH + DRAG", systemImage: "hand.draw.fill")
+                    Text("Each notch moves 0.25 m")
+                }
+                .font(.caption2.monospaced().weight(.black))
+                .foregroundStyle(.white.opacity(0.62))
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
 
-    private func annotationNudgeGroup(
-        _ mark: CoachMark,
-        endpoint: CoachMarkEndpoint,
-        title: String
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Eyebrow(text: title, color: annotationColor(for: mark.kind))
-            HStack(spacing: 6) {
-                annotationNudgeChoice(mark, endpoint: endpoint, label: "Left", image: "arrow.left", x: -0.5, z: 0)
-                annotationNudgeChoice(mark, endpoint: endpoint, label: "Right", image: "arrow.right", x: 0.5, z: 0)
-                annotationNudgeChoice(mark, endpoint: endpoint, label: "Upfield", image: "arrow.up", x: 0, z: 0.5)
-                annotationNudgeChoice(mark, endpoint: endpoint, label: "Back", image: "arrow.down", x: 0, z: -0.5)
-            }
+    private func annotationEndPointTitle(for kind: CoachMarkKind) -> String {
+        switch kind {
+        case .space: "CORNER"
+        case .run, .pass, .danger: "ARROW TIP"
+        case .playerLabel: "PLAYER"
         }
     }
 
-    private func annotationNudgeChoice(
-        _ mark: CoachMark,
-        endpoint: CoachMarkEndpoint,
-        label: String,
-        image: String,
-        x: Float,
-        z: Float
-    ) -> some View {
-        Button {
-            nudgeAnnotation(mark, endpoint: endpoint, x: x, z: z)
-        } label: {
-            VStack(spacing: 1) {
-                Image(systemName: image)
-                    .font(.headline.weight(.black))
-                Text(label.uppercased())
-                    .font(.caption2.monospaced().weight(.black))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.70)
-            }
-            .frame(width: 68, height: 52)
-        }
-        .buttonStyle(.borderedProminent)
-        .tint(annotationColor(for: mark.kind).opacity(0.88))
-        .foregroundStyle(.black)
-        .buttonRepeatBehavior(.enabled)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Move \(endpoint == .start ? "start point" : "arrow point") \(label.lowercased()) half a metre")
+    private func annotationEndPointAccessibilityTarget(for kind: CoachMarkKind) -> String {
+        kind == .space ? "opposite corner" : "arrow point"
     }
 
     private func annotationLabelShelf(_ mark: CoachMark) -> some View {
@@ -1686,10 +2041,17 @@ private struct ImmersiveControlDeck: View {
     }
 
     private func toggleInlinePanel(_ candidate: PlaybackInlinePanel) {
-        inlinePanel = PlaybackInlinePanel.toggled(
+        let nextPanel = PlaybackInlinePanel.toggled(
             current: inlinePanel,
             candidate: candidate
         )
+        inlinePanel = nextPanel
+        guard nextPanel != nil else { return }
+        showsAnnotationTools = false
+        showsPlayerGrid = false
+        showsDecisionStrip = false
+        showsEventStrip = false
+        isClearAnnotationsPending = false
     }
 
     private func isAnnotationDuration(
@@ -1773,6 +2135,7 @@ private struct ImmersiveControlDeck: View {
         showsDecisionStrip = false
         showsEventStrip = false
         showsPlayerGrid = false
+        showsAnnotationTools = false
         isClearAnnotationsPending = true
     }
 
@@ -1830,6 +2193,23 @@ private struct ImmersiveControlDeck: View {
                 team: .away,
                 players: store.selectedScenario.awayPlayers
             )
+
+            if squadSession.state == .joined || store.viewMode == .firstPerson {
+                HStack(spacing: 8) {
+                    if squadSession.state == .joined {
+                        povSharingStatusChip
+                    }
+                    if store.viewMode == .firstPerson {
+                        povStatusChip
+                    }
+
+                    Spacer(minLength: 8)
+
+                    if store.localRole == .coach, squadSession.state == .joined {
+                        coachPOVShareControls
+                    }
+                }
+            }
         }
         .padding(10)
         .background(ReplayTheme.signal.opacity(0.055), in: RoundedRectangle(cornerRadius: 17))
@@ -2081,6 +2461,7 @@ private struct ImmersiveControlDeck: View {
             showsPlayerGrid = false
             showsDecisionStrip = false
             showsEventStrip = false
+            showsPlaybackAnnotations = true
             store.beginDrawing(kind)
         } label: {
             VStack(spacing: 1) {
@@ -2186,18 +2567,6 @@ private struct ImmersiveControlDeck: View {
     private var selectedAnnotation: CoachMark? {
         guard let selectedAnnotationID else { return nil }
         return store.marks.first { $0.id == selectedAnnotationID }
-    }
-
-    /// Opening a review shelf temporarily removes secondary rate, view, and
-    /// roster rows. The pitch and 3D handles stay visible; closing the shelf
-    /// restores the full transport without losing replay state.
-    private var isReviewShelfOpen: Bool {
-        showsDecisionStrip
-            || showsEventStrip
-            || showsPlayerGrid
-            || selectedAnnotation != nil
-            || isClearAnnotationsPending
-            || inlinePanel != nil
     }
 
     private var timelineScrubber: some View {
@@ -2332,6 +2701,7 @@ private struct ImmersiveControlDeck: View {
             selectedAnnotationID = nil
             showsPlayerGrid = false
             showsDecisionStrip = false
+            showsAnnotationTools = false
             showsEventStrip.toggle()
             if opensEvents {
                 eventPage = PlaybackEventRailLayout.page(
@@ -2365,6 +2735,7 @@ private struct ImmersiveControlDeck: View {
             selectedAnnotationID = nil
             showsPlayerGrid = false
             showsEventStrip = false
+            showsAnnotationTools = false
             showsDecisionStrip.toggle()
             if showsDecisionStrip {
                 if isJoinedPlayer {
@@ -2516,6 +2887,7 @@ private struct ImmersiveControlDeck: View {
 
         case .mark(let mark):
             Button {
+                showsPlaybackAnnotations = true
                 selectedAnnotationID = mark.id
                 showsDecisionStrip = false
                 jump(to: mark)
@@ -2722,34 +3094,34 @@ private struct ImmersiveControlDeck: View {
         .tint(annotationColor(for: mark.kind))
         .accessibilityLabel("Adjust annotation endpoints")
         .accessibilityHint(
-            "Pinch and drag either glowing pitch handle, or choose a precise half-metre move"
+            "Pinch and drag either glowing pitch handle, or steer either endpoint with a quarter-metre joystick"
         )
         .accessibilityAddTraits(
             inlinePanel == .annotationGeometry(mark.id) ? .isSelected : []
         )
         .accessibilityAction(named: "Move start left") {
-            nudgeAnnotation(mark, endpoint: .start, x: -0.5, z: 0)
+            nudgeAnnotation(mark, endpoint: .start, x: -0.25, z: 0)
         }
         .accessibilityAction(named: "Move start right") {
-            nudgeAnnotation(mark, endpoint: .start, x: 0.5, z: 0)
+            nudgeAnnotation(mark, endpoint: .start, x: 0.25, z: 0)
         }
         .accessibilityAction(named: "Move start upfield") {
-            nudgeAnnotation(mark, endpoint: .start, x: 0, z: 0.5)
+            nudgeAnnotation(mark, endpoint: .start, x: 0, z: 0.25)
         }
         .accessibilityAction(named: "Move start back") {
-            nudgeAnnotation(mark, endpoint: .start, x: 0, z: -0.5)
+            nudgeAnnotation(mark, endpoint: .start, x: 0, z: -0.25)
         }
         .accessibilityAction(named: "Move arrow point left") {
-            nudgeAnnotation(mark, endpoint: .end, x: -0.5, z: 0)
+            nudgeAnnotation(mark, endpoint: .end, x: -0.25, z: 0)
         }
         .accessibilityAction(named: "Move arrow point right") {
-            nudgeAnnotation(mark, endpoint: .end, x: 0.5, z: 0)
+            nudgeAnnotation(mark, endpoint: .end, x: 0.25, z: 0)
         }
         .accessibilityAction(named: "Move arrow point upfield") {
-            nudgeAnnotation(mark, endpoint: .end, x: 0, z: 0.5)
+            nudgeAnnotation(mark, endpoint: .end, x: 0, z: 0.25)
         }
         .accessibilityAction(named: "Move arrow point back") {
-            nudgeAnnotation(mark, endpoint: .end, x: 0, z: -0.5)
+            nudgeAnnotation(mark, endpoint: .end, x: 0, z: -0.25)
         }
     }
 
@@ -2764,11 +3136,15 @@ private struct ImmersiveControlDeck: View {
             endpoint: endpoint,
             by: PitchPoint(x: x, z: z)
         ) else { return }
+        let distance = hypot(x, z)
+        let distanceLabel = distance.formatted(
+            .number.precision(.fractionLength(distance < 1 ? 2 : 1))
+        )
         switch endpoint {
         case .start:
-            annotationConfirmation = "START MOVED · 0.5 M"
+            annotationConfirmation = "START MOVED · \(distanceLabel) M"
         case .end:
-            annotationConfirmation = "ARROW POINT MOVED · 0.5 M"
+            annotationConfirmation = "ARROW POINT MOVED · \(distanceLabel) M"
         }
     }
 
@@ -3056,15 +3432,6 @@ private struct ImmersiveControlDeck: View {
         }
     }
 
-    private func viewLabel(for mode: ReplayViewMode) -> String {
-        switch mode {
-        case .firstPerson: "Player POV"
-        case .tacticalTable: "Tactical"
-        case .touchline: "Touchline"
-        case .positional: "Shape"
-        }
-    }
-
     private func updateTimelineScrub(
         _ value: DragGesture.Value,
         railWidth: CGFloat,
@@ -3172,12 +3539,6 @@ private struct ImmersiveControlDeck: View {
 
     private var isJoinedPlayer: Bool {
         store.localRole == .player && squadSession.state == .joined
-    }
-
-    private var viewModes: [ReplayViewMode] {
-        store.selectedScenario.kind == .shapeLab
-            ? [.positional, .tacticalTable, .firstPerson]
-            : [.firstPerson, .tacticalTable, .touchline]
     }
 
     private func formatTime(_ value: TimeInterval) -> String {

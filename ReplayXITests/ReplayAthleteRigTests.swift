@@ -19,6 +19,7 @@ final class ReplayAthleteRigTests: XCTestCase {
                 XCTAssertEqual(instance.joints[joint].name, joint.rawValue)
                 XCTAssertEqual(instance.joints[joint].parent?.name, joint.expectedParentName)
             }
+            XCTAssertEqual(instance.root.findEntity(named: "neck-shell") == nil, lod == .far)
 
             let bounds = instance.root.visualBounds(relativeTo: instance.root)
             XCTAssertGreaterThan(bounds.extents.y, 1.65)
@@ -110,6 +111,122 @@ final class ReplayAthleteRigTests: XCTestCase {
         XCTAssertGreaterThan(verticalOverlap, 0.18)
     }
 
+    func testHeadAndNeckUseAConnectedTwoJointGazeChain() throws {
+        let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay))
+        let player = try XCTUnwrap(scenario.player(id: "navy-rw"))
+        let rig = try ReplayAthleteFactory.make(for: player, lod: .near)
+
+        XCTAssertEqual(rig.joints[.neck].parent?.name, ReplayAthleteJoint.spine.rawValue)
+        XCTAssertEqual(rig.joints[.headRoot].parent?.name, ReplayAthleteJoint.neck.rawValue)
+        XCTAssertNotNil(rig.root.findEntity(named: "neck-shell"))
+
+        let ball = scenario.ball.pose(at: 14.1)
+        ReplayAthleteMotion.update(
+            rig,
+            from: player,
+            at: 14.1,
+            lookTargetWorldPosition: [ball.position.x, ball.height, ball.position.z]
+        )
+        XCTAssertNotEqual(rig.joints[.neck].orientation.vector, simd_quatf().vector)
+        XCTAssertNotEqual(rig.joints[.headRoot].orientation.vector, simd_quatf().vector)
+    }
+
+    func testFootballGazeTracksEitherSideAndSplitsRotationAcrossNeckAndHead() {
+        let track = PlayerTrack(
+            id: "gaze-test-seven",
+            displayName: "Gaze Test",
+            role: "Right winger",
+            shirtNumber: 7,
+            team: .home,
+            isGoalkeeper: false,
+            keyframes: [
+                MotionKeyframe(time: 0, position: .init(x: 0, z: 0), facingDegrees: 0),
+                MotionKeyframe(time: 10, position: .init(x: 0, z: 10), facingDegrees: 0),
+            ]
+        )
+        let right = ReplayAthleteMotion.lookPose(
+            for: track,
+            at: 5,
+            targetWorldPosition: [10, 0.11, 10]
+        )
+        let left = ReplayAthleteMotion.lookPose(
+            for: track,
+            at: 5,
+            targetWorldPosition: [-10, 0.11, 10]
+        )
+
+        XCTAssertLessThan(right.combinedYawRadians, -0.25)
+        XCTAssertGreaterThan(left.combinedYawRadians, 0.25)
+        XCTAssertEqual(
+            right.neckYawRadians / right.combinedYawRadians,
+            0.42,
+            accuracy: 0.000_1
+        )
+        XCTAssertLessThanOrEqual(abs(right.combinedYawRadians), 64 * .pi / 180)
+        XCTAssertLessThanOrEqual(abs(left.combinedYawRadians), 64 * .pi / 180)
+    }
+
+    func testCloseBallGlanceLooksFurtherDownWithoutPinningHeadOrBreakingSeek() {
+        let track = PlayerTrack(
+            id: "gaze-test-nine",
+            displayName: "Gaze Test",
+            role: "Centre forward",
+            shirtNumber: 9,
+            team: .home,
+            isGoalkeeper: false,
+            keyframes: [
+                MotionKeyframe(time: 0, position: .init(x: 0, z: 0), facingDegrees: 0),
+                MotionKeyframe(time: 10, position: .init(x: 0, z: 10), facingDegrees: 0),
+            ]
+        )
+        let close = ReplayAthleteMotion.lookPose(
+            for: track,
+            at: 5,
+            targetWorldPosition: [0, 0.11, 5.6]
+        )
+        let distant = ReplayAthleteMotion.lookPose(
+            for: track,
+            at: 5,
+            targetWorldPosition: [0, 0.11, 30]
+        )
+        let soughtAgain = ReplayAthleteMotion.lookPose(
+            for: track,
+            at: 5,
+            targetWorldPosition: [0, 0.11, 5.6]
+        )
+
+        XCTAssertEqual(close, soughtAgain)
+        XCTAssertGreaterThan(close.combinedPitchRadians, distant.combinedPitchRadians)
+        XCTAssertGreaterThan(close.combinedPitchRadians, 0.15)
+        XCTAssertLessThanOrEqual(close.combinedPitchRadians, 25 * .pi / 180)
+
+        let malformed = ReplayAthleteMotion.lookPose(
+            for: track,
+            at: .nan,
+            targetWorldPosition: [.nan, .infinity, -.infinity]
+        )
+        XCTAssertTrue(malformed.combinedYawRadians.isFinite)
+        XCTAssertTrue(malformed.combinedPitchRadians.isFinite)
+    }
+
+    func testDemoOverlapContainsMatchPaceBurstWithoutTeleporting() throws {
+        let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay))
+        let rightBack = try XCTUnwrap(scenario.player(id: "navy-rb"))
+        let recoveringWinger = try XCTUnwrap(scenario.player(id: "red-lw"))
+
+        XCTAssertGreaterThan(rightBack.locomotion(at: 12.8).speedMetresPerSecond, 4.8)
+        XCTAssertGreaterThan(recoveringWinger.locomotion(at: 14.0).speedMetresPerSecond, 4.0)
+
+        for player in scenario.players {
+            for (start, end) in zip(player.keyframes, player.keyframes.dropFirst()) {
+                let duration = Float(end.time - start.time)
+                XCTAssertGreaterThan(duration, 0, "non-increasing telemetry for \(player.id)")
+                let speed = ReplayGeometry.distance(start.position, end.position) / duration
+                XCTAssertLessThan(speed, 9, "implausible teleport for \(player.id)")
+            }
+        }
+    }
+
     func testLODPolicyUsesHysteresisAndSanitizesDistances() {
         let policy = ReplayAthleteLODPolicy(nearDistance: 8, farDistance: 23, hysteresis: 1.5)
         XCTAssertEqual(policy.level(forDistance: 5), .near)
@@ -155,12 +272,14 @@ final class ReplayAthleteRigTests: XCTestCase {
         let firstPosition = rig.joints[.bodyRoot].position
         let firstOrientation = rig.joints[.bodyRoot].orientation.vector
         let firstKnee = rig.joints[.leftKnee].orientation.vector
+        let firstNeck = rig.joints[.neck].orientation.vector
 
         ReplayAthleteMotion.update(rig, from: player, at: 19.0, ragdollCue: cue)
         ReplayAthleteMotion.update(rig, from: player, at: 14.1, ragdollCue: cue)
         XCTAssertEqual(rig.joints[.bodyRoot].position, firstPosition)
         XCTAssertEqual(rig.joints[.bodyRoot].orientation.vector, firstOrientation)
         XCTAssertEqual(rig.joints[.leftKnee].orientation.vector, firstKnee)
+        XCTAssertEqual(rig.joints[.neck].orientation.vector, firstNeck)
     }
 
     func testProceduralPoseHasDistinctIdleSprintAndCutMechanicsAtOnePhase() throws {

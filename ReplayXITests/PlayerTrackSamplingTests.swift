@@ -129,6 +129,7 @@ final class PlayerTrackSamplingTests: XCTestCase {
         for time in [0.0, 0.3, 2.7, 20.0] {
             assertPoseExactly(decoded.pose(at: time), track.pose(at: time))
             assertMotionExactly(decoded.motion(at: time), track.motion(at: time))
+            XCTAssertEqual(decoded.gaitPhase(at: time), track.gaitPhase(at: time))
         }
     }
 
@@ -180,6 +181,61 @@ final class PlayerTrackSamplingTests: XCTestCase {
         XCTAssertTrue(PlayerLocomotionState.jog.supportsImportedRunClip)
         XCTAssertTrue(PlayerLocomotionState.sprint.supportsImportedRunClip)
         XCTAssertFalse(PlayerLocomotionState.cut.supportsImportedRunClip)
+    }
+
+    func testGaitPhaseUsesHumanCadenceAndRemainsContinuousUnderSeek() {
+        let walking = makeTrack(keyframes: [
+            frame(0, x: 0),
+            frame(10, x: 10),
+        ])
+        let sprinting = makeTrack(keyframes: [
+            frame(0, x: 0),
+            frame(10, x: 60),
+        ])
+
+        let walkingRadiansPerSecond = walking.gaitPhase(at: 2) - walking.gaitPhase(at: 1)
+        let sprintRadiansPerSecond = sprinting.gaitPhase(at: 2) - sprinting.gaitPhase(at: 1)
+        XCTAssertEqual(
+            walkingRadiansPerSecond / (2 * .pi),
+            0.96,
+            accuracy: 0.000_1,
+            "1 m/s should present about 115 total steps per minute"
+        )
+        XCTAssertEqual(
+            sprintRadiansPerSecond / (2 * .pi),
+            0.58 + (0.38 * sqrt(Float(6))),
+            accuracy: 0.000_1,
+            "6 m/s should present about 180 total steps per minute"
+        )
+        XCTAssertGreaterThan(sprintRadiansPerSecond, walkingRadiansPerSecond)
+        XCTAssertLessThan(
+            sprintRadiansPerSecond,
+            6 * 3.10,
+            "sprinting should lengthen stride instead of cycling legs frantically"
+        )
+
+        let changingPace = makeTrack(keyframes: [
+            frame(0, x: 0),
+            frame(4, x: 4),
+            frame(6, x: 16),
+            frame(8, x: 16),
+        ])
+        let boundary = changingPace.gaitPhase(at: 4)
+        XCTAssertEqual(changingPace.gaitPhase(at: 4), boundary)
+        XCTAssertLessThan(abs(changingPace.gaitPhase(at: 3.9999) - boundary), 0.001)
+        XCTAssertLessThan(abs(changingPace.gaitPhase(at: 4.0001) - boundary), 0.001)
+        XCTAssertEqual(
+            changingPace.gaitPhase(at: 8),
+            changingPace.gaitPhase(at: 6),
+            accuracy: 0.000_1,
+            "the gait clock must stop when the player stops"
+        )
+
+        let times = (0...160).map { TimeInterval($0) * 0.05 }
+        let forward = times.map { changingPace.gaitPhase(at: $0) }
+        for (index, time) in times.reversed().enumerated() {
+            XCTAssertEqual(changingPace.gaitPhase(at: time), forward[forward.count - 1 - index])
+        }
     }
 
     func testTelemetryLocomotionCapturesAccelerationAndPathCutDeterministically() {

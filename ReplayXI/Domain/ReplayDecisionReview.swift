@@ -483,7 +483,11 @@ enum ReplayDecisionReview {
                       mark.isVisible(at: time)
                 else { return false }
                 let sourceAtReveal = subject.pose(at: mark.revealTime).position
-                return ReplayGeometry.distance(sourceAtReveal, mark.start) <= startRadius
+                let markAtReveal = mark.resolvedGeometry(
+                    in: scenario,
+                    at: mark.revealTime
+                )
+                return ReplayGeometry.distance(sourceAtReveal, markAtReveal.start) <= startRadius
             }
             .sorted { lhs, rhs in
                 if lhs.revealTime == rhs.revealTime { return lhs.id.uuidString < rhs.id.uuidString }
@@ -495,6 +499,7 @@ enum ReplayDecisionReview {
             scenario.duration,
             mark.revealTime + finiteNonnegative(configuration.outcomeLookAhead)
         )
+        let target = mark.resolvedGeometry(in: scenario, at: targetTime).end
         let receiver = scenario.players
             .filter { $0.team == subject.team && $0.id != subject.id }
             .map { player in
@@ -502,7 +507,7 @@ enum ReplayDecisionReview {
                     player: player,
                     separation: ReplayGeometry.distance(
                         player.pose(at: targetTime).position,
-                        mark.end
+                        target
                     )
                 )
             }

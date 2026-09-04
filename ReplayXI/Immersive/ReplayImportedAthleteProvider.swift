@@ -81,8 +81,8 @@ final class ReplayImportedAthleteInstance {
         self.animationControllers = animationControllers
     }
 
-    /// Uses Replay XI's telemetry-distance locomotion clock, so animation pose
-    /// is independent of playback rate and update cadence. The current pilot
+    /// Uses Replay XI's integrated telemetry-cadence clock, so animation pose is
+    /// independent of playback rate and update cadence. The current pilot
     /// contains only a forward run, so unsupported football states expose the
     /// procedural rig instead of freezing a sprint frame in place.
     @discardableResult
@@ -96,7 +96,7 @@ final class ReplayImportedAthleteInstance {
         root.isEnabled = isSupported
         guard isSupported else { return false }
 
-        let phaseRadians = locomotion.motion.locomotionPhase
+        let phaseRadians = track.gaitPhase(at: playhead)
         let turns = Double(phaseRadians) / (Double.pi * 2)
         let phase = Float(turns - floor(turns))
         seek(toNormalizedClipPhase: phase)

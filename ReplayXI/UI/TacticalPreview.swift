@@ -126,6 +126,14 @@ struct TacticalPreview: View {
         )
     }
 
+    static func resolvedMarkGeometry(
+        for mark: CoachMark,
+        in scenario: ReplayScenario,
+        at time: TimeInterval
+    ) -> ResolvedCoachMarkGeometry {
+        mark.resolvedGeometry(in: scenario, at: time)
+    }
+
     var body: some View {
         GeometryReader { proxy in
             Canvas { context, size in
@@ -497,8 +505,13 @@ struct TacticalPreview: View {
 
     private func drawMarks(in context: inout GraphicsContext, rect: CGRect) {
         for mark in (marks ?? scenario.coachMarks) where mark.isVisible(at: time) {
-            let start = screenPoint(for: mark.start, in: rect)
-            let end = screenPoint(for: mark.end, in: rect)
+            let geometry = Self.resolvedMarkGeometry(
+                for: mark,
+                in: scenario,
+                at: time
+            )
+            let start = screenPoint(for: geometry.start, in: rect)
+            let end = screenPoint(for: geometry.end, in: rect)
             var path = Path()
             path.move(to: start)
             path.addLine(to: end)

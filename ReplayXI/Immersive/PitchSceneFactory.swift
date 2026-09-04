@@ -283,6 +283,7 @@ enum PitchSceneFactory {
     private static let matchBallMesh = MeshResource.generateSphere(radius: 0.11)
     private static let matchBallPanelMesh = MeshResource.generateCylinder(height: 0.006, radius: 0.025)
     private static let matchBallShadowMesh = MeshResource.generateCylinder(height: 0.004, radius: 0.145)
+    private static let ballEmphasisMesh = MeshResource.generateCylinder(height: 0.010, radius: 0.34)
     private static let tacticalBoardRimMesh = MeshResource.generateBox(
         size: [pitchWidth + 1.20, 0.52, pitchLength + 1.20],
         cornerRadius: 0.48
@@ -432,6 +433,10 @@ enum PitchSceneFactory {
         pitch.name = "pitch"
         root.addChild(pitch)
 
+        if scenario.kind == .realWorldReplay {
+            root.addChild(ReplayWorldPreviewFactory.make())
+        }
+
         let playersRoot = Entity()
         playersRoot.name = "players-root"
         var initialAthleteBindings: [ReplayAthleteJointBinding] = []
@@ -468,6 +473,18 @@ enum PitchSceneFactory {
         )
         ballShadow.name = "ball-shadow"
         root.addChild(ballShadow)
+
+        let ballEmphasis = ModelEntity(
+            mesh: ballEmphasisMesh,
+            materials: [
+                UnlitMaterial(
+                    color: UIColor(red: 0.17, green: 0.92, blue: 0.87, alpha: 0.24),
+                    applyPostProcessToneMap: false
+                )
+            ]
+        )
+        ballEmphasis.name = "ball-emphasis"
+        root.addChild(ballEmphasis)
 
         let marksRoot = Entity()
         marksRoot.name = "marks-root"
@@ -530,7 +547,8 @@ enum PitchSceneFactory {
         triangleLockMode: TriangleLockMode = .visualise,
         isTrianglePlacementReady: Bool = false,
         showsIdealBranch: Bool = false,
-        ragdollCue: PlayerRagdollCue? = nil
+        ragdollCue: PlayerRagdollCue? = nil,
+        emphasizesBall: Bool = true
     ) {
         // A caller-supplied cue supports imported impact data in every view.
         // The bundled showcase cue stays automatic in external review views,
@@ -642,6 +660,11 @@ enum PitchSceneFactory {
         let presentationBallPosition = shapeSourcePosition.map {
             PitchPoint(x: $0.x + 0.55, z: $0.z + 0.25)
         } ?? ballPose.position
+        let playerLookTarget = SIMD3<Float>(
+            presentationBallPosition.x,
+            ballPose.height,
+            presentationBallPosition.z
+        )
 
         if let playersRoot = directChild(named: "players-root", of: root) {
             // RealityKit child ordering is not part of our data contract. It can
@@ -853,6 +876,7 @@ enum PitchSceneFactory {
                         track: player,
                         time: time,
                         locomotion: locomotion,
+                        lookTargetWorldPosition: playerLookTarget,
                         cache: sceneState
                     )
                     if let activeRagdollCue {
@@ -869,6 +893,7 @@ enum PitchSceneFactory {
                         track: player,
                         time: time,
                         locomotion: locomotion,
+                        lookTargetWorldPosition: playerLookTarget,
                         cache: sceneState
                     )
                 }
@@ -931,8 +956,22 @@ enum PitchSceneFactory {
             shadow.scale = [ballScale * spread, 1, ballScale * spread * 0.74]
             shadow.isEnabled = showsBall
         }
+        if let emphasis = directChild(named: "ball-emphasis", of: root) {
+            emphasis.position = [presentationBallPosition.x, 0.012, presentationBallPosition.z]
+            emphasis.scale = SIMD3<Float>(repeating: ballScale)
+            emphasis.isEnabled = showsBall && emphasizesBall
+        }
 
+        // Keep the semantic annotation cache stable while transport advances.
+        // Track-attached endpoints are presentation state: updating only their
+        // existing transforms avoids rebuilding every annotation hierarchy at
+        // replay cadence.
         let annotationCache = syncMarks(in: root, marks: marks)
+        updateTrackedMarkGeometry(
+            cache: annotationCache,
+            scenario: scenario,
+            time: time
+        )
         let isShapeProblem = isTriangleView
             && effectiveTriangleMode == .visualise
             && !showsIdealShape
@@ -941,17 +980,21 @@ enum PitchSceneFactory {
         let selectedBindingCandidate = selectedAnnotationID.flatMap {
             annotationCache?.bindingsByID[$0]
         }
-        let selectedMark: CoachMark? = if !isDrawing,
-                                          annotationCache?.marksRoot?.isEnabled == true,
-                                          let selectedBindingCandidate,
-                                          selectedBindingCandidate.mark.isVisible(at: time)
-                                            || selectedAnnotationIsEditable,
-                                          !isShapeProblem
-                                            || selectedBindingCandidate.mark.kind == .danger {
+        let selectedSemanticMark: CoachMark? = if !isDrawing,
+                                                  annotationCache?.marksRoot?.isEnabled == true,
+                                                  let selectedBindingCandidate,
+                                                  selectedBindingCandidate.mark.isVisible(at: time)
+                                                    || selectedAnnotationIsEditable,
+                                                  !isShapeProblem
+                                                    || selectedBindingCandidate.mark.kind == .danger {
             selectedBindingCandidate.mark
         } else {
             nil
         }
+        let selectedPresentationMark = selectedSemanticMark?.resolvingTrackGeometry(
+            in: scenario,
+            at: time
+        )
         let validDecisionSnapshot: ReplayDecisionSnapshot? = if !isDrawing,
                                                                 let decisionSnapshot,
                                                                 decisionSnapshot.scenarioID == scenario.id,
@@ -963,8 +1006,8 @@ enum PitchSceneFactory {
         }
         // Direct manipulation takes priority over comparison rails. This avoids
         // two bright, interactive teaching systems competing for the same pinch.
-        let spatialFocus: SpatialReviewFocus = if let selectedMark {
-            .annotation(mark: selectedMark, perspectiveID: perspectiveID)
+        let spatialFocus: SpatialReviewFocus = if let selectedSemanticMark {
+            .annotation(mark: selectedSemanticMark, perspectiveID: perspectiveID)
         } else if let validDecisionSnapshot {
             .decision(DecisionPlayerFocusKey(snapshot: validDecisionSnapshot))
         } else {
@@ -1046,6 +1089,7 @@ enum PitchSceneFactory {
         )
         updateMarkLabels(
             cache: annotationCache,
+            scenario: scenario,
             posesByPlayerID: playerPosesByID,
             viewMode: viewMode,
             perspectiveID: perspectiveID,
@@ -1057,14 +1101,14 @@ enum PitchSceneFactory {
         }
         AnnotationSceneAffordance.updateSelection(
             in: root,
-            mark: selectedMark,
+            mark: selectedPresentationMark,
             viewMode: viewMode,
             observer: annotationObserver(
                 posesByPlayerID: playerPosesByID,
                 viewMode: viewMode,
                 perspectiveID: perspectiveID
             ),
-            attachedPlayerPosition: selectedMark?.playerID.flatMap {
+            attachedPlayerPosition: selectedPresentationMark?.playerID.flatMap {
                 playerPosesByID[$0]?.position
             },
             selectedLabel: selectedBinding?.label.value,
@@ -1084,7 +1128,7 @@ enum PitchSceneFactory {
         )
         DecisionOptionSceneOverlay.update(
             in: root,
-            snapshot: selectedMark == nil ? validDecisionSnapshot : nil,
+            snapshot: selectedSemanticMark == nil ? validDecisionSnapshot : nil,
             scenario: scenario,
             viewMode: viewMode,
             isDrawing: isDrawing
@@ -1490,15 +1534,19 @@ enum PitchSceneFactory {
         collar.position = [0, 0.57, 0]
         spine.addChild(collar)
 
-        let neck = ModelEntity(mesh: rigNeckMesh, materials: [skinMaterial])
-        neck.name = "neck"
+        let neck = Entity()
+        neck.name = ReplayAthleteJoint.neck.rawValue
         neck.position = [0, 0.62, 0]
         spine.addChild(neck)
 
+        let neckShell = ModelEntity(mesh: rigNeckMesh, materials: [skinMaterial])
+        neckShell.name = "neck-shell"
+        neck.addChild(neckShell)
+
         let headRoot = Entity()
-        headRoot.name = "head-root"
-        headRoot.position = [0, 0.735, 0]
-        spine.addChild(headRoot)
+        headRoot.name = ReplayAthleteJoint.headRoot.rawValue
+        headRoot.position = [0, 0.115, 0]
+        neck.addChild(headRoot)
 
         let head = ModelEntity(
             mesh: rigHeadMesh,
@@ -2518,6 +2566,32 @@ enum PitchSceneFactory {
         return cache
     }
 
+    /// Resolves only telemetry-bound geometry in place. The cached `CoachMark`
+    /// remains the authoritative authored value, so seeking does not turn a
+    /// frame-specific presentation into a semantic revision or allocate a new
+    /// RealityKit tree.
+    private static func updateTrackedMarkGeometry(
+        cache: AnnotationSceneCache?,
+        scenario: ReplayScenario,
+        time: TimeInterval
+    ) {
+        guard let cache else { return }
+        for binding in cache.bindings
+        where binding.mark.kind != .playerLabel && binding.mark.followsPlayerTracks {
+            guard let entity = binding.entity.value else { continue }
+            let presentation = binding.mark.resolvingTrackGeometry(
+                in: scenario,
+                at: time
+            )
+            _ = updateMarkGeometry(
+                in: entity,
+                from: binding.mark,
+                to: presentation,
+                bodyTarget: binding.bodyTarget.value
+            )
+        }
+    }
+
     /// Recomputes tactical label membership only on a semantic focus change.
     /// Scrubbing and animation frames reuse the cached Set, while mark edits
     /// naturally invalidate it because `CoachMark` is a value in the key.
@@ -2556,8 +2630,8 @@ enum PitchSceneFactory {
         case let .annotation(mark, perspectiveID):
             var ids: Set<String> = [perspectiveID]
             ids.reserveCapacity(PlaybackSpatialLabels.tacticalFocusedPlayerLabelLimit)
-            if let attachedID = mark.playerID,
-               scenario.player(id: attachedID) != nil {
+            for attachedID in mark.anchoredPlayerIDs
+            where scenario.player(id: attachedID) != nil {
                 ids.insert(attachedID)
             }
 
@@ -2565,13 +2639,17 @@ enum PitchSceneFactory {
             // not flicker in and out as a coach drags the scrubber underneath
             // an open annotation inspector.
             let sampleTime = min(max(mark.revealTime, 0), scenario.duration)
+            let focusMark = mark.resolvingTrackGeometry(
+                in: scenario,
+                at: sampleTime
+            )
             var ranked: [(id: String, score: Float)] = []
             ranked.reserveCapacity(scenario.players.count)
             for player in scenario.players where !ids.contains(player.id) {
                 let point = player.pose(at: sampleTime).position
                 ranked.append((
                     id: player.id,
-                    score: annotationFocusDistance(point: point, mark: mark)
+                    score: annotationFocusDistance(point: point, mark: focusMark)
                 ))
             }
             ranked.sort {
@@ -3063,6 +3141,7 @@ enum PitchSceneFactory {
 
     private static func updateMarkLabels(
         cache: AnnotationSceneCache?,
+        scenario: ReplayScenario,
         posesByPlayerID: [String: PlayerPose],
         viewMode: ReplayViewMode,
         perspectiveID: String,
@@ -3090,7 +3169,8 @@ enum PitchSceneFactory {
             : nil
 
         for binding in cache.bindings {
-            let mark = binding.mark
+            let semanticMark = binding.mark
+            let mark = semanticMark.resolvingTrackGeometry(in: scenario, at: time)
             guard let label = binding.label.value else { continue }
             guard mark.isVisible(at: time) || focus.selectedMarkID == mark.id else {
                 label.isEnabled = false
@@ -3262,6 +3342,7 @@ enum PitchSceneFactory {
         track: PlayerTrack,
         time: TimeInterval,
         locomotion: PlayerLocomotionSample,
+        lookTargetWorldPosition: SIMD3<Float>?,
         cache: AnnotationSceneCache?
     ) {
         guard let marker = directChild(named: "table-marker", of: entity),
@@ -3277,6 +3358,7 @@ enum PitchSceneFactory {
                 track: track,
                 time: time,
                 locomotion: locomotion,
+                lookTargetWorldPosition: lookTargetWorldPosition,
                 cache: cache
             )
             return
@@ -3292,10 +3374,16 @@ enum PitchSceneFactory {
               let rightArm = directChild(named: "table-marker-right-arm", of: marker)
         else { return }
 
-        let motion = locomotion.motion
         let effort = locomotion.effort
-        let cycle = sin(motion.locomotionPhase)
-        let doubleCycle = sin(motion.locomotionPhase * 2)
+        let look = ReplayAthleteMotion.lookPose(
+            for: track,
+            at: time,
+            locomotion: locomotion,
+            targetWorldPosition: lookTargetWorldPosition
+        )
+        let gaitPhase = track.gaitPhase(at: time)
+        let cycle = sin(gaitPhase)
+        let doubleCycle = sin(gaitPhase * 2)
         let movingScale: Float = effort > 0.015 ? 1 : 0
         let swing = cycle * (0.10 + (effort * 0.50)) * movingScale
         let bob = abs(doubleCycle) * 0.024 * effort
@@ -3320,8 +3408,11 @@ enum PitchSceneFactory {
             angle: -0.055 * effort,
             axis: [1, 0, 0]
         ) * simd_quatf(angle: doubleCycle * 0.020 * effort, axis: [0, 0, 1])
-        head.orientation = simd_quatf(angle: 0.035 * effort, axis: [1, 0, 0])
-            * simd_quatf(angle: -doubleCycle * 0.012 * effort, axis: [0, 0, 1])
+        head.orientation = simd_quatf(
+            angle: (0.035 * effort) + look.combinedPitchRadians,
+            axis: [1, 0, 0]
+        ) * simd_quatf(angle: -doubleCycle * 0.012 * effort, axis: [0, 0, 1])
+            * simd_quatf(angle: look.combinedYawRadians, axis: [0, 1, 0])
     }
 
     private static func animateRig(
@@ -3329,6 +3420,7 @@ enum PitchSceneFactory {
         track: PlayerTrack,
         time: TimeInterval,
         locomotion: PlayerLocomotionSample,
+        lookTargetWorldPosition: SIMD3<Float>?,
         cache: AnnotationSceneCache?
     ) {
         guard let fullRig = directChild(named: "full-rig", of: entity),
@@ -3338,6 +3430,7 @@ enum PitchSceneFactory {
             track: track,
             time: time,
             locomotion: locomotion,
+            lookTargetWorldPosition: lookTargetWorldPosition,
             cache: cache
         )
     }
@@ -3394,13 +3487,16 @@ enum PitchSceneFactory {
         track: PlayerTrack,
         time: TimeInterval,
         locomotion: PlayerLocomotionSample,
+        lookTargetWorldPosition: SIMD3<Float>?,
         cache: AnnotationSceneCache?
     ) {
         guard let binding = athleteBinding(for: fullRig, cache: cache) else { return }
         let pose = ReplayAthleteMotion.locomotionPose(
             for: track,
             at: time,
-            locomotion: locomotion
+            locomotion: locomotion,
+            gaitPhase: track.gaitPhase(at: time),
+            lookTargetWorldPosition: lookTargetWorldPosition
         )
         ReplayAthleteMotion.apply(pose, to: binding)
     }

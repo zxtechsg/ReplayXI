@@ -5,6 +5,68 @@ import XCTest
 
 @MainActor
 final class ReplayXITests: XCTestCase {
+    func testPlaybackUtilityHUDAndTransportBothFollowTheWearer() {
+        XCTAssertTrue(PlaybackAttachmentPlacement.followsHead("coach-console"))
+        XCTAssertTrue(PlaybackAttachmentPlacement.followsHead("playback-view-hud"))
+        XCTAssertFalse(PlaybackAttachmentPlacement.followsHead("room-header"))
+        XCTAssertFalse(PlaybackAttachmentPlacement.followsHead("perspective-matrix"))
+    }
+
+    func testLocalAnnotationVisibilityRoundTripRestoresMarksWithoutForcingInputAffordances() {
+        let root = Entity()
+        let marks = Entity()
+        marks.name = "marks-root"
+        let selection = Entity()
+        selection.name = AnnotationSceneAffordance.selectionRootName
+        let draft = Entity()
+        draft.name = "annotation-draft-root"
+        let surface = Entity()
+        surface.name = "annotation-surface"
+        [marks, selection, draft, surface].forEach { root.addChild($0) }
+
+        PlaybackLocalOverlayVisibility.apply(
+            to: root,
+            showsAnnotations: false,
+            canOverrideMarksRoot: true
+        )
+        XCTAssertFalse(marks.isEnabled)
+        XCTAssertFalse(selection.isEnabled)
+        XCTAssertFalse(draft.isEnabled)
+        XCTAssertFalse(surface.isEnabled)
+
+        // Mirror the scene update that precedes the local gate: a new draw is
+        // active, while no annotation is selected.
+        selection.isEnabled = false
+        draft.isEnabled = true
+        surface.isEnabled = true
+        PlaybackLocalOverlayVisibility.apply(
+            to: root,
+            showsAnnotations: true,
+            canOverrideMarksRoot: true
+        )
+
+        XCTAssertTrue(marks.isEnabled)
+        XCTAssertFalse(selection.isEnabled)
+        XCTAssertTrue(draft.isEnabled)
+        XCTAssertTrue(surface.isEnabled)
+    }
+
+    func testLocalAnnotationVisibilityPreservesShapeOwnedMarksState() {
+        let root = Entity()
+        let marks = Entity()
+        marks.name = "marks-root"
+        marks.isEnabled = false
+        root.addChild(marks)
+
+        PlaybackLocalOverlayVisibility.apply(
+            to: root,
+            showsAnnotations: true,
+            canOverrideMarksRoot: false
+        )
+
+        XCTAssertFalse(marks.isEnabled)
+    }
+
     func testImmersiveInlinePanelsToggleExclusively() {
         let markID = UUID(uuidString: "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE")!
 
@@ -71,10 +133,10 @@ final class ReplayXITests: XCTestCase {
         }
     }
 
-    func testDemoCatalogueContainsExactlyFiveOrderedScenarios() {
+    func testDemoCatalogueContainsExactlySixOrderedScenarios() {
         let scenarios = DemoScenarios.all
 
-        XCTAssertEqual(scenarios.count, 5)
+        XCTAssertEqual(scenarios.count, 6)
         XCTAssertEqual(scenarios.map(\.kind), ExperienceKind.allCases)
         XCTAssertEqual(
             scenarios.map(\.id),
@@ -84,6 +146,7 @@ final class ReplayXITests: XCTestCase {
                 "triangle-lock",
                 "lane-lens",
                 "four-minds",
+                "real-world-match-replay",
             ]
         )
         XCTAssertEqual(Set(scenarios.map(\.id)).count, scenarios.count)
