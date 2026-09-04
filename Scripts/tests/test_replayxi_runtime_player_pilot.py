@@ -40,7 +40,13 @@ class RuntimePlayerPilotTests(unittest.TestCase):
         self.assertIn(f'static let expectedSHA256 = "{EXPECTED_SHA256}"', provider)
         self.assertIn(f"static let expectedBytes = {EXPECTED_BYTES:_}", provider)
         self.assertIn("static let maximumConcurrentNearFieldInstances = 1", provider)
-        self.assertIn("_isDebugAssertConfiguration()", provider)
+        self.assertIn('static let environmentKey = "REPLAYXI_IMPORTED_PLAYER_PILOT"', provider)
+        self.assertIn(
+            'static let userDefaultsKey = "ReplayXI.ImportedPlayerPilotEnabled"',
+            provider,
+        )
+        self.assertIn("debugDefault: false", provider)
+        self.assertNotIn("_isDebugAssertConfiguration()", provider)
 
 
 if __name__ == "__main__":

@@ -18,7 +18,7 @@ their own explicit reusable licences.
 | --- | --- | --- | --- | --- |
 | **Microsoft Rocketbox** | [MIT licence](https://github.com/microsoft/Microsoft-Rocketbox/blob/master/LICENSE.md); [Microsoft repository](https://github.com/microsoft/Microsoft-Rocketbox) | 115 rigged FBX avatars, common Biped rig, texture sets, and 417 compatible FBX animations. The repository includes four `Sports_Male` and two `Sports_Female` variants. | It is the only audited option that already contains recognisable football shirts, shorts, socks and boots. Relatively low geometry and a shared rig make a 22-player scene credible. Source kit art must be repainted to Replay XI branding. | **Selected for a non-shipping pilot.** Direct raw downloads work without an account and the repository permits redistribution with the MIT notice. |
 | **MakeHuman / MPFB** | Bundled assets and generated output are [CC0](https://github.com/makehumancommunity/makehuman/blob/master/LICENSE.md); the generator code is AGPL but is not shipped. | Parametric humans exported through FBX/DAE/OBJ/MHX2; MPFB offers a GameEngine rig and game proxies such as 741- and 1,591-face bodies. | Best route to original athlete body/head diversity and long-term art ownership. It still needs a football kit, hair, authored LODs, mocap and an offline Blender export pipeline. Only bundled CC0 assets may enter the automated recipe; community assets need their own audit. | **Second choice for a bespoke production set**, not a quick playback upgrade. |
-| **Quaternius Universal Base Characters + Universal Animation Library** | Both are [CC0](https://quaternius.com/faq.html); [base characters](https://quaternius.com/packs/universalbasecharacters.html) and [animations](https://quaternius.com/packs/universalanimationlibrary.html) are direct creator pages. | FBX/glTF humanoids averaging 13k triangles, 20 hairstyles, and 120+ retargetable locomotion/action clips. | Strongest zero-friction fallback and already represented by Replay XI's repaired converted fixture. The proportions and texture treatment remain deliberately stylised, so it will not deliver the requested realism by itself. | **Admitted as a one-player, Debug-only near-field pilot while Rocketbox is debranded; retain the procedural athlete for the remaining squad and every failure path.** |
+| **Quaternius Universal Base Characters + Universal Animation Library** | Both are [CC0](https://quaternius.com/faq.html); [base characters](https://quaternius.com/packs/universalbasecharacters.html) and [animations](https://quaternius.com/packs/universalanimationlibrary.html) are direct creator pages. | FBX/glTF humanoids averaging 13k triangles, 20 hairstyles, and 120+ retargetable locomotion/action clips. | Useful as a repaired conversion fixture, but the proportions and texture treatment remain deliberately stylised. Simulator visual QA also rejected the current pilot's shoulder and kit silhouette for the normal demo. | **Quarantined to an explicit one-player diagnostic override. Keep the improved procedural athlete as the default and use the fixture for importer regression tests.** |
 
 Blender Studio's Rain rig was also considered. It is a polished CC-BY practice
 rig, but it is a single stylised character with a complex animation control rig,
@@ -62,9 +62,9 @@ fictional crest, sponsor and fixed shirt number, and the current workspace has
 no audited DCC/debranding export. Admitting that texture would violate the
 neutral-kit requirement even though the source code licence is permissive.
 
-To improve close-player fidelity now without lowering that gate,
-`ReplayImportedAthleteProvider` admits the repaired CC0
-`ReplayXIPlayerKitPilot.usdz` in development builds only. The app-bundle copy is
+The repaired CC0 `ReplayXIPlayerKitPilot.usdz` remains bundled as a converter
+and importer diagnostic, but `ReplayImportedAthleteProvider` does not admit it
+by default in development or release builds. The app-bundle copy is
 byte-for-byte locked to SHA-256
 `afeec6489a68c2ac121dad713021c7a5a6ff65ae3f031d3758ccdabfa4574cc1`.
 It loads once before the immersive space, shares mesh/texture resources through
@@ -72,9 +72,9 @@ RealityKit clones, replaces the authored kit-shell materials per team, adds
 dynamic Replay XI geometric front/back numbers, and manually seeks each paused
 skeleton track from the telemetry-distance gait phase.
 
-The integration cap is one imported selected/nearest player. The fixture still
+The explicit diagnostic integration cap is one imported selected/nearest player. The fixture still
 has three 65-joint skeleton copies and seven textures decoding to 20.5 MiB, so
-using it for 22 players is explicitly unsupported. Release defaults remain off;
+using it for 22 players is explicitly unsupported. All build configurations default off;
 `REPLAYXI_IMPORTED_PLAYER_PILOT=1` or the developer preference key
 `ReplayXI.ImportedPlayerPilotEnabled` provides an explicit override. A failed
 prewarm returns to the existing procedural athlete without changing playback.
