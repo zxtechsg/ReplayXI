@@ -102,6 +102,13 @@ enum PitchSceneFactory {
         var firstPersonDetailedPlayerIDs: [String] = []
         var importedAthlete: ReplayImportedAthleteInstance?
         var importedAthleteAttemptedPlayerID: String?
+        // Match roots are immutable with respect to authored player identity.
+        // Index their entities once instead of rebuilding a 22-entry Dictionary
+        // from RealityKit's child collection on every presentation frame.
+        private var playerEntitiesByID: [String: WeakEntityReference] = [:]
+        private var playerPoseSamplesByID: [String: PlayerPose] = [:]
+        private(set) var playerEntityIndexBuildCount = 0
+        private(set) var playerPoseRefreshCount = 0
         // A match root owns at most 22 far rigs and four transient near rigs.
         // Retaining the factory-created semantic bindings removes named joint
         // searches from the 30 Hz path. Entries are explicitly invalidated when
@@ -157,6 +164,52 @@ enum PitchSceneFactory {
             return athleteRigBindings.count
         }
 
+        var indexedPlayerCount: Int {
+            playerEntitiesByID.values.reduce(into: 0) { count, reference in
+                if reference.value != nil { count += 1 }
+            }
+        }
+
+        func preparePlayerEntityIndex(
+            playersRoot: Entity,
+            scenario: ReplayScenario
+        ) {
+            let expectedIDs = Set(scenario.players.map(\.id))
+            let currentIDs = Set(playerEntitiesByID.compactMap { id, reference in
+                reference.value?.parent === playersRoot ? id : nil
+            })
+            guard currentIDs != expectedIDs else { return }
+
+            var refreshed: [String: WeakEntityReference] = [:]
+            refreshed.reserveCapacity(scenario.players.count)
+            for entity in playersRoot.children {
+                let prefix = "player-"
+                guard entity.name.hasPrefix(prefix) else { continue }
+                let playerID = String(entity.name.dropFirst(prefix.count))
+                guard expectedIDs.contains(playerID) else { continue }
+                refreshed[playerID] = WeakEntityReference(entity)
+            }
+            playerEntitiesByID = refreshed
+            playerPoseSamplesByID.reserveCapacity(scenario.players.count)
+            playerEntityIndexBuildCount &+= 1
+        }
+
+        func playerEntity(for id: String) -> Entity? {
+            playerEntitiesByID[id]?.value
+        }
+
+        func refreshPlayerPoses(
+            for players: [PlayerTrack],
+            at time: TimeInterval
+        ) -> [String: PlayerPose] {
+            playerPoseSamplesByID.removeAll(keepingCapacity: true)
+            for player in players {
+                playerPoseSamplesByID[player.id] = player.pose(at: time)
+            }
+            playerPoseRefreshCount &+= 1
+            return playerPoseSamplesByID
+        }
+
         private func pruneDetachedAthleteBindings() {
             athleteRigBindings = athleteRigBindings.filter { $0.value.root.parent != nil }
         }
@@ -192,6 +245,12 @@ enum PitchSceneFactory {
         let invalidations: Int
     }
 
+    struct PlayerSceneCacheDiagnostics: Equatable {
+        let indexedPlayers: Int
+        let entityIndexBuilds: Int
+        let poseRefreshes: Int
+    }
+
     /// Narrow regression seam for proving that presentation updates reuse the
     /// factory's semantic bindings rather than walking joint names at 30 Hz.
     static func proceduralAthleteBindingCacheDiagnostics(
@@ -219,6 +278,24 @@ enum PitchSceneFactory {
         guard let cache = annotationSceneCaches[ObjectIdentifier(root)],
               cache.root === root else { return false }
         return cache.containsAthleteBinding(for: rig)
+    }
+
+    static func playerSceneCacheDiagnostics(
+        for root: Entity
+    ) -> PlayerSceneCacheDiagnostics {
+        guard let cache = annotationSceneCaches[ObjectIdentifier(root)],
+              cache.root === root else {
+            return PlayerSceneCacheDiagnostics(
+                indexedPlayers: 0,
+                entityIndexBuilds: 0,
+                poseRefreshes: 0
+            )
+        }
+        return PlayerSceneCacheDiagnostics(
+            indexedPlayers: cache.indexedPlayerCount,
+            entityIndexBuilds: cache.playerEntityIndexBuildCount,
+            poseRefreshes: cache.playerPoseRefreshCount
+        )
     }
 
     // All 22 rigs share immutable geometry. Kits and appearances vary through
@@ -522,6 +599,10 @@ enum PitchSceneFactory {
         root.addChild(surface)
 
         let sceneCache = syncMarks(in: root, marks: scenario.coachMarks)
+        sceneCache?.preparePlayerEntityIndex(
+            playersRoot: playersRoot,
+            scenario: scenario
+        )
         for binding in initialAthleteBindings {
             sceneCache?.retainAthleteBinding(binding)
         }
@@ -579,7 +660,11 @@ enum PitchSceneFactory {
         let triangleTargetsByPlayerID = Dictionary(
             uniqueKeysWithValues: scenario.formationTargets.map { ($0.playerID, $0) }
         )
-        let playerPosesByID = Dictionary(
+        let sceneState = annotationCache(for: root)
+        let playerPosesByID = sceneState?.refreshPlayerPoses(
+            for: scenario.players,
+            at: time
+        ) ?? Dictionary(
             uniqueKeysWithValues: scenario.players.map { ($0.id, $0.pose(at: time)) }
         )
         let firstPersonVisibleIDs: [String] = if viewMode == .firstPerson {
@@ -592,7 +677,6 @@ enum PitchSceneFactory {
         } else {
             []
         }
-        let sceneState = annotationCache(for: root)
         var firstPersonDetailedIDList = resolvedFirstPersonDetailedPlayerIDs(
             cache: sceneState,
             candidates: firstPersonVisibleIDs,
@@ -667,23 +751,18 @@ enum PitchSceneFactory {
         )
 
         if let playersRoot = directChild(named: "players-root", of: root) {
-            // RealityKit child ordering is not part of our data contract. It can
-            // change when a rig is detached or another child is inserted, so
-            // always resolve the authored track through the stable player ID.
-            let playerEntitiesByID = Dictionary(
-                uniqueKeysWithValues: playersRoot.children.compactMap { entity -> (String, Entity)? in
-                    let prefix = "player-"
-                    guard entity.name.hasPrefix(prefix) else { return nil }
-                    return (String(entity.name.dropFirst(prefix.count)), entity)
-                }
+            sceneState?.preparePlayerEntityIndex(
+                playersRoot: playersRoot,
+                scenario: scenario
             )
             reconcileImportedAthlete(
                 cache: sceneState,
-                admittedPlayerID: importedAthleteID,
-                playerEntitiesByID: playerEntitiesByID
+                admittedPlayerID: importedAthleteID
             )
             for player in scenario.players {
-                guard let entity = playerEntitiesByID[player.id] else { continue }
+                guard let entity = sceneState?.playerEntity(for: player.id)
+                    ?? directChild(named: "player-\(player.id)", of: playersRoot)
+                else { continue }
                 let isSelected = player.id == perspectiveID
                 let pose = playerPosesByID[player.id] ?? player.pose(at: time)
                 let locomotion = player.locomotion(at: time)
@@ -3440,8 +3519,7 @@ enum PitchSceneFactory {
     /// the RealityKit root would make deterministic timeline seeks impossible.
     private static func reconcileImportedAthlete(
         cache: AnnotationSceneCache?,
-        admittedPlayerID: String?,
-        playerEntitiesByID: [String: Entity]
+        admittedPlayerID: String?
     ) {
         guard let cache else { return }
         if let current = cache.importedAthlete,
@@ -3458,7 +3536,7 @@ enum PitchSceneFactory {
 
         if let previous = cache.importedAthlete {
             previous.root.removeFromParent()
-            if let player = playerEntitiesByID[previous.playerID],
+            if let player = cache.playerEntity(for: previous.playerID),
                let fullRig = directChild(named: "full-rig", of: player) {
                 setProceduralModelVisualsEnabled(true, in: fullRig)
             }

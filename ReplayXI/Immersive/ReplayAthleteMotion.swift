@@ -356,7 +356,7 @@ enum ReplayAthleteMotion {
             let targetX = target.x - current.position.x
             let targetZ = target.z - current.position.z
             let horizontalDistance = hypot(targetX, targetZ)
-            if horizontalDistance > 0.04 {
+            if horizontalDistance > 0.001 {
                 let targetBearing = atan2(targetX, targetZ) * 180 / .pi
                 let targetDelta = clampAngleDelta(
                     shortestAngleDelta(from: facing, to: targetBearing),
@@ -364,23 +364,34 @@ enum ReplayAthleteMotion {
                 )
                 // A ball at the player's feet should not pin their gaze down:
                 // footballers alternate between touch and the next picture.
-                let targetWeight: Float
-                if horizontalDistance < 1.25 {
-                    targetWeight = 0.28
-                    scanWeight = 0.34
-                } else if horizontalDistance < 4 {
-                    targetWeight = 0.52
-                    scanWeight = 0.16
-                } else {
-                    targetWeight = 0.72
-                    scanWeight = 0.10
-                }
+                // Blend rather than branch at distance thresholds: the old
+                // 1.25 m and 4 m switches could rotate the complete cervical
+                // chain in one frame as a moving ball crossed either boundary.
+                let nearToMid = smootherStep((horizontalDistance - 0.82) / 0.86)
+                let midToFar = smootherStep((horizontalDistance - 3.15) / 1.70)
+                let visibility = smootherStep((horizontalDistance - 0.015) / 0.24)
+                let nearTargetWeight: Float = 0.28
+                let midTargetWeight: Float = 0.52
+                let farTargetWeight: Float = 0.72
+                let blendedMidTargetWeight = nearTargetWeight
+                    + ((midTargetWeight - nearTargetWeight) * nearToMid)
+                let targetWeight = (
+                    blendedMidTargetWeight
+                        + ((farTargetWeight - blendedMidTargetWeight) * midToFar)
+                ) * visibility
+                let nearScanWeight: Float = 0.34
+                let midScanWeight: Float = 0.16
+                let farScanWeight: Float = 0.10
+                let blendedMidScanWeight = nearScanWeight
+                    + ((midScanWeight - nearScanWeight) * nearToMid)
+                scanWeight = blendedMidScanWeight
+                    + ((farScanWeight - blendedMidScanWeight) * midToFar)
                 desiredYawDegrees = (travelDelta * isMoving * (1 - targetWeight))
                     + (targetDelta * targetWeight)
 
                 let downwardPitch = atan2(max(1.70 - target.y, -0.30), horizontalDistance)
                     * 180 / .pi
-                let pitchWeight: Float = horizontalDistance < 1.25 ? 0.52 : 0.72
+                let pitchWeight = (0.52 + (0.20 * nearToMid)) * visibility
                 desiredPitchDegrees = min(max(downwardPitch * pitchWeight, -7), 24)
             }
         }

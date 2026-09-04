@@ -209,6 +209,57 @@ final class ReplayAthleteRigTests: XCTestCase {
         XCTAssertTrue(malformed.combinedPitchRadians.isFinite)
     }
 
+    func testFootballGazeRemainsContinuousAcrossBallAttentionDistances() {
+        let track = PlayerTrack(
+            id: "gaze-distance-continuity-seven",
+            displayName: "Gaze Test",
+            role: "Right winger",
+            shirtNumber: 7,
+            team: .home,
+            isGoalkeeper: false,
+            keyframes: [
+                MotionKeyframe(time: 0, position: .init(x: 0, z: 0), facingDegrees: 0),
+                MotionKeyframe(time: 10, position: .init(x: 0, z: 10), facingDegrees: 0),
+            ]
+        )
+
+        func look(distance: Float) -> ReplayAthleteLookPose {
+            let bearing: Float = 48 * .pi / 180
+            return ReplayAthleteMotion.lookPose(
+                for: track,
+                at: 5,
+                targetWorldPosition: [
+                    sin(bearing) * distance,
+                    0.11,
+                    5 + (cos(bearing) * distance),
+                ]
+            )
+        }
+
+        for boundary: Float in [0.04, 1.25, 4] {
+            let before = look(distance: boundary - 0.01)
+            let after = look(distance: boundary + 0.01)
+            XCTAssertLessThan(
+                abs(after.combinedYawRadians - before.combinedYawRadians),
+                0.025,
+                "ball attention snapped in yaw near \(boundary) metres"
+            )
+            XCTAssertLessThan(
+                abs(after.combinedPitchRadians - before.combinedPitchRadians),
+                0.025,
+                "ball attention snapped in pitch near \(boundary) metres"
+            )
+        }
+
+        let near = look(distance: 0.45)
+        let far = look(distance: 8)
+        XCTAssertGreaterThan(
+            abs(far.combinedYawRadians),
+            abs(near.combinedYawRadians),
+            "distant play should still attract more gaze than a ball at the feet"
+        )
+    }
+
     func testDemoOverlapContainsMatchPaceBurstWithoutTeleporting() throws {
         let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay))
         let rightBack = try XCTUnwrap(scenario.player(id: "navy-rb"))

@@ -40,6 +40,8 @@ that the downloadable archive contains the described rig or animation.
 | --- | --- | --- | --- |
 | **Football Player — Portugal** by `neshallads` | [Model page](https://sketchfab.com/3d-models/football-player-portugal-5f1a05f9c0964821bbb5322aee27a34e) declares CC BY, download availability, 17.3k triangles and a model “ready to be rigged and animated.” | A higher-detail body/kit silhouette study. | It is not demonstrated as already skinned. Audit the archive format, topology, UVs and material rights; remove national/team identifiers; build and validate an original rig, LODs and animations before runtime consideration. |
 | **Rigged Player with basic animations** by `Loudcow67` | [Model page](https://sketchfab.com/3d-models/rigged-player-with-basic-animations-06c3b4bf9e4c4d25ac3768a23ae7375d) declares CC BY, download availability and approximately 1.3k triangles. | A lightweight rig/import and distant-player experiment. | The page has almost no technical provenance. Inspect every archive member, skeleton hierarchy, skin weights, clip names, bind/rest transforms, textures, embedded attribution and actual football suitability. |
+| **Soap soccer player** by `luccacatalan` | [Model page](https://sketchfab.com/3d-models/soap-soccer-player-5ae4bf9d6a324cfda79ce1298ea2d333) declares CC BY, download availability, 6.2k triangles and five named clips: kick, push, tackle and two stand-ups. | A bounded football-action importer experiment. | The deliberately toy-like silhouette does not meet near-field realism, and the listed clips omit the idle/run/walk/cut set needed for match playback. Audit the authenticated archive and source chain before even a test-only conversion. |
+| **Goalkeeper Stylized — Rig and Animation** by `P-Vi.Art` | [Model page](https://sketchfab.com/3d-models/goalkeeper-stylized-rig-and-animation-7de86f9c36f84152a777f27a73646ada) declares CC BY, download availability, 17.4k triangles, UVs, textures and a rig. | A goalkeeper silhouette and deformation reference. | It is a single stylised goalkeeper, denser than Replay XI's near-player target, and does not establish a reusable field-player family or complete clip set. |
 | **Goal Keeper Kick — Blender Rigged** by `SuperScriptDEV` | [Model page](https://sketchfab.com/3d-models/goal-keeper-kick-blender-rigged-13f29f8af55b4b9097802510472fe49f) declares CC BY, download availability, 456 triangles, and rig/animation/ragdoll tags. | A goalkeeper-pose or very-low-detail motion reference. | Tags are not an animation contract. Confirm the archive creator/source chain, playable clips, skeleton ownership, scale, root motion, deformation and whether the visual quality survives a near-field headset view. |
 
 Admission requires all of the following before any Sketchfab candidate can be
@@ -64,8 +66,18 @@ copied into the repository or app bundle:
 7. Only after admission, an exact attribution and transformation record added to
    `Docs/ReplayXI/THIRD_PARTY_ASSETS.md` alongside the bundled output hash.
 
-Until that sequence is complete, these three models remain external links only.
+Until that sequence is complete, these candidates remain external links only.
 `THIRD_PARTY_ASSETS.md` intentionally has no Sketchfab entry.
+
+Two additional discovery outcomes are explicit rejects. Extremely low-poly,
+Minecraft-styled footballers do not improve first-person fidelity. A visually
+stronger 44.6k-triangle listing titled **Man Player** reports Character Creator
+provenance; a page-level CC BY badge is insufficient evidence that proprietary
+base topology and rigging can be redistributed as an application asset. Neither
+should enter the acquisition queue. Rocketbox remains the stronger baseline
+because Microsoft publishes the source and common rig directly under MIT,
+Replay XI already pins every input byte, and the measured near candidate is
+approximately 8.1k triangles rather than an unaudited 44.6k-triangle character.
 
 ## Pinned Rocketbox pilot
 
@@ -146,6 +158,18 @@ vertices, and no frame-by-frame visual capture or physical Vision Pro run was
 performed. The candidate therefore remains outside the repository and app
 bundle until animated visual identity, dynamic team-kit separation, authored
 LODs, 22-player performance and physical-device gates pass.
+
+An additional Apple Metal `usdrecord` probe rendered the exact candidate at
+time codes 0, 4.5, 9, 13.5 and 18. All five frames retained coherent skin,
+recognisable limbs, the neutral kit and stable textures; no exploded vertices
+or skeleton collapse was visible. This is useful deformation evidence but not
+a runtime grounding pass: the standalone USD origin sits near the pelvis,
+whereas `ReplayImportedAthleteProvider` applies a bounds-derived sole offset
+when it creates an app instance. The capture therefore does not prove planted
+foot contact, in-app team-kit differentiation, animation blending or headset
+frame time. The only emitted clip also remains a short fast run, so the asset
+stays quarantined until a grounded in-app capture covers idle, acceleration,
+run, deceleration, cut and football-action transitions.
 
 The repaired CC0 `ReplayXIPlayerKitPilot.usdz` remains bundled as a converter
 and importer diagnostic, but `ReplayImportedAthleteProvider` does not admit it

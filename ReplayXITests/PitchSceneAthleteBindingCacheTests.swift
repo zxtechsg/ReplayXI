@@ -9,6 +9,38 @@ final class PitchSceneAthleteBindingCacheTests: XCTestCase {
         super.tearDown()
     }
 
+    func testPlayerEntityIndexIsBuiltOnceWhilePoseStorageRefreshesInPlace() throws {
+        let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay))
+        let root = PitchSceneFactory.makeMatchRoot(for: scenario)
+
+        let initial = PitchSceneFactory.playerSceneCacheDiagnostics(for: root)
+        XCTAssertEqual(initial.indexedPlayers, scenario.players.count)
+        XCTAssertEqual(initial.entityIndexBuilds, 1)
+        XCTAssertEqual(initial.poseRefreshes, 0)
+
+        update(
+            root: root,
+            scenario: scenario,
+            time: 12,
+            perspectiveID: scenario.defaultPerspectiveID
+        )
+        update(
+            root: root,
+            scenario: scenario,
+            time: 13,
+            perspectiveID: scenario.defaultPerspectiveID
+        )
+
+        let repeated = PitchSceneFactory.playerSceneCacheDiagnostics(for: root)
+        XCTAssertEqual(repeated.indexedPlayers, scenario.players.count)
+        XCTAssertEqual(
+            repeated.entityIndexBuilds,
+            1,
+            "steady playback must not rebuild the RealityKit player lookup"
+        )
+        XCTAssertEqual(repeated.poseRefreshes, 2)
+    }
+
     func testRepeatedSquadUpdatesReuseFactoryBindingsAndDetachInvalidatesNearRig() throws {
         let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay))
         let root = PitchSceneFactory.makeMatchRoot(for: scenario)
