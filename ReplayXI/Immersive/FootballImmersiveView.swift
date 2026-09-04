@@ -127,6 +127,7 @@ struct FootballImmersiveView: View {
                     selectedAnnotationID: $selectedAnnotationID,
                     showsDecisionStrip: $showsDecisionStrip,
                     controlDeckPresetRawValue: $controlDeckPresetRawValue,
+                    deckWidth: controlDeckLayout.contentWidth,
                     isPinchDrawing: annotationStroke != nil,
                     isPinchDrawingReady: annotationStroke?.isReadyToCommit == true,
                     exit: exitRoom
@@ -429,7 +430,6 @@ struct FootballImmersiveView: View {
 
         draggedAnnotationTarget = target
         selectedAnnotationID = target.markID
-        store.setPlaying(false, broadcast: false)
     }
 
     private func handleAnnotationDragEnded(
@@ -784,6 +784,7 @@ private struct ImmersiveControlDeck: View {
     @Binding var showsDecisionStrip: Bool
     @Binding var controlDeckPresetRawValue: String
 
+    let deckWidth: CGFloat
     let isPinchDrawing: Bool
     let isPinchDrawingReady: Bool
     let exit: () -> Void
@@ -1025,7 +1026,7 @@ private struct ImmersiveControlDeck: View {
         }
         .padding(18)
         .padding(4)
-        .frame(maxWidth: 1200)
+        .frame(width: deckWidth)
         .controlSize(.extraLarge)
         .background(ReplayTheme.navy.opacity(0.46), in: RoundedRectangle(cornerRadius: 26))
         .overlay {
@@ -1059,7 +1060,7 @@ private struct ImmersiveControlDeck: View {
             annotationConfirmation = nil
             rebuildReviewIndex()
         }
-        .onChange(of: reviewIndexKeys) { _, _ in
+        .onChange(of: store.reviewIndexVersion) { _, _ in
             rebuildReviewIndex()
         }
         .onChange(of: selectedAnnotationID) { _, selectedID in
@@ -1515,7 +1516,7 @@ private struct ImmersiveControlDeck: View {
             annotationEditMenu(compact: true)
         }
         .padding(16)
-        .frame(width: 1080)
+        .frame(width: deckWidth)
         .controlSize(.extraLarge)
         .background(ReplayTheme.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 24))
         .overlay {
@@ -1661,10 +1662,6 @@ private struct ImmersiveControlDeck: View {
     private var orderedMarks: [CoachMark] { orderedReviewMarks }
 
     private var reviewEvents: [PlaybackReviewEvent] { indexedReviewEvents }
-
-    private var reviewIndexKeys: [PlaybackReviewIndexKey] {
-        store.marks.map(PlaybackReviewIndexKey.init)
-    }
 
     private func rebuildReviewIndex() {
         let marks = store.marks.sorted {
@@ -2342,7 +2339,6 @@ private struct ImmersiveControlDeck: View {
         x: Float,
         z: Float
     ) {
-        store.setPlaying(false, broadcast: false)
         guard store.nudgeCoachMarkEndpoint(
             id: mark.id,
             endpoint: endpoint,
@@ -2626,8 +2622,13 @@ private struct ImmersiveControlDeck: View {
     }
 
     private func openAdjacentPlayerPOV(by offset: Int) {
-        store.selectAdjacentPerspective(by: offset)
-        openPlayerPOV(store.localPerspectiveID)
+        guard let playerID = PlaybackPerspectiveNavigation.adjacentPlayerID(
+            in: store.selectedScenario.players,
+            activeID: store.activePerspectiveID,
+            localFallbackID: store.localPerspectiveID,
+            offset: offset
+        ) else { return }
+        openPlayerPOV(playerID)
     }
 
     private func openPlayerPOV(_ playerID: String) {

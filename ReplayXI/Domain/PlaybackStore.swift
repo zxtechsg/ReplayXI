@@ -43,7 +43,16 @@ final class ReplayStore {
     /// that POV. Shared snapshots preserve the last published squad view while
     /// this flag is active.
     private(set) var isCoachLocalReview = false
-    var marks: [CoachMark]
+    /// Scalar UI invalidation token for the event shelf. Geometry-only handle
+    /// previews deliberately leave it unchanged, while timing, identity, kind,
+    /// label, insertion, deletion, and remote replacement advance it.
+    private(set) var reviewIndexVersion = PlaybackReviewIndexVersion()
+    var marks: [CoachMark] {
+        didSet {
+            guard reviewIndexVersionCache.refresh(marks: marks) else { return }
+            reviewIndexVersion = reviewIndexVersionCache.version
+        }
+    }
     var participantSeatAssignments: [UUID: String] = [:]
     private(set) var sharedPitchAnchorID: UUID?
     private(set) var triangleLockMode: TriangleLockMode = .visualise
@@ -73,6 +82,9 @@ final class ReplayStore {
     @ObservationIgnored
     private var latestCoachSnapshot: SharedPlaybackSnapshot?
 
+    @ObservationIgnored
+    private var reviewIndexVersionCache = PlaybackReviewIndexVersionCache()
+
     /// Geometry handle drags are rendered immediately on the coach's headset,
     /// but remain transactional until the gesture ends. Keeping only the
     /// original endpoints lets unrelated shared actions publish safely without
@@ -97,6 +109,7 @@ final class ReplayStore {
         viewMode = first.defaultViewMode
         localPerspectiveID = first.defaultPerspectiveID
         marks = first.coachMarks
+        reviewIndexVersionCache.seed(marks: marks)
     }
 
     var selectedScenario: ReplayScenario {
@@ -715,8 +728,9 @@ final class ReplayStore {
     }
 
     /// Moves the pitch-space endpoints of one coach-created spatial mark. The
-    /// non-broadcast path supports live handle dragging; the final drag update
-    /// publishes one authoritative snapshot to the squad.
+    /// first non-broadcast update opens a local geometry transaction and pauses
+    /// shared transport without exposing preview geometry. The final drag
+    /// update publishes one authoritative geometry snapshot to the squad.
     @discardableResult
     func updateCoachMarkGeometry(
         id: UUID,
@@ -748,28 +762,43 @@ final class ReplayStore {
             playerID: mark.playerID
         )
         guard isValidSharedMark(replacement, for: selectedScenario) else {
-            if broadcast,
-               let baseline = pendingCoachMarkGeometryBaselines.removeValue(forKey: id) {
-                marks[index] = markReplacingGeometry(
-                    mark,
-                    start: baseline.start,
-                    end: baseline.end
-                )
-            }
+            if broadcast { rollbackCoachMarkGeometryPreview(id: id, index: index) }
             if broadcast { statusMessage = "Keep the annotation on the pitch" }
             return false
         }
+        guard CoachMarkGeometryPolicy.accepts(
+            kind: mark.kind,
+            start: start,
+            end: end
+        ) else {
+            if broadcast { rollbackCoachMarkGeometryPreview(id: id, index: index) }
+            if broadcast {
+                statusMessage = mark.kind == .space
+                    ? "Keep the space at least 1.1 metres wide"
+                    : "Keep the annotation at least 0.8 metres long"
+            }
+            return false
+        }
 
+        let beginsPreviewTransaction = !broadcast
+            && pendingCoachMarkGeometryBaselines[id] == nil
         if broadcast {
             pendingCoachMarkGeometryBaselines.removeValue(forKey: id)
-        } else if pendingCoachMarkGeometryBaselines[id] == nil {
+        } else if beginsPreviewTransaction {
             pendingCoachMarkGeometryBaselines[id] = CoachMarkGeometry(
                 start: mark.start,
                 end: mark.end
             )
         }
         marks[index] = replacement
-        if broadcast {
+        if beginsPreviewTransaction {
+            // Geometry previews are intentionally masked by `makeSnapshot`.
+            // Publishing here therefore synchronizes only the pause and the
+            // committed baseline, preventing the coach from freezing locally
+            // while followers continue through the moment being annotated.
+            isPlaying = false
+            if isCollaborationActive { emitSnapshot() }
+        } else if broadcast {
             statusMessage = "Annotation position updated"
             emitSnapshot()
         }
@@ -850,6 +879,11 @@ final class ReplayStore {
         }
 
         marks[index] = replacement
+        // A precise endpoint adjustment is an atomic review action. Pause in
+        // the same snapshot that publishes its geometry so a rejected nudge
+        // leaves transport untouched and a successful one cannot split the
+        // coach's clock from the squad's.
+        isPlaying = false
         statusMessage = endpoint == .start
             ? "Annotation start adjusted"
             : "Annotation end adjusted"
@@ -873,6 +907,17 @@ final class ReplayStore {
         )
         statusMessage = "Annotation move cancelled"
         return true
+    }
+
+    private func rollbackCoachMarkGeometryPreview(id: UUID, index: Int) {
+        guard let baseline = pendingCoachMarkGeometryBaselines.removeValue(forKey: id) else {
+            return
+        }
+        marks[index] = markReplacingGeometry(
+            marks[index],
+            start: baseline.start,
+            end: baseline.end
+        )
     }
 
     /// Clears only the transient first point after an interrupted spatial

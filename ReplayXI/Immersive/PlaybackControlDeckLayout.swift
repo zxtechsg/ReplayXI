@@ -31,6 +31,12 @@ struct PlaybackControlDeckLayout: Equatable, Sendable {
     let verticalOffset: Float
     let forwardOffset: Float
 
+    /// Keeps the glass panel inside the attachment's transparent safety edge
+    /// while allowing accessibility layouts to use the width they requested.
+    var contentWidth: CGFloat {
+        max(attachmentWidth - 40, 1)
+    }
+
     static func resolve(
         preset: PlaybackControlDeckPreset,
         usesAccessibilityText: Bool

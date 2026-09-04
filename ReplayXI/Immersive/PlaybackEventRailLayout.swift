@@ -74,6 +74,9 @@ enum PlaybackEventRailLayout {
     struct TimelineTickClusteringSummary: Equatable, Sendable {
         let acceptedEventCount: Int
         let ignoredNonFiniteEventCount: Int
+        /// Retained for source compatibility with the first bounded
+        /// implementation. Events are now bounded by the number of output
+        /// bins rather than by dropping input, so this is always zero.
         let truncatedEventCount: Int
         let clusterCount: Int
     }
@@ -90,13 +93,13 @@ enum PlaybackEventRailLayout {
 
     /// Quantizes timeline events into visually separable pixel bins.
     ///
-    /// The input collection is never copied or sorted. Aggregation is direct
-    /// indexed and output compaction is in-place, making this suitable for a
-    /// cached SwiftUI rail buffer. Collection order does not affect cluster
-    /// positions or counts. Only the first 128 inputs are inspected; callers
-    /// should supply timeline-ordered events when truncation is possible.
+    /// The input collection is never copied or sorted. Every finite event is
+    /// aggregated into at most 128 direct-indexed bins, then output compaction
+    /// happens in-place. This keeps the chronological tail and a late selected
+    /// event visible without allowing render storage to grow with the import.
+    /// Collection order does not affect cluster positions or counts.
     @discardableResult
-    static func clusterTimelineTicks<Events: RandomAccessCollection>(
+    static func clusterTimelineTicks<Events: Collection>(
         _ events: Events,
         duration rawDuration: TimeInterval,
         railWidth rawRailWidth: CGFloat,
@@ -145,13 +148,10 @@ enum PlaybackEventRailLayout {
             )
         }
 
-        let inspectedCount = min(events.count, maximumTimelineTickCount)
         var acceptedEventCount = 0
         var ignoredNonFiniteEventCount = 0
-        var eventIndex = events.startIndex
 
-        for _ in 0..<inspectedCount {
-            let event = events[eventIndex]
+        for event in events {
             let rawTime = time(event)
             if rawTime.isFinite {
                 let clampedTime = min(max(rawTime, 0), duration)
@@ -180,7 +180,6 @@ enum PlaybackEventRailLayout {
             } else {
                 ignoredNonFiniteEventCount += 1
             }
-            eventIndex = events.index(after: eventIndex)
         }
 
         // Empty bins are only scratch space. Compact occupied bins in place so
@@ -200,7 +199,7 @@ enum PlaybackEventRailLayout {
         return TimelineTickClusteringSummary(
             acceptedEventCount: acceptedEventCount,
             ignoredNonFiniteEventCount: ignoredNonFiniteEventCount,
-            truncatedEventCount: max(events.count - inspectedCount, 0),
+            truncatedEventCount: 0,
             clusterCount: writeIndex
         )
     }
@@ -264,5 +263,135 @@ enum PlaybackEventRailLayout {
         let range = visibleRange(eventCount: eventCount, page: page)
         guard !range.isEmpty else { return "NO EVENTS" }
         return "\(range.lowerBound + 1)–\(range.upperBound) OF \(eventCount)"
+    }
+}
+
+/// An allocation-free digest of the metadata that can change the ordered
+/// review shelf or timeline rail. Spatial endpoint edits are intentionally
+/// absent: a live 3D handle drag must not rebuild and resort timeline data.
+struct PlaybackReviewIndexFingerprint: Equatable, Sendable {
+    let markCount: Int
+    private let firstLane: UInt64
+    private let secondLane: UInt64
+
+    init<Marks: Collection>(marks: Marks) where Marks.Element == CoachMark {
+        var accumulator = Accumulator()
+        var ordinal: UInt64 = 0
+
+        for mark in marks {
+            accumulator.mix(ordinal)
+            accumulator.mix(mark.id)
+            accumulator.mix(Self.code(for: mark.kind))
+            accumulator.mix(mark.label)
+            accumulator.mix(Self.canonicalBitPattern(of: mark.revealTime))
+            if let hideTime = mark.hideTime {
+                accumulator.mix(1)
+                accumulator.mix(Self.canonicalBitPattern(of: hideTime))
+            } else {
+                accumulator.mix(0)
+            }
+            ordinal &+= 1
+        }
+
+        markCount = marks.count
+        accumulator.mix(UInt64(truncatingIfNeeded: markCount))
+        firstLane = accumulator.firstLane
+        secondLane = accumulator.secondLane
+    }
+
+    private static func canonicalBitPattern(of value: TimeInterval) -> UInt64 {
+        // Double considers -0 and +0 equal. Canonicalising zero keeps this
+        // fingerprint aligned with the previous Equatable metadata key.
+        value == 0 ? 0 : value.bitPattern
+    }
+
+    private static func code(for kind: CoachMarkKind) -> UInt64 {
+        switch kind {
+        case .run: 0
+        case .pass: 1
+        case .danger: 2
+        case .space: 3
+        case .playerLabel: 4
+        }
+    }
+
+    private struct Accumulator {
+        // Two independently mixed 64-bit lanes make an accidental stale-cache
+        // collision vanishingly unlikely while keeping comparison constant
+        // time. Neither lane allocates or materialises UUID/String arrays.
+        fileprivate var firstLane: UInt64 = 0xcbf29ce484222325
+        fileprivate var secondLane: UInt64 = 0x6eed0e9da4d94a4f
+
+        mutating func mix(_ value: UInt64) {
+            var value = value.littleEndian
+            withUnsafeBytes(of: &value) { bytes in
+                for byte in bytes {
+                    mix(byte)
+                }
+            }
+        }
+
+        mutating func mix(_ value: UUID) {
+            var bytes = value.uuid
+            withUnsafeBytes(of: &bytes) { buffer in
+                for byte in buffer {
+                    mix(byte)
+                }
+            }
+        }
+
+        mutating func mix(_ value: String) {
+            mix(UInt64(value.utf8.count))
+            for byte in value.utf8 {
+                mix(byte)
+            }
+        }
+
+        private mutating func mix(_ byte: UInt8) {
+            firstLane ^= UInt64(byte)
+            firstLane &*= 0x100000001b3
+
+            secondLane ^= UInt64(byte) &+ 0x9e
+            secondLane = (secondLane << 13) | (secondLane >> 51)
+            secondLane &*= 0x9e3779b185ebca87
+        }
+    }
+}
+
+/// Scalar token observed by the control deck instead of rebuilding an array of
+/// metadata keys on every playhead render.
+struct PlaybackReviewIndexVersion: Equatable, Hashable, Sendable {
+    fileprivate(set) var rawValue: UInt64 = 0
+}
+
+/// Store-owned cache for review-index invalidation. `refresh` is intended for
+/// discrete annotation metadata mutations and sanitized remote snapshots, not
+/// the render loop. Its work is allocation-free and bounded by the store's
+/// supported mark count; unchanged metadata leaves `version` untouched.
+struct PlaybackReviewIndexVersionCache: Sendable {
+    private var fingerprint: PlaybackReviewIndexFingerprint?
+    private(set) var version = PlaybackReviewIndexVersion()
+
+    init() {}
+
+    init<Marks: Collection>(marks: Marks) where Marks.Element == CoachMark {
+        fingerprint = PlaybackReviewIndexFingerprint(marks: marks)
+    }
+
+    /// Seeds a scenario already handled by a separate scenario-ID observer,
+    /// avoiding a redundant second index rebuild.
+    mutating func seed<Marks: Collection>(marks: Marks) where Marks.Element == CoachMark {
+        fingerprint = PlaybackReviewIndexFingerprint(marks: marks)
+    }
+
+    @discardableResult
+    mutating func refresh<Marks: Collection>(
+        marks: Marks
+    ) -> Bool where Marks.Element == CoachMark {
+        let nextFingerprint = PlaybackReviewIndexFingerprint(marks: marks)
+        guard nextFingerprint != fingerprint else { return false }
+        fingerprint = nextFingerprint
+        version.rawValue &+= 1
+        return true
     }
 }

@@ -5,6 +5,7 @@ import Testing
 private final class ImportedPlayerAssetBundleToken {}
 
 @MainActor
+@Suite(.serialized)
 struct ImportedPlayerAssetTests {
     @Test
     func styledFootballerLoadsWithOpaqueSkinnedKitAndSeekableSprint() throws {

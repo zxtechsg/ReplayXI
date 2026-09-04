@@ -105,75 +105,6 @@ final class PlaybackEventRailLayoutTests: XCTestCase {
         )
     }
 
-    func testReviewIndexSignatureIgnoresLiveGeometryButTracksRailMetadata() throws {
-        let id = try XCTUnwrap(UUID(uuidString: "C63A71EC-F77D-49A4-91B7-10812CB2C33B"))
-        let original = CoachMark(
-            id: id,
-            kind: .run,
-            start: PitchPoint(x: 2, z: 3),
-            end: PitchPoint(x: 8, z: 12),
-            label: "Overlap",
-            revealTime: 4,
-            hideTime: 9
-        )
-        let geometryPreview = CoachMark(
-            id: id,
-            kind: .run,
-            start: PitchPoint(x: -20, z: -14),
-            end: PitchPoint(x: 18, z: 22),
-            label: "Overlap",
-            revealTime: 4,
-            hideTime: 9
-        )
-
-        XCTAssertEqual(
-            PlaybackReviewIndexKey(mark: original),
-            PlaybackReviewIndexKey(mark: geometryPreview),
-            "A live endpoint preview must not rebuild and sort the event rail"
-        )
-
-        let retimed = CoachMark(
-            id: id,
-            kind: .run,
-            start: geometryPreview.start,
-            end: geometryPreview.end,
-            label: "Overlap",
-            revealTime: 6,
-            hideTime: 11
-        )
-        let relabelled = CoachMark(
-            id: id,
-            kind: .run,
-            start: geometryPreview.start,
-            end: geometryPreview.end,
-            label: "Underlap",
-            revealTime: 4,
-            hideTime: 9
-        )
-        let resized = CoachMark(
-            id: id,
-            kind: .run,
-            start: geometryPreview.start,
-            end: geometryPreview.end,
-            label: "Overlap",
-            revealTime: 4,
-            hideTime: 12
-        )
-
-        XCTAssertNotEqual(
-            PlaybackReviewIndexKey(mark: original),
-            PlaybackReviewIndexKey(mark: retimed)
-        )
-        XCTAssertNotEqual(
-            PlaybackReviewIndexKey(mark: original),
-            PlaybackReviewIndexKey(mark: relabelled)
-        )
-        XCTAssertNotEqual(
-            PlaybackReviewIndexKey(mark: original),
-            PlaybackReviewIndexKey(mark: resized)
-        )
-    }
-
     func testTimelineTicksClusterIntoStablePixelBins() {
         let events = [
             Tick(time: 1.0, kind: .cue, isSelected: false),
@@ -257,31 +188,68 @@ final class PlaybackEventRailLayoutTests: XCTestCase {
         XCTAssertEqual(forward, reverse)
     }
 
-    func testTimelineClusteringIsBoundedAt128EventsAndClusters() {
+    func testTimelineClusteringBinsEveryEventWhileOutputStaysBoundedAt128Clusters() {
         let events = (0..<140).map {
-            Tick(time: TimeInterval($0), kind: .annotation, isSelected: false)
+            Tick(
+                time: TimeInterval($0),
+                kind: $0.isMultiple(of: 2) ? .cue : .annotation,
+                isSelected: $0 == 139
+            )
         }
         var clusters: [PlaybackEventRailLayout.TimelineTickCluster] = []
         PlaybackEventRailLayout.prepareTimelineTickClusters(&clusters)
 
         let summary = PlaybackEventRailLayout.clusterTimelineTicks(
             events,
-            duration: 127,
+            duration: 139,
             railWidth: 1_000_000,
             leadingInset: 9,
             minimumPixelSpacing: 1,
             into: &clusters,
             time: \Tick.time,
-            kind: \Tick.kind
+            kind: \Tick.kind,
+            isSelected: \Tick.isSelected
         )
 
-        XCTAssertEqual(summary.acceptedEventCount, 128)
-        XCTAssertEqual(summary.truncatedEventCount, 12)
+        XCTAssertEqual(summary.acceptedEventCount, 140)
+        XCTAssertEqual(summary.truncatedEventCount, 0)
         XCTAssertEqual(summary.clusterCount, 128)
         XCTAssertEqual(clusters.count, PlaybackEventRailLayout.maximumTimelineTickCount)
         XCTAssertEqual(clusters.first?.binIndex, 0)
         XCTAssertEqual(clusters.last?.binIndex, 127)
-        XCTAssertEqual(clusters.reduce(0) { $0 + $1.eventCount }, 128)
+        XCTAssertEqual(clusters.reduce(0) { $0 + $1.eventCount }, 140)
+        XCTAssertEqual(clusters.last?.latestTime, 139)
+        XCTAssertTrue(clusters.last?.containsSelection == true)
+    }
+
+    func testTimelineClusteringCountsInvalidAndSelectedTailEventsPastFormerCutoff() {
+        var events = (0..<128).map {
+            Tick(time: TimeInterval($0), kind: .cue, isSelected: false)
+        }
+        events.append(Tick(time: .nan, kind: .annotation, isSelected: false))
+        events.append(Tick(time: 199, kind: .annotation, isSelected: true))
+        var clusters: [PlaybackEventRailLayout.TimelineTickCluster] = []
+
+        let summary = PlaybackEventRailLayout.clusterTimelineTicks(
+            events,
+            duration: 199,
+            railWidth: 180,
+            leadingInset: 9,
+            into: &clusters,
+            time: \Tick.time,
+            kind: \Tick.kind,
+            isSelected: \Tick.isSelected
+        )
+
+        XCTAssertEqual(summary.acceptedEventCount, 129)
+        XCTAssertEqual(summary.ignoredNonFiniteEventCount, 1)
+        XCTAssertEqual(summary.truncatedEventCount, 0)
+        XCTAssertLessThanOrEqual(
+            clusters.count,
+            PlaybackEventRailLayout.maximumTimelineTickCount
+        )
+        XCTAssertEqual(clusters.last?.latestTime, 199)
+        XCTAssertTrue(clusters.last?.containsSelection == true)
     }
 
     func testTimelineClusteringSanitizesInvalidGeometryAndTimes() {
@@ -367,5 +335,155 @@ final class PlaybackEventRailLayoutTests: XCTestCase {
         }
         XCTAssertEqual(clusters.first?.x, 9)
         XCTAssertEqual(clusters.last?.x, 110)
+    }
+
+    func testReviewIndexFingerprintIgnoresGeometryAndTracksEveryRailField() throws {
+        let id = try XCTUnwrap(UUID(uuidString: "23CFE711-26B4-4DD5-A7CD-971081780D64"))
+        let original = CoachMark(
+            id: id,
+            kind: .run,
+            start: PitchPoint(x: 2, z: 3),
+            end: PitchPoint(x: 8, z: 12),
+            label: "Overlap",
+            revealTime: 4,
+            hideTime: 9
+        )
+        let geometryOnly = CoachMark(
+            id: id,
+            kind: .run,
+            start: PitchPoint(x: -20, z: -14),
+            end: PitchPoint(x: 18, z: 22),
+            label: "Overlap",
+            revealTime: 4,
+            hideTime: 9
+        )
+        let retimed = CoachMark(
+            id: id,
+            kind: .run,
+            start: geometryOnly.start,
+            end: geometryOnly.end,
+            label: "Overlap",
+            revealTime: 6,
+            hideTime: 11
+        )
+        let relabelled = CoachMark(
+            id: id,
+            kind: .run,
+            start: geometryOnly.start,
+            end: geometryOnly.end,
+            label: "Underlap",
+            revealTime: 4,
+            hideTime: 9
+        )
+        let changedKind = CoachMark(
+            id: id,
+            kind: .pass,
+            start: geometryOnly.start,
+            end: geometryOnly.end,
+            label: "Overlap",
+            revealTime: 4,
+            hideTime: 9
+        )
+        let openEnded = CoachMark(
+            id: id,
+            kind: .run,
+            start: geometryOnly.start,
+            end: geometryOnly.end,
+            label: "Overlap",
+            revealTime: 4,
+            hideTime: nil
+        )
+
+        let fingerprint = PlaybackReviewIndexFingerprint(marks: [original])
+        XCTAssertEqual(
+            fingerprint,
+            PlaybackReviewIndexFingerprint(marks: [geometryOnly])
+        )
+        XCTAssertNotEqual(
+            fingerprint,
+            PlaybackReviewIndexFingerprint(marks: [retimed])
+        )
+        XCTAssertNotEqual(
+            fingerprint,
+            PlaybackReviewIndexFingerprint(marks: [relabelled])
+        )
+        XCTAssertNotEqual(
+            fingerprint,
+            PlaybackReviewIndexFingerprint(marks: [changedKind])
+        )
+        XCTAssertNotEqual(
+            fingerprint,
+            PlaybackReviewIndexFingerprint(marks: [openEnded])
+        )
+        XCTAssertNotEqual(
+            fingerprint,
+            PlaybackReviewIndexFingerprint(marks: [])
+        )
+    }
+
+    func testReviewIndexVersionCacheChangesOnlyWhenMetadataChanges() throws {
+        let firstID = try XCTUnwrap(UUID(uuidString: "A8338E1A-F5E4-4EB5-BC90-55F59D031326"))
+        let secondID = try XCTUnwrap(UUID(uuidString: "88FB9010-D78A-4A9C-B11D-E578E66A95F1"))
+        let first = CoachMark(
+            id: firstID,
+            kind: .run,
+            start: PitchPoint(x: 1, z: 2),
+            end: PitchPoint(x: 4, z: 8),
+            label: "Overlap",
+            revealTime: 3,
+            hideTime: 8
+        )
+        let geometryOnly = CoachMark(
+            id: firstID,
+            kind: .run,
+            start: PitchPoint(x: -8, z: -12),
+            end: PitchPoint(x: 16, z: 20),
+            label: "Overlap",
+            revealTime: 3,
+            hideTime: 8
+        )
+        let second = CoachMark(
+            id: secondID,
+            kind: .space,
+            start: PitchPoint(x: 7, z: 9),
+            end: PitchPoint(x: 10, z: 12),
+            label: "Weak side",
+            revealTime: 12,
+            hideTime: 18
+        )
+
+        var cache = PlaybackReviewIndexVersionCache(marks: [first])
+        let initialVersion = cache.version
+
+        XCTAssertFalse(cache.refresh(marks: [geometryOnly]))
+        XCTAssertEqual(cache.version, initialVersion)
+
+        XCTAssertTrue(cache.refresh(marks: [geometryOnly, second]))
+        let insertedVersion = cache.version
+        XCTAssertNotEqual(insertedVersion, initialVersion)
+
+        XCTAssertFalse(cache.refresh(marks: [geometryOnly, second]))
+        XCTAssertEqual(cache.version, insertedVersion)
+
+        XCTAssertTrue(cache.refresh(marks: [second, geometryOnly]))
+        XCTAssertNotEqual(cache.version, insertedVersion)
+    }
+
+    func testReviewIndexVersionCacheCanSeedScenarioWithoutAdvancingVersion() {
+        let mark = CoachMark(
+            kind: .pass,
+            start: PitchPoint(x: 0, z: 0),
+            end: PitchPoint(x: 4, z: 5),
+            label: "Release",
+            revealTime: 2,
+            hideTime: 7
+        )
+        var cache = PlaybackReviewIndexVersionCache()
+        let initialVersion = cache.version
+
+        cache.seed(marks: [mark])
+        XCTAssertEqual(cache.version, initialVersion)
+        XCTAssertFalse(cache.refresh(marks: [mark]))
+        XCTAssertEqual(cache.version, initialVersion)
     }
 }

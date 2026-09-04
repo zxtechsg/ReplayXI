@@ -908,8 +908,13 @@ private struct PlaybackConsole: View {
     }
 
     private func openAdjacentPlayerPOV(by offset: Int) {
-        store.selectAdjacentPerspective(by: offset)
-        store.openLocalPlayerPOV(store.localPerspectiveID)
+        guard let playerID = PlaybackPerspectiveNavigation.adjacentPlayerID(
+            in: store.selectedScenario.players,
+            activeID: store.activePerspectiveID,
+            localFallbackID: store.localPerspectiveID,
+            offset: offset
+        ) else { return }
+        store.openLocalPlayerPOV(playerID)
     }
 
 }

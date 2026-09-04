@@ -6,6 +6,7 @@ final class CoachMarkEndpointNudgeTests: XCTestCase {
     func testNudgeMovesOnlyRequestedEndpointAndBroadcastsOnce() throws {
         let store = ReplayStore()
         let original = try makeCoachMark(in: store)
+        store.setPlaying(true, broadcast: false)
         var broadcasts: [SharedPlaybackSnapshot] = []
         store.onBroadcastSnapshot = { broadcasts.append($0) }
 
@@ -24,7 +25,9 @@ final class CoachMarkEndpointNudgeTests: XCTestCase {
         XCTAssertEqual(adjusted.label, original.label)
         XCTAssertEqual(adjusted.revealTime, original.revealTime)
         XCTAssertEqual(adjusted.hideTime, original.hideTime)
+        XCTAssertFalse(store.isPlaying)
         XCTAssertEqual(broadcasts.count, 1)
+        XCTAssertFalse(broadcasts[0].isPlaying)
         XCTAssertEqual(
             broadcasts[0].marks.first { $0.id == original.id },
             adjusted
@@ -71,6 +74,7 @@ final class CoachMarkEndpointNudgeTests: XCTestCase {
     func testNudgeCanMoveEndWithoutChangingStart() throws {
         let store = ReplayStore()
         let original = try makeCoachMark(in: store)
+        store.setPlaying(true, broadcast: false)
         var broadcastCount = 0
         store.onBroadcastSnapshot = { _ in broadcastCount += 1 }
 
@@ -85,12 +89,14 @@ final class CoachMarkEndpointNudgeTests: XCTestCase {
         let adjusted = try XCTUnwrap(store.marks.first { $0.id == original.id })
         XCTAssertEqual(adjusted.start, original.start)
         XCTAssertEqual(adjusted.end, PitchPoint(x: 7.75, z: 12.5))
+        XCTAssertFalse(store.isPlaying)
         XCTAssertEqual(broadcastCount, 1)
     }
 
     func testNudgeRejectsInvalidOrUnreadablyShortResultWithoutPublishing() throws {
         let store = ReplayStore()
         let original = try makeCoachMark(in: store)
+        store.setPlaying(true, broadcast: false)
         var broadcastCount = 0
         store.onBroadcastSnapshot = { _ in broadcastCount += 1 }
 
@@ -120,6 +126,7 @@ final class CoachMarkEndpointNudgeTests: XCTestCase {
         )
 
         XCTAssertEqual(store.marks.first { $0.id == original.id }, original)
+        XCTAssertTrue(store.isPlaying)
         XCTAssertEqual(broadcastCount, 0)
     }
 

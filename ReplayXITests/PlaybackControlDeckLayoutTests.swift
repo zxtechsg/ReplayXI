@@ -41,6 +41,8 @@ final class PlaybackControlDeckLayoutTests: XCTestCase {
             )
 
             XCTAssertGreaterThanOrEqual(accessible.attachmentWidth, normal.attachmentWidth)
+            XCTAssertGreaterThanOrEqual(accessible.contentWidth, normal.contentWidth)
+            XCTAssertEqual(accessible.contentWidth, accessible.attachmentWidth - 40)
             XCTAssertGreaterThan(accessible.uniformScale, normal.uniformScale)
             XCTAssertGreaterThan(accessible.verticalOffset, normal.verticalOffset)
             XCTAssertGreaterThan(accessible.forwardOffset, normal.forwardOffset)
