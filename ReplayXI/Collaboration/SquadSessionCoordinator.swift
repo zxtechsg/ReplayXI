@@ -134,6 +134,19 @@ final class SquadSessionCoordinator {
         publish(snapshot: store.makeSnapshot())
     }
 
+    /// Changes player follow state without allowing a private POV inspection to
+    /// replace the participant's assigned role. Rejoining first applies the
+    /// latest cached coach snapshot, then restores the seat from that snapshot
+    /// in the same main-actor transaction. UI follow controls should route
+    /// through this method rather than mutating the store directly.
+    func setFollowingCoach(_ follows: Bool) {
+        guard let store else { return }
+        store.setFollowingCoach(follows)
+        if follows {
+            applyLocalSeatAssignment(force: true)
+        }
+    }
+
     private func configure(_ session: GroupSession<ReplayXIActivity>) async {
         if let existing = groupSession, existing.id != session.id {
             existing.leave()
@@ -564,10 +577,12 @@ final class SquadSessionCoordinator {
         applyLocalSeatAssignment()
     }
 
-    private func applyLocalSeatAssignment() {
-        guard let participantID = localParticipantID,
-              let perspectiveID = store?.participantSeatAssignments[participantID]
+    private func applyLocalSeatAssignment(force: Bool = false) {
+        guard let store,
+              force || (store.followsCoach && !store.isLocallyPaused),
+              let participantID = localParticipantID,
+              let perspectiveID = store.participantSeatAssignments[participantID]
         else { return }
-        store?.setLocalPerspective(perspectiveID, entersLocalReview: false)
+        store.setLocalPerspective(perspectiveID, entersLocalReview: false)
     }
 }

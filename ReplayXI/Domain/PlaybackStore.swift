@@ -1,6 +1,14 @@
 import Foundation
 import Observation
 
+/// Identifies the independently adjustable handle of a two-point spatial
+/// annotation. Keeping this domain-level avoids coupling accessibility actions
+/// to RealityKit entities or a particular control surface.
+enum CoachMarkEndpoint: Sendable {
+    case start
+    case end
+}
+
 @MainActor
 @Observable
 final class ReplayStore {
@@ -259,13 +267,17 @@ final class ReplayStore {
             ? "Player POV ready. Position follows the run; your head controls free look. Green brackets show recorded facing."
             : "\(mode.title) view ready"
         if broadcast, localRole == .coach {
-            isCoachLocalReview = false
             emitSnapshot()
         }
     }
 
     func openLocalPlayerPOV(_ id: String) {
         guard selectedScenario.player(id: id) != nil else { return }
+        // Selecting the POV already being rendered is navigation-only. In a
+        // shared room it must not turn a following player into a local review,
+        // or pause a coach merely because a card/pitch hit resolved to the
+        // current player again.
+        guard viewMode != .firstPerson || activePerspectiveID != id else { return }
         if isCollaborationActive, localRole == .player {
             followsCoach = false
             isLocallyPaused = true
@@ -761,6 +773,87 @@ final class ReplayStore {
             statusMessage = "Annotation position updated"
             emitSnapshot()
         }
+        return true
+    }
+
+    /// Atomically nudges one handle of a coach-created spatial annotation.
+    ///
+    /// This is the store-level entry point for accessibility increment and
+    /// decrement actions. The requested pitch-space delta is clamped at the
+    /// touchlines, while malformed, no-op, and unreadably short results are
+    /// rejected without mutating or publishing state. A successful nudge emits
+    /// exactly one authoritative snapshot.
+    @discardableResult
+    func nudgeCoachMarkEndpoint(
+        id: UUID,
+        endpoint: CoachMarkEndpoint,
+        by delta: PitchPoint
+    ) -> Bool {
+        guard localRole == .coach else { return false }
+        guard delta.x.isFinite, delta.z.isFinite else {
+            statusMessage = "Choose a valid annotation movement"
+            return false
+        }
+
+        let authoredIDs = Set(selectedScenario.coachMarks.map(\.id))
+        guard !authoredIDs.contains(id),
+              let index = marks.firstIndex(where: { $0.id == id }),
+              marks[index].kind.requiresTwoPitchPoints,
+              marks[index].playerID == nil else {
+            statusMessage = authoredIDs.contains(id)
+                ? "Authored match overlay kept"
+                : "That annotation cannot be moved"
+            return false
+        }
+        guard pendingCoachMarkGeometryBaselines[id] == nil else {
+            statusMessage = "Finish the current annotation move first"
+            return false
+        }
+
+        let mark = marks[index]
+        var start = mark.start
+        var end = mark.end
+        switch endpoint {
+        case .start:
+            let proposed = PitchPoint(x: start.x + delta.x, z: start.z + delta.z)
+            guard proposed.x.isFinite, proposed.z.isFinite else {
+                statusMessage = "Choose a valid annotation movement"
+                return false
+            }
+            start = Self.clampedPitchPoint(proposed)
+        case .end:
+            let proposed = PitchPoint(x: end.x + delta.x, z: end.z + delta.z)
+            guard proposed.x.isFinite, proposed.z.isFinite else {
+                statusMessage = "Choose a valid annotation movement"
+                return false
+            }
+            end = Self.clampedPitchPoint(proposed)
+        }
+
+        guard start != mark.start || end != mark.end else {
+            statusMessage = "Annotation did not move"
+            return false
+        }
+        guard CoachMarkGeometryPolicy.accepts(
+            kind: mark.kind,
+            start: start,
+            end: end
+        ) else {
+            statusMessage = "Keep the annotation large enough to read"
+            return false
+        }
+
+        let replacement = markReplacingGeometry(mark, start: start, end: end)
+        guard isValidSharedMark(replacement, for: selectedScenario) else {
+            statusMessage = "Keep the annotation on the pitch"
+            return false
+        }
+
+        marks[index] = replacement
+        statusMessage = endpoint == .start
+            ? "Annotation start adjusted"
+            : "Annotation end adjusted"
+        emitSnapshot()
         return true
     }
 

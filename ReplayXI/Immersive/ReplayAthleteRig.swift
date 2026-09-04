@@ -526,8 +526,11 @@ enum ReplayAthleteFactory {
         }
 
         for (side, x, roll) in [
-            ("left", Float(-0.238), Float(-0.025)),
-            ("right", Float(0.238), Float(0.025)),
+            // Sit the rotation centres just inside the shirt shell. The old
+            // surface-level pivots could reveal daylight between the torso and
+            // a forward-driving sleeve even though both meshes were closed.
+            ("left", Float(-0.218), Float(-0.025)),
+            ("right", Float(0.218), Float(0.025)),
         ] {
             let shoulder = Entity()
             shoulder.name = "\(side)-shoulder"

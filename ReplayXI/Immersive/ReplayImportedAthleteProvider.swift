@@ -4,9 +4,11 @@ import RealityKit
 import UIKit
 
 /// Runtime admission policy for Replay XI's higher-fidelity imported-player
-/// pilot. The pilot is deliberately on in development builds, where it can be
-/// profiled and visually reviewed, and off in distribution builds until the
-/// physical-device gates in `PLAYER_ASSET_SELECTION.md` are complete.
+/// pilot. The current CC0 candidate remains available for explicit profiling,
+/// but it is opt-in even for development builds: simulator QA exposed an
+/// unacceptable shoulder/kit silhouette at the closest Playback distance.
+/// The improved procedural rig is the safe default until a replacement clears
+/// both the visual and physical-device gates in `PLAYER_ASSET_SELECTION.md`.
 enum ReplayImportedAthleteFeatureGate {
     static let environmentKey = "REPLAYXI_IMPORTED_PLAYER_PILOT"
     static let userDefaultsKey = "ReplayXI.ImportedPlayerPilotEnabled"
@@ -15,7 +17,7 @@ enum ReplayImportedAthleteFeatureGate {
         resolvedValue(
             environmentValue: ProcessInfo.processInfo.environment[environmentKey],
             userDefaultsValue: UserDefaults.standard.object(forKey: userDefaultsKey) as? Bool,
-            debugDefault: _isDebugAssertConfiguration()
+            debugDefault: false
         )
     }
 

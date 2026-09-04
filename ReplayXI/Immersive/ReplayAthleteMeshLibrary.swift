@@ -86,10 +86,11 @@ enum ReplayAthleteMeshLibrary {
                     .init(y: -0.025, radiusX: 0.164, radiusZ: 0.104, centreZ: -0.004),
                     .init(y: 0.045, radiusX: 0.190, radiusZ: 0.119, centreZ: -0.003),
                     .init(y: 0.180, radiusX: 0.204, radiusZ: 0.130, centreZ: -0.006),
-                    .init(y: 0.325, radiusX: 0.232, radiusZ: 0.143, centreZ: -0.001),
-                    .init(y: 0.455, radiusX: 0.250, radiusZ: 0.146, centreZ: 0),
-                    .init(y: 0.520, radiusX: 0.213, radiusZ: 0.130, centreZ: 0),
-                    .init(y: 0.555, radiusX: 0.118, radiusZ: 0.093, centreZ: 0),
+                    .init(y: 0.325, radiusX: 0.226, radiusZ: 0.140, centreZ: -0.001),
+                    .init(y: 0.445, radiusX: 0.242, radiusZ: 0.144, centreZ: 0),
+                    .init(y: 0.500, radiusX: 0.222, radiusZ: 0.135, centreZ: 0),
+                    .init(y: 0.540, radiusX: 0.174, radiusZ: 0.113, centreZ: 0),
+                    .init(y: 0.575, radiusX: 0.105, radiusZ: 0.082, centreZ: 0),
                 ],
                 segments: radialSegments,
                 capped: true
@@ -174,9 +175,13 @@ enum ReplayAthleteMeshLibrary {
             generated = try loft(
                 named: "replay-athlete-sleeve-\(lod.rawValue)",
                 profiles: [
-                    .init(y: 0.025, radiusX: 0.096, radiusZ: 0.104, centreZ: 0),
-                    .init(y: -0.060, radiusX: 0.091, radiusZ: 0.098, centreZ: 0),
-                    .init(y: -0.145, radiusX: 0.078, radiusZ: 0.083, centreZ: 0),
+                    // A small rounded crown hides the rotating joint instead
+                    // of exposing the old broad, flat cap beside the torso.
+                    .init(y: 0.075, radiusX: 0.052, radiusZ: 0.058, centreZ: 0),
+                    .init(y: 0.035, radiusX: 0.096, radiusZ: 0.105, centreZ: 0),
+                    .init(y: -0.025, radiusX: 0.108, radiusZ: 0.116, centreZ: 0),
+                    .init(y: -0.095, radiusX: 0.090, radiusZ: 0.097, centreZ: 0),
+                    .init(y: -0.160, radiusX: 0.075, radiusZ: 0.080, centreZ: 0),
                 ],
                 segments: radialSegments,
                 capped: true
@@ -352,7 +357,9 @@ enum ReplayAthleteMeshLibrary {
         var positions: [SIMD3<Float>] = []
         var normals: [SIMD3<Float>] = []
         var indices: [UInt32] = []
-        positions.reserveCapacity((profiles.count * segments) + (capped ? 2 : 0))
+        positions.reserveCapacity(
+            (profiles.count * segments) + (capped ? ((segments * 2) + 2) : 0)
+        )
         normals.reserveCapacity(positions.capacity)
         indices.reserveCapacity(((profiles.count - 1) * segments * 6) + (capped ? segments * 6 : 0))
 
@@ -407,16 +414,46 @@ enum ReplayAthleteMeshLibrary {
             let bottomCentre = UInt32(positions.count)
             positions.append([0, profiles[0].y, profiles[0].centreZ])
             normals.append([0, -1, 0])
+            let bottomRingStart = UInt32(positions.count)
+            for segmentIndex in 0..<segments {
+                let angle = (Float(segmentIndex) / Float(segments)) * (.pi * 2)
+                let profile = profiles[0]
+                positions.append([
+                    cos(angle) * profile.radiusX,
+                    profile.y,
+                    profile.centreZ + (sin(angle) * profile.radiusZ),
+                ])
+                normals.append([0, -1, 0])
+            }
+
             let topProfile = profiles[profiles.count - 1]
             let topCentre = UInt32(positions.count)
             positions.append([0, topProfile.y, topProfile.centreZ])
             normals.append([0, 1, 0])
-            let topRingStart = UInt32((profiles.count - 1) * segments)
+            let topRingStart = UInt32(positions.count)
+            for segmentIndex in 0..<segments {
+                let angle = (Float(segmentIndex) / Float(segments)) * (.pi * 2)
+                positions.append([
+                    cos(angle) * topProfile.radiusX,
+                    topProfile.y,
+                    topProfile.centreZ + (sin(angle) * topProfile.radiusZ),
+                ])
+                normals.append([0, 1, 0])
+            }
+
             for segmentIndex in 0..<segments {
                 let current = UInt32(segmentIndex)
                 let next = UInt32((segmentIndex + 1) % segments)
-                indices.append(contentsOf: [bottomCentre, current, next])
-                indices.append(contentsOf: [topCentre, topRingStart + next, topRingStart + current])
+                indices.append(contentsOf: [
+                    bottomCentre,
+                    bottomRingStart + current,
+                    bottomRingStart + next,
+                ])
+                indices.append(contentsOf: [
+                    topCentre,
+                    topRingStart + next,
+                    topRingStart + current,
+                ])
             }
         }
 

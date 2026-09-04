@@ -7,11 +7,25 @@ struct FootballImmersiveView: View {
     @Environment(SharedSpaceAnchorCoordinator.self) private var sharedSpace
     @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @AppStorage("ReplayXI.PlaybackControlDeckPreset") private var controlDeckPresetRawValue =
+        PlaybackControlDeckPreset.standard.rawValue
     @State private var selectedAnnotationID: UUID?
     @State private var draggedAnnotationTarget: AnnotationSceneTarget?
     @State private var annotationStroke: PlaybackAnnotationStroke?
     @GestureState private var spatialDragIsActive = false
     @State private var showsDecisionStrip = false
+
+    private var controlDeckPreset: PlaybackControlDeckPreset {
+        PlaybackControlDeckPreset(rawValue: controlDeckPresetRawValue) ?? .standard
+    }
+
+    private var controlDeckLayout: PlaybackControlDeckLayout {
+        PlaybackControlDeckLayout.resolve(
+            preset: controlDeckPreset,
+            usesAccessibilityText: dynamicTypeSize.isAccessibilitySize
+        )
+    }
 
     var body: some View {
         RealityView { content, attachments in
@@ -112,11 +126,12 @@ struct FootballImmersiveView: View {
                 ImmersiveControlDeck(
                     selectedAnnotationID: $selectedAnnotationID,
                     showsDecisionStrip: $showsDecisionStrip,
+                    controlDeckPresetRawValue: $controlDeckPresetRawValue,
                     isPinchDrawing: annotationStroke != nil,
                     isPinchDrawingReady: annotationStroke?.isReadyToCommit == true,
                     exit: exitRoom
                 )
-                    .frame(width: 1240)
+                    .frame(width: controlDeckLayout.attachmentWidth)
             }
 
             if store.selectedScenario.kind == .perspectiveMatrix {
@@ -236,7 +251,11 @@ struct FootballImmersiveView: View {
         // `coach-console` is local to the head anchor. The low, forward offset
         // preserves an unobstructed central view and keeps gaze/pinch targets in
         // a comfortable hand-reach cone as the wearer changes POV or turns.
-        attachments.entity(for: "coach-console")?.position = [0, -0.50, -1.22]
+        if let console = attachments.entity(for: "coach-console") {
+            let layout = controlDeckLayout
+            console.position = [0, layout.verticalOffset, layout.forwardOffset]
+            console.scale = SIMD3<Float>(repeating: layout.uniformScale)
+        }
         attachments.entity(for: "perspective-matrix")?.position = [0.92, 1.30, -1.55]
         attachments.entity(for: "position-status")?.position = [-1.00, 1.30, -1.30]
     }
@@ -757,10 +776,13 @@ private struct ImmersiveControlDeck: View {
     @State private var eventPage = 0
     @State private var orderedReviewMarks: [CoachMark] = []
     @State private var indexedReviewEvents: [PlaybackReviewEvent] = []
+    @State private var timelineTickClusters: [PlaybackEventRailLayout.TimelineTickCluster] = []
+    @State private var timelineTrackWidth: CGFloat = 0
     @State private var timelineScrubState: PlaybackTimelineScrub.GestureState?
     @State private var isClearAnnotationsPending = false
     @Binding var selectedAnnotationID: UUID?
     @Binding var showsDecisionStrip: Bool
+    @Binding var controlDeckPresetRawValue: String
 
     let isPinchDrawing: Bool
     let isPinchDrawingReady: Bool
@@ -905,64 +927,76 @@ private struct ImmersiveControlDeck: View {
                         .foregroundStyle(ReplayTheme.signal)
                         .frame(width: 58, alignment: .leading)
 
-                Button {
-                    openAdjacentPlayerPOV(by: -1)
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.headline.weight(.black))
-                        .frame(width: 34, height: 52)
-                }
-                .buttonStyle(.bordered)
-                .disabled(store.isDrawing)
-                .accessibilityLabel("Previous player")
+                    Button {
+                        openAdjacentPlayerPOV(by: -1)
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.headline.weight(.black))
+                            .frame(width: 34, height: 52)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(store.isDrawing)
+                    .accessibilityLabel("Previous player")
 
-                Button {
-                    showsPlayerGrid = true
-                    showsEventStrip = false
-                    showsDecisionStrip = false
-                    selectedAnnotationID = nil
-                } label: {
-                    if let player = store.activePerspective {
-                        Label(
-                            "\(player.team.compactTitle) · #\(player.shirtNumber) \(player.positionCode)",
-                            systemImage: "person.crop.rectangle.stack"
-                        )
-                        .font(.subheadline.weight(.black))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.76)
-                        .frame(width: 236, height: 52)
-                    } else {
-                        Label("Choose player", systemImage: "person.crop.rectangle.stack")
+                    Button {
+                        showsPlayerGrid = true
+                        showsEventStrip = false
+                        showsDecisionStrip = false
+                        selectedAnnotationID = nil
+                    } label: {
+                        if let player = store.activePerspective {
+                            Label(
+                                "\(player.team.compactTitle) · #\(player.shirtNumber) \(player.positionCode)",
+                                systemImage: "person.crop.rectangle.stack"
+                            )
+                            .font(.subheadline.weight(.black))
                             .lineLimit(1)
                             .minimumScaleFactor(0.76)
                             .frame(width: 236, height: 52)
+                        } else {
+                            Label("Choose player", systemImage: "person.crop.rectangle.stack")
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.76)
+                                .frame(width: 236, height: 52)
+                        }
                     }
-                }
-                .buttonStyle(.bordered)
-                .disabled(store.isDrawing)
-                .accessibilityLabel(
-                    store.activePerspective.map {
-                        "Focused player, number \($0.shirtNumber), \($0.role)"
-                    } ?? "Choose focused player"
-                )
-                .accessibilityHint("Opens direct point-of-view targets for all 22 players")
+                    .buttonStyle(.bordered)
+                    .disabled(store.isDrawing)
+                    .accessibilityLabel(
+                        store.activePerspective.map {
+                            "Focused player, number \($0.shirtNumber), \($0.role)"
+                        } ?? "Choose focused player"
+                    )
+                    .accessibilityHint(
+                        squadSession.state == .joined
+                            ? "Opens all 22 players for a private local selection"
+                            : "Opens direct point-of-view targets for all 22 players"
+                    )
 
-                if store.viewMode == .firstPerson {
-                    povStatusChip
-                }
+                    Button {
+                        openAdjacentPlayerPOV(by: 1)
+                    } label: {
+                        Image(systemName: "chevron.right")
+                            .font(.headline.weight(.black))
+                            .frame(width: 34, height: 52)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(store.isDrawing)
+                    .accessibilityLabel("Next player")
 
-                Button {
-                    openAdjacentPlayerPOV(by: 1)
-                } label: {
-                    Image(systemName: "chevron.right")
-                        .font(.headline.weight(.black))
-                        .frame(width: 34, height: 52)
-                }
-                .buttonStyle(.bordered)
-                .disabled(store.isDrawing)
-                .accessibilityLabel("Next player")
+                    if squadSession.state == .joined {
+                        povSharingStatusChip
+                    }
 
-                Spacer(minLength: 4)
+                    if store.viewMode == .firstPerson {
+                        povStatusChip
+                    }
+
+                    Spacer(minLength: 4)
+
+                    if store.localRole == .coach, squadSession.state == .joined {
+                        coachPOVShareControls
+                    }
 
                     if hasRoomActions {
                         roomActionsMenu
@@ -1032,6 +1066,7 @@ private struct ImmersiveControlDeck: View {
             if selectedID != nil {
                 showsPlayerGrid = false
             }
+            rebuildTimelineTickClusters(selectionID: selectedID)
         }
         .onChange(of: store.playhead) { _, playhead in
             guard let selectedAnnotationID,
@@ -1045,9 +1080,13 @@ private struct ImmersiveControlDeck: View {
             self.selectedAnnotationID = nil
         }
         .task {
+            PlaybackEventRailLayout.prepareTimelineTickClusters(&timelineTickClusters)
             rebuildReviewIndex()
             #if DEBUG
             let arguments = ProcessInfo.processInfo.arguments
+            if arguments.contains("--replayxi-large-controls") {
+                controlDeckPresetRawValue = PlaybackControlDeckPreset.large.rawValue
+            }
             if arguments.contains("--replayxi-events") {
                 showsEventStrip = true
             }
@@ -1120,6 +1159,20 @@ private struct ImmersiveControlDeck: View {
                     .disabled(store.isDrawing)
                 }
             }
+
+            Section("Control deck") {
+                ForEach(PlaybackControlDeckPreset.allCases, id: \.self) { preset in
+                    Button {
+                        controlDeckPresetRawValue = preset.rawValue
+                    } label: {
+                        if controlDeckPreset == preset {
+                            Label(preset.title, systemImage: "checkmark")
+                        } else {
+                            Label(preset.title, systemImage: preset.systemImage)
+                        }
+                    }
+                }
+            }
         } label: {
             Label(
                 "\(rateLabel(store.playbackRate)) · \(viewLabel(for: store.viewMode))",
@@ -1136,61 +1189,43 @@ private struct ImmersiveControlDeck: View {
         .accessibilityValue(
             "\(rateLabel(store.playbackRate)), \(viewLabel(for: store.viewMode))"
         )
-        .accessibilityHint("Changes playback speed or camera view")
+        .accessibilityHint("Changes playback speed, camera view, or local control size and reach")
+    }
+
+    private var controlDeckPreset: PlaybackControlDeckPreset {
+        PlaybackControlDeckPreset(rawValue: controlDeckPresetRawValue) ?? .standard
     }
 
     private var hasRoomActions: Bool {
         store.localRole == .coach
-            && (store.selectedScenario.kind == .passingChannels
-                || squadSession.state == .joined)
+            && store.selectedScenario.kind == .passingChannels
     }
 
     private var roomActionsMenu: some View {
         Menu {
-            if store.selectedScenario.kind == .passingChannels {
-                Button {
-                    store.showsLaneLens.toggle()
-                    squadSession.broadcastCurrentState()
-                } label: {
-                    Label(
-                        store.showsLaneLens ? "Hide passing lanes" : "Show passing lanes",
-                        systemImage: store.showsLaneLens ? "eye.slash" : "arrow.triangle.branch"
-                    )
-                }
-            }
-
-            if squadSession.state == .joined {
-                if !store.coachLockEnabled
-                    || store.coachFocusPerspectiveID != store.localPerspectiveID {
-                    Button {
-                        store.broadcastPerspective(store.localPerspectiveID)
-                    } label: {
-                        Label(sharePerspectiveLabel, systemImage: "dot.radiowaves.left.and.right")
-                    }
-                }
-
-                if store.coachLockEnabled {
-                    Button {
-                        store.releaseSquad()
-                    } label: {
-                        Label("End POV share", systemImage: "person.3.fill")
-                    }
-                }
+            Button {
+                store.showsLaneLens.toggle()
+                squadSession.broadcastCurrentState()
+            } label: {
+                Label(
+                    store.showsLaneLens ? "Hide passing lanes" : "Show passing lanes",
+                    systemImage: store.showsLaneLens ? "eye.slash" : "arrow.triangle.branch"
+                )
             }
         } label: {
-            Label("Room", systemImage: "person.3.fill")
+            Label("Lanes", systemImage: "arrow.triangle.branch")
                 .font(.subheadline.weight(.black))
                 .lineLimit(1)
                 .frame(width: 104, height: 52)
         }
         .buttonStyle(.bordered)
         .tint(
-            store.coachLockEnabled || store.showsLaneLens
+            store.showsLaneLens
                 ? ReplayTheme.orange
                 : .white.opacity(0.48)
         )
-        .accessibilityLabel("Room actions")
-        .accessibilityHint("Opens passing-lane and squad point-of-view actions")
+        .accessibilityLabel("Passing lane actions")
+        .accessibilityHint("Shows or hides the descriptive passing lanes")
     }
 
     private func annotationEditMenu(compact: Bool) -> some View {
@@ -1324,9 +1359,11 @@ private struct ImmersiveControlDeck: View {
 
                 VStack(alignment: .leading, spacing: 1) {
                     Eyebrow(text: "22 PLAYER POV", color: ReplayTheme.signal)
-                    Text("PINCH A SHIRT")
+                    Text(playerGridInstruction)
                         .font(.caption2.monospaced().weight(.black))
                         .foregroundStyle(.white.opacity(0.68))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
                 }
 
                 Spacer(minLength: 8)
@@ -1416,8 +1453,25 @@ private struct ImmersiveControlDeck: View {
         .accessibilityLabel(
             "\(player.team.shortTitle), number \(player.shirtNumber), \(player.role)"
         )
-        .accessibilityHint("Opens this player's free-look point of view")
+        .accessibilityHint(playerPOVAccessibilityHint)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private var playerGridInstruction: String {
+        guard squadSession.state == .joined else { return "PINCH A SHIRT" }
+        return store.localRole == .coach
+            ? "PICK LOCAL · SHARE AFTER"
+            : "PRIVATE COMFORT REVIEW"
+    }
+
+    private var playerPOVAccessibilityHint: String {
+        guard squadSession.state == .joined else {
+            return "Opens this player's free-look point of view"
+        }
+        if store.localRole == .coach {
+            return "Selects this point of view locally. Use Take Squad afterward to share it."
+        }
+        return "Pauses coach follow and opens this player's private free-look point of view."
     }
 
     private func teamAccent(_ team: FootballTeam) -> Color {
@@ -1524,6 +1578,55 @@ private struct ImmersiveControlDeck: View {
         )
     }
 
+    private var povSharingStatusChip: some View {
+        StatusPill(
+            text: povSharingStatusText,
+            systemImage: povSharingStatusSystemImage,
+            color: povSharingStatusColor
+        )
+        .accessibilityLabel("Point-of-view scope")
+        .accessibilityValue(povSharingStatusAccessibilityValue)
+    }
+
+    private var coachPOVShareControls: some View {
+        HStack(spacing: 7) {
+            if store.coachLockEnabled {
+                Button {
+                    store.releaseSquad()
+                } label: {
+                    Label("END SQUAD", systemImage: "person.3.sequence.fill")
+                        .font(.subheadline.weight(.black))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.74)
+                        .frame(width: 128, height: 52)
+                }
+                .buttonStyle(.bordered)
+                .tint(ReplayTheme.orange)
+                .accessibilityLabel("End squad point-of-view share")
+                .accessibilityHint("Returns every participant to their assigned perspective")
+            }
+
+            if !isCurrentCoachPOVShared {
+                Button {
+                    store.broadcastPerspective(store.localPerspectiveID)
+                } label: {
+                    Label(coachPOVShareButtonLabel, systemImage: "dot.radiowaves.left.and.right")
+                        .font(.subheadline.weight(.black))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.74)
+                        .frame(width: 142, height: 52)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(ReplayTheme.cyan)
+                .foregroundStyle(.black)
+                .accessibilityLabel("Take squad to selected player point of view")
+                .accessibilityHint(
+                    "Pauses playback and explicitly changes every participant's perspective"
+                )
+            }
+        }
+    }
+
     private func annotationToolButton(_ kind: CoachMarkKind, label: String) -> some View {
         let isSelected = store.isDrawing && store.selectedTool == kind
         return Button {
@@ -1584,6 +1687,38 @@ private struct ImmersiveControlDeck: View {
             eventPage,
             eventCount: events.count
         )
+        rebuildTimelineTickClusters(events: events)
+    }
+
+    private func rebuildTimelineTickClusters(
+        events: [PlaybackReviewEvent]? = nil,
+        selectionID: UUID? = nil
+    ) {
+        let events = events ?? indexedReviewEvents
+        let selectedID = selectionID ?? selectedAnnotationID
+        PlaybackEventRailLayout.clusterTimelineTicks(
+            events,
+            duration: store.selectedScenario.duration,
+            railWidth: timelineTrackWidth,
+            leadingInset: 9,
+            into: &timelineTickClusters,
+            time: { $0.time },
+            kind: { event in
+                if case .cue = event { return .cue }
+                return .annotation
+            },
+            isSelected: { event in
+                guard case .mark(let mark) = event else { return false }
+                return mark.id == selectedID
+            }
+        )
+    }
+
+    private func updateTimelineTrackWidth(_ width: CGFloat) {
+        guard width.isFinite, width > 0,
+              abs(width - timelineTrackWidth) >= 0.5 else { return }
+        timelineTrackWidth = width
+        rebuildTimelineTickClusters()
     }
 
     private var eventPageCount: Int {
@@ -1657,31 +1792,25 @@ private struct ImmersiveControlDeck: View {
                     .frame(width: max(playheadX - trackInset, 1), height: 7)
                     .position(x: trackInset + max(playheadX - trackInset, 1) / 2, y: 22)
 
-                ForEach(orderedMarks) { mark in
-                    let markProgress = CGFloat(min(max(mark.revealTime / duration, 0), 1))
-                    let isAtPlayhead = abs(mark.revealTime - store.playhead) < 0.16
-                    let isSelected = mark.id == selectedAnnotationID
+                ForEach(timelineTickClusters, id: \.binIndex) { cluster in
+                    let isAtPlayhead = store.playhead >= cluster.earliestTime - 0.16
+                        && store.playhead <= cluster.latestTime + 0.16
+                    let isSelected = cluster.containsSelection
+                    let isAnnotation = cluster.dominantKind == .annotation
                     Capsule()
-                        .fill(annotationColor(for: mark.kind))
+                        .fill(
+                            isSelected
+                                ? ReplayTheme.signal
+                                : (isAnnotation ? ReplayTheme.orange : .white.opacity(0.56))
+                        )
                         .frame(
-                            width: isSelected ? 8 : (isAtPlayhead ? 7 : 4),
+                            width: isSelected
+                                ? 8
+                                : (isAtPlayhead ? 7 : (cluster.eventCount > 1 ? 5 : 3)),
                             height: isSelected ? 22 : (isAtPlayhead ? 19 : 14)
                         )
-                        .position(
-                            x: trackInset + trackWidth * markProgress,
-                            y: 22
-                        )
-                }
-
-                ForEach(store.selectedScenario.moments) { cue in
-                    let cueProgress = CGFloat(min(max(cue.time / duration, 0), 1))
-                    Capsule()
-                        .fill(.white.opacity(0.56))
-                        .frame(width: 3, height: 13)
-                        .position(
-                            x: trackInset + trackWidth * cueProgress,
-                            y: 22
-                        )
+                        .position(x: cluster.x, y: 22)
+                        .accessibilityHidden(true)
                 }
 
                 Circle()
@@ -1741,6 +1870,12 @@ private struct ImmersiveControlDeck: View {
                     break
                 }
             }
+            .onAppear {
+                updateTimelineTrackWidth(trackWidth)
+            }
+            .onChange(of: trackWidth) { _, width in
+                updateTimelineTrackWidth(width)
+            }
         }
         .frame(minWidth: 230, maxWidth: .infinity, minHeight: 58, maxHeight: 58)
         .disabled(timelineControlsAreDisabled)
@@ -1757,7 +1892,8 @@ private struct ImmersiveControlDeck: View {
             if opensEvents {
                 eventPage = PlaybackEventRailLayout.page(
                     nearestTo: store.playhead,
-                    eventTimes: reviewEvents.map(\.time)
+                    events: reviewEvents,
+                    time: { $0.time }
                 )
             }
         } label: {
@@ -2031,12 +2167,7 @@ private struct ImmersiveControlDeck: View {
 
                 if store.localRole == .coach, isCoachCreated(mark) {
                     if mark.kind != .playerLabel {
-                        StatusPill(
-                            text: "Drag ends",
-                            systemImage: "hand.draw",
-                            color: annotationColor(for: mark.kind)
-                        )
-                        .accessibilityHint("Pinch and drag either glowing endpoint on the pitch")
+                        annotationGeometryMenu(mark)
                     }
 
                     Menu {
@@ -2132,6 +2263,96 @@ private struct ImmersiveControlDeck: View {
         .overlay {
             RoundedRectangle(cornerRadius: 17)
                 .stroke(annotationColor(for: mark.kind).opacity(0.28), lineWidth: 1)
+        }
+    }
+
+    private func annotationGeometryMenu(_ mark: CoachMark) -> some View {
+        Menu {
+            Section("Start point · 0.5 metre") {
+                Button("Left") {
+                    nudgeAnnotation(mark, endpoint: .start, x: -0.5, z: 0)
+                }
+                Button("Right") {
+                    nudgeAnnotation(mark, endpoint: .start, x: 0.5, z: 0)
+                }
+                Button("Upfield") {
+                    nudgeAnnotation(mark, endpoint: .start, x: 0, z: 0.5)
+                }
+                Button("Back") {
+                    nudgeAnnotation(mark, endpoint: .start, x: 0, z: -0.5)
+                }
+            }
+
+            Section("Arrow point · 0.5 metre") {
+                Button("Left") {
+                    nudgeAnnotation(mark, endpoint: .end, x: -0.5, z: 0)
+                }
+                Button("Right") {
+                    nudgeAnnotation(mark, endpoint: .end, x: 0.5, z: 0)
+                }
+                Button("Upfield") {
+                    nudgeAnnotation(mark, endpoint: .end, x: 0, z: 0.5)
+                }
+                Button("Back") {
+                    nudgeAnnotation(mark, endpoint: .end, x: 0, z: -0.5)
+                }
+            }
+        } label: {
+            Label("Adjust", systemImage: "arrow.up.and.down.and.arrow.left.and.right")
+                .font(.subheadline.weight(.black))
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+                .frame(minWidth: 112, minHeight: 48)
+        }
+        .buttonStyle(.bordered)
+        .tint(annotationColor(for: mark.kind))
+        .accessibilityLabel("Adjust annotation endpoints")
+        .accessibilityHint(
+            "Pinch and drag either glowing pitch handle, or choose a precise half-metre move"
+        )
+        .accessibilityAction(named: "Move start left") {
+            nudgeAnnotation(mark, endpoint: .start, x: -0.5, z: 0)
+        }
+        .accessibilityAction(named: "Move start right") {
+            nudgeAnnotation(mark, endpoint: .start, x: 0.5, z: 0)
+        }
+        .accessibilityAction(named: "Move start upfield") {
+            nudgeAnnotation(mark, endpoint: .start, x: 0, z: 0.5)
+        }
+        .accessibilityAction(named: "Move start back") {
+            nudgeAnnotation(mark, endpoint: .start, x: 0, z: -0.5)
+        }
+        .accessibilityAction(named: "Move arrow point left") {
+            nudgeAnnotation(mark, endpoint: .end, x: -0.5, z: 0)
+        }
+        .accessibilityAction(named: "Move arrow point right") {
+            nudgeAnnotation(mark, endpoint: .end, x: 0.5, z: 0)
+        }
+        .accessibilityAction(named: "Move arrow point upfield") {
+            nudgeAnnotation(mark, endpoint: .end, x: 0, z: 0.5)
+        }
+        .accessibilityAction(named: "Move arrow point back") {
+            nudgeAnnotation(mark, endpoint: .end, x: 0, z: -0.5)
+        }
+    }
+
+    private func nudgeAnnotation(
+        _ mark: CoachMark,
+        endpoint: CoachMarkEndpoint,
+        x: Float,
+        z: Float
+    ) {
+        store.setPlaying(false, broadcast: false)
+        guard store.nudgeCoachMarkEndpoint(
+            id: mark.id,
+            endpoint: endpoint,
+            by: PitchPoint(x: x, z: z)
+        ) else { return }
+        switch endpoint {
+        case .start:
+            annotationConfirmation = "START MOVED · 0.5 M"
+        case .end:
+            annotationConfirmation = "ARROW POINT MOVED · 0.5 M"
         }
     }
 
@@ -2304,16 +2525,86 @@ private struct ImmersiveControlDeck: View {
         store.marks.contains(where: isCoachCreated)
     }
 
-    private var sharePerspectiveLabel: String {
+    private var isCurrentCoachPOVShared: Bool {
+        store.coachLockEnabled
+            && store.coachFocusPerspectiveID == store.localPerspectiveID
+            && !store.isCoachLocalReview
+    }
+
+    private var coachPOVShareButtonLabel: String {
+        guard !isCurrentCoachPOVShared else { return "END SHARE" }
         guard let player = store.selectedScenario.player(id: store.localPerspectiveID) else {
-            return "Share player POV"
+            return "SHARE POV"
         }
-        return "Share #\(player.shirtNumber) POV"
+        let side = player.team == .home ? "HOME" : "OPP"
+        return "SHARE · \(side) #\(player.shirtNumber)"
+    }
+
+    private var sharedCoachPlayer: PlayerTrack? {
+        guard let playerID = store.coachFocusPerspectiveID else { return nil }
+        return store.selectedScenario.player(id: playerID)
+    }
+
+    private var sharedCoachPlayerCompactLabel: String? {
+        guard let player = sharedCoachPlayer else { return nil }
+        let side = player.team == .home ? "HOME" : "OPP"
+        return "\(side) #\(player.shirtNumber) \(player.positionCode)"
+    }
+
+    private var povSharingStatusText: String {
+        if store.localRole == .coach {
+            if store.isCoachLocalReview {
+                return sharedCoachPlayerCompactLabel.map { "LOCAL · SQUAD \($0)" } ?? "LOCAL ONLY"
+            }
+            return store.coachLockEnabled
+                ? sharedCoachPlayerCompactLabel.map { "SQUAD · \($0)" } ?? "SHARED WITH SQUAD"
+                : "LOCAL ONLY"
+        }
+        if store.followsCoach, store.coachLockEnabled {
+            return "FOLLOWING COACH"
+        }
+        return store.isLocallyPaused ? "LOCAL REVIEW" : "OWN POV"
+    }
+
+    private var povSharingStatusSystemImage: String {
+        if store.localRole == .coach, store.coachLockEnabled, !store.isCoachLocalReview {
+            return "dot.radiowaves.left.and.right"
+        }
+        if store.localRole == .player, store.followsCoach, store.coachLockEnabled {
+            return "person.3.fill"
+        }
+        return "person.crop.circle"
+    }
+
+    private var povSharingStatusColor: Color {
+        if store.localRole == .coach, store.coachLockEnabled, !store.isCoachLocalReview {
+            return ReplayTheme.orange
+        }
+        if store.localRole == .player, store.followsCoach, store.coachLockEnabled {
+            return ReplayTheme.orange
+        }
+        return ReplayTheme.cyan
+    }
+
+    private var povSharingStatusAccessibilityValue: String {
+        if store.localRole == .coach, store.isCoachLocalReview, let sharedCoachPlayer {
+            return "Private local review. The squad remains on \(sharedCoachPlayer.team.shortTitle), number \(sharedCoachPlayer.shirtNumber), \(sharedCoachPlayer.role)."
+        }
+        if store.localRole == .coach, store.coachLockEnabled, let sharedCoachPlayer {
+            return "\(sharedCoachPlayer.team.shortTitle), number \(sharedCoachPlayer.shirtNumber), \(sharedCoachPlayer.role), is shared with the squad."
+        }
+        if store.localRole == .coach {
+            return "The selected point of view is local only."
+        }
+        if store.followsCoach, store.coachLockEnabled {
+            return "Following the coach's shared point of view."
+        }
+        return "Private local review."
     }
 
     private func handlePrimaryPlaybackAction() {
         if isJoinedPlayer {
-            store.setFollowingCoach(store.isLocallyPaused)
+            squadSession.setFollowingCoach(store.isLocallyPaused)
         } else {
             store.togglePlayback()
         }
@@ -2516,9 +2807,11 @@ private struct PerspectiveMatrixPanel: View {
                             time: store.playhead,
                             selected: store.activePerspectiveID == id
                         ) {
-                            store.setPlaying(false)
-                            store.setLocalPerspective(id)
-                            store.setViewMode(.firstPerson)
+                            // Card inspection follows the same private/local
+                            // contract as pinching a player on the pitch. Only
+                            // the explicit Take Squad action may replace the
+                            // room's published perspective.
+                            store.openLocalPlayerPOV(id)
                         }
                     }
                 }
@@ -2843,7 +3136,7 @@ private struct PositioningPanel: View {
                 Spacer()
                 if store.isLocallyPaused {
                     Button("Resume coach") {
-                        store.setFollowingCoach(true)
+                        squadSession.setFollowingCoach(true)
                     }
                     .buttonStyle(.bordered)
                 }

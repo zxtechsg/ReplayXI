@@ -117,9 +117,11 @@ struct ReplayDashboardView: View {
                     for: store.scenarios.flatMap(\.players),
                     lods: [.near, .far]
                 )
-                // Development builds may admit one hash-locked CC0 skinned
-                // athlete. This pilot is fail-soft and never blocks the room:
-                // release builds and failed audits retain procedural players.
+                // An explicit developer opt-in may admit one hash-locked CC0
+                // skinned athlete for profiling. The pilot is fail-soft and
+                // never blocks the room; normal demos retain the cleaner,
+                // deterministic procedural squad until a replacement passes
+                // the close-range visual and physical-device gates.
                 _ = try? ReplayImportedAthleteProvider.prewarm()
             } catch {
                 store.isOpeningImmersive = false
@@ -641,7 +643,7 @@ private struct DashboardTransport: View {
 
                 Button {
                     if isJoinedPlayer {
-                        store.setFollowingCoach(store.isLocallyPaused)
+                        squadSession.setFollowingCoach(store.isLocallyPaused)
                     } else {
                         store.togglePlayback()
                     }

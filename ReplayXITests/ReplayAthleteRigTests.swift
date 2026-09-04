@@ -80,6 +80,36 @@ final class ReplayAthleteRigTests: XCTestCase {
         XCTAssertNotEqual(homeRig.configuration.kit.shirt, awayRig.configuration.kit.shirt)
     }
 
+    func testNearShoulderUsesRoundedHardCappedSleeveWithInsetPivots() throws {
+        let torso = try ReplayAthleteMeshLibrary.mesh(for: .torso, lod: .near)
+        let sleeve = try ReplayAthleteMeshLibrary.mesh(for: .sleeve, lod: .near)
+
+        // Eight/five authored rings plus two separate cap rings and centres.
+        // Separate cap vertices preserve flat end normals instead of smearing
+        // side normals into dark radial wedges at the animated shoulder seam.
+        XCTAssertEqual(torso.metrics.vertices, 142)
+        XCTAssertEqual(torso.metrics.triangles, 224)
+        XCTAssertEqual(sleeve.metrics.vertices, 100)
+        XCTAssertEqual(sleeve.metrics.triangles, 140)
+
+        let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay))
+        let player = try XCTUnwrap(scenario.player(id: "red-lb"))
+        let rig = try ReplayAthleteFactory.make(for: player, lod: .near)
+        XCTAssertEqual(rig.joints[.leftShoulder].position.x, -0.218, accuracy: 0.000_1)
+        XCTAssertEqual(rig.joints[.rightShoulder].position.x, 0.218, accuracy: 0.000_1)
+
+        let torsoEntity = try XCTUnwrap(rig.root.findEntity(named: "torso"))
+        let leftSleeve = try XCTUnwrap(rig.root.findEntity(named: "left-sleeve"))
+        let torsoBounds = torsoEntity.visualBounds(relativeTo: rig.root)
+        let sleeveBounds = leftSleeve.visualBounds(relativeTo: rig.root)
+        let horizontalOverlap = min(torsoBounds.max.x, sleeveBounds.max.x)
+            - max(torsoBounds.min.x, sleeveBounds.min.x)
+        let verticalOverlap = min(torsoBounds.max.y, sleeveBounds.max.y)
+            - max(torsoBounds.min.y, sleeveBounds.min.y)
+        XCTAssertGreaterThan(horizontalOverlap, 0.10)
+        XCTAssertGreaterThan(verticalOverlap, 0.18)
+    }
+
     func testLODPolicyUsesHysteresisAndSanitizesDistances() {
         let policy = ReplayAthleteLODPolicy(nearDistance: 8, farDistance: 23, hysteresis: 1.5)
         XCTAssertEqual(policy.level(forDistance: 5), .near)
@@ -198,6 +228,56 @@ final class ReplayAthleteRigTests: XCTestCase {
             0.08,
             "A cut needs a planted lateral bank rather than straight-run posing"
         )
+    }
+
+    func testFootfallTimingAddsWalkSupportAndSprintFlightWithoutFrameHistory() {
+        let flightPhase = Float.pi * 2 * 0.30
+        let oppositePhase = flightPhase + .pi
+
+        let walkingLead = ReplayAthleteMotion.footfall(for: .walk, phase: flightPhase)
+        let walkingTrail = ReplayAthleteMotion.footfall(for: .walk, phase: oppositePhase)
+        let sprintingLead = ReplayAthleteMotion.footfall(for: .sprint, phase: flightPhase)
+        let sprintingTrail = ReplayAthleteMotion.footfall(for: .sprint, phase: oppositePhase)
+
+        XCTAssertTrue(
+            walkingLead.isStance || walkingTrail.isStance,
+            "A walking athlete should retain ground support at this phase"
+        )
+        XCTAssertFalse(
+            sprintingLead.isStance || sprintingTrail.isStance,
+            "A sprint needs a brief flight phase instead of a marching walk cycle"
+        )
+
+        for state in PlayerLocomotionState.allCases {
+            for phase in [Float.nan, -Float.infinity, -13.7, 0, 29.4] {
+                let first = ReplayAthleteMotion.footfall(for: state, phase: phase)
+                let soughtAgain = ReplayAthleteMotion.footfall(for: state, phase: phase)
+                XCTAssertEqual(first, soughtAgain)
+                XCTAssertTrue(first.stride.isFinite)
+                XCTAssertTrue(first.swingLift.isFinite)
+                XCTAssertTrue(first.stanceCompression.isFinite)
+                XCTAssertTrue(first.footPitch.isFinite)
+            }
+        }
+    }
+
+    func testSprintFootfallRollsFromHeelStrikeThroughToeOffIntoTuckedRecovery() {
+        let turn = Float.pi * 2
+        let touchdown = ReplayAthleteMotion.footfall(for: .sprint, phase: turn * 0.851)
+        let lateStance = ReplayAthleteMotion.footfall(for: .sprint, phase: turn * 0.21)
+        let midRecovery = ReplayAthleteMotion.footfall(for: .sprint, phase: turn * 0.55)
+
+        XCTAssertTrue(touchdown.isStance)
+        XCTAssertLessThan(touchdown.stride, -0.95)
+        XCTAssertLessThan(touchdown.footPitch, -0.10, "heel strike should leave the toe lifted")
+
+        XCTAssertTrue(lateStance.isStance)
+        XCTAssertGreaterThan(lateStance.stride, 0.90)
+        XCTAssertGreaterThan(lateStance.footPitch, 0.15, "toe-off should roll through the forefoot")
+
+        XCTAssertFalse(midRecovery.isStance)
+        XCTAssertGreaterThan(midRecovery.swingLift, 0.95, "recovery leg should fold quickly for clearance")
+        XCTAssertLessThan(midRecovery.footPitch, -0.10, "swing boot should dorsiflex for turf clearance")
     }
 
     func testNearRigGroundingKeepsAtLeastOneBootOnOrAboveTurfAcrossGait() throws {

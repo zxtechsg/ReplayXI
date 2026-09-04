@@ -25,6 +25,22 @@ struct ReplayAthleteLocomotionPose: Sendable {
     let rightWristOrientation: simd_quatf
 }
 
+/// A compact, allocation-free sample of one boot's gait cycle.  Keeping this
+/// separate from the final joint pose makes contact timing explicit: walking
+/// retains an overlapping support phase, while sprinting has a brief flight
+/// phase and a faster recovery leg.
+struct ReplayAthleteFootfall: Equatable, Sendable {
+    /// -1 is the forward reach at heel strike; +1 is the rearward toe-off.
+    let stride: Float
+    /// Normalized recovery-leg fold, applied on top of the state's base knee bend.
+    let swingLift: Float
+    /// Additional bend while the boot is bearing weight, expressed in radians.
+    let stanceCompression: Float
+    /// World-relative boot pitch after the leg chain has been compensated.
+    let footPitch: Float
+    let isStance: Bool
+}
+
 /// Maps both telemetry locomotion and the existing fixed-step impact solver to
 /// the shared named-joint contract.  Imported one-skeleton assets can conform
 /// by exposing the same semantic binding; the procedural mesh is not a dead
@@ -78,29 +94,37 @@ enum ReplayAthleteMotion {
         let turn = locomotion.turnResponse
         let acceleration = locomotion.accelerationResponse
         let phase = locomotion.motion.locomotionPhase
-        let cycle = sin(phase)
+        let leftFootfall = footfall(at: phase, tuning: tuning.footfall)
+        let rightFootfall = footfall(at: phase + .pi, tuning: tuning.footfall)
+        let cycle = (leftFootfall.stride - rightFootfall.stride) * 0.5
         let doubleCycle = sin(phase * 2)
-        let swing = cycle * tuning.strideAmplitude
         let breathing = sin(Float(time) * 1.35 + Float(track.shirtNumber)) * 0.004
+        let braking = max(-acceleration, 0)
         let forwardLean = tuning.forwardLean
             + (max(acceleration, 0) * tuning.accelerationLean)
+            - (braking * (0.08 + (effort * 0.08)))
             + (track.isGoalkeeper ? 0.045 : 0)
         let cutBank = locomotion.state == .cut ? turn * 0.18 : turn * 0.025 * effort
 
         let goalkeeperStance: Float = track.isGoalkeeper ? 0.10 : tuning.lateralStance
         let cutPlant = locomotion.state == .cut ? abs(turn) * 0.12 : 0
-        let leftHipSwing = swing - (max(turn, 0) * cutPlant)
-        let rightHipSwing = -swing + (max(-turn, 0) * cutPlant)
+        let leftHipSwing = (leftFootfall.stride * tuning.strideAmplitude)
+            - (max(turn, 0) * cutPlant)
+        let rightHipSwing = (rightFootfall.stride * tuning.strideAmplitude)
+            + (max(-turn, 0) * cutPlant)
         let kneeBase: Float = track.isGoalkeeper ? 0.34 : tuning.kneeBase
         let kneeTravel = tuning.kneeTravel
-        let leftKneeBend = kneeBase + (max(-cycle, 0) * kneeTravel)
+        let brakingCrouch = braking * (0.05 + (effort * 0.11))
+        let leftKneeBend = kneeBase + (leftFootfall.swingLift * kneeTravel)
+            + leftFootfall.stanceCompression
+            + brakingCrouch
             + (max(turn, 0) * cutPlant)
-        let rightKneeBend = kneeBase + (max(cycle, 0) * kneeTravel)
+        let rightKneeBend = kneeBase + (rightFootfall.swingLift * kneeTravel)
+            + rightFootfall.stanceCompression
+            + brakingCrouch
             + (max(-turn, 0) * cutPlant)
-        let leftToeLift = max(-cycle, 0) * tuning.toeLift
-        let rightToeLift = max(cycle, 0) * tuning.toeLift
-        let leftAnkleAngle = -((leftHipSwing + leftKneeBend) * 0.90) + leftToeLift
-        let rightAnkleAngle = -((rightHipSwing + rightKneeBend) * 0.90) + rightToeLift
+        let leftAnkleAngle = -(leftHipSwing + leftKneeBend) + leftFootfall.footPitch
+        let rightAnkleAngle = -(rightHipSwing + rightKneeBend) + rightFootfall.footPitch
 
         let leftSoleHeight = approximateSoleHeight(
             hipAngle: leftHipSwing,
@@ -121,6 +145,7 @@ enum ReplayAthleteMotion {
         let elbowBend: Float = track.isGoalkeeper ? 0.56 : tuning.elbowBend
         let bodyBob = abs(doubleCycle) * tuning.verticalBounce
         let sideSway = -cycle * tuning.lateralSway
+        let balanceReach = braking * (0.025 + (effort * 0.07))
 
         return ReplayAthleteLocomotionPose(
             bodyPosition: [sideSway, groundingOffset + breathing + bodyBob, effort * 0.014],
@@ -148,21 +173,47 @@ enum ReplayAthleteMotion {
             rightKneeOrientation: simd_quatf(angle: rightKneeBend, axis: [1, 0, 0]),
             leftAnkleOrientation: simd_quatf(angle: leftAnkleAngle, axis: [1, 0, 0]),
             rightAnkleOrientation: simd_quatf(angle: rightAnkleAngle, axis: [1, 0, 0]),
-            leftShoulderOrientation: simd_quatf(angle: -keeperReach, axis: [0, 0, 1])
-                * simd_quatf(angle: -swing * tuning.armSwing, axis: [1, 0, 0]),
-            rightShoulderOrientation: simd_quatf(angle: keeperReach, axis: [0, 0, 1])
-                * simd_quatf(angle: swing * tuning.armSwing, axis: [1, 0, 0]),
+            leftShoulderOrientation: simd_quatf(
+                angle: -(keeperReach + balanceReach),
+                axis: [0, 0, 1]
+            ) * simd_quatf(
+                angle: rightFootfall.stride * tuning.strideAmplitude * tuning.armSwing,
+                axis: [1, 0, 0]
+            ),
+            rightShoulderOrientation: simd_quatf(
+                angle: keeperReach + balanceReach,
+                axis: [0, 0, 1]
+            ) * simd_quatf(
+                angle: leftFootfall.stride * tuning.strideAmplitude * tuning.armSwing,
+                axis: [1, 0, 0]
+            ),
             leftElbowOrientation: simd_quatf(
-                angle: elbowBend + (max(cycle, 0) * tuning.elbowTravel),
+                angle: elbowBend + (max(-rightFootfall.stride, 0) * tuning.elbowTravel),
                 axis: [1, 0, 0]
             ),
             rightElbowOrientation: simd_quatf(
-                angle: elbowBend + (max(-cycle, 0) * tuning.elbowTravel),
+                angle: elbowBend + (max(-leftFootfall.stride, 0) * tuning.elbowTravel),
                 axis: [1, 0, 0]
             ),
-            leftWristOrientation: simd_quatf(angle: -cycle * tuning.wristTravel, axis: [0, 1, 0]),
-            rightWristOrientation: simd_quatf(angle: cycle * tuning.wristTravel, axis: [0, 1, 0])
+            leftWristOrientation: simd_quatf(
+                angle: rightFootfall.stride * tuning.wristTravel,
+                axis: [0, 1, 0]
+            ),
+            rightWristOrientation: simd_quatf(
+                angle: leftFootfall.stride * tuning.wristTravel,
+                axis: [0, 1, 0]
+            )
         )
+    }
+
+    /// Absolute-phase football footfall used by the procedural rig.  This is
+    /// intentionally exposed to tests so contact semantics cannot regress into
+    /// a symmetric marching sine wave as animation tuning evolves.
+    static func footfall(
+        for state: PlayerLocomotionState,
+        phase: Float
+    ) -> ReplayAthleteFootfall {
+        footfall(at: phase, tuning: tuning(for: state).footfall)
     }
 
     static func apply(_ pose: ReplayAthleteLocomotionPose, to binding: ReplayAthleteJointBinding) {
@@ -270,6 +321,15 @@ enum ReplayAthleteMotion {
         let elbowBend: Float
         let elbowTravel: Float
         let wristTravel: Float
+        let footfall: FootfallTuning
+    }
+
+    private struct FootfallTuning {
+        let stanceFraction: Float
+        let stanceKneeCompression: Float
+        let heelStrike: Float
+        let toeOff: Float
+        let swingDorsiflexion: Float
     }
 
     private static func tuning(for state: PlayerLocomotionState) -> LocomotionTuning {
@@ -281,7 +341,11 @@ enum ReplayAthleteMotion {
                 lateralSway: 0, verticalBounce: 0, pelvisRoll: 0,
                 pelvisYaw: 0, spineRoll: 0, spineYaw: 0, headRoll: 0,
                 headTurn: 0.08, shoulderReach: 0.025, armSwing: 0,
-                elbowBend: 0.16, elbowTravel: 0, wristTravel: 0
+                elbowBend: 0.16, elbowTravel: 0, wristTravel: 0,
+                footfall: .init(
+                    stanceFraction: 1, stanceKneeCompression: 0,
+                    heelStrike: 0, toeOff: 0, swingDorsiflexion: 0
+                )
             )
         case .walk:
             LocomotionTuning(
@@ -291,7 +355,11 @@ enum ReplayAthleteMotion {
                 pelvisRoll: 0.012, pelvisYaw: 0.020, spineRoll: 0.010,
                 spineYaw: 0.030, headRoll: 0.007, headTurn: 0.10,
                 shoulderReach: 0.030, armSwing: 0.62, elbowBend: 0.28,
-                elbowTravel: 0.05, wristTravel: 0.04
+                elbowTravel: 0.05, wristTravel: 0.04,
+                footfall: .init(
+                    stanceFraction: 0.64, stanceKneeCompression: 0.055,
+                    heelStrike: 0.075, toeOff: 0.115, swingDorsiflexion: 0.075
+                )
             )
         case .jog:
             LocomotionTuning(
@@ -301,7 +369,11 @@ enum ReplayAthleteMotion {
                 pelvisRoll: 0.020, pelvisYaw: 0.034, spineRoll: 0.016,
                 spineYaw: 0.050, headRoll: 0.011, headTurn: 0.14,
                 shoulderReach: 0.035, armSwing: 0.78, elbowBend: 0.62,
-                elbowTravel: 0.10, wristTravel: 0.08
+                elbowTravel: 0.10, wristTravel: 0.08,
+                footfall: .init(
+                    stanceFraction: 0.50, stanceKneeCompression: 0.075,
+                    heelStrike: 0.105, toeOff: 0.165, swingDorsiflexion: 0.105
+                )
             )
         case .sprint:
             LocomotionTuning(
@@ -311,7 +383,11 @@ enum ReplayAthleteMotion {
                 pelvisRoll: 0.027, pelvisYaw: 0.043, spineRoll: 0.021,
                 spineYaw: 0.062, headRoll: 0.015, headTurn: 0.17,
                 shoulderReach: 0.040, armSwing: 0.90, elbowBend: 0.92,
-                elbowTravel: 0.15, wristTravel: 0.12
+                elbowTravel: 0.15, wristTravel: 0.12,
+                footfall: .init(
+                    stanceFraction: 0.40, stanceKneeCompression: 0.095,
+                    heelStrike: 0.135, toeOff: 0.220, swingDorsiflexion: 0.165
+                )
             )
         case .cut:
             LocomotionTuning(
@@ -321,9 +397,74 @@ enum ReplayAthleteMotion {
                 pelvisRoll: 0.018, pelvisYaw: 0.025, spineRoll: 0.014,
                 spineYaw: 0.035, headRoll: 0.010, headTurn: 0.24,
                 shoulderReach: 0.085, armSwing: 0.48, elbowBend: 0.72,
-                elbowTravel: 0.08, wristTravel: 0.06
+                elbowTravel: 0.08, wristTravel: 0.06,
+                footfall: .init(
+                    stanceFraction: 0.68, stanceKneeCompression: 0.160,
+                    heelStrike: 0.065, toeOff: 0.125, swingDorsiflexion: 0.085
+                )
             )
         }
+    }
+
+    private static func footfall(
+        at rawPhase: Float,
+        tuning: FootfallTuning
+    ) -> ReplayAthleteFootfall {
+        guard tuning.stanceFraction < 1 else {
+            return ReplayAthleteFootfall(
+                stride: 0,
+                swingLift: 0,
+                stanceCompression: 0,
+                footPitch: 0,
+                isStance: true
+            )
+        }
+
+        let turn = Float.pi * 2
+        let finitePhase = rawPhase.isFinite ? rawPhase : 0
+        // PlayerMotionState historically defines π/2 as peak rearward leg
+        // drive. Align the variable contact window so that instant remains
+        // toe-off for every pace instead of shifting authored replay timing.
+        let contactAlignment = (tuning.stanceFraction - 0.25) * turn
+        let remainder = (finitePhase + contactAlignment).truncatingRemainder(dividingBy: turn)
+        let progress = (remainder < 0 ? remainder + turn : remainder) / turn
+
+        if progress < tuning.stanceFraction {
+            let stanceProgress = progress / tuning.stanceFraction
+            let stride = -cos(.pi * stanceProgress)
+            let compression = sin(.pi * stanceProgress) * tuning.stanceKneeCompression
+            let heelWeight = 1 - smootherStep(stanceProgress / 0.22)
+            let toeWeight = smootherStep((stanceProgress - 0.66) / 0.34)
+            return ReplayAthleteFootfall(
+                stride: stride,
+                swingLift: 0,
+                stanceCompression: compression,
+                footPitch: (-tuning.heelStrike * heelWeight) + (tuning.toeOff * toeWeight),
+                isStance: true
+            )
+        }
+
+        let swingProgress = (progress - tuning.stanceFraction) / (1 - tuning.stanceFraction)
+        let recovery = sin(.pi * swingProgress)
+        let recoveryBlend = smootherStep(swingProgress)
+        let transitionPitch = tuning.toeOff
+            + ((-tuning.heelStrike - tuning.toeOff) * recoveryBlend)
+        // A small polynomial bias folds the recovery leg early without the
+        // comparatively expensive fractional `pow` used by many gait curves.
+        let boundedRecovery = max(recovery, 0)
+        let quickRecovery = boundedRecovery * (1.18 - (0.18 * boundedRecovery))
+        return ReplayAthleteFootfall(
+            stride: cos(.pi * swingProgress),
+            swingLift: quickRecovery,
+            stanceCompression: 0,
+            footPitch: transitionPitch - (tuning.swingDorsiflexion * boundedRecovery),
+            isStance: false
+        )
+    }
+
+    private static func smootherStep(_ rawValue: Float) -> Float {
+        let value = min(max(rawValue, 0), 1)
+        return value * value * value * (value * ((value * 6) - 15) + 10)
     }
 
     private static func approximateSoleHeight(
