@@ -19,18 +19,48 @@ final class AnnotationJoystickMathTests: XCTestCase {
             SIMD2<Int>(1, 0)
         )
         XCTAssertEqual(
-            AnnotationJoystickMath.sample(for: CGSize(width: -31, height: -49)).steps,
+            AnnotationJoystickMath.sample(for: CGSize(width: -21, height: -29)).steps,
             SIMD2<Int>(-2, -3)
         )
     }
 
-    func testTravelAndStepsAreBounded() {
+    func testAllFourNotchesHaveDistinctVisibleTravelBeforeKnobSaturation() {
+        let translations: [CGFloat] = [13, 21, 29, 37]
+        let samples = translations.map {
+            AnnotationJoystickMath.sample(for: CGSize(width: $0, height: 0))
+        }
+
+        XCTAssertEqual(samples.map(\.steps.x), [1, 2, 3, 4])
+        XCTAssertEqual(samples.map(\.knobOffset.width), translations)
+        XCTAssertTrue(samples.allSatisfy {
+            abs($0.knobOffset.width) <= AnnotationJoystickMath.maximumTravel
+                && abs($0.knobOffset.height) <= AnnotationJoystickMath.maximumTravel
+        })
+    }
+
+    func testAllFourDiagonalNotchesRemainVisuallyDistinct() {
+        let translations: [CGFloat] = [13, 21, 29, 37]
+        let samples = translations.map {
+            AnnotationJoystickMath.sample(for: CGSize(width: $0, height: -$0))
+        }
+
+        XCTAssertEqual(samples.map(\.steps), [
+            SIMD2<Int>(1, -1),
+            SIMD2<Int>(2, -2),
+            SIMD2<Int>(3, -3),
+            SIMD2<Int>(4, -4),
+        ])
+        XCTAssertEqual(samples.map(\.knobOffset.width), translations)
+        XCTAssertEqual(samples.map(\.knobOffset.height), translations.map { -$0 })
+    }
+
+    func testAxisTravelAndStepsAreBounded() {
         let sample = AnnotationJoystickMath.sample(
             for: CGSize(width: 1_000, height: -1_000)
         )
-        let travel = hypot(sample.knobOffset.width, sample.knobOffset.height)
 
-        XCTAssertEqual(travel, AnnotationJoystickMath.maximumTravel, accuracy: 0.001)
+        XCTAssertEqual(sample.knobOffset.width, AnnotationJoystickMath.maximumTravel, accuracy: 0.001)
+        XCTAssertEqual(sample.knobOffset.height, -AnnotationJoystickMath.maximumTravel, accuracy: 0.001)
         XCTAssertEqual(
             sample.steps,
             SIMD2<Int>(
@@ -55,42 +85,39 @@ final class AnnotationJoystickMathTests: XCTestCase {
         )
     }
 
-    func testStepDeltaSupportsReversingWithinOneGesture() {
-        XCTAssertEqual(
-            AnnotationJoystickMath.delta(
-                from: SIMD2<Int>(3, -2),
-                to: SIMD2<Int>(-1, 1)
-            ),
-            SIMD2<Int>(-4, 3)
+    func testSamplesRepresentAbsoluteGestureRequestsAcrossReversal() {
+        let outward = AnnotationJoystickMath.sample(
+            for: CGSize(width: 1_000, height: -1_000)
         )
+        let partiallyReturned = AnnotationJoystickMath.sample(
+            for: CGSize(width: 29, height: -21)
+        )
+        let centred = AnnotationJoystickMath.sample(for: .zero)
+
+        XCTAssertEqual(outward.steps, SIMD2<Int>(4, -4))
+        XCTAssertEqual(partiallyReturned.steps, SIMD2<Int>(3, -2))
+        XCTAssertEqual(centred.steps, .zero)
     }
 
-    func testRejectedNudgeDoesNotBecomeAReverseMoveWhenStickReturnsToCentre() {
-        let committed = SIMD2<Int>.zero
-        let rejectedOutward = SIMD2<Int>(1, 0)
-        let afterRejection = AnnotationJoystickMath.committedSteps(
-            from: committed,
-            toward: rejectedOutward,
-            mutationSucceeded: false
+    func testFinalGestureSampleIsSubmittedWhenItCrossesANotch() {
+        let previouslySubmitted = AnnotationJoystickMath.sample(
+            for: CGSize(width: 13, height: 0)
+        )
+        let authoritativeEnd = AnnotationJoystickMath.sample(
+            for: CGSize(width: 21, height: -13)
         )
 
-        XCTAssertEqual(afterRejection, committed)
-        XCTAssertEqual(
-            AnnotationJoystickMath.delta(from: afterRejection, to: .zero),
-            .zero,
-            "Returning to centre after a rejected boundary move must not nudge inward."
+        XCTAssertTrue(
+            AnnotationJoystickGesturePolicy.shouldSubmit(
+                sample: authoritativeEnd,
+                after: previouslySubmitted.steps
+            )
         )
-
-        let accepted = AnnotationJoystickMath.committedSteps(
-            from: committed,
-            toward: rejectedOutward,
-            mutationSucceeded: true
-        )
-        XCTAssertEqual(accepted, rejectedOutward)
-        XCTAssertEqual(
-            AnnotationJoystickMath.delta(from: accepted, to: .zero),
-            SIMD2<Int>(-1, 0),
-            "Only a successfully applied outward step should be reversible."
+        XCTAssertFalse(
+            AnnotationJoystickGesturePolicy.shouldSubmit(
+                sample: authoritativeEnd,
+                after: authoritativeEnd.steps
+            )
         )
     }
 }

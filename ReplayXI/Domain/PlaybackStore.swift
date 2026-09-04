@@ -4,9 +4,25 @@ import Observation
 /// Identifies the independently adjustable handle of a two-point spatial
 /// annotation. Keeping this domain-level avoids coupling accessibility actions
 /// to RealityKit entities or a particular control surface.
-enum CoachMarkEndpoint: Sendable {
+enum CoachMarkEndpoint: Equatable, Sendable {
     case start
     case end
+}
+
+/// The exact cumulative movement accepted for a joystick preview. Returning
+/// pitch metres instead of a Boolean keeps a clamped diagonal sample honest:
+/// one axis may reach a boundary while the other still has room to move.
+struct CoachMarkEndpointPreviewResult: Equatable, Sendable {
+    let appliedDelta: PitchPoint
+    let hasActiveTransaction: Bool
+}
+
+/// Identifies the one annotation handle currently owned by a local joystick
+/// gesture. Controls use this only for presentation; the store remains the
+/// authority that rejects competing mutations.
+struct CoachMarkEndpointPreviewOwner: Equatable, Sendable {
+    let markID: UUID
+    let endpoint: CoachMarkEndpoint
 }
 
 @MainActor
@@ -69,6 +85,11 @@ final class ReplayStore {
     var selectedTool: CoachMarkKind = .run
     var isDrawing = false
     var pendingDrawStart: PitchPoint?
+    /// True only while a joystick owns a local endpoint preview transaction.
+    /// Control surfaces may use this to disable conflicting actions, but the
+    /// store also enforces the barrier so correctness never depends on UI state.
+    private(set) var hasActiveCoachMarkEndpointPreview = false
+    private(set) var activeCoachMarkEndpointPreviewOwner: CoachMarkEndpointPreviewOwner?
     private(set) var shapeFocusStage: ShapeFocusStage = .problem
     var showsIdealBranch: Bool { shapeFocusStage == .ideal }
     var showsLaneLens = false
@@ -97,11 +118,86 @@ final class ReplayStore {
     @ObservationIgnored
     private var pendingCoachMarkGeometryBaselines: [UUID: CoachMarkGeometry] = [:]
 
+    /// Joystick drags use absolute movement from a stable gesture baseline.
+    /// This avoids treating a partially clamped multi-notch request as though
+    /// every requested notch had been applied. The preview stays local until
+    /// gesture end, when one snapshot publishes the final geometry.
+    @ObservationIgnored
+    private var pendingCoachMarkEndpointPreviews: [UUID: CoachMarkEndpointPreview] = [:]
+
+    /// A collaboration or immersive lifecycle transition may cancel the store
+    /// transaction while the physical pinch is still down. Remember that
+    /// gesture identity until its eventual end/cancel callback so a later drag
+    /// sample from the same pinch cannot silently start a second transaction.
+    @ObservationIgnored
+    private var interruptedCoachMarkEndpointGestureIDs: Set<UUID> = []
+
     private struct CoachMarkGeometry {
         let start: PitchPoint
         let end: PitchPoint
         let startTrackAnchor: CoachMarkTrackAnchor?
         let endTrackAnchor: CoachMarkTrackAnchor?
+    }
+
+    private struct CoachMarkEndpointPreview {
+        let gestureID: UUID
+        let endpoint: CoachMarkEndpoint
+        let resolvedStart: PitchPoint
+        let resolvedEnd: PitchPoint
+        let wasPlaying: Bool
+        /// Once the squad has received the masked pause baseline, cancellation
+        /// must keep this headset paused as well. Resuming only the coach would
+        /// split transport authority and the next heartbeat would snap them back.
+        let didPublishPause: Bool
+        var latestSampleIsValid: Bool
+        var appliedDelta: PitchPoint
+    }
+
+    private func setPendingCoachMarkEndpointPreview(
+        _ preview: CoachMarkEndpointPreview,
+        for id: UUID
+    ) {
+        pendingCoachMarkEndpointPreviews[id] = preview
+        hasActiveCoachMarkEndpointPreview = true
+        activeCoachMarkEndpointPreviewOwner = CoachMarkEndpointPreviewOwner(
+            markID: id,
+            endpoint: preview.endpoint
+        )
+    }
+
+    @discardableResult
+    private func removePendingCoachMarkEndpointPreview(
+        for id: UUID
+    ) -> CoachMarkEndpointPreview? {
+        let preview = pendingCoachMarkEndpointPreviews.removeValue(forKey: id)
+        hasActiveCoachMarkEndpointPreview = !pendingCoachMarkEndpointPreviews.isEmpty
+        if let remaining = pendingCoachMarkEndpointPreviews.first {
+            activeCoachMarkEndpointPreviewOwner = CoachMarkEndpointPreviewOwner(
+                markID: remaining.key,
+                endpoint: remaining.value.endpoint
+            )
+        } else {
+            activeCoachMarkEndpointPreviewOwner = nil
+        }
+        return preview
+    }
+
+    private func removeAllPendingCoachMarkEndpointPreviews() {
+        pendingCoachMarkEndpointPreviews.removeAll(keepingCapacity: true)
+        hasActiveCoachMarkEndpointPreview = false
+        activeCoachMarkEndpointPreviewOwner = nil
+    }
+
+    /// User-driven state changes are serialized behind endpoint adjustment.
+    /// Rejection is deliberately local and snapshot-free: the gesture may then
+    /// commit once or cancel without a stale transport/annotation action having
+    /// changed its baseline or collaboration history.
+    private func allowsMutationOutsideEndpointPreview() -> Bool {
+        guard !hasActiveCoachMarkEndpointPreview else {
+            statusMessage = "Finish or cancel the joystick adjustment first"
+            return false
+        }
+        return true
     }
 
     convenience init() {
@@ -164,6 +260,7 @@ final class ReplayStore {
     }
 
     func selectScenario(id: String, broadcast: Bool = true) {
+        guard allowsMutationOutsideEndpointPreview() else { return }
         guard !isCollaborationActive || localRole == .coach || !broadcast else { return }
         guard let scenario = scenarios.first(where: { $0.id == id }) else { return }
         guard triangleLockMode != .place else {
@@ -185,6 +282,7 @@ final class ReplayStore {
         isLocallyPaused = false
         marks = scenario.coachMarks
         pendingCoachMarkGeometryBaselines.removeAll(keepingCapacity: true)
+        removeAllPendingCoachMarkEndpointPreviews()
         sharedPitchAnchorID = nil
         triangleLockMode = .visualise
         isLocalTrianglePreview = false
@@ -206,6 +304,7 @@ final class ReplayStore {
     }
 
     func togglePlayback(broadcast: Bool = true) {
+        guard allowsMutationOutsideEndpointPreview() else { return }
         guard !isCollaborationActive || localRole == .coach || !broadcast else {
             setFollowingCoach(isLocallyPaused)
             return
@@ -220,6 +319,7 @@ final class ReplayStore {
     }
 
     func setPlaying(_ value: Bool, broadcast: Bool = true) {
+        guard allowsMutationOutsideEndpointPreview() else { return }
         if broadcast, isCollaborationActive, localRole != .coach {
             setFollowingCoach(value)
             return
@@ -233,6 +333,7 @@ final class ReplayStore {
     }
 
     func seek(to time: TimeInterval, broadcast: Bool = true) {
+        guard allowsMutationOutsideEndpointPreview() else { return }
         guard !isCollaborationActive || localRole == .coach || !broadcast else { return }
         guard time.isFinite, selectedScenario.duration.isFinite else { return }
         playhead = min(max(time, 0), selectedScenario.duration)
@@ -248,6 +349,7 @@ final class ReplayStore {
     /// looking like an unexpected snap-back.
     @discardableResult
     func beginLocalReview(at time: TimeInterval) -> Bool {
+        guard allowsMutationOutsideEndpointPreview() else { return false }
         guard time.isFinite, selectedScenario.duration.isFinite else { return false }
         let entersComfortPause = isCollaborationActive && localRole == .player
         if entersComfortPause {
@@ -267,6 +369,7 @@ final class ReplayStore {
     }
 
     func setPlaybackRate(_ rate: Double, broadcast: Bool = true) {
+        guard allowsMutationOutsideEndpointPreview() else { return }
         guard !isCollaborationActive || localRole == .coach || !broadcast else { return }
         guard rate.isFinite else { return }
         playbackRate = min(max(rate, 0.25), 4)
@@ -274,6 +377,7 @@ final class ReplayStore {
     }
 
     func setViewMode(_ mode: ReplayViewMode, broadcast: Bool = true) {
+        guard allowsMutationOutsideEndpointPreview() else { return }
         guard triangleLockMode != .place || mode == .positional else {
             statusMessage = "End physical placement before changing views."
             return
@@ -292,6 +396,7 @@ final class ReplayStore {
     }
 
     func openLocalPlayerPOV(_ id: String) {
+        guard allowsMutationOutsideEndpointPreview() else { return }
         guard selectedScenario.player(id: id) != nil else { return }
         // Selecting the POV already being rendered is navigation-only. In a
         // shared room it must not turn a following player into a local review,
@@ -316,6 +421,7 @@ final class ReplayStore {
     }
 
     func setLocalPerspective(_ id: String, entersLocalReview: Bool = true) {
+        guard allowsMutationOutsideEndpointPreview() else { return }
         guard selectedScenario.player(id: id) != nil else { return }
         if entersLocalReview, isCollaborationActive, localRole == .player {
             followsCoach = false
@@ -339,6 +445,7 @@ final class ReplayStore {
     }
 
     func broadcastPerspective(_ id: String) {
+        guard allowsMutationOutsideEndpointPreview() else { return }
         guard localRole == .coach, selectedScenario.player(id: id) != nil else { return }
         isPlaying = false
         localPerspectiveID = id
@@ -352,6 +459,7 @@ final class ReplayStore {
     }
 
     func releaseSquad() {
+        guard allowsMutationOutsideEndpointPreview() else { return }
         guard localRole == .coach else { return }
         coachLockEnabled = false
         coachFocusPerspectiveID = nil
@@ -364,6 +472,7 @@ final class ReplayStore {
     /// stable positional view. Joined players may inspect a stage locally; doing
     /// so enters comfort pause and never broadcasts over the coach.
     func setShapeFocusStage(_ stage: ShapeFocusStage, broadcast: Bool = true) {
+        guard allowsMutationOutsideEndpointPreview() else { return }
         guard selectedScenario.kind == .shapeLab else { return }
         guard triangleLockMode == .visualise else {
             statusMessage = "End physical placement before changing the comparison."
@@ -388,6 +497,7 @@ final class ReplayStore {
     }
 
     func setFollowingCoach(_ follows: Bool) {
+        guard allowsMutationOutsideEndpointPreview() else { return }
         guard isCollaborationActive, localRole == .player else { return }
         followsCoach = follows
         isLocallyPaused = !follows
@@ -399,6 +509,7 @@ final class ReplayStore {
     }
 
     func beginDrawing(_ kind: CoachMarkKind) {
+        guard allowsMutationOutsideEndpointPreview() else { return }
         guard localRole == .coach else { return }
         guard marks.count < Self.maximumSharedCoachMarks else {
             isDrawing = false
@@ -419,6 +530,7 @@ final class ReplayStore {
     }
 
     func cancelDrawing() {
+        guard allowsMutationOutsideEndpointPreview() else { return }
         isDrawing = false
         pendingDrawStart = nil
         selectedTool = .run
@@ -427,6 +539,7 @@ final class ReplayStore {
 
     @discardableResult
     func registerPitchTap(_ point: PitchPoint) -> CoachMark? {
+        guard allowsMutationOutsideEndpointPreview() else { return nil }
         guard isDrawing, localRole == .coach else { return nil }
         guard Self.isPointOnPitch(point) else {
             statusMessage = "Choose a point on the pitch"
@@ -497,6 +610,7 @@ final class ReplayStore {
     /// playhead, so no second pitch tap or draft geometry is needed.
     @discardableResult
     func labelPlayer(_ playerID: String) -> CoachMark? {
+        guard allowsMutationOutsideEndpointPreview() else { return nil }
         guard localRole == .coach else { return nil }
         guard marks.count < Self.maximumSharedCoachMarks else {
             statusMessage = "Annotation limit reached. Remove one before labelling."
@@ -529,6 +643,7 @@ final class ReplayStore {
     }
 
     func addPresetMark() {
+        guard allowsMutationOutsideEndpointPreview() else { return }
         guard localRole == .coach else { return }
         guard marks.count < Self.maximumSharedCoachMarks else {
             statusMessage = "Annotation limit reached. Remove one before adding."
@@ -582,13 +697,16 @@ final class ReplayStore {
     }
 
     func undoMark() {
+        guard allowsMutationOutsideEndpointPreview() else { return }
         guard localRole == .coach else { return }
         let authoredIDs = Set(selectedScenario.coachMarks.map(\.id))
         guard let index = marks.lastIndex(where: { !authoredIDs.contains($0.id) }) else {
             statusMessage = "No new annotation to undo"
             return
         }
-        pendingCoachMarkGeometryBaselines.removeValue(forKey: marks[index].id)
+        let removedID = marks[index].id
+        pendingCoachMarkGeometryBaselines.removeValue(forKey: removedID)
+        removePendingCoachMarkEndpointPreview(for: removedID)
         marks.remove(at: index)
         statusMessage = "Last annotation removed"
         emitSnapshot()
@@ -598,6 +716,7 @@ final class ReplayStore {
     /// authored teaching overlays. This supports mark-specific timeline menus.
     @discardableResult
     func removeCoachMark(id: UUID) -> Bool {
+        guard allowsMutationOutsideEndpointPreview() else { return false }
         guard localRole == .coach else { return false }
         let authoredIDs = Set(selectedScenario.coachMarks.map(\.id))
         guard !authoredIDs.contains(id),
@@ -608,6 +727,7 @@ final class ReplayStore {
             return false
         }
         pendingCoachMarkGeometryBaselines.removeValue(forKey: id)
+        removePendingCoachMarkEndpointPreview(for: id)
         marks.remove(at: index)
         statusMessage = "Annotation removed"
         emitSnapshot()
@@ -619,6 +739,7 @@ final class ReplayStore {
     /// remain immutable so a local edit cannot erase the teaching baseline.
     @discardableResult
     func retimeCoachMark(id: UUID, to revealTime: TimeInterval) -> Bool {
+        guard allowsMutationOutsideEndpointPreview() else { return false }
         guard localRole == .coach,
               revealTime.isFinite,
               selectedScenario.duration.isFinite,
@@ -670,6 +791,7 @@ final class ReplayStore {
     /// the replay; a finite duration creates an explicit timeline window.
     @discardableResult
     func setCoachMarkDuration(id: UUID, duration: TimeInterval?) -> Bool {
+        guard allowsMutationOutsideEndpointPreview() else { return false }
         guard localRole == .coach else { return false }
         if let duration {
             guard duration.isFinite,
@@ -719,6 +841,7 @@ final class ReplayStore {
     /// locally paused players receive the same concise tactical instruction.
     @discardableResult
     func updateCoachMarkLabel(id: UUID, label: String) -> Bool {
+        guard allowsMutationOutsideEndpointPreview() else { return false }
         guard localRole == .coach else { return false }
         let normalizedLabel = label
             .split(whereSeparator: \.isWhitespace)
@@ -774,6 +897,7 @@ final class ReplayStore {
     /// toggling tracking never makes an annotation visibly jump.
     @discardableResult
     func setCoachMarkTracking(id: UUID, playerID: String?) -> Bool {
+        guard allowsMutationOutsideEndpointPreview() else { return false }
         guard localRole == .coach else { return false }
         let authoredIDs = Set(selectedScenario.coachMarks.map(\.id))
         guard !authoredIDs.contains(id),
@@ -861,6 +985,7 @@ final class ReplayStore {
         end: PitchPoint,
         broadcast: Bool = true
     ) -> Bool {
+        guard allowsMutationOutsideEndpointPreview() else { return false }
         guard localRole == .coach else { return false }
         let authoredIDs = Set(selectedScenario.coachMarks.map(\.id))
         guard !authoredIDs.contains(id),
@@ -871,7 +996,6 @@ final class ReplayStore {
                 : "That annotation cannot be moved"
             return false
         }
-
         let mark = marks[index]
         let replacement = markReplacingGeometry(
             mark,
@@ -938,6 +1062,7 @@ final class ReplayStore {
         endpoint: CoachMarkEndpoint,
         by delta: PitchPoint
     ) -> Bool {
+        guard allowsMutationOutsideEndpointPreview() else { return false }
         guard localRole == .coach else { return false }
         guard delta.x.isFinite, delta.z.isFinite else {
             statusMessage = "Choose a valid annotation movement"
@@ -1017,11 +1142,298 @@ final class ReplayStore {
         return true
     }
 
+    /// Previews one joystick-controlled endpoint using a cumulative movement
+    /// from the gesture's first accepted sample. The request is never applied
+    /// incrementally: every update is recomputed from the immutable baseline,
+    /// then clamped independently on both pitch axes. This means a four-notch
+    /// diagonal request can truthfully apply (for example) 0.25 m horizontally
+    /// and 0.50 m vertically without corrupting the gesture's reverse path.
+    ///
+    /// Preview geometry is masked by `makeSnapshot()`. In a shared room the
+    /// first accepted sample publishes exactly one baseline pause, so followers
+    /// freeze at the same replay instant instead of advancing and rewinding when
+    /// the final geometry arrives.
+    @discardableResult
+    func previewCoachMarkEndpoint(
+        id: UUID,
+        endpoint: CoachMarkEndpoint,
+        gestureID: UUID,
+        cumulativeDelta: PitchPoint
+    ) -> CoachMarkEndpointPreviewResult? {
+        guard localRole == .coach else { return nil }
+        guard !interruptedCoachMarkEndpointGestureIDs.contains(gestureID) else {
+            statusMessage = "Lift, then start a new joystick adjustment"
+            return nil
+        }
+        guard cumulativeDelta.x.isFinite, cumulativeDelta.z.isFinite else {
+            invalidateCoachMarkEndpointPreview(id: id)
+            statusMessage = "Choose a valid annotation movement"
+            return nil
+        }
+
+        let authoredIDs = Set(selectedScenario.coachMarks.map(\.id))
+        guard !authoredIDs.contains(id),
+              let index = marks.firstIndex(where: { $0.id == id }),
+              marks[index].kind.requiresTwoPitchPoints,
+              marks[index].playerID == nil else {
+            invalidateCoachMarkEndpointPreview(id: id)
+            statusMessage = authoredIDs.contains(id)
+                ? "Authored match overlay kept"
+                : "That annotation cannot be moved"
+            return nil
+        }
+
+        let existingPreview = pendingCoachMarkEndpointPreviews[id]
+        guard existingPreview == nil || (
+            existingPreview?.endpoint == endpoint
+                && existingPreview?.gestureID == gestureID
+        ) else {
+            statusMessage = "Finish the current endpoint adjustment first"
+            return nil
+        }
+        if existingPreview == nil {
+            // One spatial edit at a time keeps snapshot masking and cancellation
+            // deterministic even if two hands address different controls.
+            guard pendingCoachMarkGeometryBaselines.isEmpty,
+                  pendingCoachMarkEndpointPreviews.isEmpty else {
+                statusMessage = "Finish the current annotation move first"
+                return nil
+            }
+        }
+
+        let mark = marks[index]
+        let currentResolved = mark.resolvedGeometry(in: selectedScenario, at: playhead)
+        let baselineStart = existingPreview?.resolvedStart ?? currentResolved.start
+        let baselineEnd = existingPreview?.resolvedEnd ?? currentResolved.end
+        var start = baselineStart
+        var end = baselineEnd
+        let baselineEndpoint: PitchPoint
+        switch endpoint {
+        case .start:
+            baselineEndpoint = baselineStart
+            let proposed = PitchPoint(
+                x: baselineStart.x + cumulativeDelta.x,
+                z: baselineStart.z + cumulativeDelta.z
+            )
+            guard proposed.x.isFinite, proposed.z.isFinite else {
+                invalidateCoachMarkEndpointPreview(id: id)
+                statusMessage = "Choose a valid annotation movement"
+                return nil
+            }
+            start = Self.clampedPitchPoint(proposed)
+        case .end:
+            baselineEndpoint = baselineEnd
+            let proposed = PitchPoint(
+                x: baselineEnd.x + cumulativeDelta.x,
+                z: baselineEnd.z + cumulativeDelta.z
+            )
+            guard proposed.x.isFinite, proposed.z.isFinite else {
+                invalidateCoachMarkEndpointPreview(id: id)
+                statusMessage = "Choose a valid annotation movement"
+                return nil
+            }
+            end = Self.clampedPitchPoint(proposed)
+        }
+        let appliedEndpoint = endpoint == .start ? start : end
+        let appliedDelta = PitchPoint(
+            x: appliedEndpoint.x - baselineEndpoint.x,
+            z: appliedEndpoint.z - baselineEndpoint.z
+        )
+
+        // An outward request made while already on a boundary is a valid no-op,
+        // but it must not pause playback or create a transaction that later
+        // converts centring the stick into an inward movement.
+        if existingPreview == nil, appliedDelta == .zero {
+            return CoachMarkEndpointPreviewResult(
+                appliedDelta: .zero,
+                hasActiveTransaction: false
+            )
+        }
+
+        guard CoachMarkGeometryPolicy.accepts(
+            kind: mark.kind,
+            start: start,
+            end: end
+        ) else {
+            invalidateCoachMarkEndpointPreview(id: id)
+            statusMessage = "Keep the annotation large enough to read"
+            return nil
+        }
+
+        let replacement = markReplacingGeometry(
+            mark,
+            start: start,
+            end: end,
+            resolvingTrackOffsetsAt: playhead
+        )
+        guard isValidSharedMark(replacement, for: selectedScenario) else {
+            invalidateCoachMarkEndpointPreview(id: id)
+            statusMessage = "Keep the annotation on the pitch"
+            return nil
+        }
+
+        var preview: CoachMarkEndpointPreview
+        if var existingPreview {
+            existingPreview.latestSampleIsValid = true
+            existingPreview.appliedDelta = appliedDelta
+            preview = existingPreview
+        } else {
+            pendingCoachMarkGeometryBaselines[id] = CoachMarkGeometry(
+                start: mark.start,
+                end: mark.end,
+                startTrackAnchor: mark.startTrackAnchor,
+                endTrackAnchor: mark.endTrackAnchor
+            )
+            preview = CoachMarkEndpointPreview(
+                gestureID: gestureID,
+                endpoint: endpoint,
+                resolvedStart: baselineStart,
+                resolvedEnd: baselineEnd,
+                wasPlaying: isPlaying,
+                didPublishPause: isCollaborationActive,
+                latestSampleIsValid: true,
+                appliedDelta: appliedDelta
+            )
+            isPlaying = false
+        }
+
+        setPendingCoachMarkEndpointPreview(preview, for: id)
+        marks[index] = replacement
+        statusMessage = endpoint == .start
+            ? "Adjusting annotation start"
+            : "Adjusting annotation end"
+        if existingPreview == nil, preview.didPublishPause {
+            // `emitSnapshot()` normally rejects an active endpoint transaction.
+            // This one deliberate packet is safe because makeSnapshot restores
+            // the committed geometry baseline while publishing the paused clock.
+            emitSnapshot(allowingEndpointPreview: true)
+        }
+        return CoachMarkEndpointPreviewResult(
+            appliedDelta: appliedDelta,
+            hasActiveTransaction: true
+        )
+    }
+
+    /// Publishes final joystick geometry as one atomic shared mutation. A
+    /// rejected last sample or a gesture returned to its origin rolls back. A
+    /// solo preview restores its earlier transport state; a shared preview stays
+    /// paused because followers already received the baseline pause packet.
+    @discardableResult
+    func commitCoachMarkEndpointPreview(id: UUID) -> PitchPoint? {
+        guard let gestureID = pendingCoachMarkEndpointPreviews[id]?.gestureID else {
+            return nil
+        }
+        return commitCoachMarkEndpointPreview(id: id, gestureID: gestureID)
+    }
+
+    /// Completes the transaction owned by one physical pinch. Supplying the
+    /// gesture identity also releases a lifecycle interruption tombstone at the
+    /// point the hand lifts, without allowing that same pinch to reopen sooner.
+    @discardableResult
+    func commitCoachMarkEndpointPreview(
+        id: UUID,
+        gestureID: UUID
+    ) -> PitchPoint? {
+        defer { interruptedCoachMarkEndpointGestureIDs.remove(gestureID) }
+        guard pendingCoachMarkEndpointPreviews[id]?.gestureID == gestureID,
+              let preview = removePendingCoachMarkEndpointPreview(for: id) else {
+            return nil
+        }
+        let baseline = pendingCoachMarkGeometryBaselines.removeValue(forKey: id)
+        guard let baseline,
+              let index = marks.firstIndex(where: { $0.id == id }) else {
+            restorePlaybackAfterCancelledEndpointPreview(preview)
+            return nil
+        }
+
+        guard preview.latestSampleIsValid,
+              preview.appliedDelta != .zero else {
+            marks[index] = markRestoringGeometry(marks[index], from: baseline)
+            restorePlaybackAfterCancelledEndpointPreview(preview)
+            statusMessage = "Annotation adjustment cancelled"
+            return nil
+        }
+
+        let mark = marks[index]
+        let resolved = mark.resolvedGeometry(in: selectedScenario, at: playhead)
+        guard CoachMarkGeometryPolicy.accepts(
+            kind: mark.kind,
+            start: resolved.start,
+            end: resolved.end
+        ), isValidSharedMark(mark, for: selectedScenario) else {
+            marks[index] = markRestoringGeometry(mark, from: baseline)
+            restorePlaybackAfterCancelledEndpointPreview(preview)
+            statusMessage = "Annotation adjustment cancelled"
+            return nil
+        }
+
+        isPlaying = false
+        statusMessage = preview.endpoint == .start
+            ? "Annotation start adjusted"
+            : "Annotation end adjusted"
+        emitSnapshot()
+        return preview.appliedDelta
+    }
+
+    /// Cancels a joystick preview, including SwiftUI disappearance and system
+    /// gesture interruption paths. Geometry always returns to its baseline. A
+    /// solo preview can also restore transport, while a shared preview remains
+    /// on the pause already published to every participant.
+    @discardableResult
+    func cancelCoachMarkEndpointPreview(id: UUID) -> Bool {
+        guard let gestureID = pendingCoachMarkEndpointPreviews[id]?.gestureID else {
+            return false
+        }
+        return cancelCoachMarkEndpointPreview(id: id, gestureID: gestureID)
+    }
+
+    /// Cancels an active preview or acknowledges that an already-interrupted
+    /// physical pinch has ended. The latter returns `false` because its geometry
+    /// was restored by the lifecycle transition, but still releases the token.
+    @discardableResult
+    func cancelCoachMarkEndpointPreview(
+        id: UUID,
+        gestureID: UUID
+    ) -> Bool {
+        defer { interruptedCoachMarkEndpointGestureIDs.remove(gestureID) }
+        guard pendingCoachMarkEndpointPreviews[id]?.gestureID == gestureID,
+              let preview = removePendingCoachMarkEndpointPreview(for: id) else {
+            return false
+        }
+        let baseline = pendingCoachMarkGeometryBaselines.removeValue(forKey: id)
+        guard let baseline,
+              let index = marks.firstIndex(where: { $0.id == id }) else {
+            restorePlaybackAfterCancelledEndpointPreview(preview)
+            return false
+        }
+        marks[index] = markRestoringGeometry(marks[index], from: baseline)
+        restorePlaybackAfterCancelledEndpointPreview(preview)
+        statusMessage = "Annotation adjustment cancelled"
+        return true
+    }
+
+    private func invalidateCoachMarkEndpointPreview(id: UUID) {
+        guard var preview = pendingCoachMarkEndpointPreviews[id] else { return }
+        preview.latestSampleIsValid = false
+        setPendingCoachMarkEndpointPreview(preview, for: id)
+    }
+
+    private func restorePlaybackAfterCancelledEndpointPreview(
+        _ preview: CoachMarkEndpointPreview
+    ) {
+        isPlaying = !preview.didPublishPause
+            && preview.wasPlaying
+            && playhead < selectedScenario.duration
+    }
+
     /// Restores a local handle-drag preview when the system cancels its pinch
     /// sequence. The baseline was never published, so rollback is deliberately
     /// local and emits no collaboration snapshot.
     @discardableResult
     func cancelCoachMarkGeometryPreview(id: UUID) -> Bool {
+        if pendingCoachMarkEndpointPreviews[id] != nil {
+            return cancelCoachMarkEndpointPreview(id: id)
+        }
         guard let baseline = pendingCoachMarkGeometryBaselines.removeValue(forKey: id),
               let index = marks.firstIndex(where: { $0.id == id }) else {
             return false
@@ -1032,6 +1444,7 @@ final class ReplayStore {
     }
 
     private func rollbackCoachMarkGeometryPreview(id: UUID, index: Int) {
+        removePendingCoachMarkEndpointPreview(for: id)
         guard let baseline = pendingCoachMarkGeometryBaselines.removeValue(forKey: id) else {
             return
         }
@@ -1041,12 +1454,14 @@ final class ReplayStore {
     /// Clears only the transient first point after an interrupted spatial
     /// stroke. The selected tool stays armed so the coach can pinch-draw again.
     func resetPendingAnnotationPointAfterInterruption() {
+        guard allowsMutationOutsideEndpointPreview() else { return }
         guard isDrawing else { return }
         pendingDrawStart = nil
         statusMessage = "Gesture interrupted. Pinch-draw again or tap a start point."
     }
 
     func clearMarks() {
+        guard allowsMutationOutsideEndpointPreview() else { return }
         guard localRole == .coach else { return }
         let authoredIDs = Set(selectedScenario.coachMarks.map(\.id))
         let previousCount = marks.count
@@ -1054,6 +1469,7 @@ final class ReplayStore {
         marks.removeAll { removedIDs.contains($0.id) }
         for id in removedIDs {
             pendingCoachMarkGeometryBaselines.removeValue(forKey: id)
+            removePendingCoachMarkEndpointPreview(for: id)
         }
         guard marks.count != previousCount else {
             statusMessage = "No new annotations to clear"
@@ -1068,6 +1484,7 @@ final class ReplayStore {
     /// step prevents a locally paused player from losing the mark on Resume.
     @discardableResult
     func appendRemoteCoachMark(_ mark: CoachMark) -> Bool {
+        guard allowsMutationOutsideEndpointPreview() else { return false }
         let scenario = selectedScenario
         guard marks.count < Self.maximumSharedCoachMarks,
               !marks.contains(where: { $0.id == mark.id }),
@@ -1141,6 +1558,7 @@ final class ReplayStore {
     /// remaining formation targets exactly once before filling ordinary seats.
     /// This is deterministic so every participant receives the same snapshot.
     func prioritizePhysicalTriangleAssignments() {
+        guard allowsMutationOutsideEndpointPreview() else { return }
         guard selectedScenario.kind == .shapeLab,
               !participantSeatAssignments.isEmpty else { return }
 
@@ -1188,6 +1606,9 @@ final class ReplayStore {
     /// SharePlay startup invalidates a local-only origin immediately, before the
     /// session can enter preparing/waiting or publish a heartbeat.
     func discardLocalTrianglePreviewForSessionTransition() {
+        if hasActiveCoachMarkEndpointPreview {
+            rollbackAllCoachMarkGeometryPreviews(interruptingEndpointGesture: true)
+        }
         guard isLocalTrianglePreview else { return }
         let retiredAnchorID = sharedPitchAnchorID
         isPlaying = false
@@ -1201,6 +1622,7 @@ final class ReplayStore {
     }
 
     func setSharedPitchAnchor(_ id: UUID?) {
+        guard allowsMutationOutsideEndpointPreview() else { return }
         guard localRole == .coach, selectedScenario.kind == .shapeLab else { return }
         let retiredAnchorID = sharedPitchAnchorID.flatMap { $0 == id ? nil : $0 }
         sharedPitchAnchorID = id
@@ -1213,6 +1635,7 @@ final class ReplayStore {
     }
 
     func activateTrianglePlacement(anchorID: UUID) {
+        guard allowsMutationOutsideEndpointPreview() else { return }
         guard localRole == .coach, selectedScenario.kind == .shapeLab else { return }
         prioritizePhysicalTriangleAssignments()
         isPlaying = false
@@ -1231,6 +1654,7 @@ final class ReplayStore {
     /// Starts a solo, device-local rehearsal. Its WorldAnchor identifier never
     /// appears in `makeSnapshot()`, even if SharePlay begins later.
     func activateLocalTrianglePreview(anchorID: UUID) {
+        guard allowsMutationOutsideEndpointPreview() else { return }
         guard localRole == .coach,
               !isCollaborationActive,
               selectedScenario.kind == .shapeLab else { return }
@@ -1250,6 +1674,7 @@ final class ReplayStore {
         participantID: UUID? = nil,
         sharedSession: Bool = false
     ) {
+        guard allowsMutationOutsideEndpointPreview() else { return }
         guard triangleLockMode == .place, sharedPitchAnchorID != nil else { return }
         guard canRevealPhysicalTriangleMarkers(
             participantID: participantID,
@@ -1263,6 +1688,7 @@ final class ReplayStore {
     }
 
     func revokeTrianglePlacementConsentLocally() {
+        guard allowsMutationOutsideEndpointPreview() else { return }
         hasLocallyAcknowledgedTrianglePlacement = false
         if triangleLockMode == .place {
             statusMessage = "Physical station hidden on this headset until you confirm it again."
@@ -1270,6 +1696,7 @@ final class ReplayStore {
     }
 
     func endTrianglePlacement() {
+        guard allowsMutationOutsideEndpointPreview() else { return }
         guard localRole == .coach, triangleLockMode == .place else { return }
         let retiredAnchorID = sharedPitchAnchorID
         isPlaying = false
@@ -1287,6 +1714,9 @@ final class ReplayStore {
     /// disappeared unexpectedly. The coach republishes the safe tabletop state;
     /// players wait for that authoritative update without trying to recreate it.
     func handleSharedPitchAnchorRemoval(_ anchorID: UUID) {
+        if hasActiveCoachMarkEndpointPreview {
+            rollbackAllCoachMarkGeometryPreviews(interruptingEndpointGesture: true)
+        }
         guard sharedPitchAnchorID == anchorID else { return }
         sharedPitchAnchorID = nil
         isLocalTrianglePreview = false
@@ -1312,7 +1742,7 @@ final class ReplayStore {
         let retiredAnchorID = sharedPitchAnchorID
         isCollaborationActive = false
         latestCoachSnapshot = nil
-        rollbackAllCoachMarkGeometryPreviews()
+        rollbackAllCoachMarkGeometryPreviews(interruptingEndpointGesture: true)
         participantSeatAssignments.removeAll()
         sharedPitchAnchorID = nil
         triangleLockMode = .visualise
@@ -1334,6 +1764,7 @@ final class ReplayStore {
     }
 
     func resetScenario() {
+        guard allowsMutationOutsideEndpointPreview() else { return }
         if triangleLockMode == .place {
             endTrianglePlacement()
         }
@@ -1341,6 +1772,7 @@ final class ReplayStore {
     }
 
     func advance(by delta: TimeInterval) {
+        guard !hasActiveCoachMarkEndpointPreview else { return }
         guard isActivelyPlaying,
               delta.isFinite,
               delta > 0,
@@ -1363,6 +1795,10 @@ final class ReplayStore {
 
     func makeSnapshot() -> SharedPlaybackSnapshot {
         let publishesPhysicalPlacement = triangleLockMode == .place && !isLocalTrianglePreview
+        // Every transient geometry path restores the committed endpoints. An
+        // endpoint joystick also publishes a real pause at its first accepted
+        // sample, so the snapshot's transport must reflect `isPlaying` rather
+        // than resurrecting its pre-gesture clock.
         let sharedMarks = marks.map { mark in
             guard let baseline = pendingCoachMarkGeometryBaselines[mark.id] else { return mark }
             return markRestoringGeometry(mark, from: baseline)
@@ -1386,6 +1822,7 @@ final class ReplayStore {
 
     @discardableResult
     func applyRemote(_ snapshot: SharedPlaybackSnapshot) -> Bool {
+        guard allowsMutationOutsideEndpointPreview() else { return false }
         guard let scenario = scenarios.first(where: { $0.id == snapshot.scenarioID }),
               scenario.duration.isFinite,
               scenario.duration >= 0 else { return false }
@@ -1457,6 +1894,7 @@ final class ReplayStore {
         pendingDrawStart = nil
         isDrawing = false
         pendingCoachMarkGeometryBaselines.removeAll(keepingCapacity: true)
+        removeAllPendingCoachMarkEndpointPreviews()
         latestCoachSnapshot = sanitizedSnapshot
         participantSeatAssignments = sanitizedSeatAssignments
         if previousAnchorID != sanitizedSharedPitchAnchorID || triangleLockMode != sanitizedTriangleMode {
@@ -1673,29 +2111,76 @@ final class ReplayStore {
         )
     }
 
-    private func rollbackAllCoachMarkGeometryPreviews() {
-        guard !pendingCoachMarkGeometryBaselines.isEmpty else { return }
+    private func rollbackAllCoachMarkGeometryPreviews(
+        interruptingEndpointGesture: Bool = false
+    ) {
+        guard !pendingCoachMarkGeometryBaselines.isEmpty ||
+                !pendingCoachMarkEndpointPreviews.isEmpty else { return }
+        if interruptingEndpointGesture {
+            interruptedCoachMarkEndpointGestureIDs.formUnion(
+                pendingCoachMarkEndpointPreviews.values.map(\.gestureID)
+            )
+        }
+        let resumesPlayback = pendingCoachMarkEndpointPreviews.values.contains {
+            !$0.didPublishPause && $0.wasPlaying
+        }
         for index in marks.indices {
             let mark = marks[index]
             guard let baseline = pendingCoachMarkGeometryBaselines[mark.id] else { continue }
             marks[index] = markRestoringGeometry(mark, from: baseline)
         }
         pendingCoachMarkGeometryBaselines.removeAll(keepingCapacity: true)
+        removeAllPendingCoachMarkEndpointPreviews()
+        if resumesPlayback {
+            isPlaying = playhead < selectedScenario.duration
+        }
     }
 
     func setCollaborationActive(_ isActive: Bool) {
+        guard isCollaborationActive != isActive else { return }
+        // Neither a joystick transaction nor a direct 3D handle drag may cross
+        // a room-authority boundary. In particular, a drag begun while SharePlay
+        // is waiting must not become committable after the session joins.
+        rollbackAllCoachMarkGeometryPreviews(interruptingEndpointGesture: true)
         if isActive {
             discardLocalTrianglePreviewForSessionTransition()
         }
         isCollaborationActive = isActive
         guard !isActive else { return }
-        rollbackAllCoachMarkGeometryPreviews()
+        rollbackAllCoachMarkGeometryPreviews(interruptingEndpointGesture: true)
         isCoachLocalReview = false
         followsCoach = true
         isLocallyPaused = false
     }
 
-    private func emitSnapshot() {
+    /// Ends any transient annotation adjustment before the immersive scene goes
+    /// away, then leaves local transport definitively paused. If the coach's
+    /// committed shared clock was running, one paused baseline snapshot is
+    /// enough; an already-paused exit emits nothing.
+    func prepareForImmersiveExit() {
+        if hasActiveCoachMarkEndpointPreview {
+            rollbackAllCoachMarkGeometryPreviews(interruptingEndpointGesture: true)
+        } else {
+            // A direct pitch-handle preview also owns transient local geometry.
+            // It already published its shared pause when it began, so rollback
+            // needs no additional packet.
+            rollbackAllCoachMarkGeometryPreviews()
+        }
+
+        let shouldPublishPause = localRole == .coach && isPlaying
+        isPlaying = false
+        if isCollaborationActive, localRole == .player {
+            followsCoach = false
+            isLocallyPaused = true
+        }
+        statusMessage = "Replay paused outside the immersive room"
+        if shouldPublishPause {
+            emitSnapshot()
+        }
+    }
+
+    private func emitSnapshot(allowingEndpointPreview: Bool = false) {
+        guard allowingEndpointPreview || !hasActiveCoachMarkEndpointPreview else { return }
         onBroadcastSnapshot?(makeSnapshot())
     }
 }
