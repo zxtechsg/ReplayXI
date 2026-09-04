@@ -8,3 +8,5 @@ dist/
 xcuserdata/
 *.profraw
 *.profdata
+__pycache__/
+*.py[cod]
