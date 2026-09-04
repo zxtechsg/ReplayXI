@@ -57,10 +57,23 @@ instead of assuming the other levels are in the export.
 
 ## Interim runtime pilot
 
-Rocketbox is not bundled yet. Its source football texture visibly contains a
-fictional crest, sponsor and fixed shirt number, and the current workspace has
-no audited DCC/debranding export. Admitting that texture would violate the
-neutral-kit requirement even though the source code licence is permissive.
+Rocketbox is not bundled yet. `Scripts/build_replayxi_rocketbox_pilot.py` now
+creates a deterministic, neutral-kit conversion candidate from a private
+hash-verified snapshot of all 11 pinned inputs. It strips horizontal root
+travel, downsamples and rebuilds four 1,024-pixel textures through a tested
+skin-preservation gate, removes source material extensions and specular maps,
+and embeds the exact Microsoft MIT notice in both USD metadata and the build
+report. The converter also rejects non-finite settings, source/converter races,
+unsafe output aliases, symlink publication and invalid per-mesh skinning.
+
+Two independent end-to-end builds were byte-identical at SHA-256
+`e338d6a3a4547920a658fea6f9240cefbb0c10c58d4049854ffd0d27b7edd76f`.
+The temporary 3.28 MiB USDZ contains two bound meshes with 5,012 total points,
+one 80-joint skeleton, one 19-sample / 0.6-second run animation, four neutral
+textures and at most four normalized influences per point. `usdchecker --arkit`
+and the legacy structural audit pass. The asset remains outside the repository
+and app bundle until RealityKit load, animated deformation, visual identity,
+LOD and performance gates pass in the simulator and on physical Vision Pro.
 
 The repaired CC0 `ReplayXIPlayerKitPilot.usdz` remains bundled as a converter
 and importer diagnostic, but `ReplayImportedAthleteProvider` does not admit it
@@ -81,14 +94,13 @@ prewarm returns to the existing procedural athlete without changing playback.
 
 ## Integration recipe
 
-1. **Acquire and preserve provenance.** Run the pinned fetcher. Copy the MIT
-   notice and a generated manifest containing source commit, input hashes,
-   converter versions and output hashes next to every derived USDZ.
-2. **Debrand and rebuild the kit.** In Blender, remove the upstream fictional
-   crest, sponsor and baked number. Author a neutral Replay XI shirt/shorts/sock
-   texture mask. Produce home, away and goalkeeper palettes from that mask; do
-   not reproduce real-club or EA artwork. Keep the existing extruded jersey
-   number entity so player identity remains dynamic and readable.
+1. **Acquire and preserve provenance.** Run the pinned fetcher, then the audited
+   pilot builder. Preserve its source commit, input/converter hashes, exact MIT
+   notice and output report next to every reviewed USDZ.
+2. **Review the neutral kit.** Inspect the generated neutral textures and skin
+   mask on the animated mesh. Author home, away and goalkeeper palettes without
+   reproducing real-club or EA artwork. Keep Replay XI's extruded jersey number
+   entity so player identity remains dynamic and readable.
 3. **Normalise the skeleton.** Scale centimetres to metres, preserve one Biped
    hierarchy, limit skin weights to four influences, and emit an explicit map
    from Biped joints to Replay XI's hips/spine/head, limb and ragdoll proxy
