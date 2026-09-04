@@ -105,7 +105,7 @@ enum ReplayAthleteMotion {
         )
     }
 
-    /// State-specific authored posing remains a pure function of match time.
+    /// Telemetry-blended authored posing remains a pure function of match time.
     /// The renderer can compute a descriptor once per player and share it with
     /// imported-asset admission and procedural fallback without transition state.
     static func locomotionPose(
@@ -115,7 +115,16 @@ enum ReplayAthleteMotion {
         gaitPhase suppliedGaitPhase: Float? = nil,
         lookTargetWorldPosition: SIMD3<Float>? = nil
     ) -> ReplayAthleteLocomotionPose {
-        let tuning = tuning(for: locomotion.state)
+        // `PlayerLocomotionState` is deliberately discrete because it is also
+        // used for clip admission and tactical semantics.  Driving the visible
+        // body directly from that enum, however, made every classification
+        // boundary an animation cut: a 0.02 m/s change around jog or sprint
+        // could replace the complete hip, knee and arm pose in one frame.
+        // Resolve the procedural presentation from continuous speed/turn bands
+        // while retaining the enum for those non-visual decisions.
+        let motionTuning = motionTuning(for: locomotion)
+        let tuning = motionTuning.tuning
+        let cutInfluence = motionTuning.cutInfluence
         let effort = locomotion.effort
         let turn = locomotion.turnResponse
         let acceleration = locomotion.accelerationResponse
@@ -133,7 +142,9 @@ enum ReplayAthleteMotion {
             + (max(acceleration, 0) * tuning.accelerationLean)
             - (braking * (0.08 + (effort * 0.08)))
             + (track.isGoalkeeper ? 0.045 : 0)
-        let cutBank = locomotion.state == .cut ? turn * 0.18 : turn * 0.025 * effort
+        let runningTurnBank = turn * 0.025 * effort
+        let cutBank = runningTurnBank
+            + ((turn * 0.18 - runningTurnBank) * cutInfluence)
         let look = lookPose(
             for: track,
             at: time,
@@ -142,7 +153,7 @@ enum ReplayAthleteMotion {
         )
 
         let goalkeeperStance: Float = track.isGoalkeeper ? 0.10 : tuning.lateralStance
-        let cutPlant = locomotion.state == .cut ? abs(turn) * 0.12 : 0
+        let cutPlant = abs(turn) * 0.12 * cutInfluence
         let leftHipSwing = (leftFootfall.stride * tuning.strideAmplitude)
             - (max(turn, 0) * cutPlant)
         let rightHipSwing = (rightFootfall.stride * tuning.strideAmplitude)
@@ -483,12 +494,117 @@ enum ReplayAthleteMotion {
         let footfall: FootfallTuning
     }
 
+    private struct ResolvedLocomotionTuning {
+        let tuning: LocomotionTuning
+        let cutInfluence: Float
+    }
+
     private struct FootfallTuning {
         let stanceFraction: Float
         let stanceKneeCompression: Float
         let heelStrike: Float
         let toeOff: Float
         let swingDorsiflexion: Float
+    }
+
+    /// Converts continuous telemetry into continuous presentation parameters.
+    /// The overlapping smoother-step bands remove pose discontinuities at the
+    /// semantic idle/walk/jog/sprint/cut thresholds without keeping mutable
+    /// transition state, so arbitrary seek and reverse playback remain exact.
+    private static func motionTuning(
+        for locomotion: PlayerLocomotionSample
+    ) -> ResolvedLocomotionTuning {
+        let speed = locomotion.speedMetresPerSecond.isFinite
+            ? min(max(locomotion.speedMetresPerSecond, 0), 12)
+            : 0
+        let turnRate = locomotion.turnRateDegreesPerSecond.isFinite
+            ? min(abs(locomotion.turnRateDegreesPerSecond), 360)
+            : 0
+
+        let walkingInfluence = smootherStep((speed - 0.08) / 0.54)
+        let joggingInfluence = smootherStep((speed - 1.10) / 1.10)
+        let sprintingInfluence = smootherStep((speed - 3.00) / 1.80)
+
+        var resolved = interpolate(
+            from: tuning(for: .idle),
+            to: tuning(for: .walk),
+            weight: walkingInfluence
+        )
+        resolved = interpolate(
+            from: resolved,
+            to: tuning(for: .jog),
+            weight: joggingInfluence
+        )
+        resolved = interpolate(
+            from: resolved,
+            to: tuning(for: .sprint),
+            weight: sprintingInfluence
+        )
+
+        // Start preparing the plant below the 70 degree/second semantic cut
+        // boundary and reach the full authored cut at 150 degrees/second. This
+        // produces a readable weight shift instead of a threshold pop.
+        let movingInfluence = smootherStep((speed - 0.65) / 0.65)
+        let turningInfluence = smootherStep((turnRate - 38) / 112)
+        let cutInfluence = movingInfluence * turningInfluence
+        resolved = interpolate(
+            from: resolved,
+            to: tuning(for: .cut),
+            weight: cutInfluence
+        )
+        return ResolvedLocomotionTuning(
+            tuning: resolved,
+            cutInfluence: cutInfluence
+        )
+    }
+
+    private static func interpolate(
+        from start: LocomotionTuning,
+        to end: LocomotionTuning,
+        weight rawWeight: Float
+    ) -> LocomotionTuning {
+        let weight = min(max(rawWeight.isFinite ? rawWeight : 0, 0), 1)
+        func blend(_ start: Float, _ end: Float) -> Float {
+            start + ((end - start) * weight)
+        }
+        return LocomotionTuning(
+            strideAmplitude: blend(start.strideAmplitude, end.strideAmplitude),
+            kneeBase: blend(start.kneeBase, end.kneeBase),
+            kneeTravel: blend(start.kneeTravel, end.kneeTravel),
+            toeLift: blend(start.toeLift, end.toeLift),
+            forwardLean: blend(start.forwardLean, end.forwardLean),
+            accelerationLean: blend(start.accelerationLean, end.accelerationLean),
+            lateralStance: blend(start.lateralStance, end.lateralStance),
+            lateralSway: blend(start.lateralSway, end.lateralSway),
+            verticalBounce: blend(start.verticalBounce, end.verticalBounce),
+            pelvisRoll: blend(start.pelvisRoll, end.pelvisRoll),
+            pelvisYaw: blend(start.pelvisYaw, end.pelvisYaw),
+            spineRoll: blend(start.spineRoll, end.spineRoll),
+            spineYaw: blend(start.spineYaw, end.spineYaw),
+            headRoll: blend(start.headRoll, end.headRoll),
+            headTurn: blend(start.headTurn, end.headTurn),
+            shoulderReach: blend(start.shoulderReach, end.shoulderReach),
+            armSwing: blend(start.armSwing, end.armSwing),
+            elbowBend: blend(start.elbowBend, end.elbowBend),
+            elbowTravel: blend(start.elbowTravel, end.elbowTravel),
+            wristTravel: blend(start.wristTravel, end.wristTravel),
+            footfall: FootfallTuning(
+                stanceFraction: blend(
+                    start.footfall.stanceFraction,
+                    end.footfall.stanceFraction
+                ),
+                stanceKneeCompression: blend(
+                    start.footfall.stanceKneeCompression,
+                    end.footfall.stanceKneeCompression
+                ),
+                heelStrike: blend(start.footfall.heelStrike, end.footfall.heelStrike),
+                toeOff: blend(start.footfall.toeOff, end.footfall.toeOff),
+                swingDorsiflexion: blend(
+                    start.footfall.swingDorsiflexion,
+                    end.footfall.swingDorsiflexion
+                )
+            )
+        )
     }
 
     private static func tuning(for state: PlayerLocomotionState) -> LocomotionTuning {

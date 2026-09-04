@@ -590,6 +590,142 @@ final class PlaybackHardeningTests: XCTestCase {
         XCTAssertFalse(player.isLocallyPaused)
     }
 
+    func testCoordinatorRejoinProjectsCachedCoachTimeForTrackBoundAnnotations() throws {
+        let receivedAt = Date(timeIntervalSinceReferenceDate: 4_500)
+        var currentReceiveDate = receivedAt
+        let coachID = UUID(uuidString: "AAAAAAAA-0000-4000-8000-000000000551")!
+        let coachParticipantID = UUID(uuidString: "BBBBBBBB-0000-4000-8000-000000000552")!
+
+        let coach = ReplayStore()
+        coach.seek(to: 5, broadcast: false)
+        let runner = try XCTUnwrap(coach.selectedScenario.player(id: "navy-rw"))
+        let authoredStart = runner.pose(at: 5).position
+        let authoredEnd = PitchPoint(x: authoredStart.x + 3, z: authoredStart.z + 6)
+        coach.beginDrawing(.run)
+        XCTAssertNil(coach.registerPitchTap(authoredStart))
+        let authoredMark = try XCTUnwrap(coach.registerPitchTap(authoredEnd))
+        XCTAssertTrue(authoredMark.followsPlayerTracks)
+        coach.setPlaybackRate(2, broadcast: false)
+        coach.setPlaying(true, broadcast: false)
+
+        let player = ReplayStore()
+        player.localRole = .player
+        player.setCollaborationActive(true)
+        let coordinator = SquadSessionCoordinator(
+            store: player,
+            receiveDate: { currentReceiveDate }
+        )
+        coordinator.state = .joined
+        coordinator.authoritativeCoachID = coachID
+        coordinator.authoritativeCoachParticipantID = coachParticipantID
+        coordinator.receiveForTesting(
+            command(
+                kind: .sync,
+                sequence: 1,
+                authorID: coachID,
+                role: .coach,
+                snapshot: coach.makeSnapshot(),
+                sentAt: receivedAt
+            ),
+            sourceParticipantID: coachParticipantID
+        )
+
+        player.openLocalPlayerPOV("red-lb")
+        XCTAssertTrue(player.isLocallyPaused)
+        currentReceiveDate = receivedAt.addingTimeInterval(1.25)
+
+        coordinator.setFollowingCoach(true)
+
+        XCTAssertTrue(player.followsCoach)
+        XCTAssertFalse(player.isLocallyPaused)
+        XCTAssertEqual(player.playhead, 7.5, accuracy: 0.000_1)
+        let synchronizedMark = try XCTUnwrap(player.marks.first { $0.id == authoredMark.id })
+        let resolved = synchronizedMark.resolvedGeometry(
+            in: player.selectedScenario,
+            at: player.playhead
+        )
+        let expectedRunnerPosition = runner.pose(at: 7.5).position
+        XCTAssertEqual(resolved.start.x, expectedRunnerPosition.x, accuracy: 0.000_1)
+        XCTAssertEqual(resolved.start.z, expectedRunnerPosition.z, accuracy: 0.000_1)
+        XCTAssertEqual(resolved.end.x - resolved.start.x, 3, accuracy: 0.000_1)
+        XCTAssertEqual(resolved.end.z - resolved.start.z, 6, accuracy: 0.000_1)
+    }
+
+    func testCoordinatorDefersStaleRejoinUntilFreshAuthenticatedSnapshotArrives() {
+        let receivedAt = Date(timeIntervalSinceReferenceDate: 4_700)
+        var currentReceiveDate = receivedAt
+        let coachID = UUID(uuidString: "AAAAAAAA-0000-4000-8000-000000000571")!
+        let coachParticipantID = UUID(uuidString: "BBBBBBBB-0000-4000-8000-000000000572")!
+        let player = ReplayStore()
+        player.localRole = .player
+        player.setCollaborationActive(true)
+        let coordinator = SquadSessionCoordinator(
+            store: player,
+            receiveDate: { currentReceiveDate }
+        )
+        coordinator.state = .joined
+        coordinator.authoritativeCoachID = coachID
+        coordinator.authoritativeCoachParticipantID = coachParticipantID
+
+        coordinator.receiveForTesting(
+            command(
+                kind: .sync,
+                sequence: 1,
+                authorID: coachID,
+                role: .coach,
+                snapshot: snapshot(playhead: 3, isPlaying: true, playbackRate: 1),
+                sentAt: receivedAt
+            ),
+            sourceParticipantID: coachParticipantID
+        )
+        player.openLocalPlayerPOV("red-lb")
+        currentReceiveDate = receivedAt.addingTimeInterval(
+            SharedTimelineProjector.maximumTransitAge + 0.25
+        )
+
+        coordinator.setFollowingCoach(true)
+
+        XCTAssertFalse(player.followsCoach)
+        XCTAssertTrue(player.isLocallyPaused)
+        XCTAssertEqual(player.playhead, 3, accuracy: 0.000_1)
+        XCTAssertEqual(player.statusMessage, "Waiting for a fresh coach state")
+
+        let spoofedParticipantID = UUID(
+            uuidString: "CCCCCCCC-0000-4000-8000-000000000573"
+        )!
+        coordinator.receiveForTesting(
+            command(
+                kind: .sync,
+                sequence: 99,
+                authorID: coachID,
+                role: .coach,
+                snapshot: snapshot(playhead: 20, isPlaying: false, playbackRate: 1),
+                sentAt: currentReceiveDate
+            ),
+            sourceParticipantID: spoofedParticipantID
+        )
+        XCTAssertFalse(player.followsCoach)
+        XCTAssertTrue(player.isLocallyPaused)
+        XCTAssertEqual(player.playhead, 3, accuracy: 0.000_1)
+
+        coordinator.receiveForTesting(
+            command(
+                kind: .sync,
+                sequence: 2,
+                authorID: coachID,
+                role: .coach,
+                snapshot: snapshot(playhead: 12, isPlaying: false, playbackRate: 1),
+                sentAt: currentReceiveDate
+            ),
+            sourceParticipantID: coachParticipantID
+        )
+
+        XCTAssertTrue(player.followsCoach)
+        XCTAssertFalse(player.isLocallyPaused)
+        XCTAssertEqual(player.playhead, 12, accuracy: 0.000_1)
+        XCTAssertFalse(player.isPlaying)
+    }
+
     func testRejectedFarStaleSyncDoesNotConsumeCoachSequence() {
         let player = ReplayStore()
         player.localRole = .player

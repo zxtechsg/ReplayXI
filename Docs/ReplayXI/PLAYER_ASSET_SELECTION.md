@@ -175,6 +175,29 @@ prewarm returns to the existing procedural athlete without changing playback.
    proxy continues to drive interaction, first-person camera attachment and
    deterministic ragdoll presentation.
 
+## Current motion evidence
+
+The default procedural athlete no longer replaces an entire gait pose when a
+telemetry sample crosses the semantic idle/walk, walk/jog, jog/sprint or cut
+classification boundary. `ReplayAthleteMotion` now blends stride, support time,
+knee lift, ankle roll, torso lean, counter-rotation and arm mechanics through
+continuous speed and turn bands. The blend is still a pure function of match
+time and telemetry, so reverse playback and SharePlay resynchronisation do not
+need mutable transition state. A focused simulator regression samples both
+sides of every semantic boundary and constrains root and joint discontinuity.
+
+The procedural near athlete also has a separately articulated neck/head chain,
+bounded deterministic scanning, ball-aware gaze, football-specific heel strike,
+toe-off and sprint flight, plus a deterministic ragdoll blend. These are code-
+and simulator-test claims, not a claim of captured professional mocap.
+
+The higher-fidelity asset requirement is **not yet complete**. The bundled CC0
+pilot is still a one-player, run-only diagnostic that falls back to the
+procedural athlete for idle, walk, cut and ragdoll states. The selected Rocketbox
+candidate is not in the app bundle and has not passed RealityKit deformation,
+authored LOD, 22-player memory/frame-time, or physical Vision Pro review. No
+Sketchfab candidate has passed the authenticated acquisition and rights gates.
+
 ## Admission gates
 
 The pilot is not production-ready until all of these are true:

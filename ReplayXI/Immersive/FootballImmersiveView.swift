@@ -939,6 +939,18 @@ struct AnnotationJoystickMath: Equatable, Sendable {
         SIMD2<Int>(current.x - previous.x, current.y - previous.y)
     }
 
+    /// Advances the gesture's committed notch only when the corresponding
+    /// store mutation succeeded. Without this gate, pushing against a touchline
+    /// records a rejected outward step; returning the stick to centre then
+    /// produces an unintended inward move even though no outward move occurred.
+    static func committedSteps(
+        from previous: SIMD2<Int>,
+        toward requested: SIMD2<Int>,
+        mutationSucceeded: Bool
+    ) -> SIMD2<Int> {
+        mutationSucceeded ? requested : previous
+    }
+
     private static func quantizedSteps(for value: CGFloat) -> Int {
         let magnitude = abs(value)
         guard magnitude > deadZone else { return 0 }
@@ -1146,7 +1158,7 @@ private struct AnnotationAdjustmentJoystick: View {
     let title: String
     let accessibilityTarget: String
     let color: Color
-    let onNudge: (_ x: Float, _ z: Float) -> Void
+    let onNudge: (_ x: Float, _ z: Float) -> Bool
 
     @State private var sample = AnnotationJoystickMath.Sample.zero
     @State private var appliedSteps = SIMD2<Int>.zero
@@ -1225,11 +1237,15 @@ private struct AnnotationAdjustmentJoystick: View {
                     to: next.steps
                 )
                 sample = next
-                appliedSteps = next.steps
                 guard delta != .zero else { return }
-                nudge(
+                let mutationSucceeded = nudge(
                     x: Float(delta.x) * stepMetres,
                     z: Float(-delta.y) * stepMetres
+                )
+                appliedSteps = AnnotationJoystickMath.committedSteps(
+                    from: appliedSteps,
+                    toward: next.steps,
+                    mutationSucceeded: mutationSucceeded
                 )
             }
             .onEnded { _ in
@@ -1237,7 +1253,8 @@ private struct AnnotationAdjustmentJoystick: View {
             }
     }
 
-    private func nudge(x: Float, z: Float) {
+    @discardableResult
+    private func nudge(x: Float, z: Float) -> Bool {
         onNudge(x, z)
     }
 
@@ -3158,17 +3175,18 @@ private struct ImmersiveControlDeck: View {
         }
     }
 
+    @discardableResult
     private func nudgeAnnotation(
         _ mark: CoachMark,
         endpoint: CoachMarkEndpoint,
         x: Float,
         z: Float
-    ) {
+    ) -> Bool {
         guard store.nudgeCoachMarkEndpoint(
             id: mark.id,
             endpoint: endpoint,
             by: PitchPoint(x: x, z: z)
-        ) else { return }
+        ) else { return false }
         let distance = hypot(x, z)
         let distanceLabel = distance.formatted(
             .number.precision(.fractionLength(distance < 1 ? 2 : 1))
@@ -3179,6 +3197,7 @@ private struct ImmersiveControlDeck: View {
         case .end:
             annotationConfirmation = "ARROW POINT MOVED · \(distanceLabel) M"
         }
+        return true
     }
 
     @ViewBuilder

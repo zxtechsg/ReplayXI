@@ -66,6 +66,13 @@ final class SquadSessionCoordinator {
     /// slider positions from the mutable store.
     @ObservationIgnored private var lastPublishedSnapshot: SharedPlaybackSnapshot?
     @ObservationIgnored private var lastPublishedInstant: ContinuousClock.Instant?
+    /// Receive instant associated with the latest accepted full coach snapshot.
+    /// `lastSync` also advances for legacy annotation-only commands, so it cannot
+    /// safely be used to project transport when a player rejoins coach follow.
+    @ObservationIgnored private var lastCoachSnapshotReceivedAt = Date.distantPast
+    /// A rejoin request made without a recent full snapshot waits for the next
+    /// authenticated sync instead of applying an arbitrarily stale playhead.
+    @ObservationIgnored private var awaitsFreshCoachSnapshotForRejoin = false
     @ObservationIgnored private let receiveDate: @MainActor () -> Date
     private let playbackClock = ContinuousClock()
 
@@ -141,10 +148,46 @@ final class SquadSessionCoordinator {
     /// through this method rather than mutating the store directly.
     func setFollowingCoach(_ follows: Bool) {
         guard let store else { return }
-        store.setFollowingCoach(follows)
-        if follows {
-            applyLocalSeatAssignment(force: true)
+        guard follows else {
+            awaitsFreshCoachSnapshotForRejoin = false
+            store.setFollowingCoach(false)
+            return
         }
+
+        // Outside a joined player room this remains the store's local state
+        // transition. The receive-time projection below is specifically a
+        // SharePlay rejoin contract.
+        guard state == .joined,
+              store.localRole == .player,
+              store.isCollaborationActive else {
+            store.setFollowingCoach(true)
+            applyLocalSeatAssignment(force: true)
+            return
+        }
+
+        let now = receiveDate()
+        let snapshotAge = now.timeIntervalSince(lastCoachSnapshotReceivedAt)
+        guard lastCoachSnapshotReceivedAt != .distantPast,
+              snapshotAge.isFinite,
+              snapshotAge >= -SharedTimelineProjector.futureTimestampTolerance,
+              snapshotAge <= SharedTimelineProjector.maximumTransitAge else {
+            // We cannot know whether a stale playing snapshot remained playing
+            // or whether the coach sought/paused after it. Stay in the local
+            // comfort pause and ask for authoritative recovery rather than
+            // presenting an invented timeline position.
+            awaitsFreshCoachSnapshotForRejoin = true
+            store.statusMessage = "Waiting for a fresh coach state"
+            sendRequestState()
+            return
+        }
+
+        awaitsFreshCoachSnapshotForRejoin = false
+        store.setFollowingCoach(true)
+        // The cached snapshot is projected to its receive instant. Advance from
+        // that instant to this pinch so track-bound marks and player poses use
+        // the same current replay time as the rest of the squad.
+        store.advance(by: max(snapshotAge, 0))
+        applyLocalSeatAssignment(force: true)
     }
 
     private func configure(_ session: GroupSession<ReplayXIActivity>) async {
@@ -262,6 +305,14 @@ final class SquadSessionCoordinator {
                 authoritativeCoachParticipantID = sourceParticipantID
             }
             lastSync = receivedAt
+            lastCoachSnapshotReceivedAt = receivedAt
+            if awaitsFreshCoachSnapshotForRejoin {
+                awaitsFreshCoachSnapshotForRejoin = false
+                // `applyRemote` cached the just-projected snapshot while the
+                // wearer remained locally paused. Applying it again after
+                // enabling follow commits that same authoritative instant.
+                store?.setFollowingCoach(true)
+            }
             applyLocalSeatAssignment()
 
         case .coachAnnotation:
@@ -524,6 +575,8 @@ final class SquadSessionCoordinator {
         nextSequence = 1
         lastPublishedSnapshot = nil
         lastPublishedInstant = nil
+        lastCoachSnapshotReceivedAt = .distantPast
+        awaitsFreshCoachSnapshotForRejoin = false
         lastSync = .distantPast
         cancellables.removeAll()
         messenger = nil

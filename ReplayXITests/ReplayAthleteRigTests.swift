@@ -349,6 +349,86 @@ final class ReplayAthleteRigTests: XCTestCase {
         )
     }
 
+    func testProceduralPoseRemainsContinuousAcrossSemanticPaceAndCutThresholds() throws {
+        let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay))
+        let player = try XCTUnwrap(scenario.player(id: "navy-rw"))
+        let phase: Float = .pi * 0.73
+
+        func sample(speed: Float, turn: Float = 0) -> PlayerLocomotionSample {
+            PlayerLocomotionSample(
+                motion: PlayerMotionState(
+                    speedMetresPerSecond: speed,
+                    distanceTravelled: 7.5,
+                    locomotionPhase: phase
+                ),
+                speedMetresPerSecond: speed,
+                accelerationMetresPerSecondSquared: 0,
+                turnRateDegreesPerSecond: turn,
+                state: PlayerLocomotionSample.classify(
+                    speedMetresPerSecond: speed,
+                    turnRateDegreesPerSecond: turn
+                )
+            )
+        }
+
+        func pose(_ sample: PlayerLocomotionSample) -> ReplayAthleteLocomotionPose {
+            ReplayAthleteMotion.locomotionPose(
+                for: player,
+                at: 12,
+                locomotion: sample,
+                gaitPhase: phase
+            )
+        }
+
+        let boundaries: [(PlayerLocomotionSample, PlayerLocomotionSample)] = [
+            (sample(speed: 0.219), sample(speed: 0.221)),
+            (sample(speed: 1.649), sample(speed: 1.651)),
+            (sample(speed: 3.799), sample(speed: 3.801)),
+            (sample(speed: 3, turn: 69.9), sample(speed: 3, turn: 70.1)),
+        ]
+        XCTAssertNotEqual(boundaries[0].0.state, boundaries[0].1.state)
+        XCTAssertNotEqual(boundaries[1].0.state, boundaries[1].1.state)
+        XCTAssertNotEqual(boundaries[2].0.state, boundaries[2].1.state)
+        XCTAssertNotEqual(boundaries[3].0.state, boundaries[3].1.state)
+
+        let referenceAxes: [SIMD3<Float>] = [
+            [0, -1, 0],
+            [0, 0, 1],
+        ]
+        for (beforeSample, afterSample) in boundaries {
+            let before = pose(beforeSample)
+            let after = pose(afterSample)
+            let orientationPairs: [(simd_quatf, simd_quatf)] = [
+                (before.bodyOrientation, after.bodyOrientation),
+                (before.hipsOrientation, after.hipsOrientation),
+                (before.spineOrientation, after.spineOrientation),
+                (before.leftHipOrientation, after.leftHipOrientation),
+                (before.rightHipOrientation, after.rightHipOrientation),
+                (before.leftKneeOrientation, after.leftKneeOrientation),
+                (before.rightKneeOrientation, after.rightKneeOrientation),
+                (before.leftShoulderOrientation, after.leftShoulderOrientation),
+                (before.rightShoulderOrientation, after.rightShoulderOrientation),
+            ]
+            for (beforeOrientation, afterOrientation) in orientationPairs {
+                for axis in referenceAxes {
+                    XCTAssertLessThan(
+                        simd_distance(
+                            beforeOrientation.act(axis),
+                            afterOrientation.act(axis)
+                        ),
+                        0.012,
+                        "A semantic state boundary must not become a visible pose cut"
+                    )
+                }
+            }
+            XCTAssertLessThan(
+                simd_distance(before.bodyPosition, after.bodyPosition),
+                0.002,
+                "Root grounding and sway must remain continuous across state labels"
+            )
+        }
+    }
+
     func testFootfallTimingAddsWalkSupportAndSprintFlightWithoutFrameHistory() {
         let flightPhase = Float.pi * 2 * 0.30
         let oppositePhase = flightPhase + .pi

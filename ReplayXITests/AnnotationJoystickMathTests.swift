@@ -64,4 +64,33 @@ final class AnnotationJoystickMathTests: XCTestCase {
             SIMD2<Int>(-4, 3)
         )
     }
+
+    func testRejectedNudgeDoesNotBecomeAReverseMoveWhenStickReturnsToCentre() {
+        let committed = SIMD2<Int>.zero
+        let rejectedOutward = SIMD2<Int>(1, 0)
+        let afterRejection = AnnotationJoystickMath.committedSteps(
+            from: committed,
+            toward: rejectedOutward,
+            mutationSucceeded: false
+        )
+
+        XCTAssertEqual(afterRejection, committed)
+        XCTAssertEqual(
+            AnnotationJoystickMath.delta(from: afterRejection, to: .zero),
+            .zero,
+            "Returning to centre after a rejected boundary move must not nudge inward."
+        )
+
+        let accepted = AnnotationJoystickMath.committedSteps(
+            from: committed,
+            toward: rejectedOutward,
+            mutationSucceeded: true
+        )
+        XCTAssertEqual(accepted, rejectedOutward)
+        XCTAssertEqual(
+            AnnotationJoystickMath.delta(from: accepted, to: .zero),
+            SIMD2<Int>(-1, 0),
+            "Only a successfully applied outward step should be reversible."
+        )
+    }
 }
