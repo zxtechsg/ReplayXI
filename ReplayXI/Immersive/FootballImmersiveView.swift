@@ -766,6 +766,36 @@ struct PlaybackReviewIndexKey: Equatable, Sendable {
     }
 }
 
+/// Immersive spaces cannot host SwiftUI's pop-up presentation controls. Keep
+/// every secondary Playback action in one mutually exclusive, in-deck shelf
+/// instead. Associated annotation IDs prevent a shelf from silently editing a
+/// different mark after the selection changes.
+enum PlaybackInlinePanel: Equatable, Sendable {
+    case settings
+    case annotationEdit
+    case annotationDuration(UUID)
+    case annotationGeometry(UUID)
+    case annotationLabel(UUID)
+
+    static func toggled(
+        current: PlaybackInlinePanel?,
+        candidate: PlaybackInlinePanel
+    ) -> PlaybackInlinePanel? {
+        current == candidate ? nil : candidate
+    }
+
+    func isValid(for selectedAnnotationID: UUID?) -> Bool {
+        switch self {
+        case .settings, .annotationEdit:
+            true
+        case .annotationDuration(let id),
+             .annotationGeometry(let id),
+             .annotationLabel(let id):
+            selectedAnnotationID == id
+        }
+    }
+}
+
 private struct ImmersiveControlDeck: View {
     @Environment(ReplayStore.self) private var store
     @Environment(SquadSessionCoordinator.self) private var squadSession
@@ -780,6 +810,7 @@ private struct ImmersiveControlDeck: View {
     @State private var timelineTrackWidth: CGFloat = 0
     @State private var timelineScrubState: PlaybackTimelineScrub.GestureState?
     @State private var isClearAnnotationsPending = false
+    @State private var inlinePanel: PlaybackInlinePanel?
     @Binding var selectedAnnotationID: UUID?
     @Binding var showsDecisionStrip: Bool
     @Binding var controlDeckPresetRawValue: String
@@ -908,7 +939,7 @@ private struct ImmersiveControlDeck: View {
 
             if !isReviewShelfOpen {
                 HStack(spacing: 9) {
-                    playbackSettingsMenu
+                    playbackSettingsButton
 
                     Spacer()
 
@@ -1000,7 +1031,7 @@ private struct ImmersiveControlDeck: View {
                     }
 
                     if hasRoomActions {
-                        roomActionsMenu
+                        roomActionsButton
                     }
                 }
             }
@@ -1016,6 +1047,8 @@ private struct ImmersiveControlDeck: View {
                     onSelectPlayer: openPlayerPOV,
                     onClose: { showsDecisionStrip = false }
                 )
+            } else if let inlinePanel {
+                inlinePanelShelf(inlinePanel)
             } else if let selectedAnnotation {
                 selectedAnnotationInspector(selectedAnnotation)
             } else if showsEventStrip {
@@ -1056,6 +1089,7 @@ private struct ImmersiveControlDeck: View {
             showsEventStrip = false
             showsPlayerGrid = false
             isClearAnnotationsPending = false
+            inlinePanel = nil
             eventPage = 0
             annotationConfirmation = nil
             rebuildReviewIndex()
@@ -1064,6 +1098,9 @@ private struct ImmersiveControlDeck: View {
             rebuildReviewIndex()
         }
         .onChange(of: selectedAnnotationID) { _, selectedID in
+            // Secondary controls belong to the selection that opened them.
+            // Never carry a label, duration, or geometry shelf onto a new mark.
+            inlinePanel = nil
             if selectedID != nil {
                 showsPlayerGrid = false
             }
@@ -1089,25 +1126,30 @@ private struct ImmersiveControlDeck: View {
                 controlDeckPresetRawValue = PlaybackControlDeckPreset.large.rawValue
             }
             if arguments.contains("--replayxi-events") {
+                inlinePanel = nil
                 showsEventStrip = true
             }
             if arguments.contains("--replayxi-player-grid") {
+                inlinePanel = nil
                 showsPlayerGrid = true
                 showsEventStrip = false
                 showsDecisionStrip = false
             }
             if arguments.contains("--replayxi-options") {
+                inlinePanel = nil
                 selectedAnnotationID = nil
                 showsEventStrip = false
                 showsDecisionStrip = true
                 store.setPlaying(false, broadcast: false)
             }
             if arguments.contains("--replayxi-select-coach-mark") {
+                inlinePanel = nil
                 selectedAnnotationID = store.marks.last?.id
                 showsDecisionStrip = false
                 showsEventStrip = true
             }
             if arguments.contains("--replayxi-clear-confirm") {
+                inlinePanel = nil
                 isClearAnnotationsPending = true
                 selectedAnnotationID = nil
                 showsDecisionStrip = false
@@ -1129,51 +1171,9 @@ private struct ImmersiveControlDeck: View {
         }
     }
 
-    private var playbackSettingsMenu: some View {
-        Menu {
-            Section("Speed") {
-                ForEach(directPlaybackRates, id: \.self) { rate in
-                    Button {
-                        store.setPlaybackRate(rate, broadcast: store.localRole == .coach)
-                    } label: {
-                        if store.playbackRate == rate {
-                            Label(rateLabel(rate), systemImage: "checkmark")
-                        } else {
-                            Text(rateLabel(rate))
-                        }
-                    }
-                    .disabled(rateControlsAreDisabled)
-                }
-            }
-
-            Section("View") {
-                ForEach(viewModes, id: \.self) { mode in
-                    Button {
-                        store.setViewMode(mode)
-                    } label: {
-                        if store.viewMode == mode {
-                            Label(viewLabel(for: mode), systemImage: "checkmark")
-                        } else {
-                            Label(viewLabel(for: mode), systemImage: mode.systemImage)
-                        }
-                    }
-                    .disabled(store.isDrawing)
-                }
-            }
-
-            Section("Control deck") {
-                ForEach(PlaybackControlDeckPreset.allCases, id: \.self) { preset in
-                    Button {
-                        controlDeckPresetRawValue = preset.rawValue
-                    } label: {
-                        if controlDeckPreset == preset {
-                            Label(preset.title, systemImage: "checkmark")
-                        } else {
-                            Label(preset.title, systemImage: preset.systemImage)
-                        }
-                    }
-                }
-            }
+    private var playbackSettingsButton: some View {
+        Button {
+            toggleInlinePanel(.settings)
         } label: {
             Label(
                 "\(rateLabel(store.playbackRate)) · \(viewLabel(for: store.viewMode))",
@@ -1190,7 +1190,8 @@ private struct ImmersiveControlDeck: View {
         .accessibilityValue(
             "\(rateLabel(store.playbackRate)), \(viewLabel(for: store.viewMode))"
         )
-        .accessibilityHint("Changes playback speed, camera view, or local control size and reach")
+        .accessibilityHint("Opens playback speed, camera view, and local control size")
+        .accessibilityAddTraits(inlinePanel == .settings ? .isSelected : [])
     }
 
     private var controlDeckPreset: PlaybackControlDeckPreset {
@@ -1202,22 +1203,19 @@ private struct ImmersiveControlDeck: View {
             && store.selectedScenario.kind == .passingChannels
     }
 
-    private var roomActionsMenu: some View {
-        Menu {
-            Button {
-                store.showsLaneLens.toggle()
-                squadSession.broadcastCurrentState()
-            } label: {
-                Label(
-                    store.showsLaneLens ? "Hide passing lanes" : "Show passing lanes",
-                    systemImage: store.showsLaneLens ? "eye.slash" : "arrow.triangle.branch"
-                )
-            }
+    private var roomActionsButton: some View {
+        Button {
+            store.showsLaneLens.toggle()
+            squadSession.broadcastCurrentState()
         } label: {
-            Label("Lanes", systemImage: "arrow.triangle.branch")
+            Label(
+                store.showsLaneLens ? "Hide lanes" : "Show lanes",
+                systemImage: store.showsLaneLens ? "eye.slash" : "arrow.triangle.branch"
+            )
                 .font(.subheadline.weight(.black))
                 .lineLimit(1)
-                .frame(width: 104, height: 52)
+                .minimumScaleFactor(0.78)
+                .frame(width: 116, height: 52)
         }
         .buttonStyle(.bordered)
         .tint(
@@ -1225,21 +1223,20 @@ private struct ImmersiveControlDeck: View {
                 ? ReplayTheme.orange
                 : .white.opacity(0.48)
         )
-        .accessibilityLabel("Passing lane actions")
-        .accessibilityHint("Shows or hides the descriptive passing lanes")
+        .accessibilityLabel(store.showsLaneLens ? "Hide passing lanes" : "Show passing lanes")
+        .accessibilityValue(store.showsLaneLens ? "Visible" : "Hidden")
+        .accessibilityHint("Toggles the descriptive passing lanes directly")
     }
 
-    private func annotationEditMenu(compact: Bool) -> some View {
-        Menu {
-            Button(action: undoLastCoachAnnotation) {
-                Label("Undo last", systemImage: "arrow.uturn.backward")
+    private func annotationEditButton(compact: Bool) -> some View {
+        Button {
+            // The drawing shelf is a top-level compact mode. Leave it before
+            // opening the inline editor so Undo/Clear cannot become an
+            // invisible selected control underneath that shelf.
+            if store.isDrawing {
+                store.cancelDrawing()
             }
-            .disabled(!canUndoCoachAnnotation)
-
-            Button(action: armClearAnnotations) {
-                Label("Clear coach marks…", systemImage: "eraser.fill")
-            }
-            .disabled(clearableCoachAnnotationCount == 0)
+            toggleInlinePanel(.annotationEdit)
         } label: {
             Group {
                 if compact {
@@ -1258,7 +1255,442 @@ private struct ImmersiveControlDeck: View {
         .disabled(store.localRole != .coach || clearableCoachAnnotationCount == 0)
         .accessibilityLabel("Edit annotations")
         .accessibilityValue("\(clearableCoachAnnotationCount) coach marks")
-        .accessibilityHint("Undo the latest mark or start a safe clear")
+        .accessibilityHint("Opens undo and clear controls")
+        .accessibilityAddTraits(inlinePanel == .annotationEdit ? .isSelected : [])
+    }
+
+    @ViewBuilder
+    private func inlinePanelShelf(_ panel: PlaybackInlinePanel) -> some View {
+        switch panel {
+        case .settings:
+            playbackSettingsShelf
+        case .annotationEdit:
+            annotationEditShelf
+        case .annotationDuration(let markID):
+            if selectedAnnotationID == markID,
+               let mark = store.marks.first(where: { $0.id == markID }) {
+                annotationDurationShelf(mark)
+            } else {
+                unavailableInlineShelf
+            }
+        case .annotationGeometry(let markID):
+            if selectedAnnotationID == markID,
+               let mark = store.marks.first(where: { $0.id == markID }) {
+                annotationGeometryShelf(mark)
+            } else {
+                unavailableInlineShelf
+            }
+        case .annotationLabel(let markID):
+            if selectedAnnotationID == markID,
+               let mark = store.marks.first(where: { $0.id == markID }) {
+                annotationLabelShelf(mark)
+            } else {
+                unavailableInlineShelf
+            }
+        }
+    }
+
+    private var playbackSettingsShelf: some View {
+        inlineShelf(color: ReplayTheme.cyan) {
+            HStack(spacing: 12) {
+                inlinePanelHeader(
+                    title: "Playback",
+                    detail: "SETTINGS",
+                    systemImage: "slider.horizontal.3",
+                    color: ReplayTheme.cyan
+                )
+
+                inlineChoiceDivider
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Eyebrow(text: "Speed", color: ReplayTheme.cyan)
+                    HStack(spacing: 6) {
+                        ForEach(directPlaybackRates, id: \.self) { rate in
+                            playbackRateChoice(rate)
+                        }
+                    }
+                }
+
+                inlineChoiceDivider
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Eyebrow(text: "View", color: ReplayTheme.signal)
+                    HStack(spacing: 6) {
+                        ForEach(viewModes, id: \.self) { mode in
+                            playbackViewChoice(mode)
+                        }
+                    }
+                }
+
+                inlineChoiceDivider
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Eyebrow(text: "Control size", color: ReplayTheme.orange)
+                    HStack(spacing: 6) {
+                        ForEach(PlaybackControlDeckPreset.allCases, id: \.self) { preset in
+                            controlDeckChoice(preset)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func playbackRateChoice(_ rate: Double) -> some View {
+        let isSelected = store.playbackRate == rate
+        return Button {
+            store.setPlaybackRate(rate, broadcast: store.localRole == .coach)
+        } label: {
+            Text(rateLabel(rate))
+                .font(.subheadline.monospacedDigit().weight(.black))
+                .frame(width: 56, height: 48)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(isSelected ? ReplayTheme.cyan : .white.opacity(0.10))
+        .foregroundStyle(isSelected ? Color.black : Color.white)
+        .disabled(rateControlsAreDisabled)
+        .accessibilityLabel("Playback speed \(rateLabel(rate))")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private func playbackViewChoice(_ mode: ReplayViewMode) -> some View {
+        let isSelected = store.viewMode == mode
+        return Button {
+            store.setViewMode(mode)
+        } label: {
+            VStack(spacing: 1) {
+                Image(systemName: mode.systemImage)
+                    .font(.headline.weight(.bold))
+                Text(viewLabel(for: mode).uppercased())
+                    .font(.caption2.monospaced().weight(.black))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+            }
+            .frame(width: 98, height: 48)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(isSelected ? ReplayTheme.signal : .white.opacity(0.10))
+        .foregroundStyle(isSelected ? Color.black : Color.white)
+        .disabled(store.isDrawing)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(viewLabel(for: mode)) view")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private func controlDeckChoice(_ preset: PlaybackControlDeckPreset) -> some View {
+        let isSelected = controlDeckPreset == preset
+        return Button {
+            controlDeckPresetRawValue = preset.rawValue
+        } label: {
+            VStack(spacing: 1) {
+                Image(systemName: preset.systemImage)
+                    .font(.headline.weight(.bold))
+                Text(preset.title.uppercased())
+                    .font(.caption2.monospaced().weight(.black))
+                    .lineLimit(1)
+            }
+            .frame(width: 72, height: 48)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(isSelected ? ReplayTheme.orange : .white.opacity(0.10))
+        .foregroundStyle(isSelected ? Color.black : Color.white)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(preset.title) control size")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private var annotationEditShelf: some View {
+        inlineShelf(color: ReplayTheme.orange) {
+            HStack(spacing: 12) {
+                inlinePanelHeader(
+                    title: "Annotations",
+                    detail: "EDIT",
+                    systemImage: "eraser.fill",
+                    color: ReplayTheme.orange
+                )
+
+                inlineChoiceDivider
+
+                Button(action: undoLastCoachAnnotation) {
+                    Label("Undo last", systemImage: "arrow.uturn.backward")
+                        .font(.subheadline.weight(.black))
+                        .frame(minWidth: 150, minHeight: 52)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(ReplayTheme.orange)
+                .foregroundStyle(.black)
+                .disabled(!canUndoCoachAnnotation)
+                .accessibilityHint("Removes the newest coach-created annotation")
+
+                Button(action: armClearAnnotations) {
+                    Label("Clear all…", systemImage: "trash.fill")
+                        .font(.subheadline.weight(.black))
+                        .frame(minWidth: 150, minHeight: 52)
+                }
+                .buttonStyle(.bordered)
+                .tint(.red)
+                .disabled(clearableCoachAnnotationCount == 0)
+                .accessibilityHint("Opens a confirmation before clearing coach-created annotations")
+
+                Spacer(minLength: 8)
+
+                StatusPill(
+                    text: "\(clearableCoachAnnotationCount) COACH MARKS",
+                    systemImage: "pencil.and.outline",
+                    color: ReplayTheme.orange
+                )
+            }
+        }
+    }
+
+    private func annotationDurationShelf(_ mark: CoachMark) -> some View {
+        inlineShelf(color: annotationColor(for: mark.kind)) {
+            HStack(spacing: 12) {
+                inlinePanelHeader(
+                    title: "Annotation",
+                    detail: "DURATION",
+                    systemImage: "timer",
+                    color: annotationColor(for: mark.kind)
+                )
+
+                inlineChoiceDivider
+
+                ForEach([3.0, 5.0, 8.0, 12.0], id: \.self) { duration in
+                    annotationDurationChoice(
+                        mark,
+                        duration: duration,
+                        title: "\(Int(duration))s"
+                    )
+                }
+
+                annotationDurationChoice(mark, duration: nil, title: "TO END")
+
+                Spacer(minLength: 8)
+
+                StatusPill(
+                    text: "NOW · \(annotationDurationLabel(mark).uppercased())",
+                    systemImage: "clock.fill",
+                    color: annotationColor(for: mark.kind)
+                )
+            }
+        }
+    }
+
+    private func annotationDurationChoice(
+        _ mark: CoachMark,
+        duration: TimeInterval?,
+        title: String
+    ) -> some View {
+        let isSelected = isAnnotationDuration(duration, selectedFor: mark)
+        return Button {
+            if store.setCoachMarkDuration(id: mark.id, duration: duration) {
+                annotationConfirmation = "DURATION · \(title)"
+                inlinePanel = nil
+            }
+        } label: {
+            Text(title)
+                .font(.subheadline.monospacedDigit().weight(.black))
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+                .frame(width: duration == nil ? 104 : 66, height: 52)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(isSelected ? annotationColor(for: mark.kind) : .white.opacity(0.10))
+        .foregroundStyle(isSelected ? Color.black : Color.white)
+        .disabled(isSelected)
+        .accessibilityLabel(duration == nil ? "Show until replay ends" : "Show for \(title)")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private func annotationGeometryShelf(_ mark: CoachMark) -> some View {
+        inlineShelf(color: annotationColor(for: mark.kind)) {
+            HStack(spacing: 12) {
+                inlinePanelHeader(
+                    title: "Half-metre",
+                    detail: "ADJUST",
+                    systemImage: "arrow.up.and.down.and.arrow.left.and.right",
+                    color: annotationColor(for: mark.kind)
+                )
+
+                inlineChoiceDivider
+
+                annotationNudgeGroup(mark, endpoint: .start, title: "START POINT")
+
+                inlineChoiceDivider
+
+                annotationNudgeGroup(mark, endpoint: .end, title: "ARROW POINT")
+
+                Spacer(minLength: 4)
+            }
+        }
+    }
+
+    private func annotationNudgeGroup(
+        _ mark: CoachMark,
+        endpoint: CoachMarkEndpoint,
+        title: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Eyebrow(text: title, color: annotationColor(for: mark.kind))
+            HStack(spacing: 6) {
+                annotationNudgeChoice(mark, endpoint: endpoint, label: "Left", image: "arrow.left", x: -0.5, z: 0)
+                annotationNudgeChoice(mark, endpoint: endpoint, label: "Right", image: "arrow.right", x: 0.5, z: 0)
+                annotationNudgeChoice(mark, endpoint: endpoint, label: "Upfield", image: "arrow.up", x: 0, z: 0.5)
+                annotationNudgeChoice(mark, endpoint: endpoint, label: "Back", image: "arrow.down", x: 0, z: -0.5)
+            }
+        }
+    }
+
+    private func annotationNudgeChoice(
+        _ mark: CoachMark,
+        endpoint: CoachMarkEndpoint,
+        label: String,
+        image: String,
+        x: Float,
+        z: Float
+    ) -> some View {
+        Button {
+            nudgeAnnotation(mark, endpoint: endpoint, x: x, z: z)
+        } label: {
+            VStack(spacing: 1) {
+                Image(systemName: image)
+                    .font(.headline.weight(.black))
+                Text(label.uppercased())
+                    .font(.caption2.monospaced().weight(.black))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.70)
+            }
+            .frame(width: 68, height: 52)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(annotationColor(for: mark.kind).opacity(0.88))
+        .foregroundStyle(.black)
+        .buttonRepeatBehavior(.enabled)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Move \(endpoint == .start ? "start point" : "arrow point") \(label.lowercased()) half a metre")
+    }
+
+    private func annotationLabelShelf(_ mark: CoachMark) -> some View {
+        inlineShelf(color: annotationColor(for: mark.kind)) {
+            HStack(spacing: 10) {
+                inlinePanelHeader(
+                    title: mark.kind.title,
+                    detail: "LABEL",
+                    systemImage: "tag.fill",
+                    color: annotationColor(for: mark.kind)
+                )
+
+                inlineChoiceDivider
+
+                ForEach(mark.kind.suggestedLabels, id: \.self) { label in
+                    let isSelected = label == mark.label
+                    Button {
+                        if store.updateCoachMarkLabel(id: mark.id, label: label) {
+                            annotationConfirmation = "LABEL · \(label.uppercased())"
+                            inlinePanel = nil
+                        }
+                    } label: {
+                        Text(label.uppercased())
+                            .font(.caption.monospaced().weight(.black))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.66)
+                            .frame(width: 156, height: 52)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(isSelected ? annotationColor(for: mark.kind) : .white.opacity(0.10))
+                    .foregroundStyle(isSelected ? Color.black : Color.white)
+                    .disabled(isSelected)
+                    .accessibilityLabel(label)
+                    .accessibilityAddTraits(isSelected ? .isSelected : [])
+                }
+            }
+        }
+    }
+
+    private var unavailableInlineShelf: some View {
+        inlineShelf(color: .secondary) {
+            HStack(spacing: 12) {
+                inlinePanelHeader(
+                    title: "Selection changed",
+                    detail: "CONTROLS CLOSED",
+                    systemImage: "exclamationmark.arrow.triangle.2.circlepath",
+                    color: .secondary
+                )
+                Text("Choose an annotation again to edit it.")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+        }
+    }
+
+    private func inlinePanelHeader(
+        title: String,
+        detail: String,
+        systemImage: String,
+        color: Color
+    ) -> some View {
+        HStack(spacing: 10) {
+            Button {
+                inlinePanel = nil
+            } label: {
+                Image(systemName: "xmark")
+                    .frame(width: 30, height: 48)
+            }
+            .buttonStyle(.bordered)
+            .accessibilityLabel("Close \(detail.lowercased()) controls")
+
+            Image(systemName: systemImage)
+                .font(.headline.weight(.black))
+                .foregroundStyle(color)
+                .frame(width: 28, height: 48)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Eyebrow(text: detail, color: color)
+                Text(title)
+                    .font(.subheadline.weight(.black))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+        }
+        .frame(minWidth: 176, alignment: .leading)
+    }
+
+    private var inlineChoiceDivider: some View {
+        Rectangle()
+            .fill(.white.opacity(0.13))
+            .frame(width: 1, height: 48)
+            .accessibilityHidden(true)
+    }
+
+    private func inlineShelf<Content: View>(
+        color: Color,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        content()
+            .padding(10)
+            .frame(maxWidth: .infinity, minHeight: 72)
+            .background(color.opacity(0.07), in: RoundedRectangle(cornerRadius: 17))
+            .overlay {
+                RoundedRectangle(cornerRadius: 17)
+                    .stroke(color.opacity(0.28), lineWidth: 1)
+            }
+    }
+
+    private func toggleInlinePanel(_ candidate: PlaybackInlinePanel) {
+        inlinePanel = PlaybackInlinePanel.toggled(
+            current: inlinePanel,
+            candidate: candidate
+        )
+    }
+
+    private func isAnnotationDuration(
+        _ duration: TimeInterval?,
+        selectedFor mark: CoachMark
+    ) -> Bool {
+        guard let duration else { return mark.hideTime == nil }
+        guard let hideTime = mark.hideTime else { return false }
+        return abs((hideTime - mark.revealTime) - duration) < 0.05
     }
 
     private var clearAnnotationsConfirmationStrip: some View {
@@ -1318,6 +1750,9 @@ private struct ImmersiveControlDeck: View {
                 self.selectedAnnotationID = nil
             }
             annotationConfirmation = "LAST MARK UNDONE"
+            if clearableCoachAnnotationCount == 0 {
+                inlinePanel = nil
+            }
         }
     }
 
@@ -1326,6 +1761,7 @@ private struct ImmersiveControlDeck: View {
         if store.isDrawing {
             store.cancelDrawing()
         }
+        inlinePanel = nil
         showsDecisionStrip = false
         showsEventStrip = false
         showsPlayerGrid = false
@@ -1513,7 +1949,7 @@ private struct ImmersiveControlDeck: View {
                 .font(.subheadline.monospacedDigit().weight(.black))
                 .foregroundStyle(.secondary)
 
-            annotationEditMenu(compact: true)
+            annotationEditButton(compact: true)
         }
         .padding(16)
         .frame(width: deckWidth)
@@ -1547,7 +1983,7 @@ private struct ImmersiveControlDeck: View {
             // Events already has a persistent primary-row button. Keeping a
             // duplicate here forced its title into a vertical stack under
             // spatial-size compression and obscured the actual drawing tools.
-            annotationEditMenu(compact: true)
+            annotationEditButton(compact: true)
         }
         .padding(12)
         .background(ReplayTheme.orange.opacity(store.isDrawing ? 0.13 : 0.06), in: RoundedRectangle(cornerRadius: 17))
@@ -1632,6 +2068,7 @@ private struct ImmersiveControlDeck: View {
         let isSelected = store.isDrawing && store.selectedTool == kind
         return Button {
             annotationConfirmation = nil
+            inlinePanel = nil
             selectedAnnotationID = nil
             showsPlayerGrid = false
             showsDecisionStrip = false
@@ -1752,6 +2189,7 @@ private struct ImmersiveControlDeck: View {
             || showsPlayerGrid
             || selectedAnnotation != nil
             || isClearAnnotationsPending
+            || inlinePanel != nil
     }
 
     private var timelineScrubber: some View {
@@ -1882,6 +2320,7 @@ private struct ImmersiveControlDeck: View {
         let isOpen = showsEventStrip || selectedAnnotation != nil
         return Button {
             let opensEvents = !showsEventStrip
+            inlinePanel = nil
             selectedAnnotationID = nil
             showsPlayerGrid = false
             showsDecisionStrip = false
@@ -1914,6 +2353,7 @@ private struct ImmersiveControlDeck: View {
 
     private var decisionReviewButton: some View {
         Button {
+            inlinePanel = nil
             selectedAnnotationID = nil
             showsPlayerGrid = false
             showsEventStrip = false
@@ -2164,18 +2604,11 @@ private struct ImmersiveControlDeck: View {
 
                 if store.localRole == .coach, isCoachCreated(mark) {
                     if mark.kind != .playerLabel {
-                        annotationGeometryMenu(mark)
+                        annotationGeometryButton(mark)
                     }
 
-                    Menu {
-                        ForEach([3.0, 5.0, 8.0, 12.0], id: \.self) { duration in
-                            Button("\(Int(duration)) seconds") {
-                                _ = store.setCoachMarkDuration(id: mark.id, duration: duration)
-                            }
-                        }
-                        Button("Until replay ends") {
-                            _ = store.setCoachMarkDuration(id: mark.id, duration: nil)
-                        }
+                    Button {
+                        toggleInlinePanel(.annotationDuration(mark.id))
                     } label: {
                         Label(annotationDurationLabel(mark), systemImage: "timer")
                             .frame(minHeight: 48)
@@ -2183,6 +2616,10 @@ private struct ImmersiveControlDeck: View {
                     .buttonStyle(.bordered)
                     .accessibilityLabel("Annotation duration")
                     .accessibilityValue(annotationDurationLabel(mark))
+                    .accessibilityHint("Opens duration choices in the control deck")
+                    .accessibilityAddTraits(
+                        inlinePanel == .annotationDuration(mark.id) ? .isSelected : []
+                    )
 
                     Button(role: .destructive) {
                         if store.removeCoachMark(id: mark.id) {
@@ -2263,37 +2700,9 @@ private struct ImmersiveControlDeck: View {
         }
     }
 
-    private func annotationGeometryMenu(_ mark: CoachMark) -> some View {
-        Menu {
-            Section("Start point · 0.5 metre") {
-                Button("Left") {
-                    nudgeAnnotation(mark, endpoint: .start, x: -0.5, z: 0)
-                }
-                Button("Right") {
-                    nudgeAnnotation(mark, endpoint: .start, x: 0.5, z: 0)
-                }
-                Button("Upfield") {
-                    nudgeAnnotation(mark, endpoint: .start, x: 0, z: 0.5)
-                }
-                Button("Back") {
-                    nudgeAnnotation(mark, endpoint: .start, x: 0, z: -0.5)
-                }
-            }
-
-            Section("Arrow point · 0.5 metre") {
-                Button("Left") {
-                    nudgeAnnotation(mark, endpoint: .end, x: -0.5, z: 0)
-                }
-                Button("Right") {
-                    nudgeAnnotation(mark, endpoint: .end, x: 0.5, z: 0)
-                }
-                Button("Upfield") {
-                    nudgeAnnotation(mark, endpoint: .end, x: 0, z: 0.5)
-                }
-                Button("Back") {
-                    nudgeAnnotation(mark, endpoint: .end, x: 0, z: -0.5)
-                }
-            }
+    private func annotationGeometryButton(_ mark: CoachMark) -> some View {
+        Button {
+            toggleInlinePanel(.annotationGeometry(mark.id))
         } label: {
             Label("Adjust", systemImage: "arrow.up.and.down.and.arrow.left.and.right")
                 .font(.subheadline.weight(.black))
@@ -2306,6 +2715,9 @@ private struct ImmersiveControlDeck: View {
         .accessibilityLabel("Adjust annotation endpoints")
         .accessibilityHint(
             "Pinch and drag either glowing pitch handle, or choose a precise half-metre move"
+        )
+        .accessibilityAddTraits(
+            inlinePanel == .annotationGeometry(mark.id) ? .isSelected : []
         )
         .accessibilityAction(named: "Move start left") {
             nudgeAnnotation(mark, endpoint: .start, x: -0.5, z: 0)
@@ -2357,21 +2769,8 @@ private struct ImmersiveControlDeck: View {
         if store.localRole == .coach,
            isCoachCreated(mark),
            mark.kind != .playerLabel {
-            Menu {
-                ForEach(mark.kind.suggestedLabels, id: \.self) { label in
-                    Button {
-                        if store.updateCoachMarkLabel(id: mark.id, label: label) {
-                            annotationConfirmation = "LABEL · \(label.uppercased())"
-                        }
-                    } label: {
-                        if label == mark.label {
-                            Label(label, systemImage: "checkmark")
-                        } else {
-                            Text(label)
-                        }
-                    }
-                    .disabled(label == mark.label)
-                }
+            Button {
+                toggleInlinePanel(.annotationLabel(mark.id))
             } label: {
                 HStack(spacing: 8) {
                     VStack(alignment: .leading, spacing: 2) {
@@ -2407,7 +2806,10 @@ private struct ImmersiveControlDeck: View {
             .layoutPriority(1)
             .accessibilityLabel("Annotation label")
             .accessibilityValue(mark.label)
-            .accessibilityHint("Opens tactical label presets")
+            .accessibilityHint("Opens tactical label choices in the control deck")
+            .accessibilityAddTraits(
+                inlinePanel == .annotationLabel(mark.id) ? .isSelected : []
+            )
         } else {
             VStack(alignment: .leading, spacing: 2) {
                 Eyebrow(
@@ -2632,6 +3034,7 @@ private struct ImmersiveControlDeck: View {
     }
 
     private func openPlayerPOV(_ playerID: String) {
+        inlinePanel = nil
         showsPlayerGrid = false
         store.openLocalPlayerPOV(playerID)
     }

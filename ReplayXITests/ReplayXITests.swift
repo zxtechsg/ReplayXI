@@ -5,6 +5,72 @@ import XCTest
 
 @MainActor
 final class ReplayXITests: XCTestCase {
+    func testImmersiveInlinePanelsToggleExclusively() {
+        let markID = UUID(uuidString: "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE")!
+
+        XCTAssertEqual(
+            PlaybackInlinePanel.toggled(current: nil, candidate: .settings),
+            .settings
+        )
+        XCTAssertNil(
+            PlaybackInlinePanel.toggled(current: .settings, candidate: .settings),
+            "Pinching an already-open shelf should close it."
+        )
+        XCTAssertEqual(
+            PlaybackInlinePanel.toggled(
+                current: .settings,
+                candidate: .annotationDuration(markID)
+            ),
+            .annotationDuration(markID),
+            "Opening a second shelf must replace the first rather than stack a presentation."
+        )
+    }
+
+    func testAnnotationInlinePanelsRemainBoundToTheirSelectedMark() {
+        let selectedID = UUID(uuidString: "AAAAAAAA-BBBB-4CCC-8DDD-000000000001")!
+        let otherID = UUID(uuidString: "AAAAAAAA-BBBB-4CCC-8DDD-000000000002")!
+        let annotationPanels: [PlaybackInlinePanel] = [
+            .annotationDuration(selectedID),
+            .annotationGeometry(selectedID),
+            .annotationLabel(selectedID),
+        ]
+
+        XCTAssertTrue(PlaybackInlinePanel.settings.isValid(for: nil))
+        XCTAssertTrue(PlaybackInlinePanel.annotationEdit.isValid(for: nil))
+        for panel in annotationPanels {
+            XCTAssertTrue(panel.isValid(for: selectedID))
+            XCTAssertFalse(panel.isValid(for: otherID))
+            XCTAssertFalse(panel.isValid(for: nil))
+        }
+    }
+
+    func testImmersiveControlDeckAvoidsUnsupportedPresentationControls() throws {
+        let projectRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sourceURL = projectRoot
+            .appendingPathComponent("ReplayXI")
+            .appendingPathComponent("Immersive")
+            .appendingPathComponent("FootballImmersiveView.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        let unsupportedPatterns = [
+            "Menu {",
+            ".sheet(",
+            ".popover(",
+            ".alert(",
+            ".confirmationDialog(",
+            ".contextMenu(",
+            ".pickerStyle(.menu)",
+        ]
+
+        for pattern in unsupportedPatterns {
+            XCTAssertFalse(
+                source.contains(pattern),
+                "Immersive attachments must use in-deck controls, not \(pattern)."
+            )
+        }
+    }
+
     func testDemoCatalogueContainsExactlyFiveOrderedScenarios() {
         let scenarios = DemoScenarios.all
 
