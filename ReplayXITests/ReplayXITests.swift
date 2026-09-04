@@ -56,15 +56,27 @@ final class ReplayXITests: XCTestCase {
         let marks = Entity()
         marks.name = "marks-root"
         marks.isEnabled = false
-        root.addChild(marks)
+        let selection = Entity()
+        selection.name = AnnotationSceneAffordance.selectionRootName
+        selection.isEnabled = true
+        let draft = Entity()
+        draft.name = "annotation-draft-root"
+        draft.isEnabled = true
+        let surface = Entity()
+        surface.name = "annotation-surface"
+        surface.isEnabled = true
+        [marks, selection, draft, surface].forEach { root.addChild($0) }
 
         PlaybackLocalOverlayVisibility.apply(
             to: root,
-            showsAnnotations: true,
+            showsAnnotations: false,
             canOverrideMarksRoot: false
         )
 
         XCTAssertFalse(marks.isEnabled)
+        XCTAssertTrue(selection.isEnabled)
+        XCTAssertTrue(draft.isEnabled)
+        XCTAssertTrue(surface.isEnabled)
     }
 
     func testImmersiveInlinePanelsToggleExclusively() {
@@ -1144,7 +1156,9 @@ final class ReplayXITests: XCTestCase {
     func testCenteredGaitEffortIsSmoothAndDeterministicAcrossAKeyframeSeek() throws {
         let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay))
         let player = try XCTUnwrap(scenario.player(id: "navy-rw"))
-        let keyframeTime: TimeInterval = 10
+        // The winger's authored change from checking still to accelerating now
+        // begins at 10.4 s after the match-tempo retiming pass.
+        let keyframeTime: TimeInterval = 10.4
 
         let justBefore = PitchSceneFactory.gaitEffort(for: player, at: keyframeTime - 0.001)
         let justAfter = PitchSceneFactory.gaitEffort(for: player, at: keyframeTime + 0.001)

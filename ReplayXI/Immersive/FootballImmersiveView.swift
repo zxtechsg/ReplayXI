@@ -848,18 +848,21 @@ enum PlaybackLocalOverlayVisibility {
         showsAnnotations: Bool,
         canOverrideMarksRoot: Bool
     ) {
-        if let marksRoot = root.findEntity(named: "marks-root") {
-            if canOverrideMarksRoot {
-                marksRoot.isEnabled = showsAnnotations
-            } else if !showsAnnotations {
-                marksRoot.isEnabled = false
-            }
-        }
+        // Shape Focus and the other authored exercises own their annotation
+        // visibility. A wearer-local Playback preference must not leak across a
+        // scenario change and disable those scene-owned teaching cues.
+        guard canOverrideMarksRoot else { return }
+
+        directChild(named: "marks-root", of: root)?.isEnabled = showsAnnotations
 
         guard !showsAnnotations else { return }
-        root.findEntity(named: AnnotationSceneAffordance.selectionRootName)?.isEnabled = false
-        root.findEntity(named: "annotation-draft-root")?.isEnabled = false
-        root.findEntity(named: "annotation-surface")?.isEnabled = false
+        directChild(named: AnnotationSceneAffordance.selectionRootName, of: root)?.isEnabled = false
+        directChild(named: "annotation-draft-root", of: root)?.isEnabled = false
+        directChild(named: "annotation-surface", of: root)?.isEnabled = false
+    }
+
+    private static func directChild(named name: String, of root: Entity) -> Entity? {
+        root.children.first { $0.name == name }
     }
 }
 
@@ -1024,10 +1027,13 @@ private struct PlaybackViewOverlayHUD: View {
                         }
 
                         overlayChoice(
-                            title: "Ball",
+                            title: "Ball glow",
                             systemImage: "scope",
                             isVisible: emphasizesBall,
-                            color: ReplayTheme.signal
+                            color: ReplayTheme.signal,
+                            accessibilityName: "Ball highlight",
+                            onValue: "On",
+                            offValue: "Off"
                         ) {
                             emphasizesBall.toggle()
                         }
@@ -1104,9 +1110,13 @@ private struct PlaybackViewOverlayHUD: View {
         isVisible: Bool,
         color: Color,
         isEnabled: Bool = true,
+        accessibilityName: String? = nil,
+        onValue: String = "Shown",
+        offValue: String = "Hidden",
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
+        let resolvedAccessibilityName = accessibilityName ?? title
+        return Button(action: action) {
             Label(title, systemImage: isVisible ? systemImage : "eye.slash")
                 .font(.caption.weight(.black))
                 .lineLimit(1)
@@ -1116,8 +1126,9 @@ private struct PlaybackViewOverlayHUD: View {
         .tint(isVisible ? color : .white.opacity(0.10))
         .foregroundStyle(isVisible ? Color.black : Color.white)
         .disabled(!isEnabled)
-        .accessibilityLabel("\(isVisible ? "Hide" : "Show") \(title.lowercased())")
-        .accessibilityValue(isVisible ? "Visible" : "Hidden")
+        .accessibilityLabel(resolvedAccessibilityName)
+        .accessibilityValue(isVisible ? onValue : offValue)
+        .accessibilityHint("Turns \(resolvedAccessibilityName.lowercased()) \(isVisible ? "off" : "on")")
         .accessibilityAddTraits(isVisible ? .isSelected : [])
     }
 
@@ -1514,6 +1525,8 @@ private struct ImmersiveControlDeck: View {
                     .font(.headline.weight(.black))
                 Text("MORE")
                     .font(.caption2.monospaced().weight(.black))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
             .frame(width: 58, height: 56)
         }
@@ -1597,6 +1610,8 @@ private struct ImmersiveControlDeck: View {
                     .font(.headline.weight(.bold))
                 Text("MARK")
                     .font(.caption2.monospaced().weight(.black))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
             .frame(width: 58, height: 56)
         }
@@ -1945,27 +1960,41 @@ private struct ImmersiveControlDeck: View {
 
                 inlineChoiceDivider
 
-                ForEach(mark.kind.suggestedLabels, id: \.self) { label in
-                    let isSelected = label == mark.label
-                    Button {
-                        if store.updateCoachMarkLabel(id: mark.id, label: label) {
-                            annotationConfirmation = "LABEL · \(label.uppercased())"
-                            inlinePanel = nil
+                LazyVGrid(
+                    columns: [
+                        GridItem(
+                            .adaptive(minimum: 118, maximum: 156),
+                            spacing: 8,
+                            alignment: .leading
+                        ),
+                    ],
+                    alignment: .leading,
+                    spacing: 8
+                ) {
+                    ForEach(mark.kind.suggestedLabels, id: \.self) { label in
+                        let isSelected = label == mark.label
+                        Button {
+                            if store.updateCoachMarkLabel(id: mark.id, label: label) {
+                                annotationConfirmation = "LABEL · \(label.uppercased())"
+                                inlinePanel = nil
+                            }
+                        } label: {
+                            Text(label.uppercased())
+                                .font(.caption.monospaced().weight(.black))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.62)
+                                .frame(maxWidth: .infinity, minHeight: 50)
                         }
-                    } label: {
-                        Text(label.uppercased())
-                            .font(.caption.monospaced().weight(.black))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.66)
-                            .frame(width: 156, height: 52)
+                        .buttonStyle(.borderedProminent)
+                        .tint(isSelected ? annotationColor(for: mark.kind) : .white.opacity(0.10))
+                        .foregroundStyle(isSelected ? Color.black : Color.white)
+                        .disabled(isSelected)
+                        .accessibilityLabel(label)
+                        .accessibilityAddTraits(isSelected ? .isSelected : [])
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(isSelected ? annotationColor(for: mark.kind) : .white.opacity(0.10))
-                    .foregroundStyle(isSelected ? Color.black : Color.white)
-                    .disabled(isSelected)
-                    .accessibilityLabel(label)
-                    .accessibilityAddTraits(isSelected ? .isSelected : [])
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(1)
             }
         }
     }
@@ -2716,6 +2745,7 @@ private struct ImmersiveControlDeck: View {
                     .font(.headline.weight(.bold))
                 Text("EVENTS")
                     .font(.caption2.monospaced().weight(.black))
+                    .lineLimit(1)
                     .minimumScaleFactor(0.75)
             }
             .frame(width: 54, height: 56)
@@ -2753,6 +2783,7 @@ private struct ImmersiveControlDeck: View {
                     .font(.headline.weight(.bold))
                 Text("OPTIONS")
                     .font(.caption2.monospaced().weight(.black))
+                    .lineLimit(1)
                     .minimumScaleFactor(0.75)
             }
             .frame(width: 58, height: 56)
@@ -2809,6 +2840,8 @@ private struct ImmersiveControlDeck: View {
             if store.localRole == .coach {
                 Button {
                     showsEventStrip = false
+                    showsAnnotationTools = true
+                    showsPlaybackAnnotations = true
                 } label: {
                     Label("DRAW", systemImage: "pencil.and.outline")
                         .font(.subheadline.weight(.black))

@@ -25,6 +25,48 @@ rig, but it is a single stylised character with a complex animation control rig,
 no football kit, no authored match LODs and no football locomotion set. It is a
 poor 22-player runtime source despite its visual quality.
 
+## Sketchfab shortlist — discovery only
+
+The user-supplied Sketchfab catalogue contains potentially useful free models,
+but a public model page is not an admitted source asset. According to
+Sketchfab's [download API guidelines](https://sketchfab.com/developers/download-api/guidelines),
+downloads require an authenticated account, and Creative Commons attribution
+must identify the creator, model and source. Replay XI has not authenticated,
+downloaded or bundled any of the candidates below. Their page metadata is a
+shortlist for a later human-authorized acquisition and archive audit, not proof
+that the downloadable archive contains the described rig or animation.
+
+| Candidate | Page-declared licence and metadata | Possible role | Unresolved admission work |
+| --- | --- | --- | --- |
+| **Football Player — Portugal** by `neshallads` | [Model page](https://sketchfab.com/3d-models/football-player-portugal-5f1a05f9c0964821bbb5322aee27a34e) declares CC BY, download availability, 17.3k triangles and a model “ready to be rigged and animated.” | A higher-detail body/kit silhouette study. | It is not demonstrated as already skinned. Audit the archive format, topology, UVs and material rights; remove national/team identifiers; build and validate an original rig, LODs and animations before runtime consideration. |
+| **Rigged Player with basic animations** by `Loudcow67` | [Model page](https://sketchfab.com/3d-models/rigged-player-with-basic-animations-06c3b4bf9e4c4d25ac3768a23ae7375d) declares CC BY, download availability and approximately 1.3k triangles. | A lightweight rig/import and distant-player experiment. | The page has almost no technical provenance. Inspect every archive member, skeleton hierarchy, skin weights, clip names, bind/rest transforms, textures, embedded attribution and actual football suitability. |
+| **Goal Keeper Kick — Blender Rigged** by `SuperScriptDEV` | [Model page](https://sketchfab.com/3d-models/goal-keeper-kick-blender-rigged-13f29f8af55b4b9097802510472fe49f) declares CC BY, download availability, 456 triangles, and rig/animation/ragdoll tags. | A goalkeeper-pose or very-low-detail motion reference. | Tags are not an animation contract. Confirm the archive creator/source chain, playable clips, skeleton ownership, scale, root motion, deformation and whether the visual quality survives a near-field headset view. |
+
+Admission requires all of the following before any Sketchfab candidate can be
+copied into the repository or app bundle:
+
+1. A user-authorized, authenticated Sketchfab download through the supported
+   site/API flow; do not scrape or bypass authentication.
+2. A frozen acquisition record containing model UID, page URL, creator, licence
+   text, download time, attribution string and SHA-256 of the original archive.
+3. Safe archive extraction plus an inventory of every mesh, texture, animation,
+   notice and auxiliary file; reject path traversal, symlinks and undeclared
+   executable content.
+4. A rights and identity audit for real-player likenesses, club/national marks,
+   sponsor art, copied game content and incompatible embedded assets. CC BY on a
+   page does not grant separate trademark, publicity or third-party artwork
+   rights.
+5. A rig audit covering skeleton topology, bind/rest transforms, normalized skin
+   weights, root motion, animation clips, finite bounds, metres/Y-up conversion,
+   deterministic seeking and visible deformation in RealityKit.
+6. Replay XI-authored neutral kits, numbers and LODs, followed by simulator and
+   physical Vision Pro profiling under the existing player-fidelity gates.
+7. Only after admission, an exact attribution and transformation record added to
+   `Docs/ReplayXI/THIRD_PARTY_ASSETS.md` alongside the bundled output hash.
+
+Until that sequence is complete, these three models remain external links only.
+`THIRD_PARTY_ASSETS.md` intentionally has no Sketchfab entry.
+
 ## Pinned Rocketbox pilot
 
 The acquisition script pins Microsoft Rocketbox commit
