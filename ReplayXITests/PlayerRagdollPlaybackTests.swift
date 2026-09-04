@@ -169,14 +169,19 @@ final class PlayerRagdollPlaybackTests: XCTestCase {
         let wearerID = scenario.defaultPerspectiveID
         let time: TimeInterval = 12
         let wearerPosition = try XCTUnwrap(
-            scenario.player(id: wearerID)?.pose(at: time).position
+            scenario.player(id: wearerID)?.presentationPose(at: time).position
         )
         let distantPlayer = try XCTUnwrap(
             scenario.players
                 .filter { $0.id != wearerID }
                 .max {
-                    ReplayGeometry.distance($0.pose(at: time).position, wearerPosition)
-                        < ReplayGeometry.distance($1.pose(at: time).position, wearerPosition)
+                    ReplayGeometry.distance(
+                        $0.presentationPose(at: time).position,
+                        wearerPosition
+                    ) < ReplayGeometry.distance(
+                        $1.presentationPose(at: time).position,
+                        wearerPosition
+                    )
                 }
         )
         let cue = PlayerRagdollCue(

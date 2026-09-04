@@ -599,7 +599,7 @@ final class PlaybackHardeningTests: XCTestCase {
         let coach = ReplayStore()
         coach.seek(to: 5, broadcast: false)
         let runner = try XCTUnwrap(coach.selectedScenario.player(id: "navy-rw"))
-        let authoredStart = runner.pose(at: 5).position
+        let authoredStart = runner.presentationPose(at: 5).position
         let authoredEnd = PitchPoint(x: authoredStart.x + 3, z: authoredStart.z + 6)
         coach.beginDrawing(.run)
         XCTAssertNil(coach.registerPitchTap(authoredStart))
@@ -644,7 +644,7 @@ final class PlaybackHardeningTests: XCTestCase {
             in: player.selectedScenario,
             at: player.playhead
         )
-        let expectedRunnerPosition = runner.pose(at: 7.5).position
+        let expectedRunnerPosition = runner.presentationPose(at: 7.5).position
         XCTAssertEqual(resolved.start.x, expectedRunnerPosition.x, accuracy: 0.000_1)
         XCTAssertEqual(resolved.start.z, expectedRunnerPosition.z, accuracy: 0.000_1)
         XCTAssertEqual(resolved.end.x - resolved.start.x, 3, accuracy: 0.000_1)

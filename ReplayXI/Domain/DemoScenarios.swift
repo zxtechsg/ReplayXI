@@ -111,7 +111,7 @@ enum DemoScenarios {
             coachMarks: [
                 mark("00000000-0000-4000-8000-000000000201", .danger, 25, 24, 28, 27, "Full-back drawn inside", 10.8),
                 mark("00000000-0000-4000-8000-000000000202", .run, 28, 14, 31, 35, "Right-back beyond", 11.2),
-                mark("00000000-0000-4000-8000-000000000203", .pass, 27, 23, 31, 29, "Release outside", 13.6),
+                mark("00000000-0000-4000-8000-000000000203", .pass, 27, 23, 31, 30, "Release outside", 13.6),
                 mark("00000000-0000-4000-8000-000000000204", .space, 29, 28, 33, 36, "Attack this channel", 13.8)
             ],
             formationTargets: [
@@ -555,7 +555,7 @@ enum DemoScenarios {
                   let player = commonPlayers.first(where: { $0.id == playerID }) else {
                 return nil
             }
-            let playerPosition = player.pose(at: revealTime).position
+            let playerPosition = player.presentationPose(at: revealTime).position
             return CoachMarkTrackAnchor(
                 playerID: playerID,
                 offset: PitchPoint(

@@ -326,12 +326,12 @@ enum ReplayAthleteMotion {
     ) -> ReplayAthleteLookPose {
         let sample = locomotion ?? track.locomotion(at: time)
         let finiteTime = time.isFinite ? min(max(time, -1_000_000), 1_000_000) : 0
-        let current = track.pose(at: finiteTime)
+        let current = track.presentationPose(at: finiteTime)
         let facing = current.facingDegrees.isFinite ? current.facingDegrees : 0
 
         let directionWindow: TimeInterval = 0.24
-        let before = track.pose(at: finiteTime - directionWindow).position
-        let after = track.pose(at: finiteTime + directionWindow).position
+        let before = track.presentationPose(at: finiteTime - directionWindow).position
+        let after = track.presentationPose(at: finiteTime + directionWindow).position
         let travelX = after.x - before.x
         let travelZ = after.z - before.z
         let travelDistance = hypot(travelX, travelZ)

@@ -373,7 +373,7 @@ struct FootballImmersiveView: View {
         let maximumSquaredDistance = maximumDistance * maximumDistance
         var closest: (player: PlayerTrack, squaredDistance: Float)?
         for player in store.selectedScenario.players {
-            let position = player.pose(at: store.playhead).position
+            let position = player.presentationPose(at: store.playhead).position
             let xOffset = position.x - point.x
             let zOffset = position.z - point.z
             let squaredDistance = (xOffset * xOffset) + (zOffset * zOffset)
@@ -438,7 +438,7 @@ struct FootballImmersiveView: View {
                 if store.selectedTool == .playerLabel {
                     store.labelPlayer(playerID)
                 } else {
-                    store.registerPitchTap(player.pose(at: store.playhead).position)
+                    store.registerPitchTap(player.presentationPose(at: store.playhead).position)
                 }
             } else {
                 openPlayerPOV(playerID)
@@ -582,7 +582,7 @@ struct FootballImmersiveView: View {
                     // Beginning on a footballer is the natural shorthand for
                     // “this player's run.” Anchor it to the authored pose.
                     start = ReplayStore.clampedPitchPoint(
-                        sourcePlayer.pose(at: store.playhead).position
+                        sourcePlayer.presentationPose(at: store.playhead).position
                     )
                 } else if let projectedStart = pitchPoint(
                     for: value,
@@ -686,7 +686,9 @@ struct FootballImmersiveView: View {
                 if store.selectedTool == .playerLabel {
                     store.labelPlayer(playerID)
                 } else {
-                    _ = store.registerPitchTap(player.pose(at: store.playhead).position)
+                    _ = store.registerPitchTap(
+                        player.presentationPose(at: store.playhead).position
+                    )
                 }
             } else {
                 openPlayerPOV(playerID)
@@ -4270,7 +4272,7 @@ private struct PerspectiveMiniMap: View {
 
     var body: some View {
         Canvas { context, size in
-            let pose = player.pose(at: time)
+            let pose = player.presentationPose(at: time)
             let centre = CGPoint(x: size.width / 2, y: size.height * 0.68)
             let scale: CGFloat = 2.35
 
@@ -4295,7 +4297,7 @@ private struct PerspectiveMiniMap: View {
             context.fill(cone, with: .color(ReplayTheme.signal.opacity(0.13)))
 
             for other in scenario.players where other.id != player.id {
-                let otherPose = other.pose(at: time)
+                let otherPose = other.presentationPose(at: time)
                 let dx = CGFloat(otherPose.position.x - pose.position.x)
                 let dz = CGFloat(otherPose.position.z - pose.position.z)
                 guard hypot(dx, dz) < 22 else { continue }

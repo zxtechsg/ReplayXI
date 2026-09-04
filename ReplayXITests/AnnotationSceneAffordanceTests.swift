@@ -173,7 +173,7 @@ final class AnnotationSceneAffordanceTests: XCTestCase {
     func testPlayerLabelTetherTracksPlayerAndResolvesAttachedTarget() throws {
         let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay))
         let player = try XCTUnwrap(scenario.player(id: "navy-rw"))
-        let initialPose = player.pose(at: 8)
+        let initialPose = player.presentationPose(at: 8)
         let mark = CoachMark(
             id: UUID(uuidString: "00000000-0000-4000-8000-00000000F001")!,
             kind: .playerLabel,
@@ -210,7 +210,7 @@ final class AnnotationSceneAffordanceTests: XCTestCase {
         )
 
         update(root, scenario: scenario, marks: marks, time: 12, selected: mark.id)
-        let laterPose = player.pose(at: 12)
+        let laterPose = player.presentationPose(at: 12)
         XCTAssertEqual(attachment.position.x, laterPose.position.x, accuracy: 0.000_1)
         XCTAssertEqual(attachment.position.z, laterPose.position.z, accuracy: 0.000_1)
     }

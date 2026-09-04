@@ -110,8 +110,8 @@ final class ReplayDecisionReviewTests: XCTestCase {
         let receiver = try XCTUnwrap(scenario.player(id: "navy-rcm"))
         let sharedMark = CoachMark(
             kind: .pass,
-            start: source.pose(at: revealTime).position,
-            end: receiver.pose(at: revealTime + 3).position,
+            start: source.presentationPose(at: revealTime).position,
+            end: receiver.presentationPose(at: revealTime + 3).position,
             label: "Shared inside return",
             revealTime: revealTime,
             hideTime: 16,
@@ -156,7 +156,7 @@ final class ReplayDecisionReviewTests: XCTestCase {
         let mark = CoachMark(
             kind: .pass,
             start: PitchPoint(x: -34, z: -51),
-            end: receiver.pose(at: targetTime).position,
+            end: receiver.presentationPose(at: targetTime).position,
             label: "Tracked source",
             revealTime: revealTime,
             hideTime: 16,
@@ -185,7 +185,7 @@ final class ReplayDecisionReviewTests: XCTestCase {
         configuration.coachMarkTargetRadiusMetres = 0.05
         let mark = CoachMark(
             kind: .pass,
-            start: source.pose(at: revealTime).position,
+            start: source.presentationPose(at: revealTime).position,
             end: PitchPoint(x: -34, z: -51),
             label: "Tracked target",
             revealTime: revealTime,
@@ -233,8 +233,8 @@ final class ReplayDecisionReviewTests: XCTestCase {
             in: scenario,
             at: displayedTime
         )
-        let sourceAtDisplay = source.pose(at: displayedTime).position
-        let receiverAtDisplay = receiver.pose(at: displayedTime).position
+        let sourceAtDisplay = source.presentationPose(at: displayedTime).position
+        let receiverAtDisplay = receiver.presentationPose(at: displayedTime).position
 
         XCTAssertEqual(geometry.start.x, sourceAtDisplay.x + startOffset.x, accuracy: 0.000_001)
         XCTAssertEqual(geometry.start.z, sourceAtDisplay.z + startOffset.z, accuracy: 0.000_001)

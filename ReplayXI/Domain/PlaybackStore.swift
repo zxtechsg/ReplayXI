@@ -624,7 +624,7 @@ final class ReplayStore {
 
         isPlaying = false
         selectedTool = .playerLabel
-        let position = player.pose(at: playhead).position
+        let position = player.presentationPose(at: playhead).position
         let mark = CoachMark(
             kind: .playerLabel,
             start: position,
@@ -657,7 +657,7 @@ final class ReplayStore {
             labelPlayer(playerID)
             return
         }
-        let sampledFocus = activePerspective?.pose(at: playhead).position ?? .zero
+        let sampledFocus = activePerspective?.presentationPose(at: playhead).position ?? .zero
         let focus = Self.clampedPitchPoint(sampledFocus)
         let destination = Self.clampedPitchPoint(
             PitchPoint(x: focus.x + 7, z: focus.z + 10)
@@ -920,7 +920,7 @@ final class ReplayStore {
         let mark = marks[index]
         let resolved = mark.resolvedGeometry(in: selectedScenario, at: playhead)
         let playerPosition = playerID.flatMap {
-            selectedScenario.player(id: $0)?.pose(at: playhead).position
+            selectedScenario.player(id: $0)?.presentationPose(at: playhead).position
         }
         let startTrackAnchor = playerID.flatMap { playerID in
             playerPosition.map {
@@ -1946,7 +1946,7 @@ final class ReplayStore {
         func nearestAnchor(to point: PitchPoint) -> CoachMarkTrackAnchor? {
             var best: (player: PlayerTrack, distance: Float)?
             for player in selectedScenario.players {
-                let position = player.pose(at: time).position
+                let position = player.presentationPose(at: time).position
                 let distance = ReplayGeometry.distance(position, point)
                 guard distance <= Self.coachMarkTrackSnapDistance else { continue }
                 if let current = best,
@@ -1957,7 +1957,7 @@ final class ReplayStore {
                 best = (player, distance)
             }
             guard let player = best?.player else { return nil }
-            let position = player.pose(at: time).position
+            let position = player.presentationPose(at: time).position
             return CoachMarkTrackAnchor(
                 playerID: player.id,
                 offset: PitchPoint(
@@ -1970,7 +1970,7 @@ final class ReplayStore {
         let startAnchor = nearestAnchor(to: start)
         if kind == .run, let startAnchor,
            let player = selectedScenario.player(id: startAnchor.playerID) {
-            let position = player.pose(at: time).position
+            let position = player.presentationPose(at: time).position
             return (
                 startAnchor,
                 CoachMarkTrackAnchor(
@@ -2052,7 +2052,7 @@ final class ReplayStore {
                   let player = selectedScenario.player(id: anchor.playerID) else {
                 return anchor
             }
-            let playerPosition = player.pose(at: time).position
+            let playerPosition = player.presentationPose(at: time).position
             return CoachMarkTrackAnchor(
                 playerID: anchor.playerID,
                 offset: PitchPoint(

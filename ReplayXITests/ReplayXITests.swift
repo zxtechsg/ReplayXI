@@ -577,7 +577,7 @@ final class ReplayXITests: XCTestCase {
         let initialPosition = root.position
         let initialOrientation = root.orientation.vector
         let initialScale = root.scale
-        let initialPose = player.pose(at: 2)
+        let initialPose = player.presentationPose(at: 2)
         let fixedPitchRotation = simd_quatf(angle: .pi, axis: [0, 1, 0])
         let expectedInitialPosition = -fixedPitchRotation.act(
             SIMD3<Float>(initialPose.position.x, 0, initialPose.position.z)
@@ -608,7 +608,7 @@ final class ReplayXITests: XCTestCase {
             positionalOriginTransform: nil
         )
 
-        let laterPose = player.pose(at: 19)
+        let laterPose = player.presentationPose(at: 19)
         let expectedLaterPosition = -fixedPitchRotation.act(
             SIMD3<Float>(laterPose.position.x, 0, laterPose.position.z)
         )
@@ -650,14 +650,16 @@ final class ReplayXITests: XCTestCase {
         let root = PitchSceneFactory.makeMatchRoot(for: scenario)
         let sampleTime: TimeInterval = 12
         let wearerID = scenario.defaultPerspectiveID
-        let wearerPose = try XCTUnwrap(scenario.player(id: wearerID)?.pose(at: sampleTime))
+        let wearerPose = try XCTUnwrap(
+            scenario.player(id: wearerID)?.presentationPose(at: sampleTime)
+        )
         let neighbourDistances: [(id: String, distance: Float)] = scenario.players.compactMap {
             guard $0.id != wearerID else { return nil }
             return (
                 id: $0.id,
                 distance: ReplayGeometry.distance(
                     wearerPose.position,
-                    $0.pose(at: sampleTime).position
+                    $0.presentationPose(at: sampleTime).position
                 )
             )
         }
@@ -1145,7 +1147,7 @@ final class ReplayXITests: XCTestCase {
         XCTAssertEqual(unrelatedChild.position, SIMD3<Float>(91, 92, 93))
         for player in scenario.players {
             let entity = try XCTUnwrap(root.findEntity(named: "player-\(player.id)"))
-            let expected = player.pose(at: sampleTime).position
+            let expected = player.presentationPose(at: sampleTime).position
             XCTAssertEqual(entity.position.x, expected.x, accuracy: 0.000_1, player.id)
             XCTAssertEqual(entity.position.z, expected.z, accuracy: 0.000_1, player.id)
             let fullRig = entity.children.first { $0.name == "full-rig" }
@@ -1285,10 +1287,15 @@ final class ReplayXITests: XCTestCase {
             XCTAssertGreaterThanOrEqual(label.position.y, 2.20, label.name)
             XCTAssertLessThanOrEqual(label.position.y, 2.60, label.name)
         }
-        let wearerPose = try XCTUnwrap(scenario.player(id: "navy-rw")).pose(at: 13.6)
+        let wearerPose = try XCTUnwrap(
+            scenario.player(id: "navy-rw")
+        ).presentationPose(at: 13.6)
         let nearPlayers = scenario.players.filter { player in
             player.id != "navy-rw"
-                && ReplayGeometry.distance(wearerPose.position, player.pose(at: 13.6).position)
+                && ReplayGeometry.distance(
+                    wearerPose.position,
+                    player.presentationPose(at: 13.6).position
+                )
                     < PlaybackSpatialLabels.firstPersonMinimumLabelDistance
         }
         for player in nearPlayers {
@@ -1301,8 +1308,13 @@ final class ReplayXITests: XCTestCase {
             scenario.players
                 .filter { $0.id != "navy-rw" }
                 .min {
-                    ReplayGeometry.distance(wearerPose.position, $0.pose(at: 13.6).position)
-                        < ReplayGeometry.distance(wearerPose.position, $1.pose(at: 13.6).position)
+                    ReplayGeometry.distance(
+                        wearerPose.position,
+                        $0.presentationPose(at: 13.6).position
+                    ) < ReplayGeometry.distance(
+                        wearerPose.position,
+                        $1.presentationPose(at: 13.6).position
+                    )
                 }
         )
         let closeRig = try XCTUnwrap(
@@ -1367,7 +1379,9 @@ final class ReplayXITests: XCTestCase {
 
         let markRoot = try XCTUnwrap(root.findEntity(named: "mark-\(mark.id.uuidString)"))
         let label = try XCTUnwrap(markRoot.findEntity(named: "annotation-label"))
-        let targetPose = try XCTUnwrap(scenario.player(id: "red-lb")).pose(at: 16)
+        let targetPose = try XCTUnwrap(
+            scenario.player(id: "red-lb")
+        ).presentationPose(at: 16)
         XCTAssertTrue(markRoot.isEnabled)
         XCTAssertEqual(label.position.x, targetPose.position.x, accuracy: 0.000_1)
         XCTAssertEqual(label.position.y, 9.40, accuracy: 0.000_1)
@@ -1789,7 +1803,8 @@ final class ReplayXITests: XCTestCase {
     func testShapeFocusProblemIsFlatAndIdealHasThreeDistinctHeights() throws {
         let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .shapeLab))
         let problemHeights = scenario.formationTargets.compactMap { target in
-            scenario.player(id: target.playerID)?.pose(at: ShapeFocusStage.problem.referenceTime).position.z
+            scenario.player(id: target.playerID)?
+                .presentationPose(at: ShapeFocusStage.problem.referenceTime).position.z
         }
         let idealHeights = scenario.formationTargets.map(\.position.z)
 
@@ -1831,7 +1846,7 @@ final class ReplayXITests: XCTestCase {
             let previewPlayer = try XCTUnwrap(problem.players.first { $0.id == player.id })
             XCTAssertEqual(
                 previewPlayer.position,
-                player.pose(at: ShapeFocusStage.problem.referenceTime).position
+                player.presentationPose(at: ShapeFocusStage.problem.referenceTime).position
             )
         }
 
@@ -1898,7 +1913,9 @@ final class ReplayXITests: XCTestCase {
         for target in scenario.formationTargets {
             let player = try XCTUnwrap(scenario.player(id: target.playerID))
             let entity = try XCTUnwrap(root.findEntity(named: "player-\(target.playerID)"))
-            let recorded = player.pose(at: ShapeFocusStage.problem.referenceTime).position
+            let recorded = player.presentationPose(
+                at: ShapeFocusStage.problem.referenceTime
+            ).position
             XCTAssertEqual(entity.position.x, recorded.x, accuracy: 0.000_1)
             XCTAssertEqual(entity.position.z, recorded.z, accuracy: 0.000_1)
             XCTAssertTrue(entity.isEnabled)
@@ -2665,7 +2682,7 @@ final class ReplayXITests: XCTestCase {
         XCTAssertEqual(broadcasts.count, 1)
 
         let mark = try XCTUnwrap(store.labelPlayer(player.id))
-        let expectedPosition = player.pose(at: 12.25).position
+        let expectedPosition = player.presentationPose(at: 12.25).position
         XCTAssertEqual(mark.kind, .playerLabel)
         XCTAssertEqual(mark.playerID, player.id)
         XCTAssertEqual(mark.start, expectedPosition)

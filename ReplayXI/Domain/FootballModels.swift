@@ -256,11 +256,13 @@ struct PlayerTrack: Identifiable, Codable, Hashable, Sendable {
     /// walking every preceding telemetry sample.
     private struct SamplingIndex: Sendable {
         let supportsBinaryLookup: Bool
+        let supportsSmoothPresentation: Bool
         let cumulativeDistances: [Float]
         let cumulativeGaitPhases: [Float]
 
         init(keyframes: [MotionKeyframe]) {
             var supportsBinaryLookup = true
+            var supportsSmoothPresentation = true
             var cumulativeDistances = Array(repeating: Float.zero, count: keyframes.count)
             var cumulativeGaitPhases = Array(repeating: Float.zero, count: keyframes.count)
 
@@ -273,6 +275,9 @@ struct PlayerTrack: Identifiable, Codable, Hashable, Sendable {
                     let previousIndex = keyframes.index(before: index)
                     if timestamp < keyframes[previousIndex].time {
                         supportsBinaryLookup = false
+                    }
+                    if timestamp <= keyframes[previousIndex].time {
+                        supportsSmoothPresentation = false
                     }
                     cumulativeDistances[index] = cumulativeDistances[previousIndex]
                         + ReplayGeometry.distance(
@@ -288,6 +293,8 @@ struct PlayerTrack: Identifiable, Codable, Hashable, Sendable {
             }
 
             self.supportsBinaryLookup = supportsBinaryLookup
+            self.supportsSmoothPresentation = supportsBinaryLookup
+                && supportsSmoothPresentation
             self.cumulativeDistances = cumulativeDistances
             self.cumulativeGaitPhases = cumulativeGaitPhases
         }
@@ -419,6 +426,77 @@ struct PlayerTrack: Identifiable, Codable, Hashable, Sendable {
         return interpolatedPose(from: start, to: end, at: time)
     }
 
+    /// A deterministic render pose that rounds sparse telemetry corners without
+    /// rewriting the authoritative keyframes returned by `pose(at:)`.
+    ///
+    /// Component-wise monotone cubic Hermite interpolation keeps every sample
+    /// inside the neighbouring keyframe bounds, while sharing one tangent on
+    /// both sides of a knot makes velocity continuous. Dense tracking, seeks,
+    /// SharePlay and player-bound annotations therefore resolve to the same
+    /// presentation sample without the stop/start velocity of linear segments.
+    func presentationPose(at time: TimeInterval) -> PlayerPose {
+        guard let first = keyframes.first else {
+            return PlayerPose(position: .zero, facingDegrees: 0)
+        }
+        guard keyframes.count > 1, time > first.time else {
+            return PlayerPose(position: first.position, facingDegrees: first.facingDegrees)
+        }
+        guard let last = keyframes.last else {
+            return PlayerPose(position: first.position, facingDegrees: first.facingDegrees)
+        }
+        guard time < last.time else {
+            return PlayerPose(position: last.position, facingDegrees: last.facingDegrees)
+        }
+
+        // Duplicate or malformed timestamps can encode deliberate discontinuity.
+        // Preserve the legacy left-continuous sampler instead of inventing a
+        // tangent across a zero/negative time span.
+        guard samplingIndex.supportsSmoothPresentation else {
+            return pose(at: time)
+        }
+
+        let endIndex = lowerBoundKeyframeIndex(for: time)
+        let startIndex = endIndex - 1
+        let start = keyframes[startIndex]
+        let end = keyframes[endIndex]
+        let span = end.time - start.time
+        guard span.isFinite, span > 0 else { return pose(at: time) }
+
+        let fraction = min(max(Float((time - start.time) / span), 0), 1)
+        let scaledSpan = Float(span)
+        let x = Self.hermite(
+            start: start.position.x,
+            end: end.position.x,
+            startTangent: presentationTangent(at: startIndex, component: .x) * scaledSpan,
+            endTangent: presentationTangent(at: endIndex, component: .x) * scaledSpan,
+            fraction: fraction
+        )
+        let z = Self.hermite(
+            start: start.position.z,
+            end: end.position.z,
+            startTangent: presentationTangent(at: startIndex, component: .z) * scaledSpan,
+            endTangent: presentationTangent(at: endIndex, component: .z) * scaledSpan,
+            fraction: fraction
+        )
+        let unwrappedFacing = start.facingDegrees + Self.shortestAngleDelta(
+            from: start.facingDegrees,
+            to: end.facingDegrees
+        )
+        let facing = Self.hermite(
+            start: start.facingDegrees,
+            end: unwrappedFacing,
+            startTangent: presentationTangent(at: startIndex, component: .facing) * scaledSpan,
+            endTangent: presentationTangent(at: endIndex, component: .facing) * scaledSpan,
+            fraction: fraction
+        )
+
+        guard x.isFinite, z.isFinite, facing.isFinite else { return pose(at: time) }
+        return PlayerPose(
+            position: PitchPoint(x: x, z: z),
+            facingDegrees: facing
+        )
+    }
+
     /// A seek-stable locomotion clock derived from telemetry distance rather
     /// than rendered frames. Scrubbing to the same instant therefore produces
     /// the same stride, and changing playback rate never changes gait shape.
@@ -534,9 +612,9 @@ struct PlayerTrack: Identifiable, Codable, Hashable, Sendable {
         }
 
         let halfWindow: TimeInterval = 0.12
-        let before = pose(at: time - halfWindow)
-        let centre = pose(at: time)
-        let after = pose(at: time + halfWindow)
+        let before = presentationPose(at: time - halfWindow)
+        let centre = presentationPose(at: time)
+        let after = presentationPose(at: time + halfWindow)
         let seconds = Float(halfWindow)
 
         let incomingX = centre.position.x - before.position.x
@@ -583,6 +661,96 @@ struct PlayerTrack: Identifiable, Codable, Hashable, Sendable {
             delta += 360
         }
         return delta
+    }
+
+    private enum PresentationComponent {
+        case x
+        case z
+        case facing
+    }
+
+    private func presentationTangent(
+        at index: Int,
+        component: PresentationComponent
+    ) -> Float {
+        guard keyframes.indices.contains(index) else { return 0 }
+        if index == keyframes.startIndex {
+            return presentationSlope(from: index, to: index + 1, component: component)
+        }
+        if index == keyframes.index(before: keyframes.endIndex) {
+            return presentationSlope(from: index - 1, to: index, component: component)
+        }
+
+        let previous = keyframes[index - 1]
+        let current = keyframes[index]
+        let next = keyframes[index + 1]
+        let incomingDuration = current.time - previous.time
+        let outgoingDuration = next.time - current.time
+        guard incomingDuration.isFinite, outgoingDuration.isFinite,
+              incomingDuration > 0, outgoingDuration > 0 else { return 0 }
+
+        let incoming = presentationSlope(
+            from: index - 1,
+            to: index,
+            component: component
+        )
+        let outgoing = presentationSlope(
+            from: index,
+            to: index + 1,
+            component: component
+        )
+        guard incoming.isFinite, outgoing.isFinite,
+              incoming != 0, outgoing != 0,
+              incoming.sign == outgoing.sign else { return 0 }
+
+        // Fritsch-Carlson weighted harmonic mean. It preserves the direction
+        // of both adjacent secants and cannot introduce component overshoot.
+        let h0 = Float(incomingDuration)
+        let h1 = Float(outgoingDuration)
+        let w1 = (2 * h1) + h0
+        let w2 = h1 + (2 * h0)
+        let denominator = (w1 / incoming) + (w2 / outgoing)
+        guard denominator.isFinite, abs(denominator) > 0.000_001 else { return 0 }
+        return (w1 + w2) / denominator
+    }
+
+    private func presentationSlope(
+        from startIndex: Int,
+        to endIndex: Int,
+        component: PresentationComponent
+    ) -> Float {
+        let start = keyframes[startIndex]
+        let end = keyframes[endIndex]
+        let duration = end.time - start.time
+        guard duration.isFinite, duration > 0 else { return 0 }
+        let delta: Float = switch component {
+        case .x:
+            end.position.x - start.position.x
+        case .z:
+            end.position.z - start.position.z
+        case .facing:
+            Self.shortestAngleDelta(from: start.facingDegrees, to: end.facingDegrees)
+        }
+        return delta / Float(duration)
+    }
+
+    private static func hermite(
+        start: Float,
+        end: Float,
+        startTangent: Float,
+        endTangent: Float,
+        fraction: Float
+    ) -> Float {
+        let t2 = fraction * fraction
+        let t3 = t2 * fraction
+        let h00 = (2 * t3) - (3 * t2) + 1
+        let h10 = t3 - (2 * t2) + fraction
+        let h01 = (-2 * t3) + (3 * t2)
+        let h11 = t3 - t2
+        return (h00 * start)
+            + (h10 * startTangent)
+            + (h01 * end)
+            + (h11 * endTangent)
     }
 
     private var locomotionPhaseOffset: Float {
@@ -1025,7 +1193,7 @@ extension CoachMark {
                   let player = scenario.player(id: anchor.playerID) else {
                 return fallback
             }
-            let playerPosition = player.pose(at: sampleTime).position
+            let playerPosition = player.presentationPose(at: sampleTime).position
             return PitchPoint(
                 x: playerPosition.x + anchor.offset.x,
                 z: playerPosition.z + anchor.offset.z
@@ -1038,7 +1206,7 @@ extension CoachMark {
         if kind == .playerLabel,
            let playerID,
            let player = scenario.player(id: playerID) {
-            let position = player.pose(at: sampleTime).position
+            let position = player.presentationPose(at: sampleTime).position
             return ResolvedCoachMarkGeometry(start: position, end: position)
         }
 

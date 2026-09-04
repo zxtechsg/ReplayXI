@@ -78,7 +78,7 @@ enum DecisionOptionSceneOverlay {
         }
 
         root.isEnabled = true
-        let sourcePoint = source.pose(at: snapshot.time).position
+        let sourcePoint = source.presentationPose(at: snapshot.time).position
         let scale = visualScale(for: viewMode)
         let visibleOptionCount = min(
             snapshot.passingOptions.count,
@@ -99,7 +99,7 @@ enum DecisionOptionSceneOverlay {
             }
 
             let option = snapshot.passingOptions[index]
-            let destination = receiver.pose(at: snapshot.time).position
+            let destination = receiver.presentationPose(at: snapshot.time).position
             slot.isEnabled = true
             let styleChanged = restyleIfNeeded(slot, option: option)
             updateGeometry(

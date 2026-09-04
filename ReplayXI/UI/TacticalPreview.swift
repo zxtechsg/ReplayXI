@@ -46,7 +46,7 @@ struct ShapeFocusPreviewPresentation: Equatable {
             if stage == .ideal, let target = targetsByPlayerID[player.id] {
                 return target.position
             }
-            return player.pose(at: time).position
+            return player.presentationPose(at: time).position
         }
 
         let defenderID = primaryDefenderID(in: scenario, time: time)
@@ -62,7 +62,7 @@ struct ShapeFocusPreviewPresentation: Equatable {
             players.append(
                 Player(
                     track: defender,
-                    position: defender.pose(at: time).position,
+                    position: defender.presentationPose(at: time).position,
                     isSource: false,
                     isDefender: true
                 )
@@ -103,8 +103,8 @@ struct ShapeFocusPreviewPresentation: Equatable {
         }
 
         return scenario.awayPlayers.min {
-            ReplayGeometry.distance($0.pose(at: time).position, referencePoint)
-                < ReplayGeometry.distance($1.pose(at: time).position, referencePoint)
+            ReplayGeometry.distance($0.presentationPose(at: time).position, referencePoint)
+                < ReplayGeometry.distance($1.presentationPose(at: time).position, referencePoint)
         }?.id
     }
 }
@@ -149,7 +149,7 @@ struct TacticalPreview: View {
                     drawMarks(in: &context, rect: pitchRect)
 
                     for player in scenario.players {
-                        let pose = player.pose(at: time)
+                        let pose = player.presentationPose(at: time)
                         let point = screenPoint(for: pose.position, in: pitchRect)
                         if showsSightCones, player.id == highlightedPlayerID {
                             drawSightCone(in: &context, origin: point, facingDegrees: pose.facingDegrees, team: player.team)

@@ -204,7 +204,7 @@ enum PitchSceneFactory {
         ) -> [String: PlayerPose] {
             playerPoseSamplesByID.removeAll(keepingCapacity: true)
             for player in players {
-                playerPoseSamplesByID[player.id] = player.pose(at: time)
+                playerPoseSamplesByID[player.id] = player.presentationPose(at: time)
             }
             playerPoseRefreshCount &+= 1
             return playerPoseSamplesByID
@@ -665,7 +665,7 @@ enum PitchSceneFactory {
             for: scenario.players,
             at: time
         ) ?? Dictionary(
-            uniqueKeysWithValues: scenario.players.map { ($0.id, $0.pose(at: time)) }
+            uniqueKeysWithValues: scenario.players.map { ($0.id, $0.presentationPose(at: time)) }
         )
         let firstPersonVisibleIDs: [String] = if viewMode == .firstPerson {
             nearestVisiblePlayerIDs(
@@ -736,8 +736,8 @@ enum PitchSceneFactory {
             showsIdealShape
                 ? triangleTargetsByPlayerID[source.id]?.position
                     ?? playerPosesByID[source.id]?.position
-                    ?? source.pose(at: time).position
-                : playerPosesByID[source.id]?.position ?? source.pose(at: time).position
+                    ?? source.presentationPose(at: time).position
+                : playerPosesByID[source.id]?.position ?? source.presentationPose(at: time).position
         } else {
             nil
         }
@@ -764,7 +764,7 @@ enum PitchSceneFactory {
                     ?? directChild(named: "player-\(player.id)", of: playersRoot)
                 else { continue }
                 let isSelected = player.id == perspectiveID
-                let pose = playerPosesByID[player.id] ?? player.pose(at: time)
+                let pose = playerPosesByID[player.id] ?? player.presentationPose(at: time)
                 let locomotion = player.locomotion(at: time)
                 // A cue is explicit and singular, so normal telemetry remains
                 // the only animation source for every uncued player. Shape Lab
@@ -784,7 +784,7 @@ enum PitchSceneFactory {
                     : pose.position
                 var presentationFacingDegrees = pose.facingDegrees
                 if let activeRagdollCue {
-                    let impactPose = player.pose(at: activeRagdollCue.impactTime)
+                    let impactPose = player.presentationPose(at: activeRagdollCue.impactTime)
                     let telemetryRelease = activeRagdollCue.telemetryRelease(at: time)
                     presentationPosition = impactPose.position.interpolated(
                         to: presentationPosition,
@@ -981,7 +981,8 @@ enum PitchSceneFactory {
 
         if let facing = directChild(named: "recorded-facing", of: root),
            let selectedPlayer = scenario.player(id: perspectiveID) {
-            let pose = playerPosesByID[selectedPlayer.id] ?? selectedPlayer.pose(at: time)
+            let pose = playerPosesByID[selectedPlayer.id]
+                ?? selectedPlayer.presentationPose(at: time)
             facing.position = [pose.position.x, 0, pose.position.z]
             facing.orientation = simd_quatf(
                 angle: -pose.facingDegrees * .pi / 180,
@@ -2277,7 +2278,8 @@ enum PitchSceneFactory {
         let targets = Array(scenario.formationTargets.prefix(3))
         let points: [PitchPoint] = targets.map { target in
             if showsIdeal { return target.position }
-            return scenario.player(id: target.playerID)?.pose(at: time).position ?? target.position
+            return scenario.player(id: target.playerID)?.presentationPose(at: time).position
+                ?? target.position
         }
         let scale = TriangleLockLayout.scale(for: mode, targets: scenario.formationTargets)
         let color = showsIdeal
@@ -2415,8 +2417,8 @@ enum PitchSceneFactory {
         }
 
         return scenario.awayPlayers.min {
-            ReplayGeometry.distance($0.pose(at: time).position, referencePoint)
-                < ReplayGeometry.distance($1.pose(at: time).position, referencePoint)
+            ReplayGeometry.distance($0.presentationPose(at: time).position, referencePoint)
+                < ReplayGeometry.distance($1.presentationPose(at: time).position, referencePoint)
         }?.id
     }
 
@@ -2441,14 +2443,14 @@ enum PitchSceneFactory {
         else { return }
 
         let targetNumbers = [2, 8, 6]
-        let start = source.pose(at: time).position
-        let defenders = scenario.awayPlayers.map { $0.pose(at: time).position }
+        let start = source.presentationPose(at: time).position
+        let defenders = scenario.awayPlayers.map { $0.presentationPose(at: time).position }
 
         for (index, shirtNumber) in targetNumbers.enumerated() {
             guard let lane = directChild(named: "candidate-lane-\(index)", of: lanesRoot) as? ModelEntity,
                   let target = scenario.homePlayers.first(where: { $0.shirtNumber == shirtNumber })
             else { continue }
-            let end = target.pose(at: time).position
+            let end = target.presentationPose(at: time).position
             let clearance = ReplayGeometry.laneClearance(from: start, to: end, defenders: defenders)
             let color: UIColor
             if shirtNumber == 6 {
@@ -2725,7 +2727,7 @@ enum PitchSceneFactory {
             var ranked: [(id: String, score: Float)] = []
             ranked.reserveCapacity(scenario.players.count)
             for player in scenario.players where !ids.contains(player.id) {
-                let point = player.pose(at: sampleTime).position
+                let point = player.presentationPose(at: sampleTime).position
                 ranked.append((
                     id: player.id,
                     score: annotationFocusDistance(point: point, mark: focusMark)
@@ -3692,7 +3694,7 @@ enum PitchSceneFactory {
             // Moving the world by the inverse player offset places the viewer at
             // the player's head-height body origin throughout the run.
             let pitchRotation = simd_quatf(angle: .pi, axis: [0, 1, 0])
-            let playerPose = scenario.player(id: perspectiveID)?.pose(at: time)
+            let playerPose = scenario.player(id: perspectiveID)?.presentationPose(at: time)
             let playerOffset = SIMD3<Float>(
                 playerPose?.position.x ?? 0,
                 0,

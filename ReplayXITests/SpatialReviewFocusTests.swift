@@ -153,7 +153,7 @@ final class SpatialReviewFocusTests: XCTestCase {
         let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay))
         let player = try XCTUnwrap(scenario.player(id: "navy-rw"))
         let time: TimeInterval = 14.1
-        let playerPoint = player.pose(at: time).position
+        let playerPoint = player.presentationPose(at: time).position
         let selected = mark(
             id: "00000000-0000-4000-8000-00000000A149",
             kind: .run,

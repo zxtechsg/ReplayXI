@@ -485,7 +485,7 @@ final class CoachMarkEndpointNudgeTests: XCTestCase {
         let alternatePlayer = try XCTUnwrap(
             store.selectedScenario.players.first { $0.id != trackedPlayer.id }
         )
-        let originalStart = trackedPlayer.pose(at: store.playhead).position
+        let originalStart = trackedPlayer.presentationPose(at: store.playhead).position
         let originalEnd = PitchPoint(x: originalStart.x + 4, z: originalStart.z + 7)
         store.beginDrawing(.run)
         XCTAssertNil(store.registerPitchTap(originalStart))
@@ -562,7 +562,7 @@ final class CoachMarkEndpointNudgeTests: XCTestCase {
             )
         )
         let laterTime: TimeInterval = 14
-        let laterPlayerPosition = trackedPlayer.pose(at: laterTime).position
+        let laterPlayerPosition = trackedPlayer.presentationPose(at: laterTime).position
         let laterGeometry = committed.resolvedGeometry(in: store.selectedScenario, at: laterTime)
         XCTAssertEqual(laterGeometry.start, laterPlayerPosition)
         XCTAssertEqual(laterGeometry.end.x - laterGeometry.start.x, 5, accuracy: 0.000_1)

@@ -339,14 +339,14 @@ enum ReplayDecisionReview {
         let contextDistance = finiteNonnegative(configuration.contextDistanceMetres)
 
         for sampleTime in sampleTimes {
-            let pose = subject.pose(at: sampleTime)
+            let pose = subject.presentationPose(at: sampleTime)
             if let previousFacing {
                 bodyTurnDegrees += absoluteAngleDifference(previousFacing, pose.facingDegrees)
             }
             previousFacing = pose.facingDegrees
 
             for player in scenario.players where player.id != subject.id {
-                let target = player.pose(at: sampleTime).position
+                let target = player.presentationPose(at: sampleTime).position
                 guard ReplayGeometry.distance(pose.position, target) <= contextDistance else { continue }
                 let bearing = heading(from: pose.position, to: target, fallback: pose.facingDegrees)
                 if absoluteAngleDifference(pose.facingDegrees, bearing) <= halfAngle {
@@ -355,13 +355,13 @@ enum ReplayDecisionReview {
             }
         }
 
-        let endPosition = subject.pose(at: time).position
+        let endPosition = subject.presentationPose(at: time).position
         let sortedContextIDs = contextIDs.sorted { lhs, rhs in
             let leftDistance = scenario.player(id: lhs).map {
-                ReplayGeometry.distance(endPosition, $0.pose(at: time).position)
+                ReplayGeometry.distance(endPosition, $0.presentationPose(at: time).position)
             } ?? .greatestFiniteMagnitude
             let rightDistance = scenario.player(id: rhs).map {
-                ReplayGeometry.distance(endPosition, $0.pose(at: time).position)
+                ReplayGeometry.distance(endPosition, $0.presentationPose(at: time).position)
             } ?? .greatestFiniteMagnitude
             if leftDistance == rightDistance { return lhs < rhs }
             return leftDistance < rightDistance
@@ -382,7 +382,7 @@ enum ReplayDecisionReview {
         time: TimeInterval,
         controlRadius: Float
     ) -> ReplayReceivingOrientation {
-        let playerPose = subject.pose(at: time)
+        let playerPose = subject.presentationPose(at: time)
         let ballPose = scenario.ball.pose(at: time)
         let ballDistance = ReplayGeometry.distance(playerPose.position, ballPose.position)
         let ballBearing = heading(
@@ -411,7 +411,7 @@ enum ReplayDecisionReview {
         time: TimeInterval,
         configuration: ReplayDecisionConfiguration
     ) -> ReplayObservedDestination? {
-        let playerPosition = subject.pose(at: time).position
+        let playerPosition = subject.presentationPose(at: time).position
         let ballPosition = scenario.ball.pose(at: time).position
         guard ReplayGeometry.distance(playerPosition, ballPosition)
             <= finiteNonnegative(configuration.possessionRadiusMetres)
@@ -430,7 +430,7 @@ enum ReplayDecisionReview {
                 (
                     player: player,
                     separation: ReplayGeometry.distance(
-                        player.pose(at: sampleTime).position,
+                        player.presentationPose(at: sampleTime).position,
                         futureBall
                     )
                 )
@@ -482,7 +482,7 @@ enum ReplayDecisionReview {
                       mark.revealTime <= time,
                       mark.isVisible(at: time)
                 else { return false }
-                let sourceAtReveal = subject.pose(at: mark.revealTime).position
+                let sourceAtReveal = subject.presentationPose(at: mark.revealTime).position
                 let markAtReveal = mark.resolvedGeometry(
                     in: scenario,
                     at: mark.revealTime
@@ -506,7 +506,7 @@ enum ReplayDecisionReview {
                 (
                     player: player,
                     separation: ReplayGeometry.distance(
-                        player.pose(at: targetTime).position,
+                        player.presentationPose(at: targetTime).position,
                         target
                     )
                 )
@@ -535,10 +535,12 @@ enum ReplayDecisionReview {
         coachSuggestion: ReplayCoachSuggestion?,
         configuration: ReplayDecisionConfiguration
     ) -> [ReplayPassingLaneOption] {
-        let start = subject.pose(at: time).position
+        let start = subject.presentationPose(at: time).position
         let defenders = scenario.players
             .filter { $0.team != subject.team }
-            .map { player in (id: player.id, position: player.pose(at: time).position) }
+            .map { player in
+                (id: player.id, position: player.presentationPose(at: time).position)
+            }
         let forcedIDs = Set([
             observedDestination?.receiverID,
             coachSuggestion?.receiverID
@@ -547,12 +549,15 @@ enum ReplayDecisionReview {
 
         let candidates = scenario.players.filter { player in
             guard player.team == subject.team, player.id != subject.id else { return false }
-            let distance = ReplayGeometry.distance(start, player.pose(at: time).position)
+            let distance = ReplayGeometry.distance(
+                start,
+                player.presentationPose(at: time).position
+            )
             return forcedIDs.contains(player.id) || distance <= maximumDistance
         }
 
         let options = candidates.map { player -> ReplayPassingLaneOption in
-            let end = player.pose(at: time).position
+            let end = player.presentationPose(at: time).position
             let passDistance = ReplayGeometry.distance(start, end)
             let nearestLaneDefender = defenders
                 .map { defender in

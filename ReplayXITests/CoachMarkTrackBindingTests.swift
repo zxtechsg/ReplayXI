@@ -11,7 +11,7 @@ final class CoachMarkTrackBindingTests: XCTestCase {
         store.seek(to: 8, broadcast: false)
 
         let player = try XCTUnwrap(store.selectedScenario.player(id: "navy-rw"))
-        let authoredStart = player.pose(at: 8).position
+        let authoredStart = player.presentationPose(at: 8).position
         let authoredEnd = PitchPoint(x: authoredStart.x + 4, z: authoredStart.z + 7)
         store.beginDrawing(.run)
         XCTAssertNil(store.registerPitchTap(authoredStart))
@@ -25,7 +25,7 @@ final class CoachMarkTrackBindingTests: XCTestCase {
         )
 
         let laterTime: TimeInterval = 14
-        let laterPlayerPosition = player.pose(at: laterTime).position
+        let laterPlayerPosition = player.presentationPose(at: laterTime).position
         let later = mark.resolvedGeometry(in: store.selectedScenario, at: laterTime)
         XCTAssertEqual(later.start.x, laterPlayerPosition.x, accuracy: 0.000_1)
         XCTAssertEqual(later.start.z, laterPlayerPosition.z, accuracy: 0.000_1)
@@ -38,8 +38,8 @@ final class CoachMarkTrackBindingTests: XCTestCase {
         store.seek(to: 10, broadcast: false)
         let source = try XCTUnwrap(store.selectedScenario.player(id: "navy-rw"))
         let receiver = try XCTUnwrap(store.selectedScenario.player(id: "navy-rb"))
-        let start = source.pose(at: 10).position
-        let end = receiver.pose(at: 10).position
+        let start = source.presentationPose(at: 10).position
+        let end = receiver.presentationPose(at: 10).position
 
         store.beginDrawing(.pass)
         XCTAssertNil(store.registerPitchTap(start))
@@ -48,8 +48,8 @@ final class CoachMarkTrackBindingTests: XCTestCase {
         XCTAssertEqual(mark.startTrackAnchor?.playerID, source.id)
         XCTAssertEqual(mark.endTrackAnchor?.playerID, receiver.id)
         let later = mark.resolvedGeometry(in: store.selectedScenario, at: 13)
-        XCTAssertEqual(later.start, source.pose(at: 13).position)
-        XCTAssertEqual(later.end, receiver.pose(at: 13).position)
+        XCTAssertEqual(later.start, source.presentationPose(at: 13).position)
+        XCTAssertEqual(later.end, receiver.presentationPose(at: 13).position)
     }
 
     func testTrackingTogglePreservesCurrentGeometryAndPublishesOnce() throws {
@@ -185,8 +185,8 @@ final class CoachMarkTrackBindingTests: XCTestCase {
         let mark = CoachMark(
             id: UUID(uuidString: "AAAAAAAA-0000-4000-8000-000000000123")!,
             kind: .pass,
-            start: source.pose(at: revealTime).position,
-            end: receiver.pose(at: revealTime).position,
+            start: source.presentationPose(at: revealTime).position,
+            end: receiver.presentationPose(at: revealTime).position,
             label: "Tracked release",
             revealTime: revealTime,
             startTrackAnchor: CoachMarkTrackAnchor(playerID: source.id),
@@ -225,8 +225,10 @@ final class CoachMarkTrackBindingTests: XCTestCase {
         let source = try XCTUnwrap(coach.selectedScenario.player(id: "navy-rw"))
         let receiver = try XCTUnwrap(coach.selectedScenario.player(id: "navy-rb"))
         coach.beginDrawing(.pass)
-        XCTAssertNil(coach.registerPitchTap(source.pose(at: 10).position))
-        let mark = try XCTUnwrap(coach.registerPitchTap(receiver.pose(at: 10).position))
+        XCTAssertNil(coach.registerPitchTap(source.presentationPose(at: 10).position))
+        let mark = try XCTUnwrap(
+            coach.registerPitchTap(receiver.presentationPose(at: 10).position)
+        )
         XCTAssertNotNil(mark.startTrackAnchor)
         XCTAssertNotNil(mark.endTrackAnchor)
 

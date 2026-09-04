@@ -591,7 +591,7 @@ final class ReplayAthleteRigTests: XCTestCase {
 
         for frame in 0 ... 360 {
             let time = Double(frame) / 120
-            let pose = track.pose(at: time)
+            let pose = track.presentationPose(at: time)
             ReplayAthleteMotion.update(rig, from: track, at: time)
             let phase = track.gaitPhase(at: time)
             let footfall = ReplayAthleteMotion.footfall(for: .sprint, phase: phase)
