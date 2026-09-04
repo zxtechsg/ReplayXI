@@ -1155,6 +1155,14 @@ private struct ImmersiveControlDeck: View {
                 showsDecisionStrip = false
                 showsEventStrip = false
             }
+            if arguments.contains("--replayxi-inline-settings") {
+                selectedAnnotationID = nil
+                showsDecisionStrip = false
+                showsEventStrip = false
+                showsPlayerGrid = false
+                isClearAnnotationsPending = false
+                inlinePanel = .settings
+            }
             #endif
         }
         .task(id: annotationConfirmation) {
