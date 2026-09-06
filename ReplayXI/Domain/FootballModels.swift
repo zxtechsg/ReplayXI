@@ -979,6 +979,11 @@ enum CoachMarkKind: String, Codable, CaseIterable, Identifiable, Sendable {
 enum CoachMarkGeometryPolicy {
     static let minimumDirectionalLength: Float = 0.80
     static let minimumZoneRadius: Float = 1.10
+    /// Tactical marks may be lifted above the pitch to describe aerial runs,
+    /// pressing layers, or a passing window without becoming unbounded scene
+    /// content. A nil value in an older replay is exactly ground level.
+    static let maximumElevation: Float = 4
+    static let elevationStep: Float = 0.25
 
     static func minimumDistance(for kind: CoachMarkKind) -> Float? {
         switch kind {
@@ -992,6 +997,16 @@ enum CoachMarkGeometryPolicy {
         guard let minimum = minimumDistance(for: kind) else { return false }
         return ReplayGeometry.distance(start, end) >= minimum
     }
+
+    static func accepts(elevation: Float?) -> Bool {
+        guard let elevation else { return true }
+        return elevation.isFinite && (0...maximumElevation).contains(elevation)
+    }
+
+    static func clampedElevation(_ elevation: Float) -> Float {
+        guard elevation.isFinite else { return 0 }
+        return min(max(elevation, 0), maximumElevation)
+    }
 }
 
 struct CoachMark: Identifiable, Codable, Hashable, Sendable {
@@ -999,6 +1014,11 @@ struct CoachMark: Identifiable, Codable, Hashable, Sendable {
     let kind: CoachMarkKind
     let start: PitchPoint
     let end: PitchPoint
+    /// Metres above the pitch for each authored endpoint. Optional storage
+    /// keeps pre-spatial replay payloads source- and wire-compatible; renderers
+    /// consume `resolvedStartElevation` / `resolvedEndElevation` instead.
+    let startElevation: Float?
+    let endElevation: Float?
     let label: String
     let revealTime: TimeInterval
     /// Optional end of the annotation's authored moment. Older replay files
@@ -1021,6 +1041,8 @@ struct CoachMark: Identifiable, Codable, Hashable, Sendable {
         kind: CoachMarkKind,
         start: PitchPoint,
         end: PitchPoint,
+        startElevation: Float? = nil,
+        endElevation: Float? = nil,
         label: String,
         revealTime: TimeInterval = 0,
         hideTime: TimeInterval? = nil,
@@ -1033,6 +1055,8 @@ struct CoachMark: Identifiable, Codable, Hashable, Sendable {
         self.kind = kind
         self.start = start
         self.end = end
+        self.startElevation = startElevation
+        self.endElevation = endElevation
         self.label = label
         self.revealTime = revealTime
         self.hideTime = hideTime
@@ -1044,6 +1068,13 @@ struct CoachMark: Identifiable, Codable, Hashable, Sendable {
 
     func isVisible(at time: TimeInterval) -> Bool {
         revealTime <= time && (hideTime.map { time < $0 } ?? true)
+    }
+
+    var resolvedStartElevation: Float { startElevation ?? 0 }
+    var resolvedEndElevation: Float { endElevation ?? 0 }
+
+    var hasSpatialElevation: Bool {
+        resolvedStartElevation > 0.001 || resolvedEndElevation > 0.001
     }
 }
 
@@ -1243,6 +1274,8 @@ extension CoachMark {
             kind: kind,
             start: geometry.start,
             end: geometry.end,
+            startElevation: startElevation,
+            endElevation: endElevation,
             label: label,
             revealTime: revealTime,
             hideTime: hideTime,

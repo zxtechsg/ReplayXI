@@ -462,11 +462,17 @@ enum ReplayAthleteMeshLibrary {
 
     private static func boot(named name: String) throws -> ReplayAthleteMeshAsset {
         var builder = TriangleMeshBuilder()
+        // A human-scale, six-stage football boot rather than a broad box at the
+        // end of the ankle. The rising heel counter secures the silhouette to
+        // the shin, the narrow midfoot opens into the ball of the foot, and the
+        // final two sections lift and taper into a recognisable rocker toe.
         let sections: [(z: Float, bottom: Float, top: Float, halfWidth: Float)] = [
-            (-0.105, -0.096, 0.030, 0.056),
-            (0.030, -0.100, 0.034, 0.073),
-            (0.175, -0.096, 0.000, 0.076),
-            (0.255, -0.084, -0.034, 0.056),
+            (-0.075, -0.094, 0.040, 0.048),
+            (-0.035, -0.100, 0.036, 0.055),
+            (0.045, -0.100, 0.028, 0.052),
+            (0.145, -0.097, 0.006, 0.061),
+            (0.215, -0.085, -0.018, 0.058),
+            (0.245, -0.066, -0.040, 0.032),
         ]
         builder.appendSectionedPrism(sections: sections)
         return try builder.makeAsset(named: name)

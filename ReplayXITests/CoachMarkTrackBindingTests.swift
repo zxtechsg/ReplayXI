@@ -85,6 +85,48 @@ final class CoachMarkTrackBindingTests: XCTestCase {
         XCTAssertEqual(snapshots.count, 2)
     }
 
+    func testManualTrackingCanFollowEveryPlayerInBothXIsAtCurrentTimestamp() throws {
+        let store = ReplayStore()
+        store.selectScenario(id: "eleven-eyes", broadcast: false)
+        store.seek(to: 10, broadcast: false)
+        store.beginDrawing(.pass)
+        XCTAssertNil(store.registerPitchTap(PitchPoint(x: -2, z: 1)))
+        let created = try XCTUnwrap(
+            store.registerPitchTap(PitchPoint(x: 3, z: 7))
+        )
+        XCTAssertEqual(store.selectedScenario.homePlayers.count, 11)
+        XCTAssertEqual(store.selectedScenario.awayPlayers.count, 11)
+
+        for player in store.selectedScenario.players {
+            let current = try XCTUnwrap(store.marks.first { $0.id == created.id })
+            let before = current.resolvedGeometry(
+                in: store.selectedScenario,
+                at: store.playhead
+            )
+
+            XCTAssertTrue(
+                store.setCoachMarkTracking(id: created.id, playerID: player.id),
+                "Expected manual tracking to accept \(player.team.rawValue) #\(player.shirtNumber)"
+            )
+            let tracked = try XCTUnwrap(store.marks.first { $0.id == created.id })
+            XCTAssertEqual(tracked.startTrackAnchor?.playerID, player.id)
+            XCTAssertEqual(tracked.endTrackAnchor?.playerID, player.id)
+
+            let after = tracked.resolvedGeometry(
+                in: store.selectedScenario,
+                at: store.playhead
+            )
+            XCTAssertEqual(after.start.x, before.start.x, accuracy: 0.000_1)
+            XCTAssertEqual(after.start.z, before.start.z, accuracy: 0.000_1)
+            XCTAssertEqual(after.end.x, before.end.x, accuracy: 0.000_1)
+            XCTAssertEqual(after.end.z, before.end.z, accuracy: 0.000_1)
+        }
+
+        XCTAssertTrue(store.setCoachMarkTracking(id: created.id, playerID: nil))
+        let fixed = try XCTUnwrap(store.marks.first { $0.id == created.id })
+        XCTAssertFalse(fixed.followsPlayerTracks)
+    }
+
     func testLegacyCoachMarkPayloadWithoutAnchorsStillDecodesAsFixedPitch() throws {
         let json = Data(
             """

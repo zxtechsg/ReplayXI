@@ -9,6 +9,15 @@ enum CoachMarkEndpoint: Equatable, Sendable {
     case end
 }
 
+/// The vertical part of a selected spatial instruction that should move.
+/// `both` lifts the complete stroke atomically, avoiding two SharePlay packets
+/// and preserving a level run/pass when the coach wants a raised layer.
+enum CoachMarkElevationTarget: Equatable, Sendable {
+    case start
+    case end
+    case both
+}
+
 /// The exact cumulative movement accepted for a joystick preview. Returning
 /// pitch metres instead of a Boolean keeps a clamped diagonal sample honest:
 /// one axis may reach a boundary while the other still has room to move.
@@ -39,10 +48,10 @@ final class ReplayStore {
     /// Bounds independently rendered annotation hierarchies in shared state.
     static let maximumSharedCoachMarks = 128
     static let maximumCoachMarkLabelLength = 96
-    /// Match-review annotations are pitch data, not arbitrary world-space
-    /// content. Keeping the shared payload inside the actual 68 x 105 metre
-    /// surface prevents a stray drag or malformed peer packet from creating a
-    /// giant line, collision volume, or off-screen label.
+    /// Match-review annotations are bounded pitch-relative spatial data, not
+    /// arbitrary room content. X/Z stays inside the actual 68 x 105 metre
+    /// surface and Y is separately capped by `CoachMarkGeometryPolicy`, so a
+    /// stray drag or malformed peer packet cannot create giant scene geometry.
     static let pitchHalfWidth: Float = 34
     static let pitchHalfLength: Float = 52.5
 
@@ -90,6 +99,11 @@ final class ReplayStore {
     /// store also enforces the barrier so correctness never depends on UI state.
     private(set) var hasActiveCoachMarkEndpointPreview = false
     private(set) var activeCoachMarkEndpointPreviewOwner: CoachMarkEndpointPreviewOwner?
+    /// A timeline pinch is an exclusive device-local preview transaction. The
+    /// store owns this flag so a second hand, accessibility activation, or an
+    /// external control cannot start annotation/POV work against a transient
+    /// playhead while the control deck owns the scrub.
+    private(set) var hasActiveTimelineScrub = false
     private(set) var shapeFocusStage: ShapeFocusStage = .problem
     var showsIdealBranch: Bool { shapeFocusStage == .ideal }
     var showsLaneLens = false
@@ -118,6 +132,16 @@ final class ReplayStore {
     @ObservationIgnored
     private var pendingCoachMarkGeometryBaselines: [UUID: CoachMarkGeometry] = [:]
 
+    @ObservationIgnored
+    private var timelineScrubCheckpoint: TimelineScrubCheckpoint?
+
+    /// Covers both the control-deck joystick transaction and a direct pinch on
+    /// a glowing RealityKit endpoint. Transport, POV, and view mutations must
+    /// treat either route as one exclusive spatial edit.
+    var hasActiveCoachMarkGeometryPreview: Bool {
+        hasActiveCoachMarkEndpointPreview || !pendingCoachMarkGeometryBaselines.isEmpty
+    }
+
     /// Joystick drags use absolute movement from a stable gesture baseline.
     /// This avoids treating a partially clamped multi-notch request as though
     /// every requested notch had been applied. The preview stays local until
@@ -135,8 +159,17 @@ final class ReplayStore {
     private struct CoachMarkGeometry {
         let start: PitchPoint
         let end: PitchPoint
+        let startElevation: Float?
+        let endElevation: Float?
         let startTrackAnchor: CoachMarkTrackAnchor?
         let endTrackAnchor: CoachMarkTrackAnchor?
+    }
+
+    private struct TimelineScrubCheckpoint {
+        let scenarioID: String
+        let playhead: TimeInterval
+        let isPlaying: Bool
+        let isLocallyPaused: Bool
     }
 
     private struct CoachMarkEndpointPreview {
@@ -188,13 +221,17 @@ final class ReplayStore {
         activeCoachMarkEndpointPreviewOwner = nil
     }
 
-    /// User-driven state changes are serialized behind endpoint adjustment.
+    /// User-driven state changes are serialized behind spatial adjustment.
     /// Rejection is deliberately local and snapshot-free: the gesture may then
     /// commit once or cancel without a stale transport/annotation action having
     /// changed its baseline or collaboration history.
     private func allowsMutationOutsideEndpointPreview() -> Bool {
-        guard !hasActiveCoachMarkEndpointPreview else {
-            statusMessage = "Finish or cancel the joystick adjustment first"
+        guard !hasActiveTimelineScrub else {
+            statusMessage = "Finish or cancel the timeline scrub first"
+            return false
+        }
+        guard !hasActiveCoachMarkGeometryPreview else {
+            statusMessage = "Finish or cancel the annotation adjustment first"
             return false
         }
         return true
@@ -341,6 +378,83 @@ final class ReplayStore {
             isPlaying = false
         }
         if broadcast { emitSnapshot() }
+    }
+
+    /// Begins a local scrub without publishing its temporary pause or playhead.
+    /// The checkpoint stays in the store so every other input route observes
+    /// the same exclusive transaction, including a second hand on the pitch.
+    @discardableResult
+    func beginTimelineScrub() -> Bool {
+        guard !hasActiveTimelineScrub else { return true }
+        guard !isDrawing else {
+            statusMessage = "Finish or cancel the annotation first"
+            return false
+        }
+        guard !hasActiveCoachMarkGeometryPreview else {
+            statusMessage = "Finish or cancel the annotation adjustment first"
+            return false
+        }
+        guard playhead.isFinite,
+              selectedScenario.duration.isFinite,
+              selectedScenario.duration >= 0 else { return false }
+        timelineScrubCheckpoint = TimelineScrubCheckpoint(
+            scenarioID: selectedScenarioID,
+            playhead: min(max(playhead, 0), selectedScenario.duration),
+            isPlaying: isPlaying && playhead < selectedScenario.duration,
+            isLocallyPaused: isLocallyPaused
+        )
+        hasActiveTimelineScrub = true
+        isPlaying = false
+        return true
+    }
+
+    /// Applies an unpublished preview sample while preserving the checkpoint
+    /// used by cancellation and by any defensive snapshot taken mid-gesture.
+    @discardableResult
+    func previewTimelineScrub(to time: TimeInterval) -> Bool {
+        guard hasActiveTimelineScrub,
+              timelineScrubCheckpoint?.scenarioID == selectedScenarioID,
+              time.isFinite,
+              selectedScenario.duration.isFinite else { return false }
+        playhead = min(max(time, 0), selectedScenario.duration)
+        isPlaying = false
+        return true
+    }
+
+    /// Commits one bounded playhead and restores the exact pre-pinch playback
+    /// and local-comfort flags. Callers may publish after this returns, when no
+    /// transient scrub remains for `makeSnapshot()` to mask.
+    @discardableResult
+    func commitTimelineScrub(to time: TimeInterval) -> Bool {
+        guard let checkpoint = timelineScrubCheckpoint,
+              hasActiveTimelineScrub,
+              checkpoint.scenarioID == selectedScenarioID,
+              time.isFinite,
+              selectedScenario.duration.isFinite else {
+            cancelTimelineScrub()
+            return false
+        }
+        let committedPlayhead = min(max(time, 0), selectedScenario.duration)
+        playhead = committedPlayhead
+        isPlaying = checkpoint.isPlaying && committedPlayhead < selectedScenario.duration
+        isLocallyPaused = checkpoint.isLocallyPaused
+        timelineScrubCheckpoint = nil
+        hasActiveTimelineScrub = false
+        return true
+    }
+
+    /// Rolls an interrupted pinch back atomically. Immersive exit invokes this
+    /// before applying its definitive pause, eliminating callback-order races.
+    func cancelTimelineScrub() {
+        defer {
+            timelineScrubCheckpoint = nil
+            hasActiveTimelineScrub = false
+        }
+        guard let checkpoint = timelineScrubCheckpoint,
+              checkpoint.scenarioID == selectedScenarioID else { return }
+        playhead = checkpoint.playhead
+        isPlaying = checkpoint.isPlaying && checkpoint.playhead < selectedScenario.duration
+        isLocallyPaused = checkpoint.isLocallyPaused
     }
 
     /// Opens a device-local review instant without claiming transport
@@ -767,6 +881,8 @@ final class ReplayStore {
             kind: mark.kind,
             start: mark.start,
             end: mark.end,
+            startElevation: mark.startElevation,
+            endElevation: mark.endElevation,
             label: mark.label,
             revealTime: revealTime,
             hideTime: shiftedHideTime,
@@ -816,6 +932,8 @@ final class ReplayStore {
             kind: mark.kind,
             start: mark.start,
             end: mark.end,
+            startElevation: mark.startElevation,
+            endElevation: mark.endElevation,
             label: mark.label,
             revealTime: mark.revealTime,
             hideTime: duration.map { mark.revealTime + $0 },
@@ -872,6 +990,8 @@ final class ReplayStore {
             kind: mark.kind,
             start: mark.start,
             end: mark.end,
+            startElevation: mark.startElevation,
+            endElevation: mark.endElevation,
             label: normalizedLabel,
             revealTime: mark.revealTime,
             hideTime: mark.hideTime,
@@ -897,7 +1017,18 @@ final class ReplayStore {
     /// toggling tracking never makes an annotation visibly jump.
     @discardableResult
     func setCoachMarkTracking(id: UUID, playerID: String?) -> Bool {
-        guard allowsMutationOutsideEndpointPreview() else { return false }
+        guard !hasActiveTimelineScrub else {
+            statusMessage = "Finish or cancel the timeline scrub first"
+            return false
+        }
+        if hasActiveCoachMarkEndpointPreview {
+            statusMessage = "Finish or cancel the joystick adjustment first"
+            return false
+        }
+        guard pendingCoachMarkGeometryBaselines.isEmpty else {
+            statusMessage = "Finish the current annotation move first"
+            return false
+        }
         guard localRole == .coach else { return false }
         let authoredIDs = Set(selectedScenario.coachMarks.map(\.id))
         guard !authoredIDs.contains(id),
@@ -906,10 +1037,6 @@ final class ReplayStore {
             statusMessage = authoredIDs.contains(id)
                 ? "Authored match overlay kept"
                 : "That annotation cannot track a player"
-            return false
-        }
-        guard pendingCoachMarkGeometryBaselines[id] == nil else {
-            statusMessage = "Finish the current annotation move first"
             return false
         }
         if let playerID, selectedScenario.player(id: playerID) == nil {
@@ -949,6 +1076,8 @@ final class ReplayStore {
             kind: mark.kind,
             start: resolved.start,
             end: resolved.end,
+            startElevation: mark.startElevation,
+            endElevation: mark.endElevation,
             label: mark.label,
             revealTime: mark.revealTime,
             hideTime: mark.hideTime,
@@ -985,7 +1114,22 @@ final class ReplayStore {
         end: PitchPoint,
         broadcast: Bool = true
     ) -> Bool {
-        guard allowsMutationOutsideEndpointPreview() else { return false }
+        guard !hasActiveTimelineScrub else {
+            statusMessage = "Finish or cancel the timeline scrub first"
+            return false
+        }
+        // A direct handle drag must be able to update and commit its own
+        // baseline, while every other mutation—including a joystick gesture or
+        // a second mark—stays serialized behind it.
+        guard !hasActiveCoachMarkEndpointPreview else {
+            statusMessage = "Finish or cancel the joystick adjustment first"
+            return false
+        }
+        guard pendingCoachMarkGeometryBaselines.isEmpty
+                || pendingCoachMarkGeometryBaselines[id] != nil else {
+            statusMessage = "Finish or cancel the annotation adjustment first"
+            return false
+        }
         guard localRole == .coach else { return false }
         let authoredIDs = Set(selectedScenario.coachMarks.map(\.id))
         guard !authoredIDs.contains(id),
@@ -1030,6 +1174,8 @@ final class ReplayStore {
             pendingCoachMarkGeometryBaselines[id] = CoachMarkGeometry(
                 start: mark.start,
                 end: mark.end,
+                startElevation: mark.startElevation,
+                endElevation: mark.endElevation,
                 startTrackAnchor: mark.startTrackAnchor,
                 endTrackAnchor: mark.endTrackAnchor
             )
@@ -1041,7 +1187,7 @@ final class ReplayStore {
             // committed baseline, preventing the coach from freezing locally
             // while followers continue through the moment being annotated.
             isPlaying = false
-            if isCollaborationActive { emitSnapshot() }
+            if isCollaborationActive { emitSnapshot(allowingGeometryPreview: true) }
         } else if broadcast {
             statusMessage = "Annotation position updated"
             emitSnapshot()
@@ -1079,11 +1225,6 @@ final class ReplayStore {
                 : "That annotation cannot be moved"
             return false
         }
-        guard pendingCoachMarkGeometryBaselines[id] == nil else {
-            statusMessage = "Finish the current annotation move first"
-            return false
-        }
-
         let mark = marks[index]
         let resolved = mark.resolvedGeometry(in: selectedScenario, at: playhead)
         var start = resolved.start
@@ -1142,6 +1283,84 @@ final class ReplayStore {
         return true
     }
 
+    /// Raises or lowers an endpoint—or the complete stroke—in pitch metres.
+    /// This is an atomic shared edit rather than a render-only transform: a
+    /// late joiner, a seek, and every SharePlay participant reconstruct the
+    /// same Y geometry from the serialized mark.
+    @discardableResult
+    func nudgeCoachMarkElevation(
+        id: UUID,
+        target: CoachMarkElevationTarget,
+        by delta: Float
+    ) -> Bool {
+        guard allowsMutationOutsideEndpointPreview() else { return false }
+        guard localRole == .coach else { return false }
+        guard delta.isFinite, delta != 0 else {
+            statusMessage = "Choose a valid height adjustment"
+            return false
+        }
+
+        let authoredIDs = Set(selectedScenario.coachMarks.map(\.id))
+        guard !authoredIDs.contains(id),
+              let index = marks.firstIndex(where: { $0.id == id }),
+              marks[index].kind.requiresTwoPitchPoints,
+              marks[index].playerID == nil else {
+            statusMessage = authoredIDs.contains(id)
+                ? "Authored match overlay kept"
+                : "That annotation cannot be raised"
+            return false
+        }
+        let mark = marks[index]
+        var start = mark.resolvedStartElevation
+        var end = mark.resolvedEndElevation
+        switch target {
+        case .start:
+            start = CoachMarkGeometryPolicy.clampedElevation(start + delta)
+        case .end:
+            end = CoachMarkGeometryPolicy.clampedElevation(end + delta)
+        case .both:
+            start = CoachMarkGeometryPolicy.clampedElevation(start + delta)
+            end = CoachMarkGeometryPolicy.clampedElevation(end + delta)
+        }
+        guard start != mark.resolvedStartElevation
+                || end != mark.resolvedEndElevation else {
+            statusMessage = "Annotation is already at that height limit"
+            return false
+        }
+
+        // Ground level remains nil on newly edited marks. This keeps the wire
+        // payload compact and semantically identical to legacy annotations.
+        let replacement = CoachMark(
+            id: mark.id,
+            kind: mark.kind,
+            start: mark.start,
+            end: mark.end,
+            startElevation: start > 0.001 ? start : nil,
+            endElevation: end > 0.001 ? end : nil,
+            label: mark.label,
+            revealTime: mark.revealTime,
+            hideTime: mark.hideTime,
+            author: mark.author,
+            playerID: mark.playerID,
+            startTrackAnchor: mark.startTrackAnchor,
+            endTrackAnchor: mark.endTrackAnchor
+        )
+        guard isValidSharedMark(replacement, for: selectedScenario) else {
+            statusMessage = "Keep the annotation within four metres of the pitch"
+            return false
+        }
+
+        marks[index] = replacement
+        isPlaying = false
+        statusMessage = switch target {
+        case .start: "Annotation start height adjusted"
+        case .end: "Annotation end height adjusted"
+        case .both: "Annotation stroke height adjusted"
+        }
+        emitSnapshot()
+        return true
+    }
+
     /// Previews one joystick-controlled endpoint using a cumulative movement
     /// from the gesture's first accepted sample. The request is never applied
     /// incrementally: every update is recomputed from the immutable baseline,
@@ -1161,6 +1380,10 @@ final class ReplayStore {
         cumulativeDelta: PitchPoint
     ) -> CoachMarkEndpointPreviewResult? {
         guard localRole == .coach else { return nil }
+        guard !hasActiveTimelineScrub else {
+            statusMessage = "Finish or cancel the timeline scrub first"
+            return nil
+        }
         guard !interruptedCoachMarkEndpointGestureIDs.contains(gestureID) else {
             statusMessage = "Lift, then start a new joystick adjustment"
             return nil
@@ -1281,6 +1504,8 @@ final class ReplayStore {
             pendingCoachMarkGeometryBaselines[id] = CoachMarkGeometry(
                 start: mark.start,
                 end: mark.end,
+                startElevation: mark.startElevation,
+                endElevation: mark.endElevation,
                 startTrackAnchor: mark.startTrackAnchor,
                 endTrackAnchor: mark.endTrackAnchor
             )
@@ -1306,7 +1531,7 @@ final class ReplayStore {
             // `emitSnapshot()` normally rejects an active endpoint transaction.
             // This one deliberate packet is safe because makeSnapshot restores
             // the committed geometry baseline while publishing the paused clock.
-            emitSnapshot(allowingEndpointPreview: true)
+            emitSnapshot(allowingGeometryPreview: true)
         }
         return CoachMarkEndpointPreviewResult(
             appliedDelta: appliedDelta,
@@ -1606,8 +1831,11 @@ final class ReplayStore {
     /// SharePlay startup invalidates a local-only origin immediately, before the
     /// session can enter preparing/waiting or publish a heartbeat.
     func discardLocalTrianglePreviewForSessionTransition() {
-        if hasActiveCoachMarkEndpointPreview {
-            rollbackAllCoachMarkGeometryPreviews(interruptingEndpointGesture: true)
+        cancelTimelineScrub()
+        if hasActiveCoachMarkGeometryPreview {
+            rollbackAllCoachMarkGeometryPreviews(
+                interruptingEndpointGesture: hasActiveCoachMarkEndpointPreview
+            )
         }
         guard isLocalTrianglePreview else { return }
         let retiredAnchorID = sharedPitchAnchorID
@@ -1714,8 +1942,11 @@ final class ReplayStore {
     /// disappeared unexpectedly. The coach republishes the safe tabletop state;
     /// players wait for that authoritative update without trying to recreate it.
     func handleSharedPitchAnchorRemoval(_ anchorID: UUID) {
-        if hasActiveCoachMarkEndpointPreview {
-            rollbackAllCoachMarkGeometryPreviews(interruptingEndpointGesture: true)
+        cancelTimelineScrub()
+        if hasActiveCoachMarkGeometryPreview {
+            rollbackAllCoachMarkGeometryPreviews(
+                interruptingEndpointGesture: hasActiveCoachMarkEndpointPreview
+            )
         }
         guard sharedPitchAnchorID == anchorID else { return }
         sharedPitchAnchorID = nil
@@ -1740,6 +1971,7 @@ final class ReplayStore {
 
     func resetCollaborationState() {
         let retiredAnchorID = sharedPitchAnchorID
+        cancelTimelineScrub()
         isCollaborationActive = false
         latestCoachSnapshot = nil
         rollbackAllCoachMarkGeometryPreviews(interruptingEndpointGesture: true)
@@ -1772,7 +2004,7 @@ final class ReplayStore {
     }
 
     func advance(by delta: TimeInterval) {
-        guard !hasActiveCoachMarkEndpointPreview else { return }
+        guard !hasActiveTimelineScrub, !hasActiveCoachMarkGeometryPreview else { return }
         guard isActivelyPlaying,
               delta.isFinite,
               delta > 0,
@@ -1803,10 +2035,12 @@ final class ReplayStore {
             guard let baseline = pendingCoachMarkGeometryBaselines[mark.id] else { return mark }
             return markRestoringGeometry(mark, from: baseline)
         }
+        let publishedPlayhead = timelineScrubCheckpoint?.playhead ?? playhead
+        let publishedIsPlaying = timelineScrubCheckpoint?.isPlaying ?? isPlaying
         return SharedPlaybackSnapshot(
             scenarioID: selectedScenarioID,
-            playhead: playhead,
-            isPlaying: isPlaying && playhead < selectedScenario.duration,
+            playhead: publishedPlayhead,
+            isPlaying: publishedIsPlaying && publishedPlayhead < selectedScenario.duration,
             playbackRate: playbackRate,
             viewMode: viewMode,
             coachFocusPerspectiveID: coachFocusPerspectiveID,
@@ -1991,6 +2225,14 @@ final class ReplayStore {
     ) -> Bool {
         let hasFiniteBoundedGeometry = Self.isPointOnPitch(mark.start)
             && Self.isPointOnPitch(mark.end)
+        let hasValidElevation = CoachMarkGeometryPolicy.accepts(
+            elevation: mark.startElevation
+        ) && CoachMarkGeometryPolicy.accepts(elevation: mark.endElevation)
+        // A zone is rendered as one horizontal tactical plane and exposes one
+        // whole-zone height control. Reject a peer payload that would place its
+        // two handles on different planes from that ring.
+        let hasCoherentZoneElevation = mark.kind != .space
+            || abs(mark.resolvedStartElevation - mark.resolvedEndElevation) <= 0.001
         let anchors = [mark.startTrackAnchor, mark.endTrackAnchor].compactMap { $0 }
         let hasValidTrackAnchors = anchors.allSatisfy { anchor in
             scenario.player(id: anchor.playerID) != nil
@@ -2024,6 +2266,8 @@ final class ReplayStore {
             && mark.author.count <= Self.maximumCoachMarkLabelLength
             && mark.author.utf8.count <= Self.maximumCoachMarkLabelLength * 4
         guard hasFiniteBoundedGeometry,
+              hasValidElevation,
+              hasCoherentZoneElevation,
               hasValidTrackAnchors,
               hasFiniteBoundedResolvedGeometry,
               hasValidRevealTime,
@@ -2032,7 +2276,10 @@ final class ReplayStore {
         guard mark.kind == .playerLabel else {
             return mark.playerID == nil
         }
-        guard mark.startTrackAnchor == nil, mark.endTrackAnchor == nil else { return false }
+        guard mark.startTrackAnchor == nil,
+              mark.endTrackAnchor == nil,
+              mark.startElevation == nil,
+              mark.endElevation == nil else { return false }
         guard let playerID = mark.playerID else { return false }
         return scenario.player(id: playerID) != nil
     }
@@ -2067,6 +2314,8 @@ final class ReplayStore {
             kind: mark.kind,
             start: start,
             end: end,
+            startElevation: mark.startElevation,
+            endElevation: mark.endElevation,
             label: mark.label,
             revealTime: mark.revealTime,
             hideTime: mark.hideTime,
@@ -2086,6 +2335,8 @@ final class ReplayStore {
             kind: mark.kind,
             start: baseline.start,
             end: baseline.end,
+            startElevation: baseline.startElevation,
+            endElevation: baseline.endElevation,
             label: mark.label,
             revealTime: mark.revealTime,
             hideTime: mark.hideTime,
@@ -2138,6 +2389,7 @@ final class ReplayStore {
 
     func setCollaborationActive(_ isActive: Bool) {
         guard isCollaborationActive != isActive else { return }
+        cancelTimelineScrub()
         // Neither a joystick transaction nor a direct 3D handle drag may cross
         // a room-authority boundary. In particular, a drag begun while SharePlay
         // is waiting must not become committable after the session joins.
@@ -2158,6 +2410,7 @@ final class ReplayStore {
     /// committed shared clock was running, one paused baseline snapshot is
     /// enough; an already-paused exit emits nothing.
     func prepareForImmersiveExit() {
+        cancelTimelineScrub()
         if hasActiveCoachMarkEndpointPreview {
             rollbackAllCoachMarkGeometryPreviews(interruptingEndpointGesture: true)
         } else {
@@ -2179,8 +2432,9 @@ final class ReplayStore {
         }
     }
 
-    private func emitSnapshot(allowingEndpointPreview: Bool = false) {
-        guard allowingEndpointPreview || !hasActiveCoachMarkEndpointPreview else { return }
+    private func emitSnapshot(allowingGeometryPreview: Bool = false) {
+        guard !hasActiveTimelineScrub else { return }
+        guard allowingGeometryPreview || !hasActiveCoachMarkGeometryPreview else { return }
         onBroadcastSnapshot?(makeSnapshot())
     }
 }

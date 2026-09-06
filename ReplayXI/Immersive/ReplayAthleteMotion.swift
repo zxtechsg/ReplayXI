@@ -59,6 +59,39 @@ struct ReplayAthleteFootfall: Equatable, Sendable {
     let isStance: Bool
 }
 
+enum ReplayAthleteLeg: String, Equatable, Sendable {
+    case left
+    case right
+
+    var opposite: ReplayAthleteLeg { self == .left ? .right : .left }
+}
+
+enum ReplayAthleteBallActionKind: String, Equatable, Sendable {
+    case controlTouch
+    case pass
+    case cutback
+}
+
+/// A render-only football action inferred from the authored player and ball
+/// tracks. It never moves either track: the values below only reshape the
+/// procedural legs around a detected touch and provide a deterministic support
+/// foot for grounding. Every field is an absolute function of replay time.
+struct ReplayAthleteBallActionPose: Equatable, Sendable {
+    let kind: ReplayAthleteBallActionKind
+    let contactTime: TimeInterval
+    let kickingLeg: ReplayAthleteLeg
+    let influence: Float
+    let kickingHipFlexion: Float
+    let kickingKneeFlexion: Float
+    let kickingFootPitch: Float
+    let supportHipFlexion: Float
+    let supportKneeFlexion: Float
+    let supportFootPitch: Float
+    let supportLateralShift: Float
+
+    var supportLeg: ReplayAthleteLeg { kickingLeg.opposite }
+}
+
 /// Maps both telemetry locomotion and the existing fixed-step impact solver to
 /// the shared named-joint contract.  Imported one-skeleton assets can conform
 /// by exposing the same semantic binding; the procedural mesh is not a dead
@@ -70,6 +103,7 @@ enum ReplayAthleteMotion {
         from track: PlayerTrack,
         at time: TimeInterval,
         lookTargetWorldPosition: SIMD3<Float>? = nil,
+        ballTrack: BallTrack? = nil,
         ragdollCue: PlayerRagdollCue? = nil
     ) {
         let locomotion = track.locomotion(at: time)
@@ -79,7 +113,8 @@ enum ReplayAthleteMotion {
                 at: time,
                 locomotion: locomotion,
                 gaitPhase: track.gaitPhase(at: time),
-                lookTargetWorldPosition: lookTargetWorldPosition
+                lookTargetWorldPosition: lookTargetWorldPosition,
+                ballTrack: ballTrack
             ),
             to: instance.joints
         )
@@ -98,14 +133,16 @@ enum ReplayAthleteMotion {
     static func locomotionPose(
         for track: PlayerTrack,
         at time: TimeInterval,
-        lookTargetWorldPosition: SIMD3<Float>? = nil
+        lookTargetWorldPosition: SIMD3<Float>? = nil,
+        ballTrack: BallTrack? = nil
     ) -> ReplayAthleteLocomotionPose {
         locomotionPose(
             for: track,
             at: time,
             locomotion: track.locomotion(at: time),
             gaitPhase: track.gaitPhase(at: time),
-            lookTargetWorldPosition: lookTargetWorldPosition
+            lookTargetWorldPosition: lookTargetWorldPosition,
+            ballTrack: ballTrack
         )
     }
 
@@ -117,7 +154,8 @@ enum ReplayAthleteMotion {
         at time: TimeInterval,
         locomotion: PlayerLocomotionSample,
         gaitPhase suppliedGaitPhase: Float? = nil,
-        lookTargetWorldPosition: SIMD3<Float>? = nil
+        lookTargetWorldPosition: SIMD3<Float>? = nil,
+        ballTrack: BallTrack? = nil
     ) -> ReplayAthleteLocomotionPose {
         // `PlayerLocomotionState` is deliberately discrete because it is also
         // used for clip admission and tactical semantics.  Driving the visible
@@ -161,25 +199,76 @@ enum ReplayAthleteMotion {
             targetWorldPosition: lookTargetWorldPosition
         )
 
-        let goalkeeperStance: Float = track.isGoalkeeper ? 0.10 : tuning.lateralStance
+        let ballAction = ballTrack.flatMap {
+            ballActionPose(for: track, ballTrack: $0, at: time)
+        }
+        var leftHipLateral: Float = track.isGoalkeeper ? 0.10 : tuning.lateralStance
+        var rightHipLateral: Float = -leftHipLateral
         let cutPlant = abs(turn) * 0.12 * cutInfluence
-        let leftHipSwing = (leftFootfall.stride * tuning.strideAmplitude)
+        var leftHipSwing = (leftFootfall.stride * tuning.strideAmplitude)
             - (max(turn, 0) * cutPlant)
-        let rightHipSwing = (rightFootfall.stride * tuning.strideAmplitude)
+        var rightHipSwing = (rightFootfall.stride * tuning.strideAmplitude)
             + (max(-turn, 0) * cutPlant)
         let kneeBase: Float = track.isGoalkeeper ? 0.34 : tuning.kneeBase
         let kneeTravel = tuning.kneeTravel
         let brakingCrouch = braking * (0.05 + (effort * 0.11))
-        let leftKneeBend = kneeBase + (leftFootfall.swingLift * kneeTravel)
+        var leftKneeBend = kneeBase + (leftFootfall.swingLift * kneeTravel)
             + leftFootfall.stanceCompression
             + brakingCrouch
             + (max(turn, 0) * cutPlant)
-        let rightKneeBend = kneeBase + (rightFootfall.swingLift * kneeTravel)
+        var rightKneeBend = kneeBase + (rightFootfall.swingLift * kneeTravel)
             + rightFootfall.stanceCompression
             + brakingCrouch
             + (max(-turn, 0) * cutPlant)
-        let leftAnkleAngle = -(leftHipSwing + leftKneeBend) + leftFootfall.footPitch
-        let rightAnkleAngle = -(rightHipSwing + rightKneeBend) + rightFootfall.footPitch
+        var leftAnkleAngle = -(leftHipSwing + leftKneeBend) + leftFootfall.footPitch
+        var rightAnkleAngle = -(rightHipSwing + rightKneeBend) + rightFootfall.footPitch
+        var leftContactWeight = leftFootfall.contactWeight
+        var rightContactWeight = rightFootfall.contactWeight
+        var actionLateralShift: Float = 0
+
+        if let action = ballAction {
+            func blend(_ current: Float, toward target: Float) -> Float {
+                current + ((target - current) * action.influence)
+            }
+
+            let kickingAnkle = -(action.kickingHipFlexion + action.kickingKneeFlexion)
+                + action.kickingFootPitch
+            let supportAnkle = -(action.supportHipFlexion + action.supportKneeFlexion)
+                + action.supportFootPitch
+            // Ease the inferred contact a second time before it competes with
+            // the gait clock. This keeps the planted leg authoritative through
+            // the strike without introducing a hard support-foot hand-off at
+            // either edge of the action window.
+            let supportLoad = smootherStep(action.influence)
+            let kickingLoadScale = 1 - (0.94 * action.influence)
+
+            switch action.kickingLeg {
+            case .left:
+                leftHipSwing = blend(leftHipSwing, toward: action.kickingHipFlexion)
+                leftKneeBend = blend(leftKneeBend, toward: action.kickingKneeFlexion)
+                leftAnkleAngle = blend(leftAnkleAngle, toward: kickingAnkle)
+                rightHipSwing = blend(rightHipSwing, toward: action.supportHipFlexion)
+                rightKneeBend = blend(rightKneeBend, toward: action.supportKneeFlexion)
+                rightAnkleAngle = blend(rightAnkleAngle, toward: supportAnkle)
+                leftHipLateral = blend(leftHipLateral, toward: 0.015)
+                rightHipLateral = blend(rightHipLateral, toward: -0.075)
+                leftContactWeight *= kickingLoadScale
+                rightContactWeight = max(rightContactWeight, supportLoad)
+                actionLateralShift = action.supportLateralShift
+            case .right:
+                rightHipSwing = blend(rightHipSwing, toward: action.kickingHipFlexion)
+                rightKneeBend = blend(rightKneeBend, toward: action.kickingKneeFlexion)
+                rightAnkleAngle = blend(rightAnkleAngle, toward: kickingAnkle)
+                leftHipSwing = blend(leftHipSwing, toward: action.supportHipFlexion)
+                leftKneeBend = blend(leftKneeBend, toward: action.supportKneeFlexion)
+                leftAnkleAngle = blend(leftAnkleAngle, toward: supportAnkle)
+                rightHipLateral = blend(rightHipLateral, toward: -0.015)
+                leftHipLateral = blend(leftHipLateral, toward: 0.075)
+                rightContactWeight *= kickingLoadScale
+                leftContactWeight = max(leftContactWeight, supportLoad)
+                actionLateralShift = -action.supportLateralShift
+            }
+        }
 
         let leftSoleHeight = approximateSoleHeight(
             hipAngle: leftHipSwing,
@@ -193,16 +282,18 @@ enum ReplayAthleteMotion {
         )
         let grounding = groundingReference(
             leftSoleHeight: leftSoleHeight,
-            leftContactWeight: leftFootfall.contactWeight,
+            leftContactWeight: leftContactWeight,
             rightSoleHeight: rightSoleHeight,
-            rightContactWeight: rightFootfall.contactWeight
+            rightContactWeight: rightContactWeight
         )
 
         let keeperReach: Float = track.isGoalkeeper ? 0.34 : tuning.shoulderReach
         let elbowBend: Float = track.isGoalkeeper ? 0.56 : tuning.elbowBend
         let bodyBob = abs(doubleCycle) * tuning.verticalBounce
-        let sideSway = -cycle * tuning.lateralSway
+        let sideSway = (-cycle * tuning.lateralSway)
+            + (actionLateralShift * (ballAction?.influence ?? 0))
         let balanceReach = braking * (0.025 + (effort * 0.07))
+            + ((ballAction?.influence ?? 0) * 0.075)
         // Counter most of the roll inherited from the body/hips/spine chain.
         // The eyes stay comparatively level while the planted body banks into
         // a cut, avoiding the metronomic head wobble of a copied gait sine.
@@ -262,9 +353,9 @@ enum ReplayAthleteMotion {
                     angle: look.headYawRadians + (cycle * tuning.spineYaw * 0.70),
                     axis: [0, 1, 0]
                 ),
-            leftHipOrientation: simd_quatf(angle: goalkeeperStance, axis: [0, 0, 1])
+            leftHipOrientation: simd_quatf(angle: leftHipLateral, axis: [0, 0, 1])
                 * simd_quatf(angle: leftHipSwing, axis: [1, 0, 0]),
-            rightHipOrientation: simd_quatf(angle: -goalkeeperStance, axis: [0, 0, 1])
+            rightHipOrientation: simd_quatf(angle: rightHipLateral, axis: [0, 0, 1])
                 * simd_quatf(angle: rightHipSwing, axis: [1, 0, 0]),
             leftKneeOrientation: simd_quatf(angle: leftKneeBend, axis: [1, 0, 0]),
             rightKneeOrientation: simd_quatf(angle: rightKneeBend, axis: [1, 0, 0]),
@@ -311,6 +402,44 @@ enum ReplayAthleteMotion {
         phase: Float
     ) -> ReplayAthleteFootfall {
         footfall(at: phase, tuning: tuning(for: state).footfall)
+    }
+
+    /// Infers a visual touch from authored ball kinematics and player proximity.
+    /// No event IDs, player IDs or hand-authored timestamps participate, so the
+    /// same input tracks always return the same pose after seek or reverse play.
+    static func ballActionPose(
+        for track: PlayerTrack,
+        ballTrack: BallTrack,
+        at time: TimeInterval
+    ) -> ReplayAthleteBallActionPose? {
+        guard time.isFinite, ballTrack.keyframes.count >= 3 else { return nil }
+
+        let keyframes = ballTrack.keyframes
+        let insertionIndex = lowerBoundBallKeyframeIndex(in: keyframes, time: time)
+        let firstCandidate = max(insertionIndex - 2, 1)
+        let lastCandidate = min(insertionIndex + 1, keyframes.count - 2)
+        guard firstCandidate <= lastCandidate else { return nil }
+
+        var strongest: ReplayAthleteBallActionPose?
+        for index in firstCandidate ... lastCandidate {
+            guard let candidate = ballActionPose(
+                for: track,
+                keyframes: keyframes,
+                contactIndex: index,
+                sampleTime: time
+            ) else { continue }
+
+            if strongest == nil
+                || candidate.influence > (strongest?.influence ?? 0) + 0.000_1
+                || (
+                    abs(candidate.influence - (strongest?.influence ?? 0)) <= 0.000_1
+                        && abs(candidate.contactTime - time)
+                            < abs((strongest?.contactTime ?? time) - time)
+                ) {
+                strongest = candidate
+            }
+        }
+        return strongest
     }
 
     /// Produces a continuous, absolute-time football gaze rather than making
@@ -547,6 +676,269 @@ enum ReplayAthleteMotion {
         let heelStrike: Float
         let toeOff: Float
         let swingDorsiflexion: Float
+    }
+
+    private struct BallActionTuning {
+        let anticipation: TimeInterval
+        let recovery: TimeInterval
+        let backswingHip: Float
+        let contactHip: Float
+        let followThroughHip: Float
+        let backswingKnee: Float
+        let contactKnee: Float
+        let followThroughKnee: Float
+        let backswingFootPitch: Float
+        let contactFootPitch: Float
+        let followThroughFootPitch: Float
+        let supportHip: Float
+        let supportKnee: Float
+        let supportFootPitch: Float
+        let supportLateralShift: Float
+    }
+
+    private static func ballActionPose(
+        for track: PlayerTrack,
+        keyframes: [BallKeyframe],
+        contactIndex: Int,
+        sampleTime: TimeInterval
+    ) -> ReplayAthleteBallActionPose? {
+        guard contactIndex > 0, contactIndex < keyframes.count - 1 else { return nil }
+        let previous = keyframes[contactIndex - 1]
+        let contact = keyframes[contactIndex]
+        let next = keyframes[contactIndex + 1]
+        guard contact.time.isFinite,
+              contact.height.isFinite,
+              let incomingVelocity = ballVelocity(from: previous, to: contact),
+              let outgoingVelocity = ballVelocity(from: contact, to: next)
+        else { return nil }
+
+        let incomingSpeed = simd_length(incomingVelocity)
+        let outgoingSpeed = simd_length(outgoingVelocity)
+        let speedChange = abs(outgoingSpeed - incomingSpeed)
+        let directionChange = directionChangeDegrees(
+            incoming: incomingVelocity,
+            outgoing: outgoingVelocity
+        )
+        let speedSalience = smootherStep((speedChange - 0.35) / 2.40)
+        let directionSalience = smootherStep((directionChange - 24) / 56)
+        let heightChange = max(
+            abs(contact.height - previous.height),
+            abs(next.height - contact.height)
+        )
+        let heightSalience = smootherStep((heightChange - 0.025) / 0.24)
+        let kinematicSalience = max(speedSalience, directionSalience, heightSalience * 0.62)
+        guard kinematicSalience > 0.025 else { return nil }
+
+        let kind: ReplayAthleteBallActionKind
+        if outgoingSpeed >= 2.10, directionChange >= 62 {
+            kind = .cutback
+        } else if outgoingSpeed >= 2.15, outgoingSpeed >= incomingSpeed + 0.65 {
+            kind = .pass
+        } else {
+            kind = .controlTouch
+        }
+        let tuning = ballActionTuning(for: kind)
+        let relativeTime = sampleTime - contact.time
+        guard relativeTime >= -tuning.anticipation,
+              relativeTime <= tuning.recovery else { return nil }
+
+        let temporalInfluence: Float
+        if relativeTime <= 0 {
+            temporalInfluence = smootherStep(
+                Float((relativeTime + tuning.anticipation) / tuning.anticipation)
+            )
+        } else {
+            temporalInfluence = 1 - smootherStep(Float(relativeTime / tuning.recovery))
+        }
+
+        let playerPose = track.presentationPose(at: contact.time)
+        let dx = contact.position.x - playerPose.position.x
+        let dz = contact.position.z - playerPose.position.z
+        let contactDistance = hypot(dx, dz)
+        let proximityInfluence = 1 - smootherStep((contactDistance - 0.18) / 1.12)
+        let heightInfluence = 1 - smootherStep((contact.height - 0.22) / 0.34)
+        let actionStrength = 0.62 + (0.38 * kinematicSalience)
+        let influence = temporalInfluence
+            * proximityInfluence
+            * heightInfluence
+            * actionStrength
+        guard influence >= 0.025 else { return nil }
+
+        let targetProgress: Float
+        let hip: Float
+        let knee: Float
+        let footPitch: Float
+        if relativeTime <= 0 {
+            targetProgress = smootherStep(
+                Float((relativeTime + tuning.anticipation) / tuning.anticipation)
+            )
+            hip = interpolate(tuning.backswingHip, tuning.contactHip, targetProgress)
+            knee = interpolate(tuning.backswingKnee, tuning.contactKnee, targetProgress)
+            footPitch = interpolate(
+                tuning.backswingFootPitch,
+                tuning.contactFootPitch,
+                targetProgress
+            )
+        } else {
+            targetProgress = smootherStep(Float(relativeTime / tuning.recovery))
+            hip = interpolate(tuning.contactHip, tuning.followThroughHip, targetProgress)
+            knee = interpolate(tuning.contactKnee, tuning.followThroughKnee, targetProgress)
+            footPitch = interpolate(
+                tuning.contactFootPitch,
+                tuning.followThroughFootPitch,
+                targetProgress
+            )
+        }
+
+        return ReplayAthleteBallActionPose(
+            kind: kind,
+            contactTime: contact.time,
+            kickingLeg: kickingLeg(
+                playerPose: playerPose,
+                ballPosition: contact.position,
+                outgoingVelocity: outgoingVelocity
+            ),
+            influence: influence,
+            kickingHipFlexion: hip,
+            kickingKneeFlexion: knee,
+            kickingFootPitch: footPitch,
+            supportHipFlexion: tuning.supportHip,
+            supportKneeFlexion: tuning.supportKnee,
+            supportFootPitch: tuning.supportFootPitch,
+            supportLateralShift: tuning.supportLateralShift
+        )
+    }
+
+    private static func ballActionTuning(
+        for kind: ReplayAthleteBallActionKind
+    ) -> BallActionTuning {
+        switch kind {
+        case .controlTouch:
+            BallActionTuning(
+                anticipation: 0.18,
+                recovery: 0.24,
+                backswingHip: 0.10,
+                contactHip: -0.18,
+                followThroughHip: -0.28,
+                backswingKnee: 0.38,
+                contactKnee: 0.20,
+                followThroughKnee: 0.28,
+                backswingFootPitch: -0.05,
+                contactFootPitch: 0.02,
+                followThroughFootPitch: -0.04,
+                supportHip: 0.04,
+                supportKnee: 0.22,
+                supportFootPitch: 0.015,
+                supportLateralShift: 0.018
+            )
+        case .pass:
+            BallActionTuning(
+                anticipation: 0.26,
+                recovery: 0.36,
+                backswingHip: 0.28,
+                contactHip: -0.30,
+                followThroughHip: -0.52,
+                backswingKnee: 0.58,
+                contactKnee: 0.24,
+                // A compact recovery fold keeps the striking boot visibly off
+                // the turf after contact instead of returning immediately to
+                // the underlying gait phase.
+                followThroughKnee: 0.64,
+                backswingFootPitch: -0.08,
+                contactFootPitch: 0.015,
+                followThroughFootPitch: -0.10,
+                supportHip: 0.055,
+                supportKnee: 0.30,
+                supportFootPitch: 0.015,
+                supportLateralShift: 0.030
+            )
+        case .cutback:
+            BallActionTuning(
+                anticipation: 0.30,
+                recovery: 0.42,
+                backswingHip: 0.20,
+                contactHip: -0.24,
+                followThroughHip: -0.42,
+                backswingKnee: 0.62,
+                contactKnee: 0.30,
+                followThroughKnee: 0.68,
+                backswingFootPitch: -0.06,
+                contactFootPitch: 0.01,
+                followThroughFootPitch: -0.06,
+                supportHip: 0.07,
+                supportKnee: 0.36,
+                supportFootPitch: 0.02,
+                supportLateralShift: 0.042
+            )
+        }
+    }
+
+    private static func lowerBoundBallKeyframeIndex(
+        in keyframes: [BallKeyframe],
+        time: TimeInterval
+    ) -> Int {
+        var lower = 0
+        var upper = keyframes.count
+        while lower < upper {
+            let middle = lower + ((upper - lower) / 2)
+            if keyframes[middle].time < time {
+                lower = middle + 1
+            } else {
+                upper = middle
+            }
+        }
+        return lower
+    }
+
+    private static func ballVelocity(
+        from start: BallKeyframe,
+        to end: BallKeyframe
+    ) -> SIMD2<Float>? {
+        let duration = end.time - start.time
+        guard duration.isFinite, duration > 0.000_1 else { return nil }
+        let seconds = Float(duration)
+        let velocity = SIMD2<Float>(
+            (end.position.x - start.position.x) / seconds,
+            (end.position.z - start.position.z) / seconds
+        )
+        guard velocity.x.isFinite, velocity.y.isFinite else { return nil }
+        return velocity
+    }
+
+    private static func directionChangeDegrees(
+        incoming: SIMD2<Float>,
+        outgoing: SIMD2<Float>
+    ) -> Float {
+        let incomingSpeed = simd_length(incoming)
+        let outgoingSpeed = simd_length(outgoing)
+        guard incomingSpeed > 0.025, outgoingSpeed > 0.025 else { return 0 }
+        let cosine = min(
+            max(simd_dot(incoming, outgoing) / (incomingSpeed * outgoingSpeed), -1),
+            1
+        )
+        return acos(cosine) * 180 / .pi
+    }
+
+    private static func kickingLeg(
+        playerPose: PlayerPose,
+        ballPosition: PitchPoint,
+        outgoingVelocity: SIMD2<Float>
+    ) -> ReplayAthleteLeg {
+        var direction = SIMD2<Float>(
+            ballPosition.x - playerPose.position.x,
+            ballPosition.z - playerPose.position.z
+        )
+        if simd_length_squared(direction) < 0.010 {
+            direction = outgoingVelocity
+        }
+        let facing = (playerPose.facingDegrees.isFinite ? playerPose.facingDegrees : 0)
+            * .pi / 180
+        let localRight = (direction.x * cos(facing)) - (direction.y * sin(facing))
+        return localRight >= 0 ? .right : .left
+    }
+
+    private static func interpolate(_ start: Float, _ end: Float, _ weight: Float) -> Float {
+        start + ((end - start) * weight)
     }
 
     /// Converts continuous telemetry into continuous presentation parameters.

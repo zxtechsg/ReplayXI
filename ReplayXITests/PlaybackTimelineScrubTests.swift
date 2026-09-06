@@ -2,6 +2,73 @@ import XCTest
 @testable import ReplayXI
 
 final class PlaybackTimelineScrubTests: XCTestCase {
+    func testStoreOwnsScrubMasksPreviewAndBlocksCompetingSpatialMutation() throws {
+        let store = ReplayStore()
+        store.playhead = 5
+        store.isPlaying = true
+        store.beginDrawing(.pass)
+        _ = store.registerPitchTap(PitchPoint(x: 2, z: 3))
+        let mark = try XCTUnwrap(store.registerPitchTap(PitchPoint(x: 6, z: 8)))
+        store.cancelDrawing()
+        store.isPlaying = true
+
+        XCTAssertTrue(store.beginTimelineScrub())
+        XCTAssertTrue(store.hasActiveTimelineScrub)
+        XCTAssertFalse(store.isPlaying)
+        XCTAssertTrue(store.previewTimelineScrub(to: 12.5))
+        XCTAssertEqual(store.playhead, 12.5)
+
+        let masked = store.makeSnapshot()
+        XCTAssertEqual(masked.playhead, 5)
+        XCTAssertTrue(masked.isPlaying)
+        XCTAssertFalse(
+            store.updateCoachMarkGeometry(
+                id: mark.id,
+                start: PitchPoint(x: 9, z: 9),
+                end: PitchPoint(x: 12, z: 12),
+                broadcast: false
+            )
+        )
+        XCTAssertNil(
+            store.previewCoachMarkEndpoint(
+                id: mark.id,
+                endpoint: .end,
+                gestureID: UUID(),
+                cumulativeDelta: PitchPoint(x: 0.5, z: 0.5)
+            ),
+            "A second-hand joystick edit must not enter while scrub owns the transaction."
+        )
+        XCTAssertFalse(store.hasActiveCoachMarkEndpointPreview)
+        XCTAssertEqual(store.marks.first(where: { $0.id == mark.id }), mark)
+
+        XCTAssertTrue(store.commitTimelineScrub(to: 12.5))
+        XCTAssertFalse(store.hasActiveTimelineScrub)
+        XCTAssertEqual(store.playhead, 12.5)
+        XCTAssertTrue(store.isPlaying)
+    }
+
+    func testInterruptedScrubRestoresLocalPauseAndExitCannotResumePlayback() {
+        let store = ReplayStore()
+        store.playhead = 7
+        store.isPlaying = true
+        store.isLocallyPaused = true
+        XCTAssertTrue(store.beginTimelineScrub())
+        XCTAssertTrue(store.previewTimelineScrub(to: 19))
+        store.cancelTimelineScrub()
+        XCTAssertEqual(store.playhead, 7)
+        XCTAssertTrue(store.isPlaying)
+        XCTAssertTrue(store.isLocallyPaused)
+        XCTAssertFalse(store.isActivelyPlaying)
+
+        store.isLocallyPaused = false
+        XCTAssertTrue(store.beginTimelineScrub())
+        XCTAssertTrue(store.previewTimelineScrub(to: 21))
+        store.prepareForImmersiveExit()
+        XCTAssertFalse(store.hasActiveTimelineScrub)
+        XCTAssertEqual(store.playhead, 7)
+        XCTAssertFalse(store.isPlaying)
+    }
+
     func testPinchCanStartAnywhereOnRailAndClamps() {
         XCTAssertEqual(
             PlaybackTimelineScrub.begin(
@@ -179,5 +246,32 @@ final class PlaybackTimelineScrubTests: XCTestCase {
             PlaybackTimelineScrub.adjustedTime(9.8, direction: 1, duration: 10),
             10
         )
+    }
+
+    func testDashboardSliderUsesStoreOwnedScrubTransaction() throws {
+        let projectRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sourceURL = projectRoot
+            .appendingPathComponent("ReplayXI")
+            .appendingPathComponent("UI")
+            .appendingPathComponent("ReplayDashboardView.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        let start = try XCTUnwrap(
+            source.range(of: "private struct DashboardTransport: View")?.lowerBound
+        )
+        let end = try XCTUnwrap(
+            source.range(
+                of: "private struct PlaybackConsole: View",
+                range: start..<source.endIndex
+            )?.lowerBound
+        )
+        let transport = String(source[start..<end])
+
+        XCTAssertTrue(transport.contains("store.beginTimelineScrub()"))
+        XCTAssertTrue(transport.contains("store.previewTimelineScrub(to: time)"))
+        XCTAssertTrue(transport.contains("store.commitTimelineScrub(to: finalPlayhead)"))
+        XCTAssertTrue(transport.contains("store.cancelTimelineScrub()"))
+        XCTAssertFalse(transport.contains("wasPlayingBeforeScrub"))
     }
 }

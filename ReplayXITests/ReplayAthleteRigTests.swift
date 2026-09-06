@@ -81,6 +81,50 @@ final class ReplayAthleteRigTests: XCTestCase {
         XCTAssertNotEqual(homeRig.configuration.kit.shirt, awayRig.configuration.kit.shirt)
     }
 
+    func testProceduralBootHasHumanScaleSixStageFootballSilhouette() throws {
+        let asset = try ReplayAthleteMeshLibrary.mesh(for: .boot, lod: .near)
+        let boot = ModelEntity(mesh: asset.mesh)
+        let bounds = boot.visualBounds(relativeTo: boot)
+        let length = bounds.extents.z
+        let width = bounds.extents.x
+
+        // Six longitudinal sections retain the deliberately low-poly language
+        // while providing a heel counter, midfoot waist, forefoot and rocker toe.
+        XCTAssertEqual(asset.metrics.vertices, 88)
+        XCTAssertEqual(asset.metrics.triangles, 44)
+        XCTAssertGreaterThanOrEqual(length, 0.30)
+        XCTAssertLessThanOrEqual(length, 0.325)
+        XCTAssertGreaterThanOrEqual(width, 0.10)
+        XCTAssertLessThanOrEqual(width, 0.125)
+        XCTAssertGreaterThan(length / width, 2.55)
+        XCTAssertEqual(bounds.min.y, -0.10, accuracy: 0.000_1)
+        XCTAssertGreaterThan(bounds.max.y, 0.035, "the heel collar should rise above the instep")
+    }
+
+    func testRefinedBootRemainsOneSharedMeshPerLODWithoutSpendingAnotherDraw() throws {
+        let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay))
+        let home = try XCTUnwrap(scenario.player(id: "navy-rw"))
+        let away = try XCTUnwrap(scenario.player(id: "red-lb"))
+        let homeRig = try ReplayAthleteFactory.make(for: home, lod: .near)
+        let awayRig = try ReplayAthleteFactory.make(for: away, lod: .near)
+        let homeLeft = try XCTUnwrap(
+            homeRig.root.findEntity(named: "left-boot")?.components[ModelComponent.self]
+        )
+        let homeRight = try XCTUnwrap(
+            homeRig.root.findEntity(named: "right-boot")?.components[ModelComponent.self]
+        )
+        let awayLeft = try XCTUnwrap(
+            awayRig.root.findEntity(named: "left-boot")?.components[ModelComponent.self]
+        )
+
+        XCTAssertTrue(homeLeft.mesh === homeRight.mesh)
+        XCTAssertTrue(homeLeft.mesh === awayLeft.mesh)
+        XCTAssertEqual(homeRig.metrics.modelEntities, 29)
+        XCTAssertTrue(homeRig.metrics.fits(ReplayAthleteLOD.near.budget))
+        XCTAssertNotNil(homeRig.root.findEntity(named: "shirt-number"))
+        XCTAssertNotNil(homeRig.root.findEntity(named: "chest-number"))
+    }
+
     func testNearShoulderUsesRoundedHardCappedSleeveWithInsetPivots() throws {
         let torso = try ReplayAthleteMeshLibrary.mesh(for: .torso, lod: .near)
         let sleeve = try ReplayAthleteMeshLibrary.mesh(for: .sleeve, lod: .near)

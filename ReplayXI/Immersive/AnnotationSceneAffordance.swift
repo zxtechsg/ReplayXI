@@ -267,7 +267,8 @@ enum AnnotationSceneAffordance {
 
         case .space:
             let radius = max(ReplayGeometry.distance(mark.start, mark.end), 1.1)
-            target.position = [mark.start.x, 0.16, mark.start.z]
+            let elevation = (mark.resolvedStartElevation + mark.resolvedEndElevation) / 2
+            target.position = [mark.start.x, 0.16 + elevation, mark.start.z]
             target.orientation = simd_quatf()
             target.scale = SIMD3<Float>(repeating: 1)
             let visibleArcFraction: Float = 0.74
@@ -285,15 +286,23 @@ enum AnnotationSceneAffordance {
             }
 
         case .run, .pass, .danger:
-            let length = max(ReplayGeometry.distance(mark.start, mark.end), 0.45)
-            let dx = mark.end.x - mark.start.x
-            let dz = mark.end.z - mark.start.z
-            target.position = [
-                (mark.start.x + mark.end.x) / 2,
-                0.17,
-                (mark.start.z + mark.end.z) / 2
-            ]
-            target.orientation = simd_quatf(angle: atan2(dx, dz), axis: [0, 1, 0])
+            let start = SIMD3<Float>(
+                mark.start.x,
+                0.17 + mark.resolvedStartElevation,
+                mark.start.z
+            )
+            let end = SIMD3<Float>(
+                mark.end.x,
+                0.17 + mark.resolvedEndElevation,
+                mark.end.z
+            )
+            let direction = end - start
+            let length = max(simd_length(direction), 0.45)
+            target.position = (start + end) / 2
+            target.orientation = simd_quatf(
+                from: SIMD3<Float>(0, 0, 1),
+                to: simd_normalize(direction)
+            )
             target.scale = [1, 1, length + 0.65]
         }
     }
@@ -347,6 +356,8 @@ enum AnnotationSceneAffordance {
                     path,
                     from: mark.start,
                     to: mark.end,
+                    startElevation: mark.resolvedStartElevation,
+                    endElevation: mark.resolvedEndElevation,
                     y: lift,
                     crossScale: scale * pulse
                 )
@@ -358,6 +369,7 @@ enum AnnotationSceneAffordance {
                     observer: observer,
                     scale: scale * pulse,
                     lift: lift,
+                    elevation: mark.resolvedStartElevation,
                     viewMode: viewMode
                 )
                 configureHandle(
@@ -366,6 +378,7 @@ enum AnnotationSceneAffordance {
                     observer: observer,
                     scale: scale * pulse,
                     lift: lift,
+                    elevation: mark.resolvedEndElevation,
                     viewMode: viewMode
                 )
             }
@@ -382,7 +395,8 @@ enum AnnotationSceneAffordance {
                 centre: mark.start,
                 radius: radius,
                 scale: scale * pulse,
-                lift: lift
+                lift: lift,
+                elevation: (mark.resolvedStartElevation + mark.resolvedEndElevation) / 2
             )
             if isEditable {
                 configureHandle(
@@ -391,6 +405,7 @@ enum AnnotationSceneAffordance {
                     observer: observer,
                     scale: scale * pulse,
                     lift: lift,
+                    elevation: mark.resolvedStartElevation,
                     viewMode: viewMode
                 )
                 configureHandle(
@@ -399,6 +414,7 @@ enum AnnotationSceneAffordance {
                     observer: observer,
                     scale: scale * pulse,
                     lift: lift,
+                    elevation: mark.resolvedEndElevation,
                     viewMode: viewMode
                 )
             }
@@ -534,13 +550,15 @@ enum AnnotationSceneAffordance {
         observer: PitchPoint,
         scale: Float,
         lift: Float,
+        elevation: Float,
         viewMode: ReplayViewMode
     ) {
         guard let handle else { return }
-        handle.position = [point.x, lift, point.z]
+        let spatialLift = lift + elevation
+        handle.position = [point.x, spatialLift, point.z]
         handle.scale = SIMD3<Float>(repeating: scale)
         if let stem = handle.children.first(where: { $0.name == "annotation-handle-stem" }) {
-            let stemHeight = max(lift, 0.04)
+            let stemHeight = max(spatialLift, 0.04)
             stem.position = [0, -stemHeight / (2 * scale), 0]
             stem.scale = [1, stemHeight / scale, 1]
         }
@@ -596,10 +614,11 @@ enum AnnotationSceneAffordance {
         centre: PitchPoint,
         radius: Float,
         scale: Float,
-        lift: Float
+        lift: Float,
+        elevation: Float
     ) {
         guard let zone else { return }
-        zone.position = [centre.x, lift, centre.z]
+        zone.position = [centre.x, lift + elevation, centre.z]
         zone.scale = [radius * scale, scale, radius * scale]
     }
 
@@ -639,15 +658,21 @@ enum AnnotationSceneAffordance {
         _ entity: Entity,
         from start: PitchPoint,
         to end: PitchPoint,
+        startElevation: Float,
+        endElevation: Float,
         y: Float,
         crossScale: Float
     ) {
-        let dx = end.x - start.x
-        let dz = end.z - start.z
-        let length = max(hypot(dx, dz), 0.001)
-        entity.position = [(start.x + end.x) / 2, y, (start.z + end.z) / 2]
+        let startPosition = SIMD3<Float>(start.x, y + startElevation, start.z)
+        let endPosition = SIMD3<Float>(end.x, y + endElevation, end.z)
+        let direction = endPosition - startPosition
+        let length = max(simd_length(direction), 0.001)
+        entity.position = (startPosition + endPosition) / 2
         entity.scale = [crossScale, crossScale, length]
-        entity.orientation = simd_quatf(angle: atan2(dx, dz), axis: [0, 1, 0])
+        entity.orientation = simd_quatf(
+            from: SIMD3<Float>(0, 0, 1),
+            to: simd_normalize(direction)
+        )
     }
 
     private static func restyleIfNeeded(_ selection: Entity, for mark: CoachMark) {

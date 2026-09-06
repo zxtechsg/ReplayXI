@@ -10,6 +10,18 @@ final class ReplayXITests: XCTestCase {
         XCTAssertTrue(PlaybackAttachmentPlacement.followsHead("playback-view-hud"))
         XCTAssertFalse(PlaybackAttachmentPlacement.followsHead("room-header"))
         XCTAssertFalse(PlaybackAttachmentPlacement.followsHead("perspective-matrix"))
+        XCTAssertEqual(
+            PlaybackAttachmentPlacement.controlAnchorTrackingMode(
+                prefersHeadAnchorAlternative: false
+            ),
+            .continuous
+        )
+        XCTAssertEqual(
+            PlaybackAttachmentPlacement.controlAnchorTrackingMode(
+                prefersHeadAnchorAlternative: true
+            ),
+            .once
+        )
     }
 
     func testLocalAnnotationVisibilityRoundTripRestoresMarksWithoutForcingInputAffordances() {
@@ -107,6 +119,7 @@ final class ReplayXITests: XCTestCase {
             .annotationDuration(selectedID),
             .annotationGeometry(selectedID),
             .annotationLabel(selectedID),
+            .annotationTracking(selectedID),
         ]
 
         XCTAssertTrue(PlaybackInlinePanel.settings.isValid(for: nil))

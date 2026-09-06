@@ -110,6 +110,12 @@ final class PlaybackControlDeckClarityTests: XCTestCase {
                 hasActiveEndpointPreview: false
             )
         )
+        XCTAssertFalse(
+            PlaybackSpatialInteractionPolicy.acceptsPitchInteraction(
+                hasActiveEndpointPreview: false,
+                hasActiveTimelineScrub: true
+            )
+        )
     }
 
     func testHidingAnnotationsClearsEveryMarkEditingSurface() throws {
@@ -138,6 +144,17 @@ final class PlaybackControlDeckClarityTests: XCTestCase {
 
         XCTAssertTrue(gesture.contains(".onEnded { value in"))
         XCTAssertTrue(gesture.contains("applyJoystickTranslation(value.translation)"))
+    }
+
+    func testJoystickDisablesWhileTimelineScrubOwnsInput() throws {
+        let source = try immersiveSource()
+        let policy = try sourceSlice(
+            source,
+            after: "private func annotationJoystickIsEnabled(",
+            before: "private func annotationEndPointAccessibilityTarget"
+        )
+
+        XCTAssertTrue(policy.contains("!store.hasActiveTimelineScrub"))
     }
 
     func testSpatialControlTargetFloorIsAtLeastSixtyPoints() {
@@ -175,6 +192,54 @@ final class PlaybackControlDeckClarityTests: XCTestCase {
         XCTAssertFalse(source.contains("Text(\"MARK\")"))
         XCTAssertFalse(source.contains("Text(\"MORE\")"))
         XCTAssertTrue(source.contains("Eyebrow(text: \"View & Overlays\""))
+    }
+
+    func testSelectedCoachMarkExposesClearRetractableTwentyTwoPlayerTracking() throws {
+        let source = try immersiveSource()
+        let inspector = try sourceSlice(
+            source,
+            after: "private func selectedAnnotationInspector(_ mark: CoachMark) -> some View",
+            before: "private func annotationGeometryButton(_ mark: CoachMark) -> some View"
+        )
+        XCTAssertTrue(inspector.contains("annotationTrackingButton(mark)"))
+
+        let trackingButton = try sourceSlice(
+            source,
+            after: "private func annotationTrackingButton(_ mark: CoachMark) -> some View",
+            before: "private func annotationTrackingButtonTitle(_ mark: CoachMark) -> String"
+        )
+        XCTAssertTrue(trackingButton.contains("toggleInlinePanel(.annotationTracking(mark.id))"))
+        XCTAssertTrue(trackingButton.contains("Annotation player tracking"))
+
+        let trackingShelf = try sourceSlice(
+            source,
+            after: "private func annotationTrackingShelf(_ mark: CoachMark) -> some View",
+            before: "private func annotationTrackingTeamRow("
+        )
+        XCTAssertTrue(trackingShelf.contains("title: \"Follow player\""))
+        XCTAssertTrue(trackingShelf.contains("detail: \"START + END\""))
+        XCTAssertTrue(trackingShelf.contains("Label(\"Pitch\""))
+        XCTAssertTrue(trackingShelf.contains("store.selectedScenario.homePlayers"))
+        XCTAssertTrue(trackingShelf.contains("store.selectedScenario.awayPlayers"))
+
+        let trackingRow = try sourceSlice(
+            source,
+            after: "private func annotationTrackingTeamRow(\n",
+            before: "private func annotationTrackingPlayerButton("
+        )
+        XCTAssertTrue(trackingRow.contains("ForEach(players.prefix(11))"))
+
+        let trackingMutation = try sourceSlice(
+            source,
+            after: "private func setAnnotationTracking(_ mark: CoachMark, playerID: String?)",
+            before: "private func annotationLabelShelf(_ mark: CoachMark) -> some View"
+        )
+        XCTAssertTrue(
+            trackingMutation.contains(
+                "store.setCoachMarkTracking(id: mark.id, playerID: playerID)"
+            )
+        )
+        XCTAssertTrue(trackingMutation.contains("inlinePanel = nil"))
     }
 
     private func immersiveSource() throws -> String {

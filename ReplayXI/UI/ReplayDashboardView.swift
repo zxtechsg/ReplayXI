@@ -622,7 +622,6 @@ private struct ShapeFocusStepButton: View {
 private struct DashboardTransport: View {
     @Environment(ReplayStore.self) private var store
     @Environment(SquadSessionCoordinator.self) private var squadSession
-    @State private var wasPlayingBeforeScrub = false
 
     private var scenario: ReplayScenario { store.selectedScenario }
 
@@ -685,7 +684,7 @@ private struct DashboardTransport: View {
                 Slider(
                     value: Binding(
                         get: { store.playhead },
-                        set: { store.seek(to: $0, broadcast: false) }
+                        set: { previewScrub(to: $0) }
                     ),
                     in: 0...max(scenario.duration, 0.1),
                     step: 0.1,
@@ -726,6 +725,9 @@ private struct DashboardTransport: View {
             RoundedRectangle(cornerRadius: 20)
                 .stroke(ReplayTheme.signal.opacity(0.20), lineWidth: 1)
         }
+        .onDisappear {
+            store.cancelTimelineScrub()
+        }
     }
 
     private var playbackControlsAreDisabled: Bool {
@@ -752,14 +754,22 @@ private struct DashboardTransport: View {
 
     private func handleScrubbing(_ editing: Bool) {
         if editing {
-            wasPlayingBeforeScrub = store.isActivelyPlaying
-            store.setPlaying(false, broadcast: false)
+            _ = store.beginTimelineScrub()
+            return
+        }
+
+        let finalPlayhead = store.playhead
+        guard store.commitTimelineScrub(to: finalPlayhead) else { return }
+        squadSession.broadcastCurrentState()
+    }
+
+    private func previewScrub(to time: TimeInterval) {
+        if store.hasActiveTimelineScrub {
+            _ = store.previewTimelineScrub(to: time)
         } else {
-            if wasPlayingBeforeScrub {
-                store.setPlaying(true, broadcast: false)
-            }
-            wasPlayingBeforeScrub = false
-            squadSession.broadcastCurrentState()
+            // Accessibility adjustments can update a Slider without opening a
+            // continuous drag. Keep that discrete route bounded and local.
+            store.seek(to: time, broadcast: false)
         }
     }
 

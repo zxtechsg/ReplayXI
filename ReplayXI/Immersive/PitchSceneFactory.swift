@@ -382,6 +382,10 @@ enum PitchSceneFactory {
         height: 0.72,
         radius: 0.34
     )
+    private static let annotationMarkElevationGuideMesh = MeshResource.generateCylinder(
+        height: 1,
+        radius: 0.018
+    )
     private static let selectionHaloMesh = MeshResource.generateCylinder(height: 0.025, radius: 0.47)
 
     private struct RagdollPhysicsPart {
@@ -731,6 +735,10 @@ enum PitchSceneFactory {
             nil
         }
         let ballPose = scenario.ball.pose(at: time)
+        // Shape Lab can substitute ideal player and ball presentation positions.
+        // Match views alone may infer render-only touches from the authoritative
+        // replay tracks; this never mutates the tactical ball path.
+        let athleteBallActionTrack: BallTrack? = isTriangleView ? nil : scenario.ball
         let shapeSourcePosition: PitchPoint? = if isTriangleView,
                                                   let source = scenario.player(id: scenario.defaultPerspectiveID) {
             showsIdealShape
@@ -956,6 +964,7 @@ enum PitchSceneFactory {
                         time: time,
                         locomotion: locomotion,
                         lookTargetWorldPosition: playerLookTarget,
+                        ballTrack: activeRagdollCue == nil ? athleteBallActionTrack : nil,
                         cache: sceneState
                     )
                     if let activeRagdollCue {
@@ -973,6 +982,7 @@ enum PitchSceneFactory {
                         time: time,
                         locomotion: locomotion,
                         lookTargetWorldPosition: playerLookTarget,
+                        ballTrack: athleteBallActionTrack,
                         cache: sceneState
                     )
                 }
@@ -2807,6 +2817,34 @@ enum PitchSceneFactory {
             return root
         }
 
+        let elevationGuideMaterial = UnlitMaterial(
+            color: color.withAlphaComponent(0.34),
+            applyPostProcessToneMap: false
+        )
+        let startGuide = ModelEntity(
+            mesh: annotationMarkElevationGuideMesh,
+            materials: [elevationGuideMaterial]
+        )
+        startGuide.name = "annotation-mark-start-elevation-guide"
+        configureAnnotationElevationGuide(
+            startGuide,
+            at: mark.start,
+            elevation: mark.resolvedStartElevation
+        )
+        root.addChild(startGuide)
+
+        let endGuide = ModelEntity(
+            mesh: annotationMarkElevationGuideMesh,
+            materials: [elevationGuideMaterial]
+        )
+        endGuide.name = "annotation-mark-end-elevation-guide"
+        configureAnnotationElevationGuide(
+            endGuide,
+            at: mark.end,
+            elevation: mark.resolvedEndElevation
+        )
+        root.addChild(endGuide)
+
         if mark.kind == .space {
             let radius = max(ReplayGeometry.distance(mark.start, mark.end), 1.1)
             let ring = ModelEntity(
@@ -2816,7 +2854,11 @@ enum PitchSceneFactory {
                 ]
             )
             ring.name = "annotation-mark-space"
-            ring.position = [mark.start.x, 0.072, mark.start.z]
+            ring.position = [
+                mark.start.x,
+                0.072 + ((mark.resolvedStartElevation + mark.resolvedEndElevation) / 2),
+                mark.start.z
+            ]
             ring.scale = [radius, 1, radius]
             root.addChild(ring)
             return root
@@ -2833,17 +2875,30 @@ enum PitchSceneFactory {
                 materials: [UnlitMaterial(color: color)]
             )
             line.name = "annotation-mark-segment-\(index)"
-            setSegmentTransform(line, from: start, to: end, y: 0.10)
+            setAnnotationSegmentTransform(
+                line,
+                from: start,
+                startElevation: mark.resolvedStartElevation
+                    + ((mark.resolvedEndElevation - mark.resolvedStartElevation) * startFraction),
+                to: end,
+                endElevation: mark.resolvedStartElevation
+                    + ((mark.resolvedEndElevation - mark.resolvedStartElevation) * endFraction),
+                baseY: 0.10
+            )
             root.addChild(line)
         }
 
-        let direction = SIMD3<Float>(mark.end.x - mark.start.x, 0, mark.end.z - mark.start.z)
+        let direction = SIMD3<Float>(
+            mark.end.x - mark.start.x,
+            mark.resolvedEndElevation - mark.resolvedStartElevation,
+            mark.end.z - mark.start.z
+        )
         let arrow = ModelEntity(
             mesh: annotationMarkArrowMesh,
             materials: [UnlitMaterial(color: color)]
         )
         arrow.name = "annotation-mark-arrow"
-        arrow.position = [mark.end.x, 0.12, mark.end.z]
+        arrow.position = [mark.end.x, 0.12 + mark.resolvedEndElevation, mark.end.z]
         arrow.isEnabled = simd_length(direction) > 0.05
         if arrow.isEnabled {
             arrow.orientation = simd_quatf(from: SIMD3<Float>(0, 1, 0), to: simd_normalize(direction))
@@ -2876,15 +2931,53 @@ enum PitchSceneFactory {
             ) != nil
 
         case .space:
+            guard let startGuide = directChild(
+                named: "annotation-mark-start-elevation-guide",
+                of: entity
+            ), let endGuide = directChild(
+                named: "annotation-mark-end-elevation-guide",
+                of: entity
+            ) else { return false }
+            configureAnnotationElevationGuide(
+                startGuide,
+                at: incoming.start,
+                elevation: incoming.resolvedStartElevation
+            )
+            configureAnnotationElevationGuide(
+                endGuide,
+                at: incoming.end,
+                elevation: incoming.resolvedEndElevation
+            )
             guard let disc = directChild(named: "annotation-mark-space", of: entity) else {
                 return false
             }
             let newRadius = max(ReplayGeometry.distance(incoming.start, incoming.end), 1.1)
-            disc.position = [incoming.start.x, 0.072, incoming.start.z]
+            disc.position = [
+                incoming.start.x,
+                0.072 + ((incoming.resolvedStartElevation + incoming.resolvedEndElevation) / 2),
+                incoming.start.z
+            ]
             disc.scale = [newRadius, 1, newRadius]
             return true
 
         case .run, .pass, .danger:
+            guard let startGuide = directChild(
+                named: "annotation-mark-start-elevation-guide",
+                of: entity
+            ), let endGuide = directChild(
+                named: "annotation-mark-end-elevation-guide",
+                of: entity
+            ) else { return false }
+            configureAnnotationElevationGuide(
+                startGuide,
+                at: incoming.start,
+                elevation: incoming.resolvedStartElevation
+            )
+            configureAnnotationElevationGuide(
+                endGuide,
+                at: incoming.end,
+                elevation: incoming.resolvedEndElevation
+            )
             let pieces = incoming.kind == .danger ? 7 : 1
             for index in 0..<pieces {
                 guard let line = directChild(
@@ -2896,17 +2989,23 @@ enum PitchSceneFactory {
                     startFraction + (incoming.kind == .danger ? 0.075 : 1),
                     1
                 )
-                setSegmentTransform(
+                setAnnotationSegmentTransform(
                     line,
                     from: incoming.start.interpolated(
                         to: incoming.end,
                         fraction: startFraction
                     ),
+                    startElevation: incoming.resolvedStartElevation
+                        + ((incoming.resolvedEndElevation - incoming.resolvedStartElevation)
+                            * startFraction),
                     to: incoming.start.interpolated(
                         to: incoming.end,
                         fraction: endFraction
                     ),
-                    y: 0.10
+                    endElevation: incoming.resolvedStartElevation
+                        + ((incoming.resolvedEndElevation - incoming.resolvedStartElevation)
+                            * endFraction),
+                    baseY: 0.10
                 )
             }
 
@@ -2915,10 +3014,14 @@ enum PitchSceneFactory {
             }
             let direction = SIMD3<Float>(
                 incoming.end.x - incoming.start.x,
-                0,
+                incoming.resolvedEndElevation - incoming.resolvedStartElevation,
                 incoming.end.z - incoming.start.z
             )
-            arrow.position = [incoming.end.x, 0.12, incoming.end.z]
+            arrow.position = [
+                incoming.end.x,
+                0.12 + incoming.resolvedEndElevation,
+                incoming.end.z
+            ]
             arrow.isEnabled = simd_length(direction) > 0.05
             if arrow.isEnabled {
                 arrow.orientation = simd_quatf(
@@ -3295,9 +3398,17 @@ enum PitchSceneFactory {
             case .touchline: 4.20
             case .positional: 6.40
             }
+            let spatialLabelElevation: Float = if mark.kind == .playerLabel {
+                0
+            } else if mark.kind == .space {
+                (mark.resolvedStartElevation + mark.resolvedEndElevation) / 2
+            } else {
+                mark.resolvedStartElevation
+                    + ((mark.resolvedEndElevation - mark.resolvedStartElevation) * 0.70)
+            }
             label.position = [
                 anchor.x,
-                mark.kind == .playerLabel ? playerLabelHeight : 0.78,
+                mark.kind == .playerLabel ? playerLabelHeight : 0.78 + spatialLabelElevation,
                 anchor.z
             ]
             label.orientation = simd_quatf(
@@ -3415,6 +3526,44 @@ enum PitchSceneFactory {
         entity.orientation = simd_quatf(angle: atan2(dx, dz), axis: [0, 1, 0])
     }
 
+    /// Aligns a cached annotation rail through all three spatial axes. The
+    /// existing pitch-only helper remains untouched for tactical overlays that
+    /// are intentionally flush to the grass.
+    private static func setAnnotationSegmentTransform(
+        _ entity: Entity,
+        from start: PitchPoint,
+        startElevation: Float,
+        to end: PitchPoint,
+        endElevation: Float,
+        baseY: Float
+    ) {
+        let startPosition = SIMD3<Float>(start.x, baseY + startElevation, start.z)
+        let endPosition = SIMD3<Float>(end.x, baseY + endElevation, end.z)
+        let direction = endPosition - startPosition
+        let length = max(simd_length(direction), 0.001)
+        entity.position = (startPosition + endPosition) / 2
+        entity.scale = [1, 1, length]
+        entity.orientation = simd_quatf(
+            from: SIMD3<Float>(0, 0, 1),
+            to: simd_normalize(direction)
+        )
+    }
+
+    /// A thin vertical tether makes Y unambiguous from first-person and
+    /// touchline views while staying disabled for ordinary pitch-level marks.
+    private static func configureAnnotationElevationGuide(
+        _ entity: Entity,
+        at point: PitchPoint,
+        elevation: Float
+    ) {
+        entity.isEnabled = elevation > 0.001
+        guard entity.isEnabled else { return }
+        let height = elevation + 0.10
+        entity.position = [point.x, height / 2, point.z]
+        entity.scale = [1, height, 1]
+        entity.orientation = simd_quatf()
+    }
+
     /// The economical squad LOD remains a genuinely animated football body.
     /// It shares the telemetry-derived gait clock with the articulated rig,
     /// but moves its existing nine render pieces instead of adding more draws.
@@ -3424,6 +3573,7 @@ enum PitchSceneFactory {
         time: TimeInterval,
         locomotion: PlayerLocomotionSample,
         lookTargetWorldPosition: SIMD3<Float>?,
+        ballTrack: BallTrack?,
         cache: AnnotationSceneCache?
     ) {
         guard let marker = directChild(named: "table-marker", of: entity),
@@ -3440,6 +3590,7 @@ enum PitchSceneFactory {
                 time: time,
                 locomotion: locomotion,
                 lookTargetWorldPosition: lookTargetWorldPosition,
+                ballTrack: ballTrack,
                 cache: cache
             )
             return
@@ -3502,6 +3653,7 @@ enum PitchSceneFactory {
         time: TimeInterval,
         locomotion: PlayerLocomotionSample,
         lookTargetWorldPosition: SIMD3<Float>?,
+        ballTrack: BallTrack?,
         cache: AnnotationSceneCache?
     ) {
         guard let fullRig = directChild(named: "full-rig", of: entity),
@@ -3512,6 +3664,7 @@ enum PitchSceneFactory {
             time: time,
             locomotion: locomotion,
             lookTargetWorldPosition: lookTargetWorldPosition,
+            ballTrack: ballTrack,
             cache: cache
         )
     }
@@ -3568,6 +3721,7 @@ enum PitchSceneFactory {
         time: TimeInterval,
         locomotion: PlayerLocomotionSample,
         lookTargetWorldPosition: SIMD3<Float>?,
+        ballTrack: BallTrack?,
         cache: AnnotationSceneCache?
     ) {
         guard let binding = athleteBinding(for: fullRig, cache: cache) else { return }
@@ -3576,7 +3730,8 @@ enum PitchSceneFactory {
             at: time,
             locomotion: locomotion,
             gaitPhase: track.gaitPhase(at: time),
-            lookTargetWorldPosition: lookTargetWorldPosition
+            lookTargetWorldPosition: lookTargetWorldPosition,
+            ballTrack: ballTrack
         )
         ReplayAthleteMotion.apply(pose, to: binding)
     }
