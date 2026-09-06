@@ -330,6 +330,91 @@ class ReplayWorldManifestTests(unittest.TestCase):
                 with self.assertRaisesRegex(ManifestError, "40-character lowercase"):
                     validate_manifest(manifest)
 
+    def test_reactor_models_are_pinned_to_their_actual_pipeline_roles(self):
+        mutations = (
+            (
+                "FastH3 provider",
+                lambda payload: payload["pipeline"][0].__setitem__("provider", "Other Host"),
+                "Reactor as the provider",
+            ),
+            (
+                "FastH3 model",
+                lambda payload: payload["pipeline"][0].__setitem__(
+                    "modelOrVersion", "Generic video model"
+                ),
+                "FastH3 as the model",
+            ),
+            (
+                "LingBot provider",
+                lambda payload: payload["pipeline"][1].__setitem__(
+                    "provider", "LingBot World 2"
+                ),
+                "Reactor as the provider",
+            ),
+            (
+                "LingBot model",
+                lambda payload: payload["pipeline"][1].__setitem__(
+                    "modelOrVersion", "LingBot Map"
+                ),
+                "LingBot World 2",
+            ),
+        )
+        for label, mutate, expected_error in mutations:
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as temporary:
+                manifest = self.fixture(Path(temporary))
+                payload = json.loads(manifest.read_text())
+                mutate(payload)
+                manifest.write_text(json.dumps(payload))
+
+                with self.assertRaisesRegex(ManifestError, expected_error):
+                    validate_manifest(manifest)
+
+    def test_lingbot_world_two_point_zero_alias_is_accepted(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            manifest = self.fixture(Path(temporary))
+            payload = json.loads(manifest.read_text())
+            payload["pipeline"][1]["modelOrVersion"] = "LingBot World 2.0"
+            manifest.write_text(json.dumps(payload))
+
+            report = validate_manifest(manifest)
+
+        self.assertTrue(report["passed"])
+
+    def test_staging_template_is_schema_valid_and_keeps_outputs_distinct(self):
+        template = (
+            PROJECT_ROOT
+            / "Docs"
+            / "ReplayXI"
+            / "replay-world-staging.template.json"
+        )
+
+        report = validate_manifest(template, verify_files=False)
+
+        self.assertTrue(report["passed"])
+        self.assertEqual(
+            report["pipelineStages"],
+            [
+                "generate-video",
+                "generate-navigable-video",
+                "reconstruct-3d",
+                "optimize-gaussian",
+                "prepare-realitykit",
+            ],
+        )
+        self.assertEqual(
+            {artifact["role"] for artifact in report["artifacts"]},
+            {
+                "source-video",
+                "reference-image",
+                "navigable-video",
+                "reconstruction-point-cloud",
+                "gaussian-splat",
+                "realitykit-world",
+            },
+        )
+        with self.assertRaisesRegex(ManifestError, "staging tool/version placeholder"):
+            validate_manifest(template)
+
     def test_valid_glb_points_reconstruction_passes(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -600,6 +685,33 @@ class ReplayWorldManifestTests(unittest.TestCase):
             manifest.write_text(json.dumps(payload))
 
             with self.assertRaisesRegex(ManifestError, "optimize-gaussian"):
+                validate_manifest(manifest)
+
+    def test_lingbot_world_two_cannot_be_declared_as_gaussian_optimizer(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self.fixture(root)
+            gaussian = root / "world.splat"
+            gaussian.write_bytes(minimal_interleaved_splat())
+            payload = json.loads(manifest.read_text())
+            payload["pipeline"].insert(
+                -1,
+                {
+                    "name": "optimize-gaussian",
+                    "provider": "Reactor",
+                    "modelOrVersion": "LingBot World 2.0",
+                },
+            )
+            payload["artifacts"].append(
+                {
+                    "role": "gaussian-splat",
+                    "path": gaussian.name,
+                    "sha256": digest(gaussian),
+                }
+            )
+            manifest.write_text(json.dumps(payload))
+
+            with self.assertRaisesRegex(ManifestError, "separate Gaussian optimizer"):
                 validate_manifest(manifest)
 
     def test_supported_gaussian_containers_pass_conservative_smoke_checks(self):

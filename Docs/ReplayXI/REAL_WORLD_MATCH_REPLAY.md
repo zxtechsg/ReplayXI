@@ -33,6 +33,13 @@ reconstruction. They are different artifacts with different guarantees:
    runtime receipt that binds the admitted RealityKit asset to its exact hash
    and byte count.
 
+Reactor's current product and API call the hosted model **LingBot World 2**;
+“2.0” is treated as a harmless naming alias in the manifest validator. The API
+documents a continuously generated `main_video` track, not a spatial-file
+download. Therefore the requested demo handoff includes a separate
+`optimize-gaussian` stage after LingBot-Map. Only that stage's validated
+`.ply`, `.splat`, or `.spz` artifact may be labelled a Gaussian splat.
+
 ## Tactical authority
 
 The reconstructed world supplies atmosphere and visual context. Player IDs,
@@ -53,6 +60,17 @@ shared time-linked annotations ────────────────�
 ```
 
 ## Required manifest shape
+
+For the requested FastH3 → LingBot World 2 → LingBot-Map → Gaussian →
+RealityKit handoff, start with
+[`replay-world-staging.template.json`](replay-world-staging.template.json).
+Its zero hashes and replacement version label are deliberate staging sentinels:
+the template passes `--schema-only`, but it cannot pass full validation or emit
+an admission receipt until every placeholder is replaced from the actual local
+artifact and exact tool revision. Copy it into the ignored
+`.replayxi-world-staging/` directory first; artifact paths resolve relative to
+the copied manifest. Do not place captured media in the synchronized app
+resources before the completed handoff passes full admission.
 
 ```json
 {
@@ -149,6 +167,19 @@ calling RealityKit's entity loader. Imported context has input, collision and
 physics components removed recursively so it cannot steal annotation gestures
 or disturb the tracked scene. Any missing, stale, malformed, symlinked or
 hash-mismatched handoff fails closed to the original procedural preview.
+
+Keep the files in separate paths and fill the template in this order:
+
+1. Save the FastH3 capture as `source.mp4` and extract the exact seed frame as
+   `reference.png`.
+2. Save Reactor's captured LingBot World 2 stream as
+   `lingbot-world-2-coverage.mp4`; this remains video.
+3. Run the pinned LingBot-Map revision and export
+   `lingbot-map-points.glb` (or another admitted point-cloud format).
+4. Run and pin a separate Gaussian optimizer, producing
+   `replayxi-world.splat`, `.spz`, or an Inria-style Gaussian `.ply`.
+5. Convert the registered visual result to `ReplayXIAdmittedWorld.usdz`, then
+   replace every zero SHA-256 value before full validation.
 
 The seed still and recorded LingBot coverage are required, hash-locked
 artifacts rather than prose-only pipeline claims. If an `optimize-gaussian`

@@ -2,6 +2,7 @@
 .derivedData*/
 .macDerivedData*/
 .codex-derived/
+.replayxi-world-staging/
 DerivedData*/
 dist/
 *.xcuserstate

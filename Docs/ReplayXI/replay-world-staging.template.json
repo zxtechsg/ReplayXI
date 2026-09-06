@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "worldID": "right-wing-overlap",
+  "displayName": "Real World Match Replay",
+  "source": {
+    "kind": "original-synthetic",
+    "owner": "Replay XI prototype",
+    "rightsBasis": "Original synthetic generation with no imported footage.",
+    "promptOrCaptureNote": "Replace this note with the exact FastH3 prompt and Reactor generation record before admission.",
+    "containsRealPlayerLikenesses": false
+  },
+  "coordinates": {
+    "upAxis": "Y",
+    "metresPerUnit": 1,
+    "pitchLengthMetres": 105,
+    "pitchWidthMetres": 68,
+    "origin": "pitch-centre",
+    "positiveZ": "home-attacking-direction",
+    "positiveX": "home-right"
+  },
+  "tacticalTruth": {
+    "generatedPixelsAreAuthoritative": false,
+    "trackingAuthority": "Replay XI deterministic authored tracking fixture"
+  },
+  "pipeline": [
+    {
+      "name": "generate-video",
+      "provider": "Reactor",
+      "modelOrVersion": "MiniMax FastH3"
+    },
+    {
+      "name": "generate-navigable-video",
+      "provider": "Reactor",
+      "modelOrVersion": "LingBot World 2"
+    },
+    {
+      "name": "reconstruct-3d",
+      "provider": "LingBot-Map",
+      "modelOrVersion": "bfcd0f20383d3a35cc9757a36ab1d5b6e5064df4"
+    },
+    {
+      "name": "optimize-gaussian",
+      "provider": "Replay XI offline Gaussian conversion",
+      "modelOrVersion": "REPLACE-WITH-EXACT-TOOL-AND-REVISION"
+    },
+    {
+      "name": "prepare-realitykit",
+      "provider": "Replay XI offline conversion",
+      "modelOrVersion": "world-admission-v1"
+    }
+  ],
+  "artifacts": [
+    {
+      "role": "source-video",
+      "path": "source.mp4",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "role": "reference-image",
+      "path": "reference.png",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "role": "navigable-video",
+      "path": "lingbot-world-2-coverage.mp4",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "role": "reconstruction-point-cloud",
+      "path": "lingbot-map-points.glb",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "role": "gaussian-splat",
+      "path": "replayxi-world.splat",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "role": "realitykit-world",
+      "path": "ReplayXIAdmittedWorld.usdz",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ]
+}

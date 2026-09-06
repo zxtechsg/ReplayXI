@@ -68,6 +68,9 @@ FORBIDDEN_REMOTE_HOSTS = {
     "www.youtube.com",
     "youtu.be",
 }
+REACTOR_PROVIDER = "reactor"
+FASTH3_MODELS = {"fasth3", "minimax fasth3"}
+LINGBOT_WORLD_2_MODELS = {"lingbot world 2", "lingbot world 2.0"}
 
 
 class ManifestError(ValueError):
@@ -86,6 +89,12 @@ def _require_text(value: Any, field: str, maximum: int = 2_000) -> str:
     if len(value) > maximum:
         raise ManifestError(f"{field} exceeds {maximum} characters")
     return value.strip()
+
+
+def _normalized_product_name(value: str) -> str:
+    """Normalize harmless product-name punctuation without weakening identity checks."""
+
+    return " ".join(value.casefold().replace("-", " ").split())
 
 
 def _local_artifact_path(manifest_dir: Path, raw_path: Any, field: str) -> Path:
@@ -957,18 +966,41 @@ def validate_manifest(path: Path, *, verify_files: bool = True) -> dict[str, Any
             raise ManifestError(f"duplicate pipeline stage: {name}")
         stage_names.append(name)
         if name == "reconstruct-3d":
-            if "lingbot-map" not in provider.lower():
+            if _normalized_product_name(provider) != "lingbot map":
                 raise ManifestError("reconstruct-3d must identify LingBot-Map as the provider")
             if not GIT_COMMIT_SHA.fullmatch(stage["modelOrVersion"]):
                 raise ManifestError(
                     "reconstruct-3d modelOrVersion must be an exact 40-character "
                     "lowercase LingBot-Map git SHA"
                 )
+        if name == "generate-video" and source_kind == "original-synthetic":
+            if _normalized_product_name(provider) != REACTOR_PROVIDER:
+                raise ManifestError(
+                    "original-synthetic generate-video must identify Reactor as the provider"
+                )
+            if _normalized_product_name(model_or_version) not in FASTH3_MODELS:
+                raise ManifestError(
+                    "original-synthetic generate-video must identify FastH3 as the model"
+                )
         if name == "generate-navigable-video":
-            implementation = f"{provider} {model_or_version}".lower()
-            if "lingbot world 2" not in implementation:
+            if _normalized_product_name(provider) != REACTOR_PROVIDER:
+                raise ManifestError(
+                    "generate-navigable-video must identify Reactor as the provider"
+                )
+            if _normalized_product_name(model_or_version) not in LINGBOT_WORLD_2_MODELS:
                 raise ManifestError(
                     "generate-navigable-video must identify LingBot World 2"
+                )
+        if name == "optimize-gaussian":
+            implementation = _normalized_product_name(f"{provider} {model_or_version}")
+            if "lingbot world 2" in implementation:
+                raise ManifestError(
+                    "optimize-gaussian must identify a separate Gaussian optimizer; "
+                    "LingBot World 2 emits navigable video"
+                )
+            if verify_files and "replace with exact tool and revision" in implementation:
+                raise ManifestError(
+                    "optimize-gaussian must replace the staging tool/version placeholder"
                 )
     required_stage_names = {
         "generate-navigable-video",
