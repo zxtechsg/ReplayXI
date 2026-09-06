@@ -233,6 +233,7 @@ deterministic four-mesh procedural shell is the active visual fallback.
 
 Useful primary references:
 
+- [Reactor LingBot World 2 model](https://www.reactor.inc/models/lingbot-world-2)
 - [Reactor LingBot World 2 API](https://www.reactor.inc/models/lingbot-world-2/api)
 - [LingBot World 2 repository](https://github.com/Robbyant/lingbot-world-v2)
 - [LingBot-Map repository](https://github.com/robbyant/lingbot-map)
