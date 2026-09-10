@@ -149,6 +149,14 @@ private struct ScenarioRail: View {
     @Environment(ReplayStore.self) private var store
     @Environment(SquadSessionCoordinator.self) private var squadSession
     @State private var showsSavedReviews = false
+    @State private var showsExercises = true
+    @State private var lastScenarioByMode: [ReplayAppMode: String] = [:]
+
+    private var activeMode: ReplayAppMode { ReplayAppMode(scenario: store.selectedScenario) }
+    private var modeScenarios: [ReplayScenario] { activeMode.scenarios(in: store.scenarios) }
+    private var navigationIsDisabled: Bool {
+        store.localRole == .player && squadSession.state == .joined
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -180,15 +188,43 @@ private struct ScenarioRail: View {
             Rectangle().fill(ReplayTheme.hairline).frame(height: 1)
 
             ScrollView {
-                LazyVStack(spacing: 9) {
-                    ForEach(store.scenarios) { scenario in
-                        ScenarioRailRow(
-                            scenario: scenario,
-                            selected: scenario.id == store.selectedScenarioID
-                        ) {
-                            store.selectScenario(id: scenario.id)
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(ReplayAppMode.allCases) { mode in
+                        modeButton(mode)
+                    }
+
+                    Divider().padding(.vertical, 4)
+
+                    Button {
+                        showsExercises.toggle()
+                    } label: {
+                        HStack {
+                            Text(activeMode == .situationRoleplay ? "Exercises" : "Replay demo")
+                                .font(.subheadline.weight(.semibold))
+                            Spacer(minLength: 8)
+                            Text("\(modeScenarios.count)")
+                                .foregroundStyle(.secondary).monospacedDigit()
+                            Image(systemName: showsExercises ? "chevron.up" : "chevron.down")
+                                .font(.caption.weight(.bold))
                         }
-                        .disabled(store.localRole == .player && squadSession.state == .joined)
+                        .frame(minHeight: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(showsExercises ? "Collapse exercises" : "Show exercises")
+                    .accessibilityValue(showsExercises ? "Expanded" : "Collapsed")
+
+                    if showsExercises {
+                        VStack(spacing: 6) {
+                            ForEach(modeScenarios) { scenario in
+                                ScenarioRailRow(
+                                    scenario: scenario,
+                                    selected: scenario.id == store.selectedScenarioID
+                                ) {
+                                    store.selectScenario(id: scenario.id)
+                                }
+                                .disabled(navigationIsDisabled)
+                            }
+                        }
                     }
                 }
                 .padding(14)
@@ -215,6 +251,9 @@ private struct ScenarioRail: View {
                     .environment(store)
             }
         }
+        .onChange(of: store.selectedScenarioID) { _, id in
+            lastScenarioByMode[activeMode] = id
+        }
         .task {
             #if DEBUG
             let arguments = ProcessInfo.processInfo.arguments
@@ -225,6 +264,48 @@ private struct ScenarioRail: View {
             #endif
         }
     }
+
+    private func modeButton(_ mode: ReplayAppMode) -> some View {
+        let isSelected = activeMode == mode
+        return Button {
+            lastScenarioByMode[activeMode] = store.selectedScenarioID
+            showsExercises = true
+            guard let id = mode.scenarioID(
+                in: store.scenarios,
+                preferredID: lastScenarioByMode[mode]
+            ) else { return }
+            store.selectScenario(id: id)
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: mode.systemImage)
+                    .font(.title3.weight(.semibold))
+                    .frame(width: 30)
+                    .foregroundStyle(isSelected ? ReplayTheme.signal : .secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(mode.title)
+                        .font(.headline).foregroundStyle(.white)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(mode.subtitle)
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
+            .padding(12)
+            .background(isSelected ? ReplayTheme.signal.opacity(0.09) : .white.opacity(0.025),
+                        in: RoundedRectangle(cornerRadius: 15))
+            .overlay {
+                RoundedRectangle(cornerRadius: 15)
+                    .stroke(isSelected ? ReplayTheme.signal.opacity(0.4) : ReplayTheme.hairline,
+                            lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(navigationIsDisabled)
+        .accessibilityLabel("\(mode.title), \(mode.subtitle)")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
 }
 
 private struct ScenarioRailRow: View {
@@ -234,30 +315,25 @@ private struct ScenarioRailRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 12) {
-                Text(scenario.kind.number)
-                    .font(.caption.monospacedDigit().weight(.black))
-                    .foregroundStyle(selected ? .black : ReplayTheme.signal)
-                    .frame(width: 34, height: 34)
-                    .background(selected ? ReplayTheme.signal : ReplayTheme.signal.opacity(0.10), in: RoundedRectangle(cornerRadius: 9))
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(scenario.kind.shortLabel)
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                    Text(scenario.strapline)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
-
-                Spacer(minLength: 0)
+            HStack(spacing: 10) {
                 Image(systemName: scenario.kind.systemImage)
-                    .font(.caption)
+                    .font(.subheadline)
+                    .frame(width: 24)
                     .foregroundStyle(selected ? ReplayTheme.signal : .secondary)
+                Text(ReplayAppMode.exerciseTitle(for: scenario))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                if selected {
+                    Image(systemName: "checkmark")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(ReplayTheme.signal)
+                }
             }
-            .padding(12)
+            .frame(minHeight: 44)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
             .background(selected ? Color.white.opacity(0.08) : Color.clear, in: RoundedRectangle(cornerRadius: 15))
             .overlay {
                 RoundedRectangle(cornerRadius: 15)
@@ -265,7 +341,8 @@ private struct ScenarioRailRow: View {
             }
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Scenario \(scenario.kind.number), \(scenario.kind.shortLabel), \(scenario.title)")
+        .accessibilityLabel(ReplayAppMode.exerciseTitle(for: scenario))
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 
