@@ -56,13 +56,26 @@ final class ReplayStore {
     static let pitchHalfLength: Float = 52.5
 
     let scenarios: [ReplayScenario]
+    let reviewLibrary: ReplayReviewLibrary
 
-    var selectedScenarioID: String
-    var playhead: TimeInterval = 0
-    var isPlaying = false
-    var playbackRate: Double = 1
-    var viewMode: ReplayViewMode
-    var localPerspectiveID: String
+    var selectedScenarioID: String {
+        didSet { if oldValue != selectedScenarioID { scheduleReviewAutosave() } }
+    }
+    var playhead: TimeInterval = 0 {
+        didSet {
+            // Passive frame advancement never encodes the library. Deliberate
+            // seeks/pauses and lifecycle exits save the latest committed time.
+            if !isPlaying, oldValue != playhead {
+                scheduleReviewAutosave()
+            }
+        }
+    }
+    var isPlaying = false { didSet { if oldValue != isPlaying { scheduleReviewAutosave() } } }
+    var playbackRate: Double = 1 { didSet { if oldValue != playbackRate { scheduleReviewAutosave() } } }
+    var viewMode: ReplayViewMode { didSet { if oldValue != viewMode { scheduleReviewAutosave() } } }
+    var localPerspectiveID: String {
+        didSet { if oldValue != localPerspectiveID { scheduleReviewAutosave() } }
+    }
     var coachFocusPerspectiveID: String?
     var coachLockEnabled = false
     var followsCoach = true
@@ -79,6 +92,7 @@ final class ReplayStore {
     private(set) var reviewIndexVersion = PlaybackReviewIndexVersion()
     var marks: [CoachMark] {
         didSet {
+            if oldValue != marks { scheduleReviewAutosave() }
             guard reviewIndexVersionCache.refresh(marks: marks) else { return }
             reviewIndexVersion = reviewIndexVersionCache.version
         }
@@ -104,12 +118,19 @@ final class ReplayStore {
     /// external control cannot start annotation/POV work against a transient
     /// playhead while the control deck owns the scrub.
     private(set) var hasActiveTimelineScrub = false
-    private(set) var shapeFocusStage: ShapeFocusStage = .problem
+    private(set) var shapeFocusStage: ShapeFocusStage = .problem {
+        didSet { if oldValue != shapeFocusStage { scheduleReviewAutosave() } }
+    }
     var showsIdealBranch: Bool { shapeFocusStage == .ideal }
-    var showsLaneLens = false
+    var showsLaneLens = false { didSet { if oldValue != showsLaneLens { scheduleReviewAutosave() } } }
     var isImmersiveOpen = false
     var isOpeningImmersive = false
     var statusMessage = "Choose a scenario, then enter the review room."
+
+    @ObservationIgnored private var reviewAutosaveTask: Task<Void, Never>?
+    @ObservationIgnored private var isReviewAutosaveReady = false
+    @ObservationIgnored private var isRestoringSavedReview = false
+    @ObservationIgnored private var retainedScenarioMarks: [String: [CoachMark]] = [:]
 
     @ObservationIgnored
     var onBroadcastSnapshot: (@MainActor (SharedPlaybackSnapshot) -> Void)?
@@ -241,15 +262,129 @@ final class ReplayStore {
         self.init(scenarios: DemoScenarios.all)
     }
 
-    init(scenarios: [ReplayScenario]) {
+    init(scenarios: [ReplayScenario], reviewLibrary: ReplayReviewLibrary? = nil) {
         precondition(!scenarios.isEmpty, "Replay XI requires at least one scenario")
         self.scenarios = scenarios
+        self.reviewLibrary = reviewLibrary ?? ReplayReviewLibrary(scenarios: scenarios)
         let first = scenarios[0]
         selectedScenarioID = first.id
         viewMode = first.defaultViewMode
         localPerspectiveID = first.defaultPerspectiveID
         marks = first.coachMarks
         reviewIndexVersionCache.seed(marks: marks)
+        isReviewAutosaveReady = true
+    }
+
+    var savedReviews: [SavedReplayReview] { reviewLibrary.savedReviews }
+    var autosavedReview: SavedReplayReview? { reviewLibrary.autosavedReview }
+    var reviewSaveStatus: String {
+        reviewLibrary.usesDisk ? reviewLibrary.status : "\(reviewLibrary.status) · saves are temporary"
+    }
+    var canSaveReview: Bool {
+        !reviewLibrary.isReadOnly
+            && savedReviews.count < ReplayReviewLibrary.maximumSavedReviews
+            && !hasActiveTimelineScrub && !hasActiveCoachMarkGeometryPreview && !isDrawing
+    }
+    var canRestoreSavedReview: Bool {
+        !isCollaborationActive && triangleLockMode != .place
+            && !hasActiveTimelineScrub && !hasActiveCoachMarkGeometryPreview && !isDrawing
+    }
+
+    func makeSavedReviewState() -> SavedReplayState {
+        let committed = makeSnapshot()
+        var scenarioMarks = retainedScenarioMarks
+        scenarioMarks[selectedScenarioID] = committed.marks
+        return SavedReplayState(
+            scenarioID: selectedScenarioID,
+            playhead: committed.playhead,
+            playbackRate: playbackRate,
+            viewMode: viewMode,
+            perspectiveID: localPerspectiveID,
+            showsLaneLens: showsLaneLens,
+            shapeFocusStage: shapeFocusStage,
+            marksByScenario: scenarioMarks
+        )
+    }
+
+    @discardableResult
+    func saveReview(named name: String, state: SavedReplayState? = nil) -> Bool {
+        guard canSaveReview else {
+            statusMessage = "Finish the current edit before saving"
+            return false
+        }
+        return reviewLibrary.save(named: name, state: state ?? makeSavedReviewState())
+    }
+
+    @discardableResult
+    func renameSavedReview(id: UUID, name: String) -> Bool {
+        reviewLibrary.rename(id: id, name: name)
+    }
+
+    @discardableResult
+    func deleteSavedReview(id: UUID) -> Bool { reviewLibrary.delete(id: id) }
+
+    @discardableResult
+    func restoreSavedReview(id: UUID) -> Bool {
+        guard let review = savedReviews.first(where: { $0.id == id }) else { return false }
+        return restoreReview(review)
+    }
+
+    @discardableResult
+    func restoreAutosavedReview() -> Bool {
+        guard let review = autosavedReview else { return false }
+        return restoreReview(review)
+    }
+
+    @discardableResult
+    func restoreReview(_ review: SavedReplayReview) -> Bool {
+        guard canRestoreSavedReview else {
+            statusMessage = isCollaborationActive
+                ? "Leave the squad room to open a saved review"
+                : "Finish the current gesture or placement first"
+            return false
+        }
+        guard reviewLibrary.accepts(review.state) else {
+            statusMessage = "This review could not be opened"
+            return false
+        }
+        reviewAutosaveTask?.cancel()
+        isRestoringSavedReview = true
+        resetCollaborationState()
+        let state = review.state
+        selectedScenarioID = state.scenarioID
+        playhead = state.playhead
+        playbackRate = state.playbackRate
+        viewMode = state.viewMode
+        localPerspectiveID = state.perspectiveID
+        retainedScenarioMarks = state.marksByScenario
+        marks = state.marks
+        showsLaneLens = state.showsLaneLens
+        shapeFocusStage = selectedScenario.kind == .shapeLab ? state.shapeFocusStage : .problem
+        isPlaying = false
+        isRestoringSavedReview = false
+        statusMessage = "\(review.name) opened · paused"
+        scheduleReviewAutosave()
+        return true
+    }
+
+    /// Captures committed endpoints/time even during an interrupted gesture.
+    /// It never persists the drawing tool or uncommitted first stroke point.
+    @discardableResult
+    func flushReviewAutosave() -> Bool {
+        reviewAutosaveTask?.cancel()
+        reviewAutosaveTask = nil
+        return reviewLibrary.autosave(makeSavedReviewState())
+    }
+
+    private func scheduleReviewAutosave() {
+        guard isReviewAutosaveReady, !isRestoringSavedReview, reviewLibrary.usesDisk else { return }
+        reviewAutosaveTask?.cancel()
+        reviewAutosaveTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .milliseconds(600)) } catch { return }
+            guard !Task.isCancelled, let self else { return }
+            self.reviewAutosaveTask = nil
+            _ = self.reviewLibrary.autosave(self.makeSavedReviewState())
+        }
     }
 
     var selectedScenario: ReplayScenario {
@@ -297,14 +432,23 @@ final class ReplayStore {
     }
 
     func selectScenario(id: String, broadcast: Bool = true) {
+        selectScenario(id: id, broadcast: broadcast, resettingReview: false)
+    }
+
+    private func selectScenario(id: String, broadcast: Bool, resettingReview: Bool) {
         guard allowsMutationOutsideEndpointPreview() else { return }
         guard !isCollaborationActive || localRole == .coach || !broadcast else { return }
         guard let scenario = scenarios.first(where: { $0.id == id }) else { return }
+        guard selectedScenarioID != id || resettingReview else { return }
         guard triangleLockMode != .place else {
             statusMessage = "End physical placement before changing scenarios."
             return
         }
         let retiredAnchorID = sharedPitchAnchorID
+        let changesScenario = selectedScenarioID != id
+        if changesScenario {
+            retainedScenarioMarks[selectedScenarioID] = makeSnapshot().marks
+        }
         selectedScenarioID = scenario.id
         shapeFocusStage = .problem
         playhead = scenario.kind == .shapeLab
@@ -317,7 +461,7 @@ final class ReplayStore {
         coachLockEnabled = false
         isCoachLocalReview = false
         isLocallyPaused = false
-        marks = scenario.coachMarks
+        marks = resettingReview ? scenario.coachMarks : (retainedScenarioMarks[id] ?? scenario.coachMarks)
         pendingCoachMarkGeometryBaselines.removeAll(keepingCapacity: true)
         removeAllPendingCoachMarkEndpointPreviews()
         sharedPitchAnchorID = nil
@@ -377,6 +521,7 @@ final class ReplayStore {
         if playhead >= selectedScenario.duration {
             isPlaying = false
         }
+        scheduleReviewAutosave()
         if broadcast { emitSnapshot() }
     }
 
@@ -440,6 +585,7 @@ final class ReplayStore {
         isLocallyPaused = checkpoint.isLocallyPaused
         timelineScrubCheckpoint = nil
         hasActiveTimelineScrub = false
+        scheduleReviewAutosave()
         return true
     }
 
@@ -2000,7 +2146,7 @@ final class ReplayStore {
         if triangleLockMode == .place {
             endTrianglePlacement()
         }
-        selectScenario(id: selectedScenarioID)
+        selectScenario(id: selectedScenarioID, broadcast: true, resettingReview: true)
     }
 
     func advance(by delta: TimeInterval) {
@@ -2223,6 +2369,11 @@ final class ReplayStore {
         _ mark: CoachMark,
         for scenario: ReplayScenario
     ) -> Bool {
+        Self.isValidReviewMark(mark, for: scenario)
+    }
+
+    /// Disk and SharePlay inputs share the same geometry and identity gate.
+    static func isValidReviewMark(_ mark: CoachMark, for scenario: ReplayScenario) -> Bool {
         let hasFiniteBoundedGeometry = Self.isPointOnPitch(mark.start)
             && Self.isPointOnPitch(mark.end)
         let hasValidElevation = CoachMarkGeometryPolicy.accepts(
@@ -2430,6 +2581,7 @@ final class ReplayStore {
         if shouldPublishPause {
             emitSnapshot()
         }
+        flushReviewAutosave()
     }
 
     private func emitSnapshot(allowingGeometryPreview: Bool = false) {

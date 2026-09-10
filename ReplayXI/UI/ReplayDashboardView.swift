@@ -148,6 +148,7 @@ struct ReplayDashboardView: View {
 private struct ScenarioRail: View {
     @Environment(ReplayStore.self) private var store
     @Environment(SquadSessionCoordinator.self) private var squadSession
+    @State private var showsSavedReviews = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -192,7 +193,36 @@ private struct ScenarioRail: View {
                 }
                 .padding(14)
             }
-
+            Divider()
+            Button {
+                showsSavedReviews = true
+            } label: {
+                HStack {
+                    Label("Saved reviews", systemImage: "bookmark")
+                        .font(.headline)
+                    Spacer(minLength: 4)
+                    Text("\(store.savedReviews.count)")
+                        .monospacedDigit().foregroundStyle(.secondary)
+                }
+                .frame(minHeight: 44)
+            }
+            .buttonStyle(.bordered)
+            .padding(14)
+            .sheet(isPresented: $showsSavedReviews) {
+                ReplayReviewLibraryView { showsSavedReviews = false }
+                    .padding(16)
+                    .frame(width: 820, height: 390)
+                    .environment(store)
+            }
+        }
+        .task {
+            #if DEBUG
+            let arguments = ProcessInfo.processInfo.arguments
+            if arguments.contains("--replayxi-saved-reviews") {
+                if store.savedReviews.isEmpty { store.saveReview(named: "Right-wing return") }
+                showsSavedReviews = !arguments.contains("--replayxi-autostart")
+            }
+            #endif
         }
     }
 }
@@ -274,16 +304,19 @@ private struct ScenarioWorkspace: View {
                 }
 
                 if scenario.kind == .realWorldReplay {
-                    HStack(spacing: 10) {
-                        MetricTile(value: "SYNTH", label: "Source clip")
-                        MetricTile(value: "TRACKS", label: "Tactical truth")
-                        MetricTile(value: "SHA-256", label: "Asset gate")
-                        MetricTile(value: "4", label: "Batched shells")
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: "cube.transparent")
+                            .font(.title2).foregroundStyle(ReplayTheme.cyan)
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("Synthetic reconstruction preview").font(.headline)
+                            Text("Explore the scene and add tactical marks. Player paths are authored demo data, not measured match footage. Gaussian reconstruction is not available yet.")
+                                .font(.subheadline).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
-                    .accessibilityElement(children: .combine)
-                    .accessibilityLabel(
-                        "Original synthetic source, deterministic tracking truth, hash-locked assets, four batched reconstruction preview shells"
-                    )
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(ReplayTheme.cyan.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
                 }
 
                 TacticalPreview(

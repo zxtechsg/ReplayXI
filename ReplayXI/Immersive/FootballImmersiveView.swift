@@ -964,6 +964,7 @@ enum PlaybackLocalOverlayVisibility {
 /// different mark after the selection changes.
 enum PlaybackInlinePanel: Equatable, Sendable {
     case settings
+    case savedReviews
     case annotationEdit
     case annotationDuration(UUID)
     case annotationGeometry(UUID)
@@ -979,7 +980,7 @@ enum PlaybackInlinePanel: Equatable, Sendable {
 
     func isValid(for selectedAnnotationID: UUID?) -> Bool {
         switch self {
-        case .settings, .annotationEdit:
+        case .settings, .savedReviews, .annotationEdit:
             true
         case .annotationDuration(let id),
              .annotationGeometry(let id),
@@ -1706,7 +1707,7 @@ private struct ImmersiveControlDeck: View {
                 _ = store.cancelCoachMarkGeometryPreview(id: selectedAnnotationID)
             }
             selectedAnnotationID = nil
-            if inlinePanel != .settings {
+            if inlinePanel != .settings && inlinePanel != .savedReviews {
                 inlinePanel = nil
             }
             isClearAnnotationsPending = false
@@ -1810,6 +1811,13 @@ private struct ImmersiveControlDeck: View {
                 .stroke(.white.opacity(0.13), lineWidth: 1)
         }
         .glassBackgroundEffect(in: .rect(cornerRadius: 26))
+        .task {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--replayxi-saved-reviews") {
+                inlinePanel = .savedReviews
+            }
+            #endif
+        }
         .onChange(of: store.marks.count) { oldCount, newCount in
             guard store.localRole == .coach,
                   newCount > oldCount,
@@ -2139,6 +2147,18 @@ private struct ImmersiveControlDeck: View {
                 annotationEventsButton
                 decisionReviewButton
                 settingsToolButton
+                Button {
+                    toggleInlinePanel(.savedReviews)
+                } label: {
+                    Label("Reviews", systemImage: "bookmark")
+                        .font(.subheadline.weight(.bold))
+                        .lineLimit(1)
+                        .frame(width: 126, height: PlaybackControlDeckPresentation.minimumSpatialHitTarget)
+                }
+                .buttonStyle(.bordered)
+                .disabled(secondaryPlaybackControlsAreDisabled)
+                .accessibilityLabel("Saved reviews")
+                .accessibilityHint("Save this moment or load an earlier review")
 
                 if store.localRole == .coach {
                     annotationEditButton(compact: false)
@@ -2174,6 +2194,13 @@ private struct ImmersiveControlDeck: View {
         switch panel {
         case .settings:
             playbackSettingsShelf
+        case .savedReviews:
+            inlineShelf(color: ReplayTheme.cyan) {
+                ReplayReviewLibraryView {
+                    inlinePanel = nil
+                    showsToolsShelf = true
+                }
+            }
         case .annotationEdit:
             annotationEditShelf
         case .annotationDuration(let markID):
