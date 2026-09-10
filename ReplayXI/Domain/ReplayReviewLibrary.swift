@@ -200,27 +200,39 @@ final class ReplayReviewLibrary {
         } catch LibraryError.newerVersion {
             isReadOnly = true
             status = "Saves need a newer app version"
+        } catch is DecodingError {
+            recoverDamagedPrimary(fileURL)
+        } catch LibraryError.invalidDocument {
+            recoverDamagedPrimary(fileURL)
         } catch {
-            do {
-                let quarantine = fileURL.deletingLastPathComponent()
-                    .appendingPathComponent("reviews-damaged-\(UUID().uuidString).json")
-                try FileManager.default.moveItem(at: fileURL, to: quarantine)
-                let backupURL = fileURL.appendingPathExtension("backup")
-                guard FileManager.default.fileExists(atPath: backupURL.path) else {
-                    status = "Damaged save kept aside. A new library is ready."
-                    return
-                }
-                let (document, data) = try read(backupURL)
-                try data.write(to: fileURL, options: .atomic)
-                adopt(document, data: data)
-                status = "Recovered the previous save"
-            } catch LibraryError.newerVersion {
-                isReadOnly = true
-                status = "Saves need a newer app version"
-            } catch {
-                isReadOnly = true
-                status = "Saves could not be opened"
+            // Permission, file-protection and other I/O errors do not prove
+            // corruption. Keep the primary in place and block writes so an
+            // older backup cannot silently replace a merely unreadable review.
+            isReadOnly = true
+            status = "Saves could not be read. Try reopening the app."
+        }
+    }
+
+    private func recoverDamagedPrimary(_ fileURL: URL) {
+        do {
+            let quarantine = fileURL.deletingLastPathComponent()
+                .appendingPathComponent("reviews-damaged-\(UUID().uuidString).json")
+            try FileManager.default.moveItem(at: fileURL, to: quarantine)
+            let backupURL = fileURL.appendingPathExtension("backup")
+            guard FileManager.default.fileExists(atPath: backupURL.path) else {
+                status = "Damaged save kept aside. A new library is ready."
+                return
             }
+            let (document, data) = try read(backupURL)
+            try data.write(to: fileURL, options: .atomic)
+            adopt(document, data: data)
+            status = "Recovered the previous save"
+        } catch LibraryError.newerVersion {
+            isReadOnly = true
+            status = "Saves need a newer app version"
+        } catch {
+            isReadOnly = true
+            status = "Saves could not be opened"
         }
     }
 
