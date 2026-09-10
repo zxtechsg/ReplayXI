@@ -117,8 +117,14 @@ final class ReplayReviewLibrary {
 
     @discardableResult
     func rename(id: UUID, name: String) -> Bool {
-        guard let name = Self.validName(name),
-              let index = savedReviews.firstIndex(where: { $0.id == id }) else { return false }
+        guard let name = Self.validName(name) else {
+            status = "Use 1–60 characters without line breaks"
+            return false
+        }
+        guard let index = savedReviews.firstIndex(where: { $0.id == id }) else {
+            status = "This saved review is no longer available"
+            return false
+        }
         var reviews = savedReviews
         reviews[index].name = name
         return persist(reviews: reviews, autosave: autosavedReview, message: "Review renamed")

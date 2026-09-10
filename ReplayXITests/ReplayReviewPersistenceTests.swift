@@ -167,6 +167,15 @@ final class ReplayReviewPersistenceTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: url), futureData)
     }
 
+    func testInvalidRenamePreservesTheReviewAndExplainsTheFailure() throws {
+        let library = ReplayReviewLibrary(scenarios: DemoScenarios.all)
+        XCTAssertTrue(library.save(named: "Overlap", state: ReplayStore().makeSavedReviewState()))
+        let saved = try XCTUnwrap(library.savedReviews.first)
+        XCTAssertFalse(library.rename(id: saved.id, name: "Two\nlines"))
+        XCTAssertEqual(library.savedReviews.first, saved)
+        XCTAssertEqual(library.status, "Use 1–60 characters without line breaks")
+    }
+
     func testMissingPrimaryRecoversBackupAfterInterruptedRecovery() throws {
         let url = try makeURL()
         let library = library(at: url)
