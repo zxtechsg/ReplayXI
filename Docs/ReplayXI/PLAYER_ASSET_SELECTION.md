@@ -2,18 +2,20 @@
 
 ## Decision
 
-Use the **Microsoft Rocketbox Sports avatars** as the next near-field visual
-pilot. Keep Replay XI's original procedural near/mid/far athletes as the
-shipping fallback until the imported model passes deformation, debranding,
-performance and Vision Pro visual gates.
+Use the **Microsoft Rocketbox Sports avatar** for near-field idle/run playback.
+The two-clip full-body runtime is now bundled, with deterministic bone sampling,
+head-look compensation and chest-attached jersey numbers. Keep the original
+procedural athletes for walks, cuts, football touches, impacts, distant subjects
+and failed asset admission. Physical Vision Pro profiling and additional
+football-specific clips remain required; this is not a FIFA-level fidelity claim.
 
 The 2026-09-10 build now uses the MIT Rocketbox **static face** on near
 athletes after prewarm. It supplies facial anatomy, eyes, ears, hair and
-normal-map detail while the existing head/neck joints, football gait and
-ragdoll drive movement. Its 1,724 vertices and 3,128 triangles replace five
+normal-map detail on the procedural fallback while its head/neck joints,
+football gait and ragdoll drive movement. Its 1,724 vertices and 3,128 triangles replace five
 primitive face draws with one shared model. Five small skin palettes match
-the current player appearances. The full-body skinned pilot remains separate;
-its clip/LOD qualification is not implied by the static-face integration.
+the current player appearances. The older run-only full-body pilot remains
+separate from the new two-clip renderer; its historical qualification is below.
 See the [asset ledger](THIRD_PARTY_ASSETS.md#bundled-rocketbox-face--2026-09-10).
 
 This decision does not permit EA Sports/FIFA models, animations, textures,

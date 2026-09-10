@@ -362,6 +362,101 @@ def write_usd(path, contract, meshes, clips, notice):
     stage.GetRootLayer().Save()
 
 
+def audit_surface_contract(path, expected_joint_paths):
+    """Fail closed if packaging drops smooth normals, UVs or skin/material links.
+
+    This verifies the authored USD data, not RealityKit's rendered result.
+    Runtime import still needs to preserve the skin and remap material slots.
+    """
+    stage = Usd.Stage.Open(str(path))
+    if stage is None or str(stage.GetDefaultPrim().GetPath()) != ROOT_PATH:
+        raise RuntimeError("athlete USD has no expected SkelRoot")
+    if UsdGeom.GetStageUpAxis(stage) != UsdGeom.Tokens.y or UsdGeom.GetStageMetersPerUnit(stage) != 1:
+        raise RuntimeError("athlete USD coordinate contract changed")
+    skeleton_path = ROOT_PATH + "/Skeleton"
+    skeleton = UsdSkel.Skeleton(stage.GetPrimAtPath(skeleton_path))
+    if not skeleton or list(skeleton.GetJointsAttr().Get() or []) != list(expected_joint_paths):
+        raise RuntimeError("athlete USD joint order differs from motion JSON")
+    joint_count = len(expected_joint_paths)
+    for attribute in (skeleton.GetBindTransformsAttr(), skeleton.GetRestTransformsAttr()):
+        matrices = np.asarray(attribute.Get())
+        if matrices.shape != (joint_count, 4, 4) or not np.isfinite(matrices).all():
+            raise RuntimeError("athlete USD has invalid bind/rest transforms")
+    meshes = {}
+    for name in ("Body", "Head"):
+        mesh = UsdGeom.Mesh(stage.GetPrimAtPath(ROOT_PATH + "/" + name))
+        if not mesh:
+            raise RuntimeError(f"athlete USD is missing {name}")
+        points = np.asarray(mesh.GetPointsAttr().Get())
+        normals = np.asarray(mesh.GetNormalsAttr().Get())
+        if (points.ndim != 2 or points.shape[1] != 3 or not len(points)
+                or normals.shape != points.shape or not np.isfinite(points).all()
+                or not np.isfinite(normals).all()):
+            raise RuntimeError(f"{name} lost finite per-vertex normals")
+        lengths = np.linalg.norm(normals, axis=1)
+        if mesh.GetNormalsInterpolation() != UsdGeom.Tokens.vertex or np.max(abs(lengths - 1)) > 0.001:
+            raise RuntimeError(f"{name} smooth normals must be unit vertex normals")
+        if mesh.GetSubdivisionSchemeAttr().Get() != UsdGeom.Tokens.none:
+            raise RuntimeError(f"{name} must retain the authored triangle topology")
+        uv = UsdGeom.PrimvarsAPI(mesh).GetPrimvar("st")
+        coordinates = np.asarray(uv.Get())
+        if uv.GetInterpolation() != UsdGeom.Tokens.vertex or coordinates.shape != (len(points), 2) or not np.isfinite(coordinates).all():
+            raise RuntimeError(f"{name} lost per-vertex UVs")
+        binding = UsdSkel.BindingAPI(mesh.GetPrim())
+        if list(binding.GetSkeletonRel().GetTargets()) != [Sdf.Path(skeleton_path)]:
+            raise RuntimeError(f"{name} lost its direct shared-skeleton binding")
+        if binding.GetGeomBindTransformAttr().Get() != Gf.Matrix4d(1):
+            raise RuntimeError(f"{name} geometry bind transform is no longer identity")
+        if binding.GetJointsAttr().HasAuthoredValueOpinion():
+            raise RuntimeError(f"{name} introduced a per-mesh joint remap")
+        shader_path = ROOT_PATH + f"/{name}Material"
+        bound, _ = UsdShade.MaterialBindingAPI(mesh.GetPrim()).ComputeBoundMaterial()
+        if str(bound.GetPath()) != shader_path:
+            raise RuntimeError(f"{name} material binding changed")
+        surface = UsdShade.Shader(stage.GetPrimAtPath(shader_path + "/Surface"))
+        textures = {}
+        for suffix, input_name, colour_space in [("Colour", "diffuseColor", "sRGB"), ("Normal", "normal", "raw")]:
+            texture = UsdShade.Shader(stage.GetPrimAtPath(shader_path + "/" + suffix))
+            connection = surface.GetInput(input_name).GetConnectedSource()
+            if not connection or connection[0].GetPrim() != texture.GetPrim():
+                raise RuntimeError(f"{name} lost the {suffix} texture connection")
+            if texture.GetInput("sourceColorSpace").Get() != colour_space:
+                raise RuntimeError(f"{name} {suffix} texture colour space changed")
+            asset = texture.GetInput("file").Get()
+            if not asset or not asset.resolvedPath:
+                raise RuntimeError(f"{name} {suffix} texture cannot resolve")
+            if Path(path).suffix == ".usdz":
+                # Every texture must resolve inside this package, not an
+                # incidental external file beside the staging directory.
+                resolved = str(Path(path).resolve()) + "["
+                if not asset.resolvedPath.startswith(resolved):
+                    raise RuntimeError(f"{name} {suffix} texture is not embedded")
+            textures[suffix.lower()] = asset.path
+        normal_shader = UsdShade.Shader(stage.GetPrimAtPath(shader_path + "/Normal"))
+        if (normal_shader.GetInput("scale").Get() != Gf.Vec4f(2, 2, 2, 1)
+                or normal_shader.GetInput("bias").Get() != Gf.Vec4f(-1, -1, -1, 0)):
+            raise RuntimeError(f"{name} normal map no longer decodes unsigned RGB to signed XYZ")
+        indices = np.asarray(mesh.GetFaceVertexIndicesAttr().Get(), dtype=int)
+        counts = np.asarray(mesh.GetFaceVertexCountsAttr().Get(), dtype=int)
+        if not np.all(counts == 3) or len(indices) != len(counts) * 3 or np.any(indices < 0) or np.any(indices >= len(points)):
+            raise RuntimeError(f"{name} triangle indices are invalid")
+        triangles = indices.reshape(-1, 3)
+        face = np.cross(points[triangles[:, 1]] - points[triangles[:, 0]],
+                        points[triangles[:, 2]] - points[triangles[:, 0]])
+        face_lengths = np.linalg.norm(face, axis=1)
+        valid = face_lengths > 1e-10
+        face[valid] /= face_lengths[valid, None]
+        cosine = np.einsum("ni,ni->n", face[valid], normals[triangles[valid, 0]])
+        smooth_fraction = float(np.mean(cosine < 0.999)) if valid.any() else 0
+        if smooth_fraction < 0.5:
+            raise RuntimeError(f"{name} normals look flat instead of smoothly interpolated")
+        meshes[name] = {"normalCount": len(normals), "normalInterpolation": "vertex",
+                        "maximumNormalUnitError": float(np.max(abs(lengths - 1))),
+                        "smoothCornerFraction": smooth_fraction, "textures": textures,
+                        "materialPath": shader_path, "skeletonPath": skeleton_path}
+    return {"skeletonPath": skeleton_path, "jointCount": joint_count, "meshes": meshes}
+
+
 def local_anchor(contract, semantic, world_point):
     path = contract["semanticJoints"][semantic]
     index = contract["paths"].index(path)
@@ -412,6 +507,7 @@ def build(source, output):
         normalize_usdz_timestamps(package)
         subprocess.run(["usdchecker", "--arkit", str(package)], check=True)
         audit = audit_usd_skinning(package, notice)
+        surface_audit = audit_surface_contract(package, contract["paths"])
         all_points = np.concatenate([mesh["points"] for mesh in meshes])
         minimum, maximum = all_points.min(axis=0), all_points.max(axis=0)
         body_points = meshes[0]["points"]
@@ -445,6 +541,7 @@ def build(source, output):
         (output / "LICENSE-ROCKETBOX-MIT.txt").write_text(notice)
         names = [package.name, motion_path.name, *palette_names]
         report = {"sourceCommit": ROCKETBOX_COMMIT, "geometry": geometry, "skinning": audit,
+                  "surfaceContract": surface_audit,
                   "clips": [{"id": clip["id"], "durationSeconds": clip["durationSeconds"], "frames": len(clip["frames"])} for clip in clips],
                   "files": {name: {"bytes": (output / name).stat().st_size, "sha256": sha256_file(output / name)} for name in names}}
         (output / "ReplayXIRocketboxBuildReport.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")

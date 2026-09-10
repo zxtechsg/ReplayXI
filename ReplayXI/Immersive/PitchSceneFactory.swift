@@ -102,6 +102,8 @@ enum PitchSceneFactory {
         var firstPersonDetailedPlayerIDs: [String] = []
         var importedAthlete: ReplayImportedAthleteInstance?
         var importedAthleteAttemptedPlayerID: String?
+        var skinnedAthletes: [String: ReplaySkinnedAthleteInstance] = [:]
+        var skinnedAthleteFailedIDs: Set<String> = []
         // Match roots are immutable with respect to authored player identity.
         // Index their entities once instead of rebuilding a 22-entry Dictionary
         // from RealityKit's child collection on every presentation frame.
@@ -771,6 +773,22 @@ enum PitchSceneFactory {
                 cache: sceneState,
                 admittedPlayerID: importedAthleteID
             )
+            let admittedSkinIDs: Set<String> = if viewMode == .firstPerson {
+                firstPersonDetailedIDs
+            } else if scenario.kind == .shapeLab && viewMode == .positional
+                        && effectiveTriangleMode == .visualise {
+                featuredTriangleIDs.union(primaryTriangleDefenderID.map { Set([$0]) } ?? [])
+            } else {
+                [perspectiveID]
+            }
+            // Release old subjects before iterating the roster. Admission must
+            // not depend on whether the new selection sorts before the old one.
+            if let sceneState {
+                for id in sceneState.skinnedAthletes.keys.filter({ !admittedSkinIDs.contains($0) }) {
+                    sceneState.skinnedAthletes.removeValue(forKey: id)?.root.removeFromParent()
+                }
+                sceneState.skinnedAthleteFailedIDs.formIntersection(admittedSkinIDs)
+            }
             for player in scenario.players {
                 guard let entity = sceneState?.playerEntity(for: player.id)
                     ?? directChild(named: "player-\(player.id)", of: playersRoot)
@@ -816,10 +834,10 @@ enum PitchSceneFactory {
                         presentationBallPosition.x - presentationPosition.x,
                         presentationBallPosition.z - presentationPosition.z
                     )
-                    entity.orientation = simd_quatf(angle: -facingRadians, axis: [0, 1, 0])
+                    entity.orientation = simd_quatf(angle: facingRadians, axis: [0, 1, 0])
                 } else {
                     entity.orientation = simd_quatf(
-                        angle: -presentationFacingDegrees * .pi / 180,
+                        angle: presentationFacingDegrees * .pi / 180,
                         axis: [0, 1, 0]
                     )
                 }
@@ -886,6 +904,12 @@ enum PitchSceneFactory {
                             || isSelected
                             || activeRagdollCue != nil
                     )
+                // Keep new skins bounded to the same near-subject selection.
+                // Detaching a subject releases its pose buffers and render root.
+                if !needsDetailedRig, let previous = sceneState?.skinnedAthletes.removeValue(forKey: player.id) {
+                    previous.root.removeFromParent()
+                    sceneState?.skinnedAthleteFailedIDs.remove(player.id)
+                }
                 if needsDetailedRig,
                    directChild(named: "full-rig", of: entity) == nil,
                    let athlete = makeDetailedRig(for: player) {
@@ -927,7 +951,34 @@ enum PitchSceneFactory {
                     }
                     importedMotionIsSupported = false
                 }
-                let usesImportedAthlete = hasImportedAthlete && importedMotionIsSupported
+                let hasBallAction = athleteBallActionTrack.flatMap {
+                    ReplayAthleteMotion.ballActionPose(for: player, ballTrack: $0, at: time)
+                }.map { $0.influence > 0 } ?? false
+                // A forward-only legacy clip must not erase a football touch.
+                if importedBelongsToPlayer && hasBallAction { attachedImportedAthlete?.root.isEnabled = false }
+                let usesLegacySkin = hasImportedAthlete && importedMotionIsSupported && !hasBallAction
+                if needsDetailedRig, ReplaySkinnedAthleteProvider.isPrewarmed,
+                   admittedSkinIDs.contains(player.id),
+                   !ReplayImportedAthleteFeatureGate.isEnabled,
+                   let sceneState, sceneState.skinnedAthletes[player.id] == nil,
+                   sceneState.skinnedAthletes.count < ReplaySkinnedAthleteProvider.maximumConcurrentInstances,
+                   !sceneState.skinnedAthleteFailedIDs.contains(player.id) {
+                    if let skin = try? ReplaySkinnedAthleteProvider.make(for: player) {
+                        entity.addChild(skin.root)
+                        sceneState.skinnedAthletes[player.id] = skin
+                    } else {
+                        sceneState.skinnedAthleteFailedIDs.insert(player.id)
+                    }
+                }
+                let usesNewSkin: Bool
+                if needsDetailedRig, let skin = sceneState?.skinnedAthletes[player.id] {
+                    usesNewSkin = skin.update(at: time, track: player, locomotion: locomotion,
+                                             lookTarget: playerLookTarget, hasBallAction: hasBallAction,
+                                             hasImpact: activeRagdollCue != nil)
+                } else {
+                    usesNewSkin = false
+                }
+                let usesImportedAthlete = usesLegacySkin || usesNewSkin
                 // Player POV retains only its capped visible-neighbour set;
                 // the wearer's hidden avatar must never be built or cached.
                 // Other views keep the default rig plus the current selection,
@@ -999,7 +1050,7 @@ enum PitchSceneFactory {
                 ?? selectedPlayer.presentationPose(at: time)
             facing.position = [pose.position.x, 0, pose.position.z]
             facing.orientation = simd_quatf(
-                angle: -pose.facingDegrees * .pi / 180,
+                angle: pose.facingDegrees * .pi / 180,
                 axis: [0, 1, 0]
             )
             facing.scale = SIMD3<Float>(repeating: 1)

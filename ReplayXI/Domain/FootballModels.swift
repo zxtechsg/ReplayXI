@@ -634,7 +634,9 @@ struct PlayerTrack: Identifiable, Codable, Hashable, Sendable {
         ) / Float(halfWindow * 2)
         var pathTurn: Float = 0
         if incomingDistance > 0.005, outgoingDistance > 0.005 {
-            let cross = (incomingX * outgoingZ) - (incomingZ * outgoingX)
+            // A positive pitch bearing turns +Z towards +X. Use the Y
+            // component of the 3D cross product so path and facing turns agree.
+            let cross = (incomingZ * outgoingX) - (incomingX * outgoingZ)
             let dot = (incomingX * outgoingX) + (incomingZ * outgoingZ)
             pathTurn = atan2(cross, dot) * 180 / .pi / seconds
         }

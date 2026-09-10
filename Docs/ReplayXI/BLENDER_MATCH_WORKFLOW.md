@@ -93,5 +93,6 @@ and the app bundle.
   player-linked annotation, jersey-number and existing-scene preservation checks.
   Static GLB reimport passed camera, ball and POV transform checks. The tactical
   and close-up renders were inspected; these are two-second QA, not match footage.
-- Rigged Rocketbox body and idle/run motion are staged outside the app bundle.
-  This does not yet replace the current runtime body or prove FIFA-level art.
+- At this Blender checkpoint, the rigged body and idle/run motion were staged
+  outside the app bundle. [Loop 35](LOOP35_SKINNED_PLAYERS_AND_HEADING.md) records
+  their subsequent near-field runtime integration and remaining limits.

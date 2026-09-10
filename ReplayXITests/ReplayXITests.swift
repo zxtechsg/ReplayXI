@@ -646,7 +646,7 @@ final class ReplayXITests: XCTestCase {
             )
         )
         let recordedFacingOrientation = simd_quatf(
-            angle: -laterPose.facingDegrees * .pi / 180,
+            angle: laterPose.facingDegrees * .pi / 180,
             axis: [0, 1, 0]
         )
         XCTAssertEqual(facing.orientation.vector, recordedFacingOrientation.vector)

@@ -1,5 +1,41 @@
 # Replay XI third-party player asset ledger
 
+## Bundled single-skeleton Rocketbox body — 2026-09-10
+
+`ReplayXIRocketboxAthlete.usdz`, `ReplayXIRocketboxMotion.json` and the fifteen
+`ReplayXIRocketbox{Home,Away,Keeper}Skin{0...4}.png` files in
+`ReplayXI/Resources/Players/` derive from the pinned Microsoft Rocketbox source
+below. They are distinct from the older run-only pilot described later.
+
+- Source: [Microsoft Rocketbox](https://github.com/microsoft/Microsoft-Rocketbox),
+  commit `0943055db6ec570bcef9f2c8b41c9e5467c808f9`; `Sports_Male_02`,
+  `m_idle_breathe_01` and `m_run_fast_01`.
+- Licence: upstream MIT, retained in USD metadata and the already-bundled
+  `LICENSE-ROCKETBOX-MIT.txt`. No EA/FIFA assets or club/sponsor art are used.
+- Reproduction: `Scripts/build_replayxi_skinned_athlete.py`; neutral kits and
+  skin palettes are authored by the repository's conversion scripts.
+- USDZ: 1,385,975 bytes; SHA-256
+  `7cfb694888f111928643e8aca7041d21925f5d55f3f5adbd353a972ca255e772`.
+- Motion JSON: 791,827 bytes; SHA-256
+  `d30a7379b81a4b0ea3fef5ebd20ad101911ab4fd521a5be1f6c00c0804f59ce4`.
+- 80 joints, 5,012 vertices, 8,146 triangles; shared body/head material sections.
+  Smooth vertex normals, normalized weights, common skeleton binding, embedded
+  neutral colour/normal maps and source joint ordering are audited after packaging.
+- RealityKit import must retain mesh parts `Body` (slot 0, 3,288 vertices) and
+  `Head` (slot 1, 1,724 vertices), with the sidecar's exact 80 joint names. The
+  provider rejects unexpected layouts rather than guessing material mappings.
+- Fifteen body palettes and five reused face palettes are shared. The base-level
+  texture estimate is 25 MiB (including the 1024px body normal), excluding mipmaps
+  and importer/cache overhead. Skin and jersey numbers reserve four material draws
+  per visible instance. These are asset estimates, not headset frame-time claims.
+
+The app integration uses absolute-time idle/run poses, bounded head look and
+chest-attached geometric shirt numbers. Walks, cuts, ball actions and impacts
+retain the existing procedural football rig until equivalent clips are available.
+The near-subject cap is two in player POV and four in other views; distant players
+retain their lower-cost representation. Physical-headset performance and broader
+football motion coverage remain open qualification work.
+
 ## Conversion-validation asset
 
 | Repository path | Upstream work | Creator | License | Replay XI modification |

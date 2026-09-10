@@ -199,8 +199,8 @@ final class ReplayAthleteRigTests: XCTestCase {
             targetWorldPosition: [-10, 0.11, 10]
         )
 
-        XCTAssertLessThan(right.combinedYawRadians, -0.25)
-        XCTAssertGreaterThan(left.combinedYawRadians, 0.25)
+        XCTAssertGreaterThan(right.combinedYawRadians, 0.25)
+        XCTAssertLessThan(left.combinedYawRadians, -0.25)
         XCTAssertEqual(
             right.neckYawRadians / right.combinedYawRadians,
             0.42,

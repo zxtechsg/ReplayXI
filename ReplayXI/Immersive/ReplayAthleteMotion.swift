@@ -527,10 +527,9 @@ enum ReplayAthleteMotion {
 
         desiredYawDegrees += (scan * scanAmplitude * scanWeight) + turnLead
         let yawLimit = 64 - (18 * sample.effort)
-        // Player roots use Replay XI's pitch-bearing convention (positive
-        // bearing is a negative RealityKit Y rotation), so local cervical yaw
-        // carries the same sign conversion.
-        let boundedYawRadians = -min(max(desiredYawDegrees, -yawLimit), yawLimit) * .pi / 180
+        // Athletes face local +Z. Positive Y yaw turns that forward axis
+        // towards +X, matching atan2(deltaX, deltaZ) and the player root.
+        let boundedYawRadians = min(max(desiredYawDegrees, -yawLimit), yawLimit) * .pi / 180
 
         let pitchScan = interpolatedScanTarget(
             for: track.id,

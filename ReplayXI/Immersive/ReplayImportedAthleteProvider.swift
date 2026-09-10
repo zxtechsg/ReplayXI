@@ -65,6 +65,13 @@ enum ReplayAthleteHeadProvider {
         return head
     }
 
+    /// Full-body skins reuse these five prepared face textures and normal map.
+    /// No texture decoding is needed when a player enters the near-field set.
+    static func material(at index: Int) -> PhysicallyBasedMaterial? {
+        guard materials.indices.contains(index) else { return nil }
+        return materials[index]
+    }
+
     private static func firstModel(in entity: Entity) -> ModelComponent? {
         if let component = entity.components[ModelComponent.self] { return component }
         for child in entity.children {

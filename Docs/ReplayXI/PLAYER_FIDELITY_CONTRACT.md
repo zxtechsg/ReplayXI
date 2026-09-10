@@ -2,7 +2,17 @@
 
 ## Outcome
 
-Replay XI now has an original, texture-free athlete renderer that can replace
+The app now also contains `ReplaySkinnedAthleteProvider`: a licensed Rocketbox
+80-joint skin with deterministic idle/run sampling and head look. It uses its
+own bone-array contract, not the procedural child-entity hierarchy below. See
+the [asset ledger](THIRD_PARTY_ASSETS.md#bundled-single-skeleton-rocketbox-body--2026-09-10).
+It reserves two material sections plus two jersey draws per near subject;
+5,012 skin vertices and 8,146 skin triangles are shared before instance skinning.
+The existing procedural budget is **not** the skinned body's geometry budget.
+Walks, cuts, touches and impacts still use the procedural fallback. Headset
+frame-time qualification and more football clips remain pending.
+
+The original procedural athlete renderer can replace
 the close procedural mannequin without importing proprietary football-game
 content. It uses cached `MeshDescriptor` geometry with authored anatomical
 profiles: shoulder-to-waist taper, separate pelvis, quadriceps, calf, jaw,
@@ -87,8 +97,9 @@ triangle in an instance and fails construction if its LOD budget is exceeded.
 | Mid | 19 | 2,700 | 3,800 | smooth body, back number, distal gait |
 | Far | 7 | 1,800 | 2,500 | seven-draw silhouette, proximal gait, tactical tag supplies number |
 
-Apple currently recommends keeping a whole Shared Space below roughly 250 draw
-calls and 250,000 vertices/triangles, and a Full Space below roughly 500 of each.
+Apple recommends keeping a whole Shared Space below roughly 250 draw
+calls and 250,000 vertices/triangles, and a Full Space below roughly 500 draw
+calls and 500,000 vertices/triangles.
 The conservative athlete-only plans are therefore:
 
 | Space | Near | Mid | Far | Athlete draw upper bound | Remaining Apple draw envelope |

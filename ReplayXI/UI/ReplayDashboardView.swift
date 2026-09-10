@@ -122,10 +122,18 @@ struct ReplayDashboardView: View {
                 )
                 // An explicit developer opt-in may admit one hash-locked CC0
                 // skinned athlete for profiling. The pilot is fail-soft and
-                // never blocks the room; normal demos retain the cleaner,
-                // deterministic procedural squad until a replacement passes
-                // the close-range visual and physical-device gates.
+                // never blocks the room. It remains separate from the licensed
+                // Rocketbox body and the procedural football-action fallback.
                 _ = try? ReplayImportedAthleteProvider.prewarm()
+                // The licensed single-skeleton body is prepared once before
+                // presentation. Failed admission keeps the working fallback.
+                do {
+                    try ReplaySkinnedAthleteProvider.prewarm()
+                } catch {
+                    #if DEBUG
+                    print("Replay XI skinned-player preparation failed; using standard rig: \(error)")
+                    #endif
+                }
             } catch {
                 store.isOpeningImmersive = false
                 store.statusMessage = "Player renderer could not prepare. Try opening the room again."
