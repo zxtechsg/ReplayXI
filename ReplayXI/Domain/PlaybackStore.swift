@@ -1336,6 +1336,9 @@ final class ReplayStore {
             if isCollaborationActive { emitSnapshot(allowingGeometryPreview: true) }
         } else if broadcast {
             statusMessage = "Annotation position updated"
+            // The final sample may equal the preview already on screen. The
+            // baseline mask changed even when marks.didSet observes no change.
+            scheduleReviewAutosave()
             emitSnapshot()
         }
         return true
@@ -1742,6 +1745,9 @@ final class ReplayStore {
         statusMessage = preview.endpoint == .start
             ? "Annotation start adjusted"
             : "Annotation end adjusted"
+        // A settled pinch may already have autosaved its masked baseline.
+        // Committing unmasks geometry without changing the stored mark value.
+        scheduleReviewAutosave()
         emitSnapshot()
         return preview.appliedDelta
     }
