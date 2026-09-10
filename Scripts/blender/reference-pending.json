@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "match-reference-pending",
+  "duration": 60,
+  "coordinateSystem": "pitch-metres-x-width-z-length",
+  "source": {
+    "status": "reference-pending",
+    "provenance": "awaiting-user-supplied-reference"
+  },
+  "trackEvidence": {
+    "origin": "untracked",
+    "confidence": null,
+    "sourceVisibility": "unknown",
+    "measured3D": false
+  },
+  "players": [],
+  "ball": { "keyframes": [] },
+  "annotations": []
+}

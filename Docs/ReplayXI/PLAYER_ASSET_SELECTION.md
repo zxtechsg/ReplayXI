@@ -240,6 +240,106 @@ prewarm returns to the existing procedural athlete without changing playback.
 
 ## Current motion evidence
 
+### Full-body Roleplay staging — 2026-09-10
+
+`Scripts/build_replayxi_skinned_athlete.py` now emits a complete skinned
+Rocketbox athlete and local-pose data from the pinned sports body, idle and
+run sources. It uses one clean 80-joint USD skeleton, two directly bound
+meshes (5,012 vertices / 8,146 triangles), and metre/Y-up coordinates.
+`ReplayXIRocketboxMotion.json` contains exact exported joint paths, parent
+indices, rest TRS, bone-local axes, semantic joint mapping, foot contacts,
+shirt-surface number anchors, 83 idle frames and 19 run frames. Horizontal
+root movement is removed; the run's 7.18 cm vertical cycle is retained.
+
+Three home/away/keeper palettes each support all five skin appearances. The
+15 body maps are 512px; they can share the existing five detailed head maps.
+Both USDZ and JSON reproduced byte-for-byte across repeated builds before
+the final number-anchor fit refinement. ARKit validation, skin-weight and
+exact USD/JSON joint-order checks pass. Reviewed offline idle/run previews show
+recognisable, coherent deformation; the Metal preview still shows faceted
+cloth shading, so material/shading review remains open.
+
+The staged output is in `.codex-derived/ReplayXI-Assets/Rocketbox-Loop32-Final/`.
+It is deliberately outside the app bundle while the requested real-match
+Roleplay/Blender work takes priority. No new default runtime rendering path is
+claimed by this asset-build step.
+
+Known-working build dependencies are Python 3.9.6, `numpy==2.0.2`,
+`Pillow==11.3.0`, `usd-core==26.8`, Assimp 6.0, and Apple's
+`/usr/bin/usdzip` / `/usr/bin/usdchecker`. Blender output uses Blender 5.2.1
+LTS. To recreate the Python environment and run the three non-skipping math
+tests from the repository root:
+
+```sh
+/usr/bin/python3 -m venv .codex-derived/ReplayXI-Assets/BuildEnv
+.codex-derived/ReplayXI-Assets/BuildEnv/bin/python3 -m pip install --no-cache-dir 'numpy==2.0.2' 'Pillow==11.3.0' 'usd-core==26.8'
+PYTHONPYCACHEPREFIX=/private/tmp/replayxi-asset-pycache .codex-derived/ReplayXI-Assets/BuildEnv/bin/python3 -m unittest discover -s Scripts/tests -p test_replayxi_skinned_athlete.py -v
+```
+
+For a fresh full-body build, use a new output directory; the builder rejects
+existing Rocketbox outputs. The extra Assimp export below supplies the named
+geometry manifest consumed by the Blender builder. It is separate from the
+USD builder's private, temporary Assimp exports:
+
+```sh
+replayxi_python=.codex-derived/ReplayXI-Assets/BuildEnv/bin/python3
+replayxi_source=.codex-derived/ReplayXI-Assets/RebuildSource
+replayxi_output=.codex-derived/ReplayXI-Assets/Rebuilt
+"$replayxi_python" Scripts/fetch_replayxi_rocketbox_pilot.py "$replayxi_source"
+PATH=/opt/homebrew/bin:/usr/bin:/bin PYTHONPYCACHEPREFIX=/private/tmp/replayxi-asset-pycache "$replayxi_python" Scripts/build_replayxi_skinned_athlete.py "$replayxi_source" "$replayxi_output"
+/opt/homebrew/bin/assimp export "$replayxi_source/Assets/Avatars/Professions/Sports_Male_02/Export/Sports_Male_02.fbx" "$replayxi_source/model.gltf" -fgltf2
+/Applications/Blender.app/Contents/MacOS/Blender --factory-startup --background --python-exit-code 1 --python Scripts/blender/prepare_football_player.py -- --source "$replayxi_source" --staged "$replayxi_output" --output "$replayxi_output/Blender" --render
+```
+
+USDZ, pose JSON, `.blend` and GLB outputs remain ignored under
+`.codex-derived/`; the committed scripts and pinned MIT source records are
+their rebuild path. Blender also reuses the committed, derived Rocketbox head
+palette. This is a version-recorded recipe, not a fully hermetic toolchain:
+Blender files and GLBs are verified for content/deformation, not promised to
+have identical binary hashes across Blender or exporter versions.
+
+### Editable Blender players — 2026-09-10
+
+`Scripts/blender/prepare_football_player.py` builds an isolated Blender 5.2
+library from the same audited geometry and named motion contract. It does not
+modify the user's open scene or preferences. The generated library lives in
+`.codex-derived/ReplayXI-Assets/Rocketbox-Loop32-Final/Blender/`:
+
+- `ReplayXIFootballPlayers.blend`: home/away/keeper collections with shared
+  body/head geometry, object-local kit materials and independently editable
+  front/back numbers attached to the chest bone.
+- `ReplayXIFootballPlayers.json`: coordinate, action, geometry and attribution
+  contract, including precise semantic bone names.
+- `ReplayXIFootballPlayerHome.glb`, `ReplayXIFootballPlayerAway.glb`,
+  `ReplayXIFootballPlayerKeeper.glb`: approximately
+  1.48 MB each, for MCP safe-mode import. Each includes one 80-bone skin, both
+  animation clips, four meshes (body/head/two numbers) and embedded textures.
+- `ReplayXIFootballPlayer-idle.png` and `-run.png`: inspected CPU renders.
+
+The model faces Blender -Y in metre/Z-up space. Keep the root's +0.0164364 m
+sole offset when placing it on the pitch. `ReplayXI_Idle` spans frames 1–83;
+`ReplayXI_Run_InPlace` spans frames 1–19, both at 30 fps. Text objects carry
+`replayxi_kind=jersey_number`; copy their font data before changing each
+player's digits. When copying a collection, remap parents and armature
+modifiers, then explicitly restore `matrix_parent_inverse` **and**
+`matrix_basis`. This prevents Blender's copied bone-parent cache from moving
+the number off the shirt.
+
+Evaluated skin positions match source linear-blend skinning within 0.0000012 m
+over six sampled poses. Shirt anchor error is below 0.0000003 m. Smooth source
+normals fix the faceted-cloth appearance in Blender previews. Post-save tests
+append all three templates, move/rotate them, check independent kits/numbers,
+then re-import all three GLBs and confirm actual animated mesh deformation.
+This is a usable Blender demo asset, **not** a claim of a football mocap suite,
+physics ragdoll, or completed Vision Pro runtime integration.
+
+Rebuild and test with the audited source directory already prepared:
+
+```sh
+/Applications/Blender.app/Contents/MacOS/Blender --factory-startup --background --python-exit-code 1 --python Scripts/blender/prepare_football_player.py -- --source /private/tmp/replayxi-rocketbox-loop31 --staged .codex-derived/ReplayXI-Assets/Rocketbox-Loop32-Final --output .codex-derived/ReplayXI-Assets/Rocketbox-Loop32-Final/Blender --render
+/Applications/Blender.app/Contents/MacOS/Blender --factory-startup --background --python-exit-code 1 --python Scripts/blender/test_football_player.py -- --library-dir .codex-derived/ReplayXI-Assets/Rocketbox-Loop32-Final/Blender
+```
+
 The default procedural athlete no longer replaces an entire gait pose when a
 telemetry sample crosses the semantic idle/walk, walk/jog, jog/sprint or cut
 classification boundary. `ReplayAthleteMotion` now blends stride, support time,
