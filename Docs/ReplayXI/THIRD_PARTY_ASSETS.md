@@ -27,7 +27,7 @@ XCTest load admitted that exact hash, measured 1.348 × 1.821 × 0.338-metre
 bounds, observed one RealityKit-coalesced `ModelEntity`, exposed two finite
 0.6000000238-second animation resources, and deterministically sought both at
 five clip times. The focused test passed 1/1. The transient fixture was removed
-immediately afterward; no Rocketbox binary is checked in or bundled.
+immediately afterward; that full-body skinned Rocketbox pilot is not bundled.
 All 43 acquisition, conversion, archive and packaged-skinning tests also pass
 when this temporary output is supplied through the integration-test gate.
 
@@ -35,7 +35,48 @@ OpenUSD proves non-static skinning transforms, but the RealityKit unit-test API
 does not expose deformed vertex positions. Admission still requires rendered
 frame review, dynamic team-kit separation, authored LODs, 22-player profiling,
 and physical Vision Pro validation. Until then the procedural athlete remains
-the default and Rocketbox remains quarantined.
+the default for body motion, and the full-body Rocketbox pilot remains experimental.
+
+## Bundled Rocketbox face — 2026-09-10
+
+`ReplayXI/Resources/Players/ReplayXIAthleteHead.usdz` is a separate static
+head extracted from the same hash-verified MIT `Sports_Male_02` source. It
+replaces the primitive near-player face with authored facial anatomy, eyes,
+ears and short hair. It attaches directly to Replay XI's existing moving
+head joint; the existing neck joint, gait, football actions and ragdoll remain
+responsible for motion. This asset adds no animation controller or skinning
+pass and contains no source kit or sponsor art.
+
+Its textured neck meets the shirt collar directly. The old procedural neck
+shell is omitted for this asset, avoiding a second skin surface under the jaw.
+
+`Scripts/build_replayxi_athlete_head.py` verifies the 11 pinned source inputs,
+extracts only the head material primitive through Assimp 6.0, verifies its
+consumed geometry/UV values, converts Z-up centimetres to head-local Y-up
+metres, corrects the vertical UV convention, and packages it with Apple's
+USD tools. A 512px normal map and five 512px skin palettes preserve facial
+detail while matching the existing athlete appearances. The source MIT
+notice is in USD metadata and bundled as `LICENSE-ROCKETBOX-MIT.txt`.
+
+- Source commit: `0943055db6ec570bcef9f2c8b41c9e5467c808f9`.
+- Source: [Microsoft Rocketbox](https://github.com/microsoft/Microsoft-Rocketbox).
+- USDZ: 586,688 bytes; 1,724 vertices; 3,128 triangles; one material.
+- Near athlete, worst-case `88` shirt/chest numbers: 24 model entities,
+  4,550 vertices and 5,728 triangles. Invisible backs of the raised number
+  glyphs are omitted; their visible fronts and side walls are unchanged.
+- USDZ SHA-256: `7446de58f31366aacf733060a12748b62c3dfb75a46994ba3ed32576355c1f20`.
+- All face resources together: approximately 1.8 MiB on disk; at most 7 MiB
+  decoded base-level textures shared across players, before mipmaps.
+- `ReplayAthleteHeadProvider` loads once before the room opens and shares one
+  mesh and five material instances. Any preparation failure keeps the original
+  procedural face. Mid/far players retain their low-cost geometry.
+- `usdchecker --arkit` passes. Metal image review verified facial proportions,
+  eye/mouth placement, neck UVs and normal-map shading. In-app fit and motion
+  are covered by `ReplayAthleteHeadTests`; physical headset profiling remains
+  required before making a device frame-rate claim.
+
+This is a face-fidelity improvement, not admission of the full Rocketbox body
+or its run-only motion clip. The existing full-body pilot requirements remain.
 
 The Quaternius pages identify both packs as CC0 and explicitly permit personal,
 educational, and commercial use. The character pack is humanoid-rigged,

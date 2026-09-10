@@ -331,6 +331,11 @@ enum ReplayAthleteFactory {
             lods: lods,
             shirtNumbers: Set(players.map { min(max($0.shirtNumber, 0), 99) })
         )
+        if lods.contains(.near) {
+            // Fail softly if a bundled head or texture cannot load. Geometry
+            // and material decoding occurs before the immersive frame loop.
+            try? ReplayAthleteHeadProvider.prewarm()
+        }
     }
 
     static func make(
@@ -453,11 +458,14 @@ enum ReplayAthleteFactory {
         // the torso while the head rotates independently.  The two-joint chain
         // lets the motion solver distribute a footballer's gaze naturally and
         // keeps the head/neck silhouette connected through wide scans.
+        let texturedHead = lod == .near
+            ? ReplayAthleteHeadProvider.make(appearance: configuration.appearance)
+            : nil
         let neck = Entity()
         neck.name = ReplayAthleteJoint.neck.rawValue
         neck.position = [0, 0.585, 0]
         spine.addChild(neck)
-        if lod != .far {
+        if lod != .far && texturedHead == nil {
             let neckShell = try addCustomModel(
                 .neck,
                 named: "neck-shell",
@@ -469,13 +477,23 @@ enum ReplayAthleteFactory {
 
         let headRoot = Entity()
         headRoot.name = ReplayAthleteJoint.headRoot.rawValue
-        headRoot.position = [0, 0.170, 0]
+        // The authored face includes its own neck. Seat that neckline inside
+        // the collar and omit the old neck shell, which otherwise intersects
+        // the jaw as a broad untextured block when the head scans or tilts.
+        headRoot.position = [0, texturedHead == nil ? 0.170 : 0.125, 0]
         neck.addChild(headRoot)
-        try addCustomModel(.head, named: "head", to: headRoot, material: skinMaterial)
-        if lod != .far {
-            try addCustomModel(.hair, named: "hair", to: headRoot, material: hairMaterial)
+        if let texturedHead {
+            headRoot.addChild(texturedHead)
+            metrics.modelEntities += 1
+            metrics.verticesPerInstance += ReplayAthleteHeadProvider.metrics.vertices
+            metrics.trianglesPerInstance += ReplayAthleteHeadProvider.metrics.triangles
+        } else {
+            try addCustomModel(.head, named: "head", to: headRoot, material: skinMaterial)
+            if lod != .far {
+                try addCustomModel(.hair, named: "hair", to: headRoot, material: hairMaterial)
+            }
         }
-        if lod == .near {
+        if lod == .near && texturedHead == nil {
             for (side, x) in [("left", Float(-0.048)), ("right", Float(0.048))] {
                 addPrimitiveModel(
                     mesh: eyeMesh,

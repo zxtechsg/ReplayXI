@@ -7,6 +7,15 @@ pilot. Keep Replay XI's original procedural near/mid/far athletes as the
 shipping fallback until the imported model passes deformation, debranding,
 performance and Vision Pro visual gates.
 
+The 2026-09-10 build now uses the MIT Rocketbox **static face** on near
+athletes after prewarm. It supplies facial anatomy, eyes, ears, hair and
+normal-map detail while the existing head/neck joints, football gait and
+ragdoll drive movement. Its 1,724 vertices and 3,128 triangles replace five
+primitive face draws with one shared model. Five small skin palettes match
+the current player appearances. The full-body skinned pilot remains separate;
+its clip/LOD qualification is not implied by the static-face integration.
+See the [asset ledger](THIRD_PARTY_ASSETS.md#bundled-rocketbox-face--2026-09-10).
+
 This decision does not permit EA Sports/FIFA models, animations, textures,
 logos, likenesses or extracted game data. Educational use does not make copied
 commercial game assets safe to redistribute. The selected sources below carry
@@ -114,7 +123,7 @@ instead of assuming the other levels are in the export.
 
 ## Interim runtime pilot
 
-Rocketbox is not bundled yet. `Scripts/build_replayxi_rocketbox_pilot.py` now
+The full-body Rocketbox pilot is not bundled yet. `Scripts/build_replayxi_rocketbox_pilot.py` now
 creates a deterministic, neutral-kit conversion candidate from a private
 hash-verified snapshot of all 11 pinned inputs. It strips horizontal root
 travel, downsamples and rebuilds four 1,024-pixel textures through a tested
@@ -245,10 +254,10 @@ bounded deterministic scanning, ball-aware gaze, football-specific heel strike,
 toe-off and sprint flight, plus a deterministic ragdoll blend. These are code-
 and simulator-test claims, not a claim of captured professional mocap.
 
-The higher-fidelity asset requirement is **not yet complete**. The bundled CC0
+The full-body higher-fidelity asset requirement is **not yet complete**. The bundled CC0
 pilot is still a one-player, run-only diagnostic that falls back to the
 procedural athlete for idle, walk, cut and ragdoll states. The selected
-Rocketbox candidate is not in the app bundle. Its deterministic RealityKit load
+Rocketbox full-body candidate is not in the app bundle. Its deterministic RealityKit load
 and seek probe now passes, but rendered deformation, authored
 idle/cut/football-action clips, dynamic team-kit separation, authored LOD,
 22-player memory/frame-time, and physical Vision Pro review remain open. No

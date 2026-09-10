@@ -3,6 +3,89 @@ import Foundation
 import RealityKit
 import UIKit
 
+/// The MIT Rocketbox face is a static surface attached to our head joint. It
+/// adds real facial anatomy and a normal map without replacing the football
+/// pose solver or running another skeleton. All 22 players share one mesh and
+/// five 512px skin palettes; only near athletes use it.
+@MainActor
+enum ReplayAthleteHeadProvider {
+    static let resourceName = "ReplayXIAthleteHead"
+    static let expectedSHA256 = "7446de58f31366aacf733060a12748b62c3dfb75a46994ba3ed32576355c1f20"
+    static let metrics = ReplayAthleteMeshMetrics(vertices: 1_724, triangles: 3_128)
+    static let decodedTextureBytes = 7 * 512 * 512 * 4
+    private static var mesh: MeshResource?
+    private static var materials: [PhysicallyBasedMaterial] = []
+
+    static var isPrewarmed: Bool { mesh != nil && materials.count == 5 }
+
+    static func prewarm(in bundle: Bundle = .main) throws {
+        guard !isPrewarmed else { return }
+        guard let url = resourceURL(named: resourceName, extension: "usdz", in: bundle) else {
+            throw ReplayImportedAthleteError.resourceMissing
+        }
+        let data = try Data(contentsOf: url, options: .mappedIfSafe)
+        let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        guard digest == expectedSHA256 else {
+            throw ReplayImportedAthleteError.resourceHashMismatch(actual: digest)
+        }
+        let loaded = try Entity.load(contentsOf: url)
+        guard let component = firstModel(in: loaded),
+              let sourceMaterial = component.materials.first as? PhysicallyBasedMaterial
+        else { throw ReplayImportedAthleteError.resourceMissing }
+        let bounds = loaded.visualBounds(relativeTo: loaded)
+        guard bounds.extents.allFinite,
+              (0.17...0.20).contains(bounds.extents.x),
+              (0.30...0.34).contains(bounds.extents.y)
+        else { throw ReplayImportedAthleteError.invalidBounds }
+
+        var prepared: [PhysicallyBasedMaterial] = []
+        for index in 0..<5 {
+            guard let textureURL = resourceURL(
+                named: "ReplayXIAthleteSkin\(index)", extension: "png", in: bundle
+            ) else { throw ReplayImportedAthleteError.resourceMissing }
+            let texture = try TextureResource.load(contentsOf: textureURL)
+            var material = sourceMaterial
+            material.baseColor = .init(tint: .white, texture: .init(texture))
+            prepared.append(material)
+        }
+        // Publish together so a failed texture load never exposes a half-ready
+        // renderer. The procedural face remains available without a retry loop.
+        materials = prepared
+        mesh = component.mesh
+    }
+
+    static func make(appearance: ReplayAthleteAppearance) -> ModelEntity? {
+        guard let mesh, materials.count == 5 else { return nil }
+        let index = (0..<5).first { ReplayAthleteAppearance.replayXI(index: $0).skin == appearance.skin } ?? 0
+        let head = ModelEntity(mesh: mesh, materials: [materials[index]])
+        head.name = "head"
+        // Source facial anatomy is adult scale. A small width adjustment seats
+        // the authored neck inside the shirt collar without stretching height.
+        head.scale.x = 1.07
+        return head
+    }
+
+    private static func firstModel(in entity: Entity) -> ModelComponent? {
+        if let component = entity.components[ModelComponent.self] { return component }
+        for child in entity.children {
+            if let component = firstModel(in: child) { return component }
+        }
+        return nil
+    }
+
+    private static func resourceURL(named name: String, extension suffix: String, in bundle: Bundle) -> URL? {
+        bundle.url(forResource: name, withExtension: suffix, subdirectory: "Resources/Players")
+            ?? bundle.url(forResource: name, withExtension: suffix)
+    }
+
+    #if DEBUG
+    static func resetForTesting() {
+        mesh = nil
+        materials = []
+    }
+    #endif
+}
+
 /// Runtime admission policy for Replay XI's higher-fidelity imported-player
 /// pilot. The current CC0 candidate remains available for explicit profiling,
 /// but it is opt-in even for development builds: simulator QA exposed an

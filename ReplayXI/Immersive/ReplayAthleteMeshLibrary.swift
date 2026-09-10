@@ -298,7 +298,8 @@ enum ReplayAthleteMeshLibrary {
                     ),
                     size: specification.size,
                     depth: 0.018,
-                    chamfer: 0.028
+                    chamfer: 0.028,
+                    includesBackFace: false
                 )
             }
         }
@@ -362,12 +363,17 @@ enum ReplayAthleteMeshLibrary {
         )
         normals.reserveCapacity(positions.capacity)
         indices.reserveCapacity(((profiles.count - 1) * segments * 6) + (capped ? segments * 6 : 0))
+        // Torso rings ascend; limbs are authored from their joint downwards.
+        // Both need outward-facing winding and normals. Treating a descending
+        // limb as an ascending loft turned its surface inward and flattened its
+        // longitudinal normal, producing dark seams and culled limb surfaces.
+        let direction: Float = profiles.last!.y >= profiles.first!.y ? 1 : -1
 
         for ringIndex in profiles.indices {
             let profile = profiles[ringIndex]
             let previous = profiles[max(ringIndex - 1, profiles.startIndex)]
             let next = profiles[min(ringIndex + 1, profiles.index(before: profiles.endIndex))]
-            let dy = max(next.y - previous.y, 0.000_1)
+            let dy = direction * max(abs(next.y - previous.y), 0.000_1)
             let drx = next.radiusX - previous.radiusX
             let drz = next.radiusZ - previous.radiusZ
             let dCentreZ = next.centreZ - previous.centreZ
@@ -392,7 +398,7 @@ enum ReplayAthleteMeshLibrary {
                     0,
                     cosine * profile.radiusZ
                 )
-                let rawNormal = simd_cross(alongProfile, aroundRing)
+                let rawNormal = simd_cross(alongProfile, aroundRing) * direction
                 normals.append(simd_length_squared(rawNormal) > 0.000_001
                     ? simd_normalize(rawNormal)
                     : SIMD3<Float>(cosine, 0, sine))
@@ -406,14 +412,16 @@ enum ReplayAthleteMeshLibrary {
                 let lowerNext = UInt32((ringIndex * segments) + nextSegment)
                 let upper = UInt32(((ringIndex + 1) * segments) + segmentIndex)
                 let upperNext = UInt32(((ringIndex + 1) * segments) + nextSegment)
-                indices.append(contentsOf: [lower, upper, lowerNext, lowerNext, upper, upperNext])
+                indices.append(contentsOf: direction > 0
+                    ? [lower, upper, lowerNext, lowerNext, upper, upperNext]
+                    : [lower, lowerNext, upper, lowerNext, upperNext, upper])
             }
         }
 
         if capped {
             let bottomCentre = UInt32(positions.count)
             positions.append([0, profiles[0].y, profiles[0].centreZ])
-            normals.append([0, -1, 0])
+            normals.append([0, -direction, 0])
             let bottomRingStart = UInt32(positions.count)
             for segmentIndex in 0..<segments {
                 let angle = (Float(segmentIndex) / Float(segments)) * (.pi * 2)
@@ -423,13 +431,13 @@ enum ReplayAthleteMeshLibrary {
                     profile.y,
                     profile.centreZ + (sin(angle) * profile.radiusZ),
                 ])
-                normals.append([0, -1, 0])
+                normals.append([0, -direction, 0])
             }
 
             let topProfile = profiles[profiles.count - 1]
             let topCentre = UInt32(positions.count)
             positions.append([0, topProfile.y, topProfile.centreZ])
-            normals.append([0, 1, 0])
+            normals.append([0, direction, 0])
             let topRingStart = UInt32(positions.count)
             for segmentIndex in 0..<segments {
                 let angle = (Float(segmentIndex) / Float(segments)) * (.pi * 2)
@@ -438,22 +446,24 @@ enum ReplayAthleteMeshLibrary {
                     topProfile.y,
                     topProfile.centreZ + (sin(angle) * topProfile.radiusZ),
                 ])
-                normals.append([0, 1, 0])
+                normals.append([0, direction, 0])
             }
 
             for segmentIndex in 0..<segments {
                 let current = UInt32(segmentIndex)
                 let next = UInt32((segmentIndex + 1) % segments)
-                indices.append(contentsOf: [
+                let firstCap: [UInt32] = [
                     bottomCentre,
                     bottomRingStart + current,
                     bottomRingStart + next,
-                ])
-                indices.append(contentsOf: [
+                ]
+                let lastCap: [UInt32] = [
                     topCentre,
                     topRingStart + next,
                     topRingStart + current,
-                ])
+                ]
+                indices.append(contentsOf: direction > 0 ? firstCap : Array(firstCap.reversed()))
+                indices.append(contentsOf: direction > 0 ? lastCap : Array(lastCap.reversed()))
             }
         }
 
@@ -560,7 +570,8 @@ enum ReplayAthleteMeshLibrary {
             centre: SIMD2<Float>,
             size: SIMD2<Float>,
             depth: Float,
-            chamfer: Float
+            chamfer: Float,
+            includesBackFace: Bool = true
         ) {
             let halfWidth = size.x / 2
             let halfHeight = size.y / 2
@@ -575,10 +586,12 @@ enum ReplayAthleteMeshLibrary {
                 [-halfWidth, halfHeight - boundedChamfer],
                 [-halfWidth, -halfHeight + boundedChamfer],
             ].map { $0 + centre }
-            appendExtrudedPolygon(outline, depth: depth)
+            appendExtrudedPolygon(outline, depth: depth, includesBackFace: includesBackFace)
         }
 
-        mutating func appendExtrudedPolygon(_ outline: [SIMD2<Float>], depth: Float) {
+        mutating func appendExtrudedPolygon(
+            _ outline: [SIMD2<Float>], depth: Float, includesBackFace: Bool
+        ) {
             guard outline.count >= 3 else { return }
             let frontZ = depth / 2
             let backZ = -depth / 2
@@ -593,13 +606,18 @@ enum ReplayAthleteMeshLibrary {
                 indices.append(contentsOf: [frontBase, frontBase + UInt32(index), frontBase + UInt32(index + 1)])
             }
 
-            let backBase = UInt32(positions.count)
-            for point in outline {
-                positions.append([point.x, point.y, backZ])
-                normals.append([0, 0, -1])
-            }
-            for index in 1..<(outline.count - 1) {
-                indices.append(contentsOf: [backBase, backBase + UInt32(index + 1), backBase + UInt32(index)])
+            // Shirt digits face outwards and their backs are against opaque
+            // fabric. Omit that invisible face while retaining crisp fronts
+            // and all side walls; two #88 labels save 224 vertices / 168 tris.
+            if includesBackFace {
+                let backBase = UInt32(positions.count)
+                for point in outline {
+                    positions.append([point.x, point.y, backZ])
+                    normals.append([0, 0, -1])
+                }
+                for index in 1..<(outline.count - 1) {
+                    indices.append(contentsOf: [backBase, backBase + UInt32(index + 1), backBase + UInt32(index)])
+                }
             }
 
             for index in outline.indices {
