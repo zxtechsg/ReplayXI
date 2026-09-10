@@ -2276,6 +2276,10 @@ final class ReplayStore {
             triangleLockMode: sanitizedTriangleMode,
             shapeFocusStage: sanitizedShapeFocusStage
         )
+        let changesScenario = selectedScenarioID != scenario.id
+        // Physical placement can replace an incompatible local scenario even
+        // during comfort pause. Its clock, marks and view must move together.
+        let adoptsPlacementScenario = changesScenario && sanitizedTriangleMode == .place
         selectedTool = .run
         pendingDrawStart = nil
         isDrawing = false
@@ -2289,19 +2293,16 @@ final class ReplayStore {
         sharedPitchAnchorID = sanitizedSharedPitchAnchorID
         triangleLockMode = sanitizedTriangleMode
         if sanitizedTriangleMode == .place {
-            if selectedScenarioID != scenario.id {
-                selectedScenarioID = scenario.id
-                localPerspectiveID = scenario.defaultPerspectiveID
-            }
             shapeFocusStage = .ideal
             isPlaying = false
             viewMode = .positional
         }
-        guard !isLocallyPaused else {
+        guard !isLocallyPaused || adoptsPlacementScenario else {
             statusMessage = "Local comfort pause — coach state ready when you resume"
             return true
         }
-        if selectedScenarioID != scenario.id {
+        if changesScenario {
+            retainedScenarioMarks[selectedScenarioID] = makeSnapshot().marks
             selectedScenarioID = scenario.id
             localPerspectiveID = scenario.defaultPerspectiveID
         }
@@ -2314,7 +2315,9 @@ final class ReplayStore {
         marks = sanitizedSnapshot.marks
         showsLaneLens = sanitizedSnapshot.showsLaneLens
         shapeFocusStage = sanitizedSnapshot.shapeFocusStage
-        statusMessage = "Coach state synchronized"
+        statusMessage = isLocallyPaused
+            ? "Local comfort pause — coach state ready when you resume"
+            : "Coach state synchronized"
         return true
     }
 
