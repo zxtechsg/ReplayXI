@@ -174,11 +174,15 @@ enum PitchSceneFactory {
             playersRoot: Entity,
             scenario: ReplayScenario
         ) {
+            // Validate existing weak references directly. The index is built
+            // once for a match root, so two temporary Sets on every frame buy
+            // nothing during ordinary playback.
+            guard playerEntitiesByID.count != scenario.players.count
+                || !scenario.players.allSatisfy({
+                    playerEntitiesByID[$0.id]?.value?.parent === playersRoot
+                })
+            else { return }
             let expectedIDs = Set(scenario.players.map(\.id))
-            let currentIDs = Set(playerEntitiesByID.compactMap { id, reference in
-                reference.value?.parent === playersRoot ? id : nil
-            })
-            guard currentIDs != expectedIDs else { return }
 
             var refreshed: [String: WeakEntityReference] = [:]
             refreshed.reserveCapacity(scenario.players.count)
@@ -1057,11 +1061,6 @@ enum PitchSceneFactory {
         // existing transforms avoids rebuilding every annotation hierarchy at
         // replay cadence.
         let annotationCache = syncMarks(in: root, marks: marks)
-        updateTrackedMarkGeometry(
-            cache: annotationCache,
-            scenario: scenario,
-            time: time
-        )
         let isShapeProblem = isTriangleView
             && effectiveTriangleMode == .visualise
             && !showsIdealShape
@@ -1165,6 +1164,15 @@ enum PitchSceneFactory {
                 binding.labelTarget.value?.isEnabled = acceptsAnnotationInput
             }
         }
+        // Resolve track geometry after admission. Hidden history can contain
+        // 128 marks; only the few rendered marks need scene transforms and hit
+        // volume updates. A newly revealed mark catches up before this frame
+        // is presented, including after a reverse seek.
+        updateTrackedMarkGeometry(
+            cache: annotationCache,
+            scenario: scenario,
+            time: time
+        )
 
         PlaybackSpatialLabels.updatePlayerLabels(
             in: root,
@@ -2666,10 +2674,10 @@ enum PitchSceneFactory {
         scenario: ReplayScenario,
         time: TimeInterval
     ) {
-        guard let cache else { return }
+        guard let cache, cache.marksRoot?.isEnabled == true else { return }
         for binding in cache.bindings
         where binding.mark.kind != .playerLabel && binding.mark.followsPlayerTracks {
-            guard let entity = binding.entity.value else { continue }
+            guard let entity = binding.entity.value, entity.isEnabled else { continue }
             let presentation = binding.mark.resolvingTrackGeometry(
                 in: scenario,
                 at: time
@@ -3354,21 +3362,23 @@ enum PitchSceneFactory {
 
         for binding in cache.bindings {
             let semanticMark = binding.mark
-            let mark = semanticMark.resolvingTrackGeometry(in: scenario, at: time)
             guard let label = binding.label.value else { continue }
-            guard mark.isVisible(at: time) || focus.selectedMarkID == mark.id else {
+            guard cache.marksRoot?.isEnabled == true,
+                  binding.entity.value?.isEnabled == true,
+                  semanticMark.isVisible(at: time) || focus.selectedMarkID == semanticMark.id else {
                 label.isEnabled = false
                 continue
             }
             label.isEnabled = switch focus {
             case .normal:
-                visibleFirstPersonLabels?.contains(mark.id) ?? true
+                visibleFirstPersonLabels?.contains(semanticMark.id) ?? true
             case .annotation:
-                focus.selectedMarkID == mark.id
+                focus.selectedMarkID == semanticMark.id
             case .decision:
                 false
             }
             guard label.isEnabled else { continue }
+            let mark = semanticMark.resolvingTrackGeometry(in: scenario, at: time)
             let anchor: PitchPoint
             if mark.kind == .playerLabel {
                 anchor = mark.playerID.flatMap { posesByPlayerID[$0]?.position } ?? mark.end
@@ -3465,7 +3475,8 @@ enum PitchSceneFactory {
         var latestSecond: (id: UUID, time: TimeInterval)?
         for binding in cache.bindings {
             let mark = binding.mark
-            guard mark.id != selectedVisibleID, mark.isVisible(at: time) else { continue }
+            guard binding.entity.value?.isEnabled == true,
+                  mark.id != selectedVisibleID, mark.isVisible(at: time) else { continue }
             let candidate = (id: mark.id, time: mark.revealTime)
             if latestFirst == nil || candidate.time > latestFirst!.time {
                 latestSecond = latestFirst

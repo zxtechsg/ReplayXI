@@ -6,13 +6,12 @@ import Foundation
 /// one instant.
 enum PlaybackSceneRenderBudget {
     static let normalAnnotationDrawLimit = 18
-    // One selected press/danger annotation costs eleven draws by itself. Keep
-    // the focused-review envelope large enough to preserve that selected mark
-    // while still admitting no unrelated geometry beside it.
-    static let decisionAnnotationDrawLimit = 11
+    // An elevated press/danger mark includes two ground tethers. Reserve room
+    // for all thirteen draws so the selected mark remains complete.
+    static let decisionAnnotationDrawLimit = 13
     static let selectedEditableOverlayDraws = 11
     static let selectedReadOnlyOverlayDraws = 4
-    static let selectedAnnotationSystemDrawLimit = 22
+    static let selectedAnnotationSystemDrawLimit = 24
 
     static func estimatedDraws(for kind: CoachMarkKind) -> Int {
         switch kind {
@@ -25,6 +24,14 @@ enum PlaybackSceneRenderBudget {
         case .playerLabel:
             6 // board + accent + glyph + ring + inset + tether
         }
+    }
+
+    static func estimatedDraws(for mark: CoachMark) -> Int {
+        let base = estimatedDraws(for: mark.kind)
+        guard mark.kind != .playerLabel else { return base }
+        return base
+            + (mark.resolvedStartElevation > 0.001 ? 1 : 0)
+            + (mark.resolvedEndElevation > 0.001 ? 1 : 0)
     }
 
     /// Computes stable recency once when annotation identity/timing changes.
@@ -72,14 +79,14 @@ enum PlaybackSceneRenderBudget {
            let selected = marks.first(where: { $0.id == selectedID }),
            selected.isVisible(at: time) || selectedIsEditable {
             result.insert(selectedID)
-            consumedDraws += estimatedDraws(for: selected.kind)
+            consumedDraws += estimatedDraws(for: selected)
         }
 
         for index in priorityIndices {
             guard marks.indices.contains(index) else { continue }
             let mark = marks[index]
             guard mark.id != selectedID, mark.isVisible(at: time) else { continue }
-            let cost = estimatedDraws(for: mark.kind)
+            let cost = estimatedDraws(for: mark)
             guard consumedDraws + cost <= drawLimit else { continue }
             result.insert(mark.id)
             consumedDraws += cost
@@ -93,7 +100,7 @@ enum PlaybackSceneRenderBudget {
     ) -> Int {
         marks.reduce(into: 0) { total, mark in
             guard visibleIDs.contains(mark.id) else { return }
-            total += estimatedDraws(for: mark.kind)
+            total += estimatedDraws(for: mark)
         }
     }
 }
