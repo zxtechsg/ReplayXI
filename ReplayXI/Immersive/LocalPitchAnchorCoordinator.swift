@@ -4,14 +4,14 @@ import Observation
 import QuartzCore
 import simd
 
-/// Runs the world-tracking portion of Replay XI's nearby positional rehearsal.
+/// Tracks this headset relative to a device-local pitch origin.
 ///
 /// This coordinator reports the horizontal pose of the Apple Vision Pro headset.
 /// It does not track the wearer's feet, stance, stride, or full body.
 @available(visionOS 26.0, *)
 @MainActor
 @Observable
-final class SharedSpaceAnchorCoordinator {
+final class LocalPitchAnchorCoordinator {
     struct HorizontalHeadsetPose: Equatable, Sendable {
         /// Headset position along the pitch anchor's horizontal x-axis, in metres.
         let x: Float
@@ -91,7 +91,6 @@ final class SharedSpaceAnchorCoordinator {
     private(set) var pitchOriginTransform: simd_float4x4?
     private(set) var isPitchAnchorTracked = false
     private(set) var placedPitchAnchorLocally = false
-    private(set) var isAnchorSharingAvailable = false
     private(set) var isPlacingPitchAnchor = false
 
     /// Called only when ARKit unexpectedly removes the anchor currently selected
@@ -118,7 +117,6 @@ final class SharedSpaceAnchorCoordinator {
     @ObservationIgnored private var sharedAnchorCache: [UUID: WorldAnchor] = [:]
     @ObservationIgnored private var anchorUpdatesTask: Task<Void, Never>?
     @ObservationIgnored private var poseSamplingTask: Task<Void, Never>?
-    @ObservationIgnored private var sharingAvailabilityTask: Task<Void, Never>?
     @ObservationIgnored private var pitchAnchorRemovalTask: Task<Void, Never>?
 
     /// Starts world tracking. Call this only while the app presents a Full Space.
@@ -139,7 +137,6 @@ final class SharedSpaceAnchorCoordinator {
 
         anchorUpdatesTask = makeAnchorUpdatesTask(provider: provider)
         poseSamplingTask = makePoseSamplingTask(provider: provider)
-        sharingAvailabilityTask = makeSharingAvailabilityTask(provider: provider)
 
         do {
             // World tracking alone doesn't request scene reconstruction or plane data.
@@ -151,42 +148,21 @@ final class SharedSpaceAnchorCoordinator {
         }
     }
 
-    /// Places the shared pitch origin. The caller is responsible for restricting this to the coach.
-    ///
-    /// The transform is expressed in the local ARKit world coordinate system. Nearby SharePlay
-    /// participants receive the resulting anchor through `WorldTrackingProvider.anchorUpdates`.
-    @discardableResult
-    func placeSharedPitchAnchor(
-        originFromAnchorTransform transform: simd_float4x4
-    ) async throws -> UUID {
-        try await placePitchAnchor(
-            originFromAnchorTransform: transform,
-            sharedWithNearbyParticipants: true
-        )
-    }
-
-    /// Places a device-local pitch origin for solo rehearsal. It uses the same
-    /// safety and tracking path as squad placement, but makes no claim that the
-    /// frame is visible on another headset.
+    /// Places a device-local pitch origin. No anchor is shared with another headset.
     @discardableResult
     func placeLocalPitchAnchor(
         originFromAnchorTransform transform: simd_float4x4
     ) async throws -> UUID {
         try await placePitchAnchor(
-            originFromAnchorTransform: transform,
-            sharedWithNearbyParticipants: false
+            originFromAnchorTransform: transform
         )
     }
 
     private func placePitchAnchor(
-        originFromAnchorTransform transform: simd_float4x4,
-        sharedWithNearbyParticipants: Bool
+        originFromAnchorTransform transform: simd_float4x4
     ) async throws -> UUID {
         guard let provider = worldTrackingProvider, arkitSession != nil else {
             throw CoordinatorError.worldTrackingNotRunning
-        }
-        guard !sharedWithNearbyParticipants || isAnchorSharingAvailable else {
-            throw CoordinatorError.sharingUnavailable
         }
         guard !isPlacingPitchAnchor else {
             throw CoordinatorError.placementInProgress
@@ -196,8 +172,7 @@ final class SharedSpaceAnchorCoordinator {
 
         let previousAnchor = pitchAnchor
         let newAnchor = WorldAnchor(
-            originFromAnchorTransform: transform,
-            sharedWithNearbyParticipants: sharedWithNearbyParticipants
+            originFromAnchorTransform: transform
         )
 
         try await provider.addAnchor(newAnchor)
@@ -221,16 +196,9 @@ final class SharedSpaceAnchorCoordinator {
         return newAnchor.id
     }
 
-    /// Places a yaw-aligned origin at the coach's current headset position.
+    /// Places a yaw-aligned origin at the current headset position.
     ///
     /// The position is still a headset reference—not a measured foot or floor point.
-    @discardableResult
-    func placeSharedPitchAnchorAtCurrentHeadset() async throws -> UUID {
-        let origin = try currentHeadsetFloorOrigin()
-        return try await placeSharedPitchAnchor(originFromAnchorTransform: origin)
-    }
-
-    /// Solo counterpart to `placeSharedPitchAnchorAtCurrentHeadset()`.
     @discardableResult
     func placeLocalPitchAnchorAtCurrentHeadset() async throws -> UUID {
         let origin = try currentHeadsetFloorOrigin()
@@ -262,7 +230,7 @@ final class SharedSpaceAnchorCoordinator {
         return origin
     }
 
-    /// Selects the coach-authoritative anchor ID carried by the shared playback state.
+    /// Selects the local anchor ID used by the positioning view.
     /// Anchor updates may arrive before or after that state, so updates are cached by UUID.
     func selectSharedPitchAnchor(id: UUID?) {
         selectedSharedPitchAnchorID = id
@@ -293,8 +261,7 @@ final class SharedSpaceAnchorCoordinator {
         status = .stopped
     }
 
-    /// Removes only the anchor created by this headset. Remote shared anchors
-    /// remain owned by the coach who placed them.
+    /// Removes only the anchor created by this headset.
     func removeLocallyPlacedPitchAnchor() async {
         if let pitchAnchorRemovalTask {
             await pitchAnchorRemovalTask.value
@@ -349,20 +316,11 @@ final class SharedSpaceAnchorCoordinator {
         }
     }
 
-    private func makeSharingAvailabilityTask(
-        provider: WorldTrackingProvider
-    ) -> Task<Void, Never> {
-        Task { [weak self] in
-            for await availability in provider.worldAnchorSharingAvailability {
-                guard let self, !Task.isCancelled else { return }
-                isAnchorSharingAvailable = availability == .available
-            }
-        }
-    }
+
 
     private func handleAnchorUpdate(_ update: AnchorUpdate<WorldAnchor>) {
         let anchor = update.anchor
-        guard anchor.isSharedWithNearbyParticipants || anchor.id == locallyPlacedPitchAnchorID else {
+        guard anchor.id == locallyPlacedPitchAnchorID else {
             return
         }
 
@@ -461,10 +419,8 @@ final class SharedSpaceAnchorCoordinator {
     private func tearDownSession() {
         anchorUpdatesTask?.cancel()
         poseSamplingTask?.cancel()
-        sharingAvailabilityTask?.cancel()
         anchorUpdatesTask = nil
         poseSamplingTask = nil
-        sharingAvailabilityTask = nil
         pitchAnchorRemovalTask?.cancel()
         pitchAnchorRemovalTask = nil
 
@@ -481,16 +437,14 @@ final class SharedSpaceAnchorCoordinator {
         pitchOriginTransform = nil
         isPitchAnchorTracked = false
         placedPitchAnchorLocally = false
-        isAnchorSharingAvailable = false
         isPlacingPitchAnchor = false
     }
 }
 
 @available(visionOS 26.0, *)
-extension SharedSpaceAnchorCoordinator {
+extension LocalPitchAnchorCoordinator {
     enum CoordinatorError: LocalizedError {
         case worldTrackingNotRunning
-        case sharingUnavailable
         case headsetNotTracked
         case placementInProgress
 
@@ -498,8 +452,6 @@ extension SharedSpaceAnchorCoordinator {
             switch self {
             case .worldTrackingNotRunning:
                 "Start world tracking in the immersive space before placing the pitch origin."
-            case .sharingUnavailable:
-                "Nearby SharePlay anchor sharing is not available yet."
             case .headsetNotTracked:
                 "The headset pose is not currently tracked."
             case .placementInProgress:

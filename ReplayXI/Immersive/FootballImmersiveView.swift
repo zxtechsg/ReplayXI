@@ -3,8 +3,7 @@ import SwiftUI
 
 struct FootballImmersiveView: View {
     @Environment(ReplayStore.self) private var store
-    @Environment(SquadSessionCoordinator.self) private var squadSession
-    @Environment(SharedSpaceAnchorCoordinator.self) private var sharedSpace
+    @Environment(LocalPitchAnchorCoordinator.self) private var sharedSpace
     @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -85,8 +84,8 @@ struct FootballImmersiveView: View {
                 isTrianglePlacementReady: store.hasLocallyAcknowledgedTrianglePlacement
                     && sharedSpace.hasUsableSharedPitchFrame
                     && store.canRevealPhysicalTriangleMarkers(
-                        participantID: squadSession.localParticipantID,
-                        sharedSession: squadSession.state == .joined
+                        participantID: nil,
+                        sharedSession: false
                     ),
                 showsIdealBranch: store.showsIdealBranch,
                 emphasizesBall: emphasizesBall
@@ -131,8 +130,8 @@ struct FootballImmersiveView: View {
                     isTrianglePlacementReady: store.hasLocallyAcknowledgedTrianglePlacement
                         && sharedSpace.hasUsableSharedPitchFrame
                         && store.canRevealPhysicalTriangleMarkers(
-                            participantID: squadSession.localParticipantID,
-                            sharedSession: squadSession.state == .joined
+                            participantID: nil,
+                            sharedSession: false
                         ),
                     showsIdealBranch: store.showsIdealBranch,
                     emphasizesBall: emphasizesBall
@@ -796,8 +795,7 @@ struct FootballImmersiveView: View {
     }
 
     private func openPlayerPOV(_ playerID: String) {
-        // Player selection is local. Sharing the POV remains an explicit coach
-        // action in the transport deck, preventing an accidental squad switch.
+        // Follow player translation while preserving headset-controlled free look.
         store.openLocalPlayerPOV(playerID)
     }
 
@@ -835,7 +833,6 @@ struct FootballImmersiveView: View {
 
 private struct ImmersiveRoomHeader: View {
     @Environment(ReplayStore.self) private var store
-    @Environment(SquadSessionCoordinator.self) private var squadSession
 
     var body: some View {
         HStack(spacing: 14) {
@@ -866,8 +863,8 @@ private struct ImmersiveRoomHeader: View {
             }
 
             StatusPill(
-                text: squadSession.state.label,
-                systemImage: squadSession.state == .joined ? "shareplay" : "person.crop.circle"
+                text: "LOCAL REPLAY",
+                systemImage: "visionpro"
             )
         }
         .padding(18)
@@ -1164,7 +1161,6 @@ enum AnnotationJoystickAccessibility {
 /// shelf: immersive spaces never receive a Menu, sheet, popover, or alert.
 private struct PlaybackViewOverlayHUD: View {
     @Environment(ReplayStore.self) private var store
-    @Environment(SquadSessionCoordinator.self) private var squadSession
     @Binding var showsPlaybackAnnotations: Bool
     @Binding var emphasizesBall: Bool
     @State private var isExpanded = false
@@ -1259,11 +1255,11 @@ private struct PlaybackViewOverlayHUD: View {
                                 systemImage: "arrow.triangle.branch",
                                 isVisible: store.showsLaneLens,
                                 color: ReplayTheme.cyan,
-                                isEnabled: canControlSharedOverlays
+                                isEnabled: canControlOverlays
                             ) {
                                 store.showsLaneLens.toggle()
                                 if store.localRole == .coach {
-                                    squadSession.broadcastCurrentState()
+                                    store.flushReviewAutosave()
                                 }
                             }
                         }
@@ -1292,9 +1288,7 @@ private struct PlaybackViewOverlayHUD: View {
         [.firstPerson, .tacticalTable, .touchline]
     }
 
-    private var canControlSharedOverlays: Bool {
-        squadSession.state != .joined || store.localRole == .coach
-    }
+    private var canControlOverlays: Bool { true }
 
     private var activeOverlayBadges: [PlaybackOverlayBadge] {
         PlaybackOverlayBadge.activeBadges(
@@ -1630,7 +1624,6 @@ private struct AnnotationAdjustmentJoystick: View {
 
 private struct ImmersiveControlDeck: View {
     @Environment(ReplayStore.self) private var store
-    @Environment(SquadSessionCoordinator.self) private var squadSession
     @State private var annotationConfirmation: String?
     @State private var showsEventStrip = false
     @State private var showsPlayerGrid = false
@@ -3141,21 +3134,8 @@ private struct ImmersiveControlDeck: View {
                 players: store.selectedScenario.awayPlayers
             )
 
-            if squadSession.state == .joined || store.viewMode == .firstPerson {
-                HStack(spacing: 8) {
-                    if squadSession.state == .joined {
-                        povSharingStatusChip
-                    }
-                    if store.viewMode == .firstPerson {
-                        povStatusChip
-                    }
-
-                    Spacer(minLength: 8)
-
-                    if store.localRole == .coach, squadSession.state == .joined {
-                        coachPOVShareControls
-                    }
-                }
+            if store.viewMode == .firstPerson {
+                povStatusChip
             }
         }
         .padding(10)
@@ -3232,26 +3212,13 @@ private struct ImmersiveControlDeck: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    private var playerGridInstruction: String {
-        guard squadSession.state == .joined else { return "PINCH A SHIRT" }
-        return store.localRole == .coach
-            ? "PICK LOCAL · SHARE AFTER"
-            : "PRIVATE COMFORT REVIEW"
-    }
+    private var playerGridInstruction: String { "PINCH A SHIRT" }
 
     private var playerGridTitle: String {
         "22 PLAYER POV"
     }
 
-    private var playerPOVAccessibilityHint: String {
-        guard squadSession.state == .joined else {
-            return "Opens this player's free-look point of view"
-        }
-        if store.localRole == .coach {
-            return "Selects this point of view locally. Use Take Squad afterward to share it."
-        }
-        return "Pauses coach follow and opens this player's private free-look point of view."
-    }
+    private var playerPOVAccessibilityHint: String { "Opens this player's free-look point of view" }
 
     private func teamAccent(_ team: FootballTeam) -> Color {
         team == .home ? ReplayTheme.cyan : ReplayTheme.orange
@@ -3354,55 +3321,6 @@ private struct ImmersiveControlDeck: View {
         .accessibilityHint(
             "Your position follows the player. Your headset controls where you look. Green brackets show the player's recorded facing direction."
         )
-    }
-
-    private var povSharingStatusChip: some View {
-        StatusPill(
-            text: povSharingStatusText,
-            systemImage: povSharingStatusSystemImage,
-            color: povSharingStatusColor
-        )
-        .accessibilityLabel("Point-of-view scope")
-        .accessibilityValue(povSharingStatusAccessibilityValue)
-    }
-
-    private var coachPOVShareControls: some View {
-        HStack(spacing: 7) {
-            if store.coachLockEnabled {
-                Button {
-                    store.releaseSquad()
-                } label: {
-                    Label("END SQUAD", systemImage: "person.3.sequence.fill")
-                        .font(.subheadline.weight(.black))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.74)
-                        .frame(width: 128, height: 52)
-                }
-                .buttonStyle(.bordered)
-                .tint(ReplayTheme.orange)
-                .accessibilityLabel("End squad point-of-view share")
-                .accessibilityHint("Returns every participant to their assigned perspective")
-            }
-
-            if !isCurrentCoachPOVShared {
-                Button {
-                    store.broadcastPerspective(store.localPerspectiveID)
-                } label: {
-                    Label(coachPOVShareButtonLabel, systemImage: "dot.radiowaves.left.and.right")
-                        .font(.subheadline.weight(.black))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.74)
-                        .frame(width: 142, height: 52)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(ReplayTheme.cyan)
-                .foregroundStyle(.black)
-                .accessibilityLabel("Take squad to selected player point of view")
-                .accessibilityHint(
-                    "Pauses playback and explicitly changes every participant's perspective"
-                )
-            }
-        }
     }
 
     private func annotationToolButton(_ kind: CoachMarkKind, label: String) -> some View {
@@ -3693,14 +3611,7 @@ private struct ImmersiveControlDeck: View {
             showsAnnotationTools = false
             showsToolsShelf = false
             showsDecisionStrip = true
-            if isJoinedPlayer {
-                // Decision review is a local comfort pause for a follower.
-                // Leaving follow and pausing must be one state transition or
-                // the next coach heartbeat immediately overwrites this view.
-                _ = store.beginLocalReview(at: store.playhead)
-            } else {
-                store.setPlaying(false, broadcast: false)
-            }
+            store.setPlaying(false, broadcast: false)
         } label: {
             Label("Decisions", systemImage: "eye.fill")
                 .font(.subheadline.weight(.black))
@@ -4339,13 +4250,11 @@ private struct ImmersiveControlDeck: View {
     }
 
     private var timelineControlsAreDisabled: Bool {
-        store.isDrawing
-            || store.hasActiveCoachMarkGeometryPreview
-            || (isJoinedPlayer && !store.isLocallyPaused)
+        store.isDrawing || store.hasActiveCoachMarkGeometryPreview
     }
 
     private var rateControlsAreDisabled: Bool {
-        store.isDrawing || store.hasActiveCoachMarkGeometryPreview || isJoinedPlayer
+        store.isDrawing || store.hasActiveCoachMarkGeometryPreview
     }
 
     private var primaryPlaybackControlIsDisabled: Bool {
@@ -4370,17 +4279,11 @@ private struct ImmersiveControlDeck: View {
     }
 
     private var primaryPlaybackLabel: String {
-        if isJoinedPlayer {
-            return store.isLocallyPaused ? "Rejoin" : "Hold"
-        }
-        return store.isActivelyPlaying ? "Pause" : "Play"
+        store.isActivelyPlaying ? "Pause" : "Play"
     }
 
     private var primaryPlaybackSystemImage: String {
-        if isJoinedPlayer {
-            return store.isLocallyPaused ? "arrow.clockwise" : "pause.fill"
-        }
-        return store.isActivelyPlaying ? "pause.fill" : "play.fill"
+        store.isActivelyPlaying ? "pause.fill" : "play.fill"
     }
 
     private var annotationInstruction: String {
@@ -4417,90 +4320,9 @@ private struct ImmersiveControlDeck: View {
         store.marks.contains(where: isCoachCreated)
     }
 
-    private var isCurrentCoachPOVShared: Bool {
-        store.coachLockEnabled
-            && store.coachFocusPerspectiveID == store.localPerspectiveID
-            && !store.isCoachLocalReview
-    }
-
-    private var coachPOVShareButtonLabel: String {
-        guard !isCurrentCoachPOVShared else { return "END SHARE" }
-        guard let player = store.selectedScenario.player(id: store.localPerspectiveID) else {
-            return "SHARE POV"
-        }
-        let side = player.team == .home ? "HOME" : "OPP"
-        return "SHARE · \(side) #\(player.shirtNumber)"
-    }
-
-    private var sharedCoachPlayer: PlayerTrack? {
-        guard let playerID = store.coachFocusPerspectiveID else { return nil }
-        return store.selectedScenario.player(id: playerID)
-    }
-
-    private var sharedCoachPlayerCompactLabel: String? {
-        guard let player = sharedCoachPlayer else { return nil }
-        let side = player.team == .home ? "HOME" : "OPP"
-        return "\(side) #\(player.shirtNumber) \(player.positionCode)"
-    }
-
-    private var povSharingStatusText: String {
-        if store.localRole == .coach {
-            if store.isCoachLocalReview {
-                return sharedCoachPlayerCompactLabel.map { "LOCAL · SQUAD \($0)" } ?? "LOCAL ONLY"
-            }
-            return store.coachLockEnabled
-                ? sharedCoachPlayerCompactLabel.map { "SQUAD · \($0)" } ?? "SHARED WITH SQUAD"
-                : "LOCAL ONLY"
-        }
-        if store.followsCoach, store.coachLockEnabled {
-            return "FOLLOWING COACH"
-        }
-        return store.isLocallyPaused ? "LOCAL REVIEW" : "OWN POV"
-    }
-
-    private var povSharingStatusSystemImage: String {
-        if store.localRole == .coach, store.coachLockEnabled, !store.isCoachLocalReview {
-            return "dot.radiowaves.left.and.right"
-        }
-        if store.localRole == .player, store.followsCoach, store.coachLockEnabled {
-            return "person.3.fill"
-        }
-        return "person.crop.circle"
-    }
-
-    private var povSharingStatusColor: Color {
-        if store.localRole == .coach, store.coachLockEnabled, !store.isCoachLocalReview {
-            return ReplayTheme.orange
-        }
-        if store.localRole == .player, store.followsCoach, store.coachLockEnabled {
-            return ReplayTheme.orange
-        }
-        return ReplayTheme.cyan
-    }
-
-    private var povSharingStatusAccessibilityValue: String {
-        if store.localRole == .coach, store.isCoachLocalReview, let sharedCoachPlayer {
-            return "Private local review. The squad remains on \(sharedCoachPlayer.team.shortTitle), number \(sharedCoachPlayer.shirtNumber), \(sharedCoachPlayer.role)."
-        }
-        if store.localRole == .coach, store.coachLockEnabled, let sharedCoachPlayer {
-            return "\(sharedCoachPlayer.team.shortTitle), number \(sharedCoachPlayer.shirtNumber), \(sharedCoachPlayer.role), is shared with the squad."
-        }
-        if store.localRole == .coach {
-            return "The selected point of view is local only."
-        }
-        if store.followsCoach, store.coachLockEnabled {
-            return "Following the coach's shared point of view."
-        }
-        return "Private local review."
-    }
-
     private func handlePrimaryPlaybackAction() {
         guard !primaryPlaybackControlIsDisabled else { return }
-        if isJoinedPlayer {
-            squadSession.setFollowingCoach(store.isLocallyPaused)
-        } else {
-            store.togglePlayback()
-        }
+        store.togglePlayback()
     }
 
     private func jump(to cue: CueMoment) {
@@ -4600,7 +4422,7 @@ private struct ImmersiveControlDeck: View {
             return
         }
         if store.localRole == .coach {
-            squadSession.broadcastCurrentState()
+            store.flushReviewAutosave()
         }
         resetTimelineScrubState()
     }
@@ -4655,10 +4477,6 @@ private struct ImmersiveControlDeck: View {
         .padding(14)
         .frame(maxWidth: 700)
         .glassBackgroundEffect(in: .rect(cornerRadius: 22))
-    }
-
-    private var isJoinedPlayer: Bool {
-        store.localRole == .player && squadSession.state == .joined
     }
 
     private func formatTime(_ value: TimeInterval) -> String {
@@ -4859,8 +4677,7 @@ private enum ShapeFocusStep: Int, CaseIterable, Identifiable {
 
 private struct PositioningPanel: View {
     @Environment(ReplayStore.self) private var store
-    @Environment(SharedSpaceAnchorCoordinator.self) private var sharedSpace
-    @Environment(SquadSessionCoordinator.self) private var squadSession
+    @Environment(LocalPitchAnchorCoordinator.self) private var sharedSpace
     @State private var placementError: String?
     @State private var showsPlacementPreflight = false
     @State private var hasConfirmedClearArea = false
@@ -5018,24 +4835,6 @@ private struct PositioningPanel: View {
             }
         }
 
-        if store.localRole == .player && squadSession.state == .joined {
-            HStack(spacing: 8) {
-                Label(
-                    store.isLocallyPaused ? "Local comparison paused from coach" : "Following coach",
-                    systemImage: store.isLocallyPaused ? "pause.circle" : "person.badge.key.fill"
-                )
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-                Spacer()
-                if store.isLocallyPaused {
-                    Button("Resume coach") {
-                        squadSession.setFollowingCoach(true)
-                    }
-                    .buttonStyle(.bordered)
-                }
-            }
-        }
-
         Label("Tabletop markers only. Stay where you are during steps 1 and 2.", systemImage: "figure.stand")
             .font(.caption2.weight(.semibold))
             .foregroundStyle(.secondary)
@@ -5048,28 +4847,19 @@ private struct PositioningPanel: View {
                 .font(.headline.weight(.black))
                 .foregroundStyle(ReplayTheme.orange)
 
-            Text("Shape Focus uses a shared origin across an approximately 5 m × 3 m clear area. Vision Pro does not detect feet, people, furniture, or every obstacle for this drill.")
+            Text("Shape Focus uses a local origin across an approximately 5 m × 3 m clear area. Vision Pro does not detect feet, people, furniture, or every obstacle for this drill.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Label("All wearers are stationary", systemImage: "figure.stand")
+            Label("Stay stationary", systemImage: "figure.stand")
             Label("The entire marked area is clear", systemImage: "square.dashed")
-            switch squadSession.state {
-            case .joined:
-                Label("A nearby SharePlay session is connected", systemImage: "shareplay")
-            case .offline:
-                Label("Solo mode creates a local-only station preview", systemImage: "visionpro")
-            case .preparing, .waiting:
-                Label("SharePlay is connecting — placement stays locked", systemImage: "hourglass")
-            case .unavailable:
-                Label("SharePlay is unavailable — return to solo mode before placement", systemImage: "exclamationmark.triangle.fill")
-            }
+            Label("Station markers are local to this headset", systemImage: "visionpro")
         }
         .font(.caption.weight(.semibold))
 
         Toggle(isOn: $hasConfirmedClearArea) {
-            Text("I checked the full area and briefed every wearer. No running.")
+            Text("I checked the full area. I will stay stationary. No running.")
                 .font(.caption.weight(.black))
         }
         .toggleStyle(.switch)
@@ -5081,30 +4871,6 @@ private struct PositioningPanel: View {
                 color: placementModeColor
             )
 
-            if squadSession.state == .joined {
-                StatusPill(
-                    text: sharedSpace.isAnchorSharingAvailable ? "ANCHOR READY" : "WAITING FOR ANCHOR",
-                    systemImage: sharedSpace.isAnchorSharingAvailable ? "checkmark.circle" : "location",
-                    color: sharedSpace.isAnchorSharingAvailable ? ReplayTheme.signal : ReplayTheme.orange
-                )
-            }
-        }
-
-        if squadSession.state == .offline {
-            Button {
-                Task { await squadSession.startSharePlay() }
-            } label: {
-                Label("Start nearby SharePlay", systemImage: "shareplay")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(ReplayTheme.signal)
-            .foregroundStyle(.black)
-        } else if squadSession.physicalPlacementRoute == nil {
-            Label("Wait until SharePlay reaches LIVE ROOM. No local anchor will be created while it is starting or waiting.", systemImage: "lock.shield.fill")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(ReplayTheme.orange)
-                .fixedSize(horizontal: false, vertical: true)
         }
 
         HStack(spacing: 8) {
@@ -5116,11 +4882,11 @@ private struct PositioningPanel: View {
             .buttonStyle(.bordered)
 
             Button(placementButtonTitle) {
-                placeSharedStations()
+                placeLocalStations()
             }
             .buttonStyle(.borderedProminent)
             .tint(ReplayTheme.orange)
-            .disabled(!canPlaceSharedStations)
+            .disabled(!canPlaceLocalStations)
         }
 
         if let placementError {
@@ -5134,7 +4900,7 @@ private struct PositioningPanel: View {
     @ViewBuilder
     private var playerAcknowledgement: some View {
         Label(
-            isSharedPhysicalSession ? "Verify your assigned role" : "Choose the role you will rehearse",
+            "Choose the role you will rehearse",
             systemImage: "person.crop.circle.badge.checkmark"
         )
             .font(.headline.weight(.black))
@@ -5153,8 +4919,8 @@ private struct PositioningPanel: View {
 
         Button {
             store.acknowledgeTrianglePlacementLocally(
-                participantID: squadSession.localParticipantID,
-                sharedSession: isSharedPhysicalSession
+                participantID: nil,
+                sharedSession: false
             )
         } label: {
             Label("I’m stationary — reveal my station", systemImage: "eye.fill")
@@ -5166,8 +4932,8 @@ private struct PositioningPanel: View {
         .disabled(
             !sharedSpace.hasUsableSharedPitchFrame
                 || !store.canRevealPhysicalTriangleMarkers(
-                    participantID: squadSession.localParticipantID,
-                    sharedSession: isSharedPhysicalSession
+                    participantID: nil,
+                    sharedSession: false
                 )
         )
 
@@ -5179,9 +4945,7 @@ private struct PositioningPanel: View {
     @ViewBuilder
     private var placeContent: some View {
         Label(
-            isSharedPhysicalSession && store.localRole == .coach
-                ? "Shared station overview"
-                : "Your role station",
+            "Your role station",
             systemImage: "scope"
         )
             .font(.headline.weight(.black))
@@ -5245,7 +5009,7 @@ private struct PositioningPanel: View {
             }
         }
 
-        Text("The coach does not receive live body or foot positions. \(SharedSpaceAnchorCoordinator.trackingDisclosure)")
+        Text(LocalPitchAnchorCoordinator.trackingDisclosure)
             .font(.caption2)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
@@ -5253,33 +5017,6 @@ private struct PositioningPanel: View {
 
     @ViewBuilder
     private var stationSelector: some View {
-        if isSharedPhysicalSession {
-            if store.localRole == .coach {
-                Label("Coach overview — stay at the origin and direct each assigned wearer.", systemImage: "person.badge.key.fill")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else if let assignedTarget {
-                HStack(spacing: 10) {
-                    Image(systemName: "lock.shield.fill")
-                        .foregroundStyle(ReplayTheme.signal)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Eyebrow(text: "Identity-bound station", color: ReplayTheme.signal)
-                        Text(assignedRoleLabel(for: assignedTarget))
-                            .font(.caption.weight(.black))
-                    }
-                    Spacer(minLength: 0)
-                }
-                .padding(10)
-                .background(ReplayTheme.signal.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-                .accessibilityLabel("Assigned \(assignedTarget.label) station")
-            } else {
-                Label("No unique station is assigned to this headset. Stay still; markers remain hidden until the coach assignment arrives.", systemImage: "person.crop.circle.badge.exclamationmark")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(ReplayTheme.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        } else {
             HStack(spacing: 6) {
                 ForEach(store.selectedScenario.formationTargets) { target in
                     let isSelected = target.playerID == assignedTarget?.playerID
@@ -5305,7 +5042,6 @@ private struct PositioningPanel: View {
                     .accessibilityLabel("Choose \(target.label) station")
                 }
             }
-        }
     }
 
     @ViewBuilder
@@ -5384,52 +5120,25 @@ private struct PositioningPanel: View {
         showsPlacementPreflight = true
     }
 
-    private var canPlaceSharedStations: Bool {
-        guard store.localRole == .coach,
-              hasConfirmedClearArea,
-              sharedSpace.isRunning,
-              !sharedSpace.isPlacingPitchAnchor,
-              let route = squadSession.physicalPlacementRoute else { return false }
-        switch route {
-        case .localPreview: return true
-        case .sharedSquad: return sharedSpace.isAnchorSharingAvailable
-        }
+    private var canPlaceLocalStations: Bool {
+        hasConfirmedClearArea && sharedSpace.isRunning && !sharedSpace.isPlacingPitchAnchor
     }
 
     private var placementButtonTitle: String {
-        if sharedSpace.isPlacingPitchAnchor { return "Anchoring…" }
-        return switch squadSession.physicalPlacementRoute {
-        case .localPreview: "Place local station preview"
-        case .sharedSquad: "Anchor 3 shared stations"
-        case nil: "Placement locked while connecting"
-        }
+        sharedSpace.isPlacingPitchAnchor ? "Anchoring…" : "Place local stations"
     }
 
-    private func placeSharedStations() {
-        guard canPlaceSharedStations,
-              let requestedRoute = squadSession.physicalPlacementRoute else { return }
+    private func placeLocalStations() {
+        guard canPlaceLocalStations else { return }
         Task {
             do {
-                let anchorID: UUID
-                switch requestedRoute {
-                case .sharedSquad:
-                    anchorID = try await sharedSpace.placeSharedPitchAnchorAtCurrentHeadset()
-                case .localPreview:
-                    anchorID = try await sharedSpace.placeLocalPitchAnchorAtCurrentHeadset()
-                }
-
-                guard squadSession.physicalPlacementRoute == requestedRoute else {
+                let anchorID = try await sharedSpace.placeLocalPitchAnchorAtCurrentHeadset()
+                guard store.isImmersiveOpen, showsPlacementPreflight,
+                      hasConfirmedClearArea, store.triangleLockMode == .visualise else {
                     await sharedSpace.removeLocallyPlacedPitchAnchor()
-                    placementError = "Connection state changed during placement. No station was activated; try again in a stable mode."
                     return
                 }
-
-                switch requestedRoute {
-                case .sharedSquad:
-                    store.activateTrianglePlacement(anchorID: anchorID)
-                case .localPreview:
-                    store.activateLocalTrianglePreview(anchorID: anchorID)
-                }
+                store.activateLocalTrianglePreview(anchorID: anchorID)
                 sharedSpace.selectSharedPitchAnchor(id: anchorID)
                 placementError = nil
                 showsPlacementPreflight = false
@@ -5439,31 +5148,11 @@ private struct PositioningPanel: View {
         }
     }
 
-    private var placementModeLabel: String {
-        switch squadSession.state {
-        case .offline: "LOCAL PREVIEW MODE"
-        case .joined: "SHARED SQUAD MODE"
-        case .preparing, .waiting: "CONNECTING — PLACEMENT LOCKED"
-        case .unavailable: "PLACEMENT UNAVAILABLE"
-        }
-    }
+    private var placementModeLabel: String { "LOCAL POSITIONING" }
 
-    private var placementModeSystemImage: String {
-        switch squadSession.state {
-        case .offline: "visionpro"
-        case .joined: "shareplay"
-        case .preparing, .waiting: "hourglass"
-        case .unavailable: "exclamationmark.triangle.fill"
-        }
-    }
+    private var placementModeSystemImage: String { "visionpro" }
 
-    private var placementModeColor: Color {
-        switch squadSession.state {
-        case .offline: ReplayTheme.cyan
-        case .joined: ReplayTheme.signal
-        case .preparing, .waiting, .unavailable: ReplayTheme.orange
-        }
-    }
+    private var placementModeColor: Color { ReplayTheme.cyan }
 
     private var placementStatus: String {
         guard sharedSpace.hasUsableSharedPitchFrame else { return "POSITIONING PAUSED" }
@@ -5474,14 +5163,12 @@ private struct PositioningPanel: View {
 
     private var assignedTarget: FormationTarget? {
         store.physicalTriangleTarget(
-            participantID: squadSession.localParticipantID,
-            sharedSession: isSharedPhysicalSession
+            participantID: nil,
+            sharedSession: false
         )
     }
 
-    private var isSharedPhysicalSession: Bool {
-        squadSession.state == .joined && !store.isLocalTrianglePreview
-    }
+
 
     private var distanceToAssignedTarget: Float? {
         guard store.triangleLockMode == .place,
@@ -5517,14 +5204,14 @@ private struct PositioningPanel: View {
     private func correctionText(for target: FormationTarget) -> String? {
         guard sharedSpace.hasUsableSharedPitchFrame,
               let pose = sharedSpace.horizontalHeadsetPose else {
-            return "Positioning paused — stay still while the shared origin localizes."
+            return "Positioning paused — stay still while the local origin localizes."
         }
         let station = PitchSceneFactory.positionalTargetPoint(
             for: target,
             in: store.selectedScenario,
             mode: .place
         )
-        let displacement = SharedSpaceAnchorCoordinator.wearerRelativeDisplacement(
+        let displacement = LocalPitchAnchorCoordinator.wearerRelativeDisplacement(
             from: pose,
             targetX: station.x,
             targetZ: station.z

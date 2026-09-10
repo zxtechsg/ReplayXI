@@ -51,7 +51,7 @@ struct ReplayReviewLibraryView: View {
             }
 
             if !store.canRestoreSavedReview {
-                Label("Finish editing or leave the shared session to load a review.", systemImage: "lock")
+                Label("Finish editing or leave positioning mode to load a review.", systemImage: "lock")
                     .font(.subheadline).foregroundStyle(ReplayTheme.orange)
             }
         }
@@ -59,7 +59,7 @@ struct ReplayReviewLibraryView: View {
         .controlSize(.large)
         .padding(12)
         .onChange(of: store.canRestoreSavedReview) { _, allowed in
-            // A SharePlay join must not leave a stale load confirmation active.
+            // Editing or positioning must not leave a stale load confirmation active.
             if !allowed, case .restore = action { action = nil }
         }
     }

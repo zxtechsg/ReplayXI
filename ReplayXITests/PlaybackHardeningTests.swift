@@ -73,7 +73,7 @@ final class PlaybackHardeningTests: XCTestCase {
         let mark = try XCTUnwrap(
             store.registerPitchTap(PitchPoint(x: 8, z: 12))
         )
-        let coordinator = SquadSessionCoordinator(store: store)
+        let coordinator = LegacySnapshotCoordinator(store: store)
         store.setPlaybackRate(1)
 
         let originalPublished = try XCTUnwrap(
@@ -161,7 +161,7 @@ final class PlaybackHardeningTests: XCTestCase {
 
     func testCancelledGeometryPreviewRollsBackWithoutPublishing() throws {
         let store = ReplayStore()
-        let coordinator = SquadSessionCoordinator(store: store)
+        let coordinator = LegacySnapshotCoordinator(store: store)
         store.selectScenario(id: ExperienceKind.squadReplay.rawValue)
         store.seek(to: 6, broadcast: false)
         store.beginDrawing(.run)
@@ -206,7 +206,7 @@ final class PlaybackHardeningTests: XCTestCase {
         let player = ReplayStore()
         player.localRole = .player
         player.setCollaborationActive(true)
-        let coordinator = SquadSessionCoordinator(store: player)
+        let coordinator = LegacySnapshotCoordinator(store: player)
         coordinator.state = .joined
 
         let coachID = UUID(uuidString: "AAAAAAAA-0000-4000-8000-000000000101")!
@@ -262,7 +262,7 @@ final class PlaybackHardeningTests: XCTestCase {
         let player = ReplayStore()
         player.localRole = .player
         player.setCollaborationActive(true)
-        let coordinator = SquadSessionCoordinator(store: player)
+        let coordinator = LegacySnapshotCoordinator(store: player)
         coordinator.state = .joined
 
         let coachID = UUID(uuidString: "AAAAAAAA-0000-4000-8000-000000000301")!
@@ -348,7 +348,7 @@ final class PlaybackHardeningTests: XCTestCase {
         let player = ReplayStore()
         player.localRole = .player
         player.setCollaborationActive(true)
-        let coordinator = SquadSessionCoordinator(store: player)
+        let coordinator = LegacySnapshotCoordinator(store: player)
         coordinator.state = .joined
 
         let coachID = UUID(uuidString: "AAAAAAAA-0000-4000-8000-000000000201")!
@@ -381,7 +381,7 @@ final class PlaybackHardeningTests: XCTestCase {
 
     func testParticipantJoinSnapshotPreservesCommittedReviewDuringScrub() throws {
         let store = ReplayStore()
-        let coordinator = SquadSessionCoordinator(store: store)
+        let coordinator = LegacySnapshotCoordinator(store: store)
         store.seek(to: 4, broadcast: false)
         store.setPlaybackRate(1, broadcast: false)
         store.setPlaying(true)
@@ -404,7 +404,7 @@ final class PlaybackHardeningTests: XCTestCase {
 
     func testRewindSeekAndRateChangeResetHeartbeatProjectionOrigin() throws {
         let store = ReplayStore()
-        let coordinator = SquadSessionCoordinator(store: store)
+        let coordinator = LegacySnapshotCoordinator(store: store)
         store.seek(to: 12, broadcast: false)
         store.setPlaying(true)
 
@@ -531,7 +531,7 @@ final class PlaybackHardeningTests: XCTestCase {
             let player = ReplayStore()
             player.localRole = .player
             player.setCollaborationActive(true)
-            let coordinator = SquadSessionCoordinator(
+            let coordinator = LegacySnapshotCoordinator(
                 store: player,
                 receiveDate: { receivedAt }
             )
@@ -559,7 +559,7 @@ final class PlaybackHardeningTests: XCTestCase {
         let coachParticipantID = UUID(uuidString: "BBBBBBBB-0000-4000-8000-000000000502")!
         let sentAt = Date(timeIntervalSinceReferenceDate: 4_000)
         let receivedAt = sentAt.addingTimeInterval(0.5)
-        let coordinator = SquadSessionCoordinator(
+        let coordinator = LegacySnapshotCoordinator(
             store: player,
             receiveDate: { receivedAt }
         )
@@ -611,7 +611,7 @@ final class PlaybackHardeningTests: XCTestCase {
         let player = ReplayStore()
         player.localRole = .player
         player.setCollaborationActive(true)
-        let coordinator = SquadSessionCoordinator(
+        let coordinator = LegacySnapshotCoordinator(
             store: player,
             receiveDate: { currentReceiveDate }
         )
@@ -659,7 +659,7 @@ final class PlaybackHardeningTests: XCTestCase {
         let player = ReplayStore()
         player.localRole = .player
         player.setCollaborationActive(true)
-        let coordinator = SquadSessionCoordinator(
+        let coordinator = LegacySnapshotCoordinator(
             store: player,
             receiveDate: { currentReceiveDate }
         )
@@ -736,7 +736,7 @@ final class PlaybackHardeningTests: XCTestCase {
         let receivedAt = sentAt.addingTimeInterval(
             SharedTimelineProjector.maximumTransitAge + 1
         )
-        let coordinator = SquadSessionCoordinator(
+        let coordinator = LegacySnapshotCoordinator(
             store: player,
             receiveDate: { receivedAt }
         )

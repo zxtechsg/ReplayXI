@@ -2,8 +2,7 @@ import SwiftUI
 
 struct ReplayDashboardView: View {
     @Environment(ReplayStore.self) private var store
-    @Environment(SquadSessionCoordinator.self) private var squadSession
-    @Environment(SharedSpaceAnchorCoordinator.self) private var sharedSpace
+    @Environment(LocalPitchAnchorCoordinator.self) private var sharedSpace
     @Environment(\.openImmersiveSpace) private var openImmersiveSpace
     @Environment(\.dismissWindow) private var dismissWindow
 
@@ -35,9 +34,6 @@ struct ReplayDashboardView: View {
             .ignoresSafeArea()
         }
         .preferredColorScheme(.dark)
-        .task {
-            squadSession.startObserving()
-        }
         .task {
             let clock = ContinuousClock()
             var previous = clock.now
@@ -140,7 +136,7 @@ struct ReplayDashboardView: View {
                 return
             }
             await Task.yield()
-            store.statusMessage = "Opening the shared review room…"
+            store.statusMessage = "Opening spatial replay…"
             let result = await openImmersiveSpace(id: "ReplayRoom")
             store.isImmersiveOpen = result == .opened
             store.isOpeningImmersive = false
@@ -155,7 +151,6 @@ struct ReplayDashboardView: View {
 
 private struct ScenarioRail: View {
     @Environment(ReplayStore.self) private var store
-    @Environment(SquadSessionCoordinator.self) private var squadSession
     @State private var showsSavedReviews = false
     @State private var showsExercises = true
     @State private var lastScenarioByMode: [ReplayAppMode: String] = [:]
@@ -163,7 +158,7 @@ private struct ScenarioRail: View {
     private var activeMode: ReplayAppMode { ReplayAppMode(scenario: store.selectedScenario) }
     private var modeScenarios: [ReplayScenario] { activeMode.scenarios(in: store.scenarios) }
     private var navigationIsDisabled: Bool {
-        store.localRole == .player && squadSession.state == .joined
+        store.hasActiveTimelineScrub || store.hasActiveCoachMarkGeometryPreview
     }
 
     var body: some View {
@@ -383,7 +378,7 @@ private struct ScenarioWorkspace: View {
                     HStack(spacing: 10) {
                         MetricTile(value: "3", label: "Role stations")
                         MetricTile(value: "2", label: "Passing lanes")
-                        MetricTile(value: "1", label: "Shared origin")
+                        MetricTile(value: "1", label: "Local origin")
                         MetricTile(value: "0", label: "Running required")
                     }
                 }
@@ -462,7 +457,6 @@ private enum ShapeFocusStep: Int, CaseIterable, Identifiable {
 
 private struct ShapeFocusDashboard: View {
     @Environment(ReplayStore.self) private var store
-    @Environment(SquadSessionCoordinator.self) private var squadSession
 
     let openRoom: () -> Void
 
@@ -582,14 +576,14 @@ private struct ShapeFocusDashboard: View {
                 Spacer(minLength: 4)
 
                 StatusPill(
-                    text: squadSession.state == .joined ? "SQUAD READY" : "SOLO PREVIEW",
-                    systemImage: squadSession.state == .joined ? "shareplay" : "person.crop.circle",
-                    color: squadSession.state == .joined ? ReplayTheme.signal : .secondary
+                    text: "LOCAL POSITIONING",
+                    systemImage: "person.crop.circle",
+                    color: ReplayTheme.cyan
                 )
             }
 
             Label(
-                "Squad stations use nearby SharePlay; solo mode provides a local-only preview. Both require a clear 5 m × 3 m area, explicit confirmation, and no running.",
+                "Station markers stay on this device. Use a clear 5 m × 3 m area, confirm it is safe, and never run in the headset.",
                 systemImage: "checkmark.shield.fill"
             )
             .font(.caption2.weight(.semibold))
@@ -627,7 +621,7 @@ private struct ShapeFocusDashboard: View {
         case .ideal:
             "#8 stays inside and beneath the play, #7 holds the wide return, and #2 goes outside and beyond."
         case .physical:
-            "Each wearer chooses one role station and receives a slow, local correction toward the shared triangle."
+            "Choose a role station and compare your headset position with the local triangle."
         }
     }
 
@@ -739,7 +733,6 @@ private struct ShapeFocusStepButton: View {
 
 private struct DashboardTransport: View {
     @Environment(ReplayStore.self) private var store
-    @Environment(SquadSessionCoordinator.self) private var squadSession
 
     private var scenario: ReplayScenario { store.selectedScenario }
 
@@ -775,11 +768,7 @@ private struct DashboardTransport: View {
                 .disabled(playbackControlsAreDisabled)
 
                 Button {
-                    if isJoinedPlayer {
-                        squadSession.setFollowingCoach(store.isLocallyPaused)
-                    } else {
-                        store.togglePlayback()
-                    }
+                    store.togglePlayback()
                 } label: {
                     Image(systemName: playbackIcon)
                         .frame(width: 26)
@@ -849,26 +838,14 @@ private struct DashboardTransport: View {
     }
 
     private var playbackControlsAreDisabled: Bool {
-        store.localRole != .coach && squadSession.state == .joined
+        store.hasActiveCoachMarkGeometryPreview
     }
 
-    private var isJoinedPlayer: Bool {
-        store.localRole == .player && squadSession.state == .joined
-    }
 
-    private var playbackIcon: String {
-        if isJoinedPlayer {
-            return store.isLocallyPaused ? "arrow.clockwise" : "pause.fill"
-        }
-        return store.isActivelyPlaying ? "pause.fill" : "play.fill"
-    }
 
-    private var playbackLabel: String {
-        if isJoinedPlayer {
-            return store.isLocallyPaused ? "Resume following coach" : "Pause locally"
-        }
-        return store.isActivelyPlaying ? "Pause replay" : "Play replay"
-    }
+    private var playbackIcon: String { store.isActivelyPlaying ? "pause.fill" : "play.fill" }
+
+    private var playbackLabel: String { store.isActivelyPlaying ? "Pause replay" : "Play replay" }
 
     private func handleScrubbing(_ editing: Bool) {
         if editing {
@@ -878,7 +855,7 @@ private struct DashboardTransport: View {
 
         let finalPlayhead = store.playhead
         guard store.commitTimelineScrub(to: finalPlayhead) else { return }
-        squadSession.broadcastCurrentState()
+        store.flushReviewAutosave()
     }
 
     private func previewScrub(to time: TimeInterval) {
@@ -904,7 +881,6 @@ private struct DashboardTransport: View {
 
 private struct PlaybackConsole: View {
     @Environment(ReplayStore.self) private var store
-    @Environment(SquadSessionCoordinator.self) private var squadSession
     @State private var rosterTeam: FootballTeam = .home
 
     var scenario: ReplayScenario { store.selectedScenario }
@@ -939,7 +915,7 @@ private struct PlaybackConsole: View {
                         }
                         .buttonStyle(.bordered)
                         .tint(moment.id == store.activeMoment?.id ? ReplayTheme.orange : .white.opacity(0.45))
-                        .disabled(store.localRole != .coach && squadSession.state == .joined)
+                        .disabled(store.hasActiveCoachMarkGeometryPreview)
                     }
                 }
             }
@@ -1065,76 +1041,20 @@ private struct PlaybackConsole: View {
 
 private struct RoomRail: View {
     @Environment(ReplayStore.self) private var store
-    @Environment(SquadSessionCoordinator.self) private var squadSession
-    @Environment(SharedSpaceAnchorCoordinator.self) private var sharedSpace
+    @Environment(LocalPitchAnchorCoordinator.self) private var sharedSpace
 
     let openRoom: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Eyebrow(text: "Review room")
-                    Spacer()
-                    Circle()
-                        .fill(squadSession.state == .joined ? ReplayTheme.signal : .secondary)
-                        .frame(width: 8, height: 8)
-                }
-
-                HStack(alignment: .firstTextBaseline) {
-                    Text(squadSession.state == .joined ? "\(squadSession.participantCount)" : "1")
-                        .font(.system(size: 34, weight: .black, design: .rounded))
-                    Text(
-                        squadSession.state == .joined
-                            ? (squadSession.participantCount == 1 ? "player connected" : "players connected")
-                            : "solo preview"
-                    )
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                }
-
-                StatusPill(
-                    text: squadSession.state.label,
-                    systemImage: squadSession.state == .joined ? "shareplay" : "person.crop.circle"
-                )
-
-                Picker("Local role", selection: Binding(
-                    get: { store.localRole },
-                    set: { store.localRole = $0 }
-                )) {
-                    ForEach(SquadRole.allCases, id: \.self) { role in
-                        Text(role.title).tag(role)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .disabled(squadSession.state != .offline)
-
-                Button {
-                    Task { await squadSession.startSharePlay() }
-                } label: {
-                    Label("Start squad SharePlay", systemImage: "shareplay")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .disabled(
-                    squadSession.state == .preparing
-                        || squadSession.state == .waiting
-                        || squadSession.state == .joined
-                )
-
-                ShareLink(
-                    item: ReplayXIActivity(
-                        roomID: squadSession.localID,
-                        scenarioID: store.selectedScenarioID,
-                        coachInstanceID: squadSession.localID
-                    ),
-                    preview: SharePreview("Replay XI review room")
-                ) {
-                    Label("Invite via Share menu", systemImage: "square.and.arrow.up")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .disabled(squadSession.state == .preparing || squadSession.state == .waiting)
+                Eyebrow(text: "Your review")
+                Label("Local experience", systemImage: "visionpro")
+                    .font(.title3.weight(.bold))
+                Text("Replay, switch players and annotate. Reviews stay on this device.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(20)
 
@@ -1142,9 +1062,9 @@ private struct RoomRail: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Eyebrow(text: "Navy XI seats")
+                    Eyebrow(text: "Home XI perspectives")
                     Spacer()
-                    Text("\(liveSeatCount) LIVE • \(11 - min(liveSeatCount, 11)) SIM")
+                    Text("11 SIMULATED")
                         .font(.caption2.monospacedDigit().weight(.bold))
                         .foregroundStyle(.secondary)
                 }
@@ -1200,26 +1120,10 @@ private struct RoomRail: View {
         }
     }
 
-    private var liveSeatCount: Int {
-        if squadSession.state == .offline { return 0 }
-        return min(store.participantSeatAssignments.count, 11)
-    }
+
 
     private func seatState(playerID: String) -> String {
-        if store.localRole == .coach, store.localPerspectiveID == playerID {
-            return "VIEWING"
-        }
-        if let localParticipantID = squadSession.localParticipantID,
-           store.participantSeatAssignments[localParticipantID] == playerID {
-            return "YOU"
-        }
-        if store.participantSeatAssignments.values.contains(playerID) { return "LIVE" }
-        if squadSession.state == .offline,
-           store.localRole == .player,
-           store.localPerspectiveID == playerID {
-            return "YOU"
-        }
-        return "SIM"
+        store.localPerspectiveID == playerID ? "VIEWING" : "SIM"
     }
 }
 
@@ -1240,7 +1144,7 @@ private struct SeatRow: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(player.role)
                         .font(.caption.weight(.bold))
-                    Text(state == "VIEWING" ? "COACH POV" : (selected ? "OWN POV" : player.displayName))
+                    Text(selected ? "PLAYER POV" : player.displayName)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)

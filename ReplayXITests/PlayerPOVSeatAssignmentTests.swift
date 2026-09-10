@@ -15,7 +15,7 @@ final class PlayerPOVSeatAssignmentTests: XCTestCase {
         let player = ReplayStore()
         player.localRole = .player
         player.setCollaborationActive(true)
-        let coordinator = SquadSessionCoordinator(
+        let coordinator = LegacySnapshotCoordinator(
             store: player,
             receiveDate: { receivedAt }
         )
@@ -90,7 +90,7 @@ final class PlayerPOVSeatAssignmentTests: XCTestCase {
         let player = ReplayStore()
         player.localRole = .player
         player.setCollaborationActive(true)
-        let coordinator = SquadSessionCoordinator(
+        let coordinator = LegacySnapshotCoordinator(
             store: player,
             receiveDate: { receivedAt }
         )

@@ -1662,7 +1662,7 @@ final class ReplayXITests: XCTestCase {
 
     func testLocalCoachPOVImmediatelyPausesSquadWithoutReplacingSharedView() throws {
         let store = ReplayStore()
-        let coordinator = SquadSessionCoordinator(store: store)
+        let coordinator = LegacySnapshotCoordinator(store: store)
         coordinator.state = .joined
         coordinator.authoritativeCoachID = coordinator.localID
         store.setCollaborationActive(true)
@@ -1701,7 +1701,7 @@ final class ReplayXITests: XCTestCase {
 
     func testHeartbeatProjectionAdvancesAcrossIntervalsAndPreservesPublishedPerspective() throws {
         let store = ReplayStore()
-        let coordinator = SquadSessionCoordinator(store: store)
+        let coordinator = LegacySnapshotCoordinator(store: store)
         store.setCollaborationActive(true)
         store.broadcastPerspective("navy-rw")
         store.seek(to: 3, broadcast: false)
@@ -1733,7 +1733,7 @@ final class ReplayXITests: XCTestCase {
 
     func testHeartbeatProjectionStopsAtScenarioEndAndDoesNotRestart() throws {
         let store = ReplayStore()
-        let coordinator = SquadSessionCoordinator(store: store)
+        let coordinator = LegacySnapshotCoordinator(store: store)
         let duration = store.selectedScenario.duration
         store.setCollaborationActive(true)
         store.seek(to: duration - 0.25, broadcast: false)
@@ -2176,7 +2176,7 @@ final class ReplayXITests: XCTestCase {
     }
 
     func testPhysicalPlacementRouteIsUnavailableDuringSharePlayTransitions() {
-        let coordinator = SquadSessionCoordinator(store: ReplayStore())
+        let coordinator = LegacySnapshotCoordinator(store: ReplayStore())
 
         coordinator.state = .offline
         XCTAssertEqual(coordinator.physicalPlacementRoute, .localPreview)
@@ -2191,13 +2191,13 @@ final class ReplayXITests: XCTestCase {
     }
 
     func testPositionCorrectionRotatesIntoWearerHeading() {
-        let facingPitchForward = SharedSpaceAnchorCoordinator.HorizontalHeadsetPose(
+        let facingPitchForward = LocalPitchAnchorCoordinator.HorizontalHeadsetPose(
             x: 0,
             z: 0,
             yawRadians: 0,
             sampledAt: 1
         )
-        let forward = SharedSpaceAnchorCoordinator.wearerRelativeDisplacement(
+        let forward = LocalPitchAnchorCoordinator.wearerRelativeDisplacement(
             from: facingPitchForward,
             targetX: 1,
             targetZ: -2
@@ -2205,13 +2205,13 @@ final class ReplayXITests: XCTestCase {
         XCTAssertEqual(forward.rightMetres, 1, accuracy: 0.000_1)
         XCTAssertEqual(forward.forwardMetres, 2, accuracy: 0.000_1)
 
-        let facingPitchRight = SharedSpaceAnchorCoordinator.HorizontalHeadsetPose(
+        let facingPitchRight = LocalPitchAnchorCoordinator.HorizontalHeadsetPose(
             x: 0,
             z: 0,
             yawRadians: .pi / 2,
             sampledAt: 2
         )
-        let rotated = SharedSpaceAnchorCoordinator.wearerRelativeDisplacement(
+        let rotated = LocalPitchAnchorCoordinator.wearerRelativeDisplacement(
             from: facingPitchRight,
             targetX: 2,
             targetZ: 0
@@ -3246,7 +3246,7 @@ final class ReplayXITests: XCTestCase {
         let player = ReplayStore()
         player.localRole = .player
         player.setCollaborationActive(true)
-        let coordinator = SquadSessionCoordinator(store: player)
+        let coordinator = LegacySnapshotCoordinator(store: player)
         coordinator.state = .joined
 
         let coachID = UUID(uuidString: "AAAAAAAA-0000-4000-8000-000000000010")!
@@ -3325,7 +3325,7 @@ final class ReplayXITests: XCTestCase {
 
     func testLeavingRoomClearsStaleSynchronizationTimestamp() {
         let store = ReplayStore()
-        let coordinator = SquadSessionCoordinator(store: store)
+        let coordinator = LegacySnapshotCoordinator(store: store)
         coordinator.state = .joined
         coordinator.lastSync = Date()
 

@@ -59,7 +59,7 @@ final class LocalPOVIsolationTests: XCTestCase {
 
     func testPrivateCoachCameraChangeKeepsPublishedSquadPOVUntilExplicitShare() throws {
         let store = ReplayStore()
-        let coordinator = SquadSessionCoordinator(store: store)
+        let coordinator = LegacySnapshotCoordinator(store: store)
         coordinator.state = .joined
         coordinator.authoritativeCoachID = coordinator.localID
         store.setCollaborationActive(true)

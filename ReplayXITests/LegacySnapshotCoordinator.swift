@@ -1,11 +1,11 @@
-import Combine
+// Legacy snapshot compatibility harness. Test-only; no networking or Apple group APIs.
 import Foundation
-import GroupActivities
 import Observation
+@testable import ReplayXI
 
 @MainActor
 @Observable
-final class SquadSessionCoordinator {
+final class LegacySnapshotCoordinator {
     enum PhysicalPlacementRoute: Equatable {
         case localPreview
         case sharedSquad
@@ -53,12 +53,6 @@ final class SquadSessionCoordinator {
     }
 
     @ObservationIgnored private weak var store: ReplayStore?
-    @ObservationIgnored private var groupSession: GroupSession<ReplayXIActivity>?
-    @ObservationIgnored private var messenger: GroupSessionMessenger?
-    @ObservationIgnored private var sessionObservationTask: Task<Void, Never>?
-    @ObservationIgnored private var messageTask: Task<Void, Never>?
-    @ObservationIgnored private var heartbeatTask: Task<Void, Never>?
-    @ObservationIgnored private var cancellables: Set<AnyCancellable> = []
     @ObservationIgnored private var nextSequence: UInt64 = 1
     @ObservationIgnored private var sequenceGate = SequenceGate()
     /// Last state the coach deliberately published. Heartbeats resend this
@@ -87,52 +81,15 @@ final class SquadSessionCoordinator {
         }
     }
 
-    func startObserving() {
-        guard sessionObservationTask == nil else { return }
-        sessionObservationTask = Task { [weak self] in
-            for await session in ReplayXIActivity.sessions() {
-                guard let self, !Task.isCancelled else { return }
-                await self.configure(session)
-            }
-        }
-    }
 
-    func startSharePlay() async {
-        guard let store else { return }
-        guard state == .offline || {
-            if case .unavailable = state { return true }
-            return false
-        }() else { return }
-        store.discardLocalTrianglePreviewForSessionTransition()
-        state = .preparing
-        let activity = ReplayXIActivity(
-            roomID: localID,
-            scenarioID: store.selectedScenarioID,
-            coachInstanceID: localID
-        )
-        roomID = activity.roomID
 
-        do {
-            let activated = try await activity.activate()
-            if activated {
-                state = .waiting
-            } else {
-                roomID = nil
-                state = .offline
-            }
-        } catch {
-            roomID = nil
-            state = .unavailable("SharePlay could not start")
-        }
-    }
+
 
     func leaveRoom() {
-        groupSession?.leave()
         cleanUpSession()
     }
 
     func endRoom() {
-        groupSession?.end()
         cleanUpSession()
     }
 
@@ -190,87 +147,11 @@ final class SquadSessionCoordinator {
         applyLocalSeatAssignment(force: true)
     }
 
-    private func configure(_ session: GroupSession<ReplayXIActivity>) async {
-        if let existing = groupSession, existing.id != session.id {
-            existing.leave()
-        }
-        cleanUpSession(keepObserver: true)
-        groupSession = session
-        roomID = session.activity.roomID
-        localParticipantID = session.localParticipant.id
-        authoritativeCoachID = session.activity.coachInstanceID
-        store?.localRole = session.isLocallyInitiated ? .coach : .player
-        authoritativeCoachParticipantID = session.isLocallyInitiated
-            ? session.localParticipant.id
-            : nil
-        if let scenarioID = store?.scenarios.first(where: { $0.id == session.activity.scenarioID })?.id {
-            store?.selectScenario(id: scenarioID, broadcast: false)
-        }
 
-        if let coordinator = await session.systemCoordinator {
-            var configuration = SystemCoordinator.Configuration()
-            configuration.supportsGroupImmersiveSpace = true
-            configuration.spatialTemplatePreference = .sideBySide.contentExtent(2.8)
-            coordinator.configuration = configuration
-            supportsGroupImmersiveSpace = true
-        }
 
-        let messenger = GroupSessionMessenger(session: session, deliveryMode: .reliable)
-        self.messenger = messenger
-        subscribe(to: session)
-        receiveMessages(with: messenger)
-        session.join()
-        state = .waiting
-    }
 
-    private func subscribe(to session: GroupSession<ReplayXIActivity>) {
-        session.$activeParticipants
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] participants in
-                guard let self else { return }
-                participantCount = max(participants.count, 1)
-                nearbyParticipantCount = max(participants.filter(\.isNearbyWithLocalParticipant).count, 1)
-                if isAuthoritativeCoach {
-                    updateSeatAssignments(for: participants, localParticipant: session.localParticipant)
-                    publishParticipantChange()
-                }
-            }
-            .store(in: &cancellables)
 
-        session.$state
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] sessionState in
-                guard let self else { return }
-                switch sessionState {
-                case .waiting:
-                    state = .waiting
-                    store?.setCollaborationActive(false)
-                case .joined:
-                    let wasJoined = state == .joined
-                    state = .joined
-                    store?.setCollaborationActive(true)
-                    if !wasJoined {
-                        sendRequestState()
-                        startHeartbeat()
-                    }
-                case .invalidated:
-                    cleanUpSession()
-                @unknown default:
-                    state = .unavailable("Unknown SharePlay session state")
-                    store?.setCollaborationActive(false)
-                }
-            }
-            .store(in: &cancellables)
-    }
 
-    private func receiveMessages(with messenger: GroupSessionMessenger) {
-        messageTask = Task { [weak self] in
-            for await (command, context) in messenger.messages(of: SharedCommand.self) {
-                guard let self, !Task.isCancelled else { return }
-                receive(command, sourceParticipantID: context.source.id)
-            }
-        }
-    }
 
     private func receive(_ command: SharedCommand, sourceParticipantID: UUID) {
         guard command.authorID != localID else { return }
@@ -516,50 +397,11 @@ final class SquadSessionCoordinator {
         return lastPublishedSnapshot
     }
 
-    private func broadcast(snapshot: SharedPlaybackSnapshot) {
-        guard state == .joined, isAuthoritativeCoach, let messenger, let store else { return }
-        let command = SharedCommand(
-            kind: .sync,
-            sequence: takeSequence(),
-            authorID: localID,
-            sentAt: Date(),
-            authorRole: store.localRole,
-            snapshot: snapshot,
-            mark: nil
-        )
-        Task {
-            try? await messenger.send(command)
-        }
-    }
+    private func broadcast(snapshot: SharedPlaybackSnapshot) {}
 
-    private func sendRequestState() {
-        guard let messenger, let store else { return }
-        let command = SharedCommand(
-            kind: .requestState,
-            sequence: takeSequence(),
-            authorID: localID,
-            sentAt: Date(),
-            authorRole: store.localRole,
-            snapshot: nil,
-            mark: nil
-        )
-        Task {
-            try? await messenger.send(command)
-        }
-    }
+    private func sendRequestState() {}
 
-    private func startHeartbeat() {
-        heartbeatTask?.cancel()
-        heartbeatTask = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(2))
-                guard let self, state == .joined else { continue }
-                if isAuthoritativeCoach {
-                    rebroadcastPublishedState()
-                }
-            }
-        }
-    }
+
 
     private func takeSequence() -> UInt64 {
         defer { nextSequence &+= 1 }
@@ -567,10 +409,6 @@ final class SquadSessionCoordinator {
     }
 
     private func cleanUpSession(keepObserver: Bool = false) {
-        messageTask?.cancel()
-        heartbeatTask?.cancel()
-        messageTask = nil
-        heartbeatTask = nil
         sequenceGate.reset()
         nextSequence = 1
         lastPublishedSnapshot = nil
@@ -578,9 +416,6 @@ final class SquadSessionCoordinator {
         lastCoachSnapshotReceivedAt = .distantPast
         awaitsFreshCoachSnapshotForRejoin = false
         lastSync = .distantPast
-        cancellables.removeAll()
-        messenger = nil
-        groupSession = nil
         participantCount = 1
         nearbyParticipantCount = 1
         supportsGroupImmersiveSpace = false
@@ -598,37 +433,7 @@ final class SquadSessionCoordinator {
         authoritativeCoachID == localID && store?.localRole == .coach
     }
 
-    private func updateSeatAssignments(
-        for participants: Set<Participant>,
-        localParticipant: Participant
-    ) {
-        guard let store else { return }
-        let playerParticipants = participants.filter { $0.id != authoritativeCoachParticipantID }
-        let participantIDs = Set(playerParticipants.map(\.id))
-        var assignments = store.participantSeatAssignments.filter { participantIDs.contains($0.key) }
-        let physicalPlayerIDs = store.selectedScenario.kind == .shapeLab
-            ? store.selectedScenario.formationTargets.map(\.playerID)
-            : []
-        let playerIDs = physicalPlayerIDs + store.selectedScenario.homePlayers.map(\.id).filter {
-            !physicalPlayerIDs.contains($0)
-        }
-        var availablePlayerIDs = playerIDs.filter { !Set(assignments.values).contains($0) }
 
-        let orderedParticipants = playerParticipants.sorted {
-            if $0.id == localParticipant.id { return true }
-            if $1.id == localParticipant.id { return false }
-            return $0.id.uuidString < $1.id.uuidString
-        }
-        for participant in orderedParticipants where assignments[participant.id] == nil {
-            guard !availablePlayerIDs.isEmpty else { break }
-            assignments[participant.id] = availablePlayerIDs.removeFirst()
-        }
-        store.participantSeatAssignments = assignments
-        if store.selectedScenario.kind == .shapeLab {
-            store.prioritizePhysicalTriangleAssignments()
-        }
-        applyLocalSeatAssignment()
-    }
 
     private func applyLocalSeatAssignment(force: Bool = false) {
         guard let store,

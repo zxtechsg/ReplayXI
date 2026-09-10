@@ -39,9 +39,9 @@ enum DemoScenarios {
             title: "Eleven Eyes",
             strapline: "One moment. Eleven honest pictures.",
             matchContext: matchContext,
-            objective: "Keep the squad on one clock while every player reviews the move from their own position.",
+            objective: "Review the same move from any of the 22 player positions on one local timeline.",
             coachPrompt: "Stay in your own eyes. Notice when the outside lane first becomes available.",
-            proofPoint: "The whole side can review one event together without losing the context unique to each role.",
+            proofPoint: "Switch roles to see what each player could see, then annotate the same moment.",
             duration: sequenceDuration,
             // Match Playback opens on the stable tactical board so the coach
             // can scrub, select and annotate before deliberately entering a
@@ -55,12 +55,12 @@ enum DemoScenarios {
             players: commonPlayers,
             ball: commonBall,
             moments: [
-                cue("squad-ready", 0, "SQUAD SYNC", "Eleven roles, one clock", "Every Northbridge role is attached to the same deterministic match timeline."),
+                cue("squad-ready", 0, "TEAM PERSPECTIVES", "Eleven roles, one clock", "Every Northbridge role is attached to the same deterministic match timeline."),
                 cue("squad-build", 4.2, "BUILD-UP", "The right side opens", "The right centre-back carries forward and fixes the first line of pressure."),
                 cue("squad-receive", 9.8, "OWN EYES", "The winger checks short", "Each player sees a different picture as the ball travels into the right winger."),
                 cue("squad-window", 13.6, "DECISION", "The overlap breaks the line", "The right-back moves beyond the recovering winger while the full-back is drawn inside."),
                 cue("squad-cutback", 18.2, "FINAL THIRD", "The cut-back is on", "The right midfielder arrives behind the holding player instead of crowding the forward line."),
-                cue("squad-finish", 24.5, "OUTCOME", "The move reaches the far corner", "The same sequence can now be rewound without changing anyone's assigned perspective.")
+                cue("squad-finish", 24.5, "OUTCOME", "The move reaches the far corner", "Rewind the same sequence while keeping your chosen perspective.")
             ],
             coachMarks: [
                 mark("00000000-0000-4000-8000-000000000101", .pass, 12, -10, 25, 1, "Break the first line", 4.2),
@@ -90,11 +90,11 @@ enum DemoScenarios {
             id: "everyone-with-seven",
             kind: .coachFocus,
             title: "Everyone With Seven",
-            strapline: "Put the whole room inside the decision.",
+            strapline: "Step inside the decision.",
             matchContext: matchContext,
-            objective: "Broadcast the right winger's view and make the timing of the overlap visible to every role.",
+            objective: "Review the right winger's view and mark the timing of the overlap.",
             coachPrompt: "Everybody with seven. Read the full-back's hips, then find the runner outside him.",
-            proofPoint: "A coach can move the squad to one player's view and place instructions directly in that player's picture.",
+            proofPoint: "Select a player and place instructions directly in that player's view.",
             duration: sequenceDuration,
             defaultViewMode: .firstPerson,
             defaultPerspectiveID: "navy-rw",
@@ -102,8 +102,8 @@ enum DemoScenarios {
             players: commonPlayers,
             ball: commonBall,
             moments: [
-                cue("focus-context", 0, "TOUCHLINE", "See the full move first", "The shared tactical view establishes the press before the squad changes perspective."),
-                cue("focus-lock", 9.8, "COACH FOCUS", "Everybody with seven", "The squad freezes on the winger's first touch at the same match time."),
+                cue("focus-context", 0, "TOUCHLINE", "See the full move first", "The tactical view establishes the press before you change perspective."),
+                cue("focus-lock", 9.8, "COACH FOCUS", "Everybody with seven", "Pause on the winger's first touch and inspect the options."),
                 cue("focus-hips", 11.6, "READ THE DEFENDER", "The full-back steps inside", "Eastport's left-back turns towards the ball and gives up the space behind his outside shoulder."),
                 cue("focus-release", 14.1, "RELEASE", "Play before the lane closes", "The recovering wide player is still behind the overlapping right-back."),
                 cue("focus-result", 18.2, "REWARD", "The runner reaches the byline", "The winger's early release creates a cut-back rather than a crowded cross.")
@@ -133,7 +133,7 @@ enum DemoScenarios {
             matchContext: matchContext,
             objective: "Set the right-back, right winger, and right midfielder at three distinct heights around the press.",
             coachPrompt: "Seven wider. Eight beneath the cover shadow. Two hold the outside route.",
-            proofPoint: "Three nearby players can understand relative spacing through shared targets without running in the headset.",
+            proofPoint: "Explore three role stations and relative spacing on one headset without running.",
             duration: sequenceDuration,
             defaultViewMode: .positional,
             defaultPerspectiveID: "navy-rcm",
@@ -145,7 +145,7 @@ enum DemoScenarios {
                 cue("shape-flat", 8.0, "SHAPE CHECK", "The unit is almost flat", "From eight, the winger and full-back stack on one passing angle, so the holding defender can screen both."),
                 cue("shape-stagger", 15.0, "ADJUST", "Create three heights", "The right-back continues outside while the midfielder stays beneath the ball."),
                 cue("shape-green", 16.0, "TRIANGLE LOCK", "Two lanes stay open", "The press can take away one pass, but not both the overlap and the inside return."),
-                cue("shape-transfer", 20.0, "TRANSFER", "Carry the picture into play", "The shared targets correspond directly to the full-scale replay positions.")
+                cue("shape-transfer", 20.0, "TRANSFER", "Carry the picture into play", "The local targets correspond directly to the full-scale replay positions.")
             ],
             coachMarks: [
                 mark("00000000-0000-4000-8000-000000000301", .pass, 26, 8, 27, 22, "Back to winger", 7.5),

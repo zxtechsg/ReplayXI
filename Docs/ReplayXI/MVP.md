@@ -1,5 +1,9 @@
 # Replay XI — MVP Runbook
 
+> Current scope: **local-only Replay XI**. See [Local experience](LOCAL_EXPERIENCE.md)
+> for current features and personal-team signing. Multiplayer descriptions in
+> this original runbook are historical and no longer describe the app.
+
 Replay XI is a stationary visionOS prototype for collaborative football review. It demonstrates how a coach and squad could inspect one reconstructed move from player-level viewpoints, lock everyone to one perspective, compare positioning, reveal passing channels, and annotate the pitch in shared spatial context.
 
 This build is an experience prototype, not a match-reconstruction or performance-analysis product. Its job is to make the proposed workflow tangible while keeping every data, tracking, safety, and multi-device claim explicit.

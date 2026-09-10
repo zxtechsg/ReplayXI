@@ -276,6 +276,22 @@ final class ReplayStore {
     }
 
     var savedReviews: [SavedReplayReview] { reviewLibrary.savedReviews }
+
+    /// The app has one local editor. Keep saved timeline/marks/POV, but never
+    /// restore a remote role, a coach lock or a transport callback on launch.
+    func prepareForLocalExperience() {
+        onBroadcastSnapshot = nil
+        setCollaborationActive(false)
+        localRole = .coach
+        coachLockEnabled = false
+        coachFocusPerspectiveID = nil
+        isCoachLocalReview = false
+        followsCoach = true
+        isLocallyPaused = false
+        participantSeatAssignments.removeAll()
+        statusMessage = "Local replay ready"
+    }
+
     var autosavedReview: SavedReplayReview? { reviewLibrary.autosavedReview }
     var reviewSaveStatus: String {
         reviewLibrary.usesDisk ? reviewLibrary.status : "\(reviewLibrary.status) · saves are temporary"

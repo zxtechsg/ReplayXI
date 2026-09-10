@@ -1,9 +1,7 @@
 import Foundation
 
 /// Local presentation cadence for both the dashboard preview and immersive
-/// playback. Shared-session authority remains on SquadSessionCoordinator's
-/// independent heartbeat; this clock only decides how smoothly a headset
-/// samples the already-authoritative timeline.
+/// playback. This clock controls how smoothly the headset samples the local timeline.
 enum ReplayPresentationClock {
     /// Roughly 60 Hz. This halves the match-time transform step compared with
     /// the former 33 ms loop, including while reviewing at 4×.

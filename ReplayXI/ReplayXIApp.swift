@@ -1,12 +1,10 @@
-import GroupActivities
 import SwiftUI
 
 @main
 struct ReplayXIApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @State private var store: ReplayStore
-    @State private var squadSession: SquadSessionCoordinator
-    @State private var sharedSpace: SharedSpaceAnchorCoordinator
+    @State private var sharedSpace: LocalPitchAnchorCoordinator
 
     init() {
         // Test hosts and scripted demos never touch production saves. A normal
@@ -21,7 +19,8 @@ struct ReplayXIApp: App {
             : ReplayReviewLibrary.persistent(scenarios: scenarios)
         let store = ReplayStore(scenarios: scenarios, reviewLibrary: library)
         if !isTestHost && !hasDemoRoute { store.restoreAutosavedReview() }
-        let sharedSpace = SharedSpaceAnchorCoordinator()
+        store.prepareForLocalExperience()
+        let sharedSpace = LocalPitchAnchorCoordinator()
         sharedSpace.onSelectedAnchorRemoved = { [weak store] anchorID in
             store?.handleSharedPitchAnchorRemoval(anchorID)
         }
@@ -29,7 +28,6 @@ struct ReplayXIApp: App {
             Task { await sharedSpace?.removeLocallyPlacedPitchAnchor() }
         }
         _store = State(initialValue: store)
-        _squadSession = State(initialValue: SquadSessionCoordinator(store: store))
         _sharedSpace = State(initialValue: sharedSpace)
     }
 
@@ -37,14 +35,9 @@ struct ReplayXIApp: App {
         WindowGroup(id: "ReplayDashboard") {
             ReplayDashboardView()
                 .environment(store)
-                .environment(squadSession)
                 .environment(sharedSpace)
-                .groupActivityAssociation(
-                    store.isImmersiveOpen ? nil : .primary("ReplayXIReviewRoom")
-                )
         }
         .defaultSize(width: 1_380, height: 820)
-        .handlesExternalEvents(matching: ["ReplayXIReviewRoom"])
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { store.flushReviewAutosave() }
         }
@@ -52,9 +45,7 @@ struct ReplayXIApp: App {
         ImmersiveSpace(id: "ReplayRoom") {
             FootballImmersiveView()
                 .environment(store)
-                .environment(squadSession)
                 .environment(sharedSpace)
-                .groupActivityAssociation(.primary("ReplayXIReviewRoom"))
         }
         .immersionStyle(selection: .constant(.mixed), in: .mixed)
     }
