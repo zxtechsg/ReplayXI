@@ -1,8 +1,7 @@
 import CoreGraphics
 
-/// Device-local comfort presets for the head-following Playback console.
-/// They never enter shared state: every wearer can choose the angular size and
-/// reach distance that works for them without moving another headset's UI.
+/// Comfort presets for the room-anchored Playback console. Offsets are relative
+/// to the captured workspace origin, not the wearer's current head position.
 enum PlaybackControlDeckPreset: String, CaseIterable, Hashable, Sendable {
     case near
     case standard
@@ -75,7 +74,7 @@ struct PlaybackControlDeckLayout: Equatable, Sendable {
     }
 }
 
-/// A small, independent head-following surface for view and overlay choices.
+/// A small room-anchored surface for view and overlay choices.
 /// Its negative horizontal offset keeps it in the upper-left comfort quadrant
 /// without covering either the replayed player's sightline or the transport.
 struct PlaybackViewHUDLayout: Equatable, Sendable {

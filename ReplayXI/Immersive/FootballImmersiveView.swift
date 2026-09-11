@@ -7,8 +7,6 @@ struct FootballImmersiveView: View {
     @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @Environment(\.accessibilityPrefersHeadAnchorAlternative)
-    private var accessibilityPrefersHeadAnchorAlternative
     @AppStorage("ReplayXI.PlaybackControlDeckPreset") private var controlDeckPresetRawValue =
         PlaybackControlDeckPreset.standard.rawValue
     @State private var selectedAnnotationID: UUID?
@@ -22,6 +20,7 @@ struct FootballImmersiveView: View {
     // integration explicit without coupling the control surface to the renderer.
     @State private var emphasizesBall = true
     @State private var accessibilityActivationSubscription: EventSubscription?
+    @State private var controlPlacementRevision = 0
 
     private var controlDeckPreset: PlaybackControlDeckPreset {
         PlaybackControlDeckPreset(rawValue: controlDeckPresetRawValue) ?? .standard
@@ -45,17 +44,9 @@ struct FootballImmersiveView: View {
         RealityView { content, attachments in
             let root = PitchSceneFactory.makeMatchRoot(for: store.selectedScenario)
             content.add(root)
-            // Normal playback follows the physical wearer independently of the
-            // replayed player's moving POV. When assistive technology conflicts
-            // with head-locked content, `.once` captures the initial head pose
-            // and then leaves the controls stable in the room.
-            let controlsAnchor = AnchorEntity(
-                .head,
-                trackingMode: PlaybackAttachmentPlacement.controlAnchorTrackingMode(
-                    prefersHeadAnchorAlternative: accessibilityPrefersHeadAnchorAlternative
-                )
+            let controlsAnchor = PlaybackAttachmentPlacement.makeAnchor(
+                revision: controlPlacementRevision
             )
-            controlsAnchor.name = "playback-controls-head-anchor"
             content.add(controlsAnchor)
             if accessibilityActivationSubscription == nil {
                 accessibilityActivationSubscription = content.subscribe(
@@ -138,18 +129,22 @@ struct FootballImmersiveView: View {
                 )
                 applyLocalOverlayVisibility(to: root)
             }
-            // Attachments do not inherit the match-root presentation transform.
-            // Re-assert their room-space placement whenever view mode or another
-            // observed playback value causes RealityView to update.
+            // Recenter only on explicit request, never on head or player motion.
             if let controlsAnchor = content.entities.first(where: {
-                $0.name == "playback-controls-head-anchor"
+                $0.name == PlaybackAttachmentPlacement.anchorName
             }) as? AnchorEntity {
-                controlsAnchor.anchoring.trackingMode =
-                    PlaybackAttachmentPlacement.controlAnchorTrackingMode(
-                        prefersHeadAnchorAlternative: accessibilityPrefersHeadAnchorAlternative
+                var workspace = controlsAnchor
+                if PlaybackAttachmentPlacement.needsRecenter(controlsAnchor, revision: controlPlacementRevision) {
+                    workspace = PlaybackAttachmentPlacement.recenteredAnchor(
+                        from: controlsAnchor, revision: controlPlacementRevision
                     )
+                    content.remove(controlsAnchor)
+                    content.add(workspace)
+                }
+                // Restoring a different exercise can create new conditional panels.
+                // Mount them without replacing the captured workspace origin.
+                addAttachments(to: content, attachments: attachments, controlsAnchor: workspace)
             }
-            updateAttachmentPositions(attachments)
         } attachments: {
             if store.selectedScenario.kind == .shapeLab {
                 Attachment(id: "room-header") {
@@ -167,6 +162,7 @@ struct FootballImmersiveView: View {
                     deckWidth: controlDeckLayout.contentWidth,
                     isPinchDrawing: annotationStroke != nil,
                     isPinchDrawingReady: annotationStroke?.isReadyToCommit == true,
+                    recenterControls: recenterControls,
                     exit: exitRoom
                 )
                     .frame(width: controlDeckLayout.attachmentWidth)
@@ -176,7 +172,8 @@ struct FootballImmersiveView: View {
                 Attachment(id: "playback-view-hud") {
                     PlaybackViewOverlayHUD(
                         showsPlaybackAnnotations: $showsPlaybackAnnotations,
-                        emphasizesBall: $emphasizesBall
+                        emphasizesBall: $emphasizesBall,
+                        recenterControls: recenterControls
                     )
                     .frame(width: viewHUDLayout.attachmentWidth)
                 }
@@ -317,19 +314,11 @@ struct FootballImmersiveView: View {
         attachments: RealityViewAttachments,
         controlsAnchor: AnchorEntity
     ) {
-        for id in [
-            "room-header",
-            "coach-console",
-            "playback-view-hud",
-            "perspective-matrix",
-            "position-status",
-        ] {
+        for id in PlaybackAttachmentPlacement.attachmentIDs {
             if let entity = attachments.entity(for: id) {
                 entity.name = id
-                if PlaybackAttachmentPlacement.followsHead(id) {
+                if entity.parent !== controlsAnchor {
                     controlsAnchor.addChild(entity)
-                } else {
-                    content.add(entity)
                 }
             }
         }
@@ -337,10 +326,8 @@ struct FootballImmersiveView: View {
     }
 
     private func updateAttachmentPositions(_ attachments: RealityViewAttachments) {
-        attachments.entity(for: "room-header")?.position = [0, 1.74, -1.55]
-        // `coach-console` is local to the head anchor. The low, forward offset
-        // preserves an unobstructed central view and keeps gaze/pinch targets in
-        // a comfortable hand-reach cone as the wearer changes POV or turns.
+        attachments.entity(for: "room-header")?.position = [0, 0.10, -1.55]
+        // Offsets are relative to the captured room-space origin, not the head.
         if let console = attachments.entity(for: "coach-console") {
             let layout = controlDeckLayout
             console.position = [0, layout.verticalOffset, layout.forwardOffset]
@@ -351,8 +338,18 @@ struct FootballImmersiveView: View {
             viewHUD.position = [layout.horizontalOffset, layout.verticalOffset, layout.forwardOffset]
             viewHUD.scale = SIMD3<Float>(repeating: layout.uniformScale)
         }
-        attachments.entity(for: "perspective-matrix")?.position = [0.92, 1.30, -1.55]
-        attachments.entity(for: "position-status")?.position = [-1.00, 1.30, -1.30]
+        attachments.entity(for: "perspective-matrix")?.position = [0.92, -0.34, -1.55]
+        attachments.entity(for: "position-status")?.position = [-1.00, -0.34, -1.30]
+    }
+
+    private func recenterControls() {
+        guard PlaybackAttachmentPlacement.canRecenter(
+            isDrawing: store.isDrawing || annotationStroke != nil,
+            isScrubbing: store.hasActiveTimelineScrub,
+            isEditingGeometry: store.hasActiveCoachMarkGeometryPreview
+        ) else { return }
+        controlPlacementRevision &+= 1
+        store.statusMessage = "Controls placed here — look around freely"
     }
 
     /// Annotation visibility is a wearer-local analysis preference. Keep the
@@ -914,18 +911,6 @@ struct PlaybackReviewIndexKey: Equatable, Sendable {
     }
 }
 
-enum PlaybackAttachmentPlacement {
-    static func followsHead(_ attachmentID: String) -> Bool {
-        attachmentID == "coach-console" || attachmentID == "playback-view-hud"
-    }
-
-    static func controlAnchorTrackingMode(
-        prefersHeadAnchorAlternative: Bool
-    ) -> AnchoringComponent.TrackingMode {
-        prefersHeadAnchorAlternative ? .once : .continuous
-    }
-}
-
 /// Applies a wearer-local visibility gate after PitchSceneFactory has resolved
 /// the authored scene state. Playback marks can be restored directly on a
 /// hide/show round trip; Shape Focus retains its scene-owned marks visibility.
@@ -1163,6 +1148,7 @@ private struct PlaybackViewOverlayHUD: View {
     @Environment(ReplayStore.self) private var store
     @Binding var showsPlaybackAnnotations: Bool
     @Binding var emphasizesBall: Bool
+    let recenterControls: () -> Void
     @State private var isExpanded = false
 
     var body: some View {
@@ -1224,6 +1210,19 @@ private struct PlaybackViewOverlayHUD: View {
                         }
                     }
                 }
+
+                Button(action: recenterControls) {
+                    Label("Place controls here", systemImage: "viewfinder")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity, minHeight: 60)
+                }
+                .buttonStyle(.bordered)
+                .disabled(!PlaybackAttachmentPlacement.canRecenter(
+                    isDrawing: store.isDrawing,
+                    isScrubbing: store.hasActiveTimelineScrub,
+                    isEditingGeometry: store.hasActiveCoachMarkGeometryPreview
+                ))
+                .accessibilityHint("Places the workspace in front of you, then leaves it fixed in the room")
 
                 VStack(alignment: .leading, spacing: 5) {
                     Eyebrow(text: "Overlays", color: ReplayTheme.orange)
@@ -1646,6 +1645,7 @@ private struct ImmersiveControlDeck: View {
     let deckWidth: CGFloat
     let isPinchDrawing: Bool
     let isPinchDrawingReady: Bool
+    let recenterControls: () -> Void
     let exit: () -> Void
 
     var body: some View {
@@ -1713,6 +1713,12 @@ private struct ImmersiveControlDeck: View {
 
     private var matchPlaybackDeck: some View {
         VStack(alignment: .leading, spacing: 11) {
+            if store.selectedScenario.kind == .realWorldReplay {
+                Label("Synthetic preview · reference clip not loaded", systemImage: "info.circle")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(ReplayTheme.orange)
+                    .padding(.horizontal, 8)
+            }
             HStack(spacing: 8) {
                 Button(action: exit) {
                     Image(systemName: "xmark")
@@ -2229,44 +2235,51 @@ private struct ImmersiveControlDeck: View {
 
     private var playbackSettingsShelf: some View {
         inlineShelf(color: ReplayTheme.cyan) {
-            HStack(spacing: 12) {
-                inlinePanelHeader(
-                    title: "Playback",
-                    detail: "SETTINGS",
-                    systemImage: "slider.horizontal.3",
-                    color: ReplayTheme.cyan
-                )
-
-                inlineChoiceDivider
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Eyebrow(text: "Speed", color: ReplayTheme.cyan)
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 16) {
+                    inlinePanelHeader(
+                        title: "Playback",
+                        detail: "TIME",
+                        systemImage: "slider.horizontal.3",
+                        color: ReplayTheme.cyan
+                    )
                     HStack(spacing: 6) {
                         ForEach(directPlaybackRates, id: \.self) { rate in
                             playbackRateChoice(rate)
                         }
                     }
-                }
-
-                inlineChoiceDivider
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Eyebrow(text: "Step", color: ReplayTheme.signal)
+                    Spacer(minLength: 8)
                     HStack(spacing: 6) {
                         timelineStepChoice(seconds: -1, title: "−1s")
                         timelineStepChoice(seconds: 1, title: "+1s")
                     }
                 }
-
-                inlineChoiceDivider
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Eyebrow(text: "Control size", color: ReplayTheme.orange)
+                Divider()
+                HStack(spacing: 16) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Eyebrow(text: "Workspace", color: ReplayTheme.orange)
+                        Text("Fixed in the room")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                     HStack(spacing: 6) {
                         ForEach(PlaybackControlDeckPreset.allCases, id: \.self) { preset in
                             controlDeckChoice(preset)
                         }
                     }
+                    Spacer(minLength: 8)
+                    Button(action: recenterControls) {
+                        Label("Place controls here", systemImage: "viewfinder")
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(1)
+                            .frame(minHeight: 60)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!PlaybackAttachmentPlacement.canRecenter(
+                        isDrawing: store.isDrawing,
+                        isScrubbing: store.hasActiveTimelineScrub,
+                        isEditingGeometry: store.hasActiveCoachMarkGeometryPreview
+                    ))
+                    .accessibilityHint("Moves the workspace once; it does not follow your head")
                 }
             }
         }

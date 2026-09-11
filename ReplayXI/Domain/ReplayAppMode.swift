@@ -1,7 +1,6 @@
 import Foundation
 
-/// Navigation groups reuse stable scenario IDs. Saved reviews and shared-room
-/// payloads keep their existing format when the dashboard changes shape.
+/// Navigation groups reuse stable scenario IDs and saved review formats.
 enum ReplayAppMode: String, CaseIterable, Identifiable, Hashable, Sendable {
     case situationRoleplay
     case matchReplay
@@ -14,14 +13,14 @@ enum ReplayAppMode: String, CaseIterable, Identifiable, Hashable, Sendable {
 
     var title: String {
         switch self {
-        case .situationRoleplay: "Situation roleplay"
+        case .situationRoleplay: "Strategy analysis"
         case .matchReplay: "Match replay"
         }
     }
 
     var subtitle: String {
         switch self {
-        case .situationRoleplay: "Synthetic 3D exercises"
+        case .situationRoleplay: "3D plays, POVs and annotations"
         case .matchReplay: "Synthetic reconstruction preview"
         }
     }

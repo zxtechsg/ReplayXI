@@ -1454,6 +1454,11 @@ enum PitchSceneFactory {
         let root = Entity()
         root.name = "ball"
 
+        if let visual = ReplayStrategyBallProvider.makeInstance() {
+            root.addChild(visual)
+            return root
+        }
+
         let shell = ModelEntity(
             mesh: matchBallMesh,
             materials: [SimpleMaterial(color: .white, roughness: 0.74, isMetallic: false)]

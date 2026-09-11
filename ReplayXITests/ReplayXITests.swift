@@ -5,23 +5,14 @@ import XCTest
 
 @MainActor
 final class ReplayXITests: XCTestCase {
-    func testPlaybackUtilityHUDAndTransportBothFollowTheWearer() {
-        XCTAssertTrue(PlaybackAttachmentPlacement.followsHead("coach-console"))
-        XCTAssertTrue(PlaybackAttachmentPlacement.followsHead("playback-view-hud"))
-        XCTAssertFalse(PlaybackAttachmentPlacement.followsHead("room-header"))
-        XCTAssertFalse(PlaybackAttachmentPlacement.followsHead("perspective-matrix"))
-        XCTAssertEqual(
-            PlaybackAttachmentPlacement.controlAnchorTrackingMode(
-                prefersHeadAnchorAlternative: false
-            ),
-            .continuous
-        )
-        XCTAssertEqual(
-            PlaybackAttachmentPlacement.controlAnchorTrackingMode(
-                prefersHeadAnchorAlternative: true
-            ),
-            .once
-        )
+    func testPlaybackWorkspaceCapturesPoseOnceWithoutFollowingHead() {
+        let anchor = PlaybackAttachmentPlacement.makeAnchor(revision: 0)
+        XCTAssertEqual(anchor.anchoring.trackingMode, .once)
+        XCTAssertEqual(anchor.name, PlaybackAttachmentPlacement.anchorName)
+        XCTAssertEqual(Set(PlaybackAttachmentPlacement.attachmentIDs).count, 5)
+        XCTAssertTrue(PlaybackAttachmentPlacement.attachmentIDs.contains("coach-console"))
+        XCTAssertTrue(PlaybackAttachmentPlacement.attachmentIDs.contains("playback-view-hud"))
+        XCTAssertFalse(PlaybackAttachmentPlacement.needsRecenter(anchor, revision: 0))
     }
 
     func testLocalAnnotationVisibilityRoundTripRestoresMarksWithoutForcingInputAffordances() {
@@ -808,11 +799,12 @@ final class ReplayXITests: XCTestCase {
         XCTAssertNotNil(root.findEntity(named: "recorded-facing"))
         XCTAssertNotNil(root.findEntity(named: "selection-halo"))
         let ball = try XCTUnwrap(root.findEntity(named: "ball"))
-        XCTAssertNotNil(ball.findEntity(named: "ball-shell"))
-        XCTAssertEqual(
-            ball.children.filter { $0.name.hasPrefix("ball-panel-") }.count,
-            6
-        )
+        if ReplayStrategyBallProvider.isPrewarmed {
+            XCTAssertNotNil(ball.findEntity(named: ReplayStrategyBallProvider.visualRootName))
+        } else {
+            XCTAssertNotNil(ball.findEntity(named: "ball-shell"))
+            XCTAssertEqual(ball.children.filter { $0.name.hasPrefix("ball-panel-") }.count, 6)
+        }
         XCTAssertNotNil(root.findEntity(named: "ball-shadow"))
 
         for player in scenario.players {

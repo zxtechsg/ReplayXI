@@ -1,5 +1,9 @@
 # Blender match reconstruction
 
+> Scope update, 12 September: [Local product goal](LOCAL_PRODUCT_GOAL.md)
+> supersedes the older priority below. Current modes are Strategy Analysis and
+> Match Replay; the workspace is room-fixed, not head-following.
+
 ## Current priority — 10 September 2026
 
 Only **Situation Roleplay** and **Match Replay** are in scope. Both use replay,

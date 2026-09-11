@@ -38,6 +38,16 @@ class LocalCapabilityTests(unittest.TestCase):
         self.assertIn("final class LegacySnapshotCoordinator", fixture)
         self.assertNotRegex(fixture, r"import\s+GroupActivities|messenger\.send|activity\.activate")
 
+    def test_spatial_workspace_is_once_anchored_and_recenter_is_explicit(self):
+        placement = (APP / "Immersive/PlaybackAttachmentPlacement.swift").read_text()
+        immersive = (APP / "Immersive/FootballImmersiveView.swift").read_text()
+        self.assertIn("AnchorEntity(.head, trackingMode: .once)", placement)
+        self.assertNotIn(".continuous", placement)
+        self.assertIn("PlaybackAttachmentPlacement.needsRecenter", immersive)
+        self.assertIn("entity.parent !== controlsAnchor", immersive)
+        self.assertNotIn("playback-controls-head-anchor", immersive)
+        self.assertIn("Synthetic preview · reference clip not loaded", immersive)
+
 
 if __name__ == "__main__":
     unittest.main()

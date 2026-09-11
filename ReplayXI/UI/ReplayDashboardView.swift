@@ -130,6 +130,15 @@ struct ReplayDashboardView: View {
                     print("Replay XI skinned-player preparation failed; using standard rig: \(error)")
                     #endif
                 }
+                // Optional visual admission; a missing/corrupt asset retains the
+                // procedural ball without blocking playback or loading per frame.
+                do {
+                    try ReplayStrategyBallProvider.prewarm()
+                } catch {
+                    #if DEBUG
+                    print("Replay XI Blender ball unavailable; using standard ball: \(error)")
+                    #endif
+                }
             } catch {
                 store.isOpeningImmersive = false
                 store.statusMessage = "Player renderer could not prepare. Try opening the room again."

@@ -2,7 +2,7 @@ import XCTest
 @testable import ReplayXI
 
 final class PlaybackControlDeckLayoutTests: XCTestCase {
-    func testComfortPresetsStayInsideSafeHeadFollowEnvelope() {
+    func testComfortPresetsStayInsideInitialWorkspaceEnvelope() {
         let near = PlaybackControlDeckLayout.resolve(
             preset: .near,
             usesAccessibilityText: false

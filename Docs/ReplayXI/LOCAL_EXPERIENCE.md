@@ -1,6 +1,7 @@
 # Local-only Replay XI
 
-Current product scope: Situation Roleplay and Match Replay on one Vision Pro.
+Current product scope: Strategy Analysis and Match Replay on one Vision Pro.
+See [the current product goal](LOCAL_PRODUCT_GOAL.md) and [UI research](SPATIAL_UI_RESEARCH.md).
 This supersedes the multiplayer scope in earlier loop reports and the original MVP.
 Do not restore Group Activities, network rooms, invites or shared anchors unless
 the user explicitly requests multiplayer again.
@@ -33,11 +34,11 @@ Open ReplayXI.xcodeproj, select ReplayXI, then Signing & Capabilities.
 Keep automatic signing and choose your personal team. Group Activities is no
 longer required. Simulator builds do not require a provisioning profile.
 
-The user's current bundle ID (`aa`) and separate Debug/Release team selections
-were preserved. If Xcode reports a bundle-ID registration error, choose a unique
-reverse-domain ID you own. Select the same intended team in both configurations
-when building or archiving. Removing Group Activities fixes that capability
-requirement; it does not verify account credentials or device provisioning.
+The user's bundle ID and team selections are preserved, not managed by the
+asset/UI changes. If Xcode reports a bundle-ID registration error, choose a
+unique reverse-domain ID you own. Select the intended team when building or
+archiving. Removing Group Activities fixes that capability requirement; it
+does not verify account credentials or device provisioning.
 
 This remains a visionOS app, not an iPhone app. Real video-to-3D reconstruction
 and physical-headset performance/gesture validation are still unfinished.
