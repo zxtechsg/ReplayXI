@@ -490,10 +490,14 @@ enum ReplayAthleteMotion {
             let horizontalDistance = hypot(targetX, targetZ)
             if horizontalDistance > 0.001 {
                 let targetBearing = atan2(targetX, targetZ) * 180 / .pi
-                let targetDelta = clampAngleDelta(
-                    shortestAngleDelta(from: facing, to: targetBearing),
-                    limit: 112
-                )
+                let relativeTargetBearing = shortestAngleDelta(from: facing, to: targetBearing)
+                let targetDelta = clampAngleDelta(relativeTargetBearing, limit: 112)
+                // A target crossing directly behind changes its signed bearing
+                // from +180 to -180. Fade horizontal attention through the rear
+                // sector before that wrap, rather than snapping the head between
+                // opposite shoulder checks. This is absolute-time and leaves
+                // front/side attention and vertical ball glances unchanged.
+                let rearAttention = 1 - smootherStep((abs(relativeTargetBearing) - 112) / 68)
                 // A ball at the player's feet should not pin their gaze down:
                 // footballers alternate between touch and the next picture.
                 // Blend rather than branch at distance thresholds: the old
@@ -510,7 +514,7 @@ enum ReplayAthleteMotion {
                 let targetWeight = (
                     blendedMidTargetWeight
                         + ((farTargetWeight - blendedMidTargetWeight) * midToFar)
-                ) * visibility
+                ) * visibility * rearAttention
                 let nearScanWeight: Float = 0.34
                 let midScanWeight: Float = 0.16
                 let farScanWeight: Float = 0.10
