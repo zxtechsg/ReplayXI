@@ -98,6 +98,14 @@ struct ReplayAthleteBallActionPose: Equatable, Sendable {
 /// end or a second animation system.
 @MainActor
 enum ReplayAthleteMotion {
+    #if DEBUG
+    private(set) static var ballActionSampleCount = 0
+
+    static func resetBallActionSampleCountForTesting() {
+        ballActionSampleCount = 0
+    }
+    #endif
+
     static func update(
         _ instance: ReplayAthleteInstance,
         from track: PlayerTrack,
@@ -420,6 +428,9 @@ enum ReplayAthleteMotion {
         ballTrack: BallTrack,
         at time: TimeInterval
     ) -> ReplayAthleteBallActionPose? {
+        #if DEBUG
+        ballActionSampleCount &+= 1
+        #endif
         guard time.isFinite, ballTrack.keyframes.count >= 3 else { return nil }
 
         let keyframes = ballTrack.keyframes
@@ -623,7 +634,7 @@ enum ReplayAthleteMotion {
         )
         blend(
             .neck,
-            toward: simd_quatf()
+            toward: simd_quatf(real: 1, imag: .zero)
         )
         blend(
             .headRoot,

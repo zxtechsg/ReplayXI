@@ -147,15 +147,24 @@ enum PlaybackSpatialLabels {
             case .positional:
                 2.30
             }
+            let minimumReviewHeight = ReplayAthleteReviewLayout.minimumTagHeight(
+                athleteScale: ReplayAthleteReviewLayout.focusScale(
+                    viewMode: viewMode,
+                    isSelected: player.id == perspectiveID,
+                    isFeatured: scenario.featuredPerspectiveIDs.contains(player.id),
+                    isShapeRole: scenario.formationTargets.contains { $0.playerID == player.id }
+                ),
+                labelScale: resolvedScale
+            )
             let resolvedHeight: Float = switch viewMode {
             case .firstPerson:
                 firstPersonLabelHeight(forDistance: distance)
                     + (player.team == .away ? 0.16 : 0)
                     + (player.shirtNumber.isMultiple(of: 2) ? 0 : 0.08)
             case .tacticalTable:
-                tacticalLabelHeight(team: player.team, shirtNumber: player.shirtNumber)
+                max(tacticalLabelHeight(team: player.team, shirtNumber: player.shirtNumber), minimumReviewHeight)
             case .touchline, .positional:
-                defaultLabelHeight
+                max(defaultLabelHeight, minimumReviewHeight)
             }
             label.position = [pose.position.x, resolvedHeight, pose.position.z]
             label.orientation = simd_quatf(angle: atan2(dx, dz), axis: [0, 1, 0])

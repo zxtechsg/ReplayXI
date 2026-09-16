@@ -200,7 +200,7 @@ struct ReplaySkinnedAthleteImpactPose {
             upperLength: simd_length(upper), lowerLength: simd_length(lower),
             proximalNeutral: simd_normalize(upperToDown * simd_quatf(motion.restPose.modelSpaceTransforms[proximal])),
             middleNeutral: simd_normalize(lowerToDown * simd_quatf(motion.restPose.modelSpaceTransforms[middle])),
-            distalNeutral: simd_normalize((isArm ? lowerToDown : simd_quatf())
+            distalNeutral: simd_normalize((isArm ? lowerToDown : simd_quatf(real: 1, imag: .zero))
                 * simd_quatf(motion.restPose.modelSpaceTransforms[distal]))
         )
     }

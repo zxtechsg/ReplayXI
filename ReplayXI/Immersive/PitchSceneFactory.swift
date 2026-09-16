@@ -13,6 +13,18 @@ enum PitchSceneFactory {
     /// readable identities, the ball, and coach annotations.
     static let firstPersonDetailedRigLimit = 2
 
+    /// A root represents one immutable authored match. Keep its rolling table
+    /// with that root, independent of annotation-cache eviction or view mode.
+    private struct BallRollingCache: Component {
+        let motion: ReplayBallRollingMotion
+    }
+
+    #if DEBUG
+    static func ballRollingMotionForTesting(in root: Entity) -> ReplayBallRollingMotion? {
+        root.components[BallRollingCache.self]?.motion
+    }
+    #endif
+
     /// Weak RealityKit references let the cache accelerate a live scene
     /// without extending that scene's lifetime after immersive-root replacement.
     private final class WeakEntityReference {
@@ -516,6 +528,7 @@ enum PitchSceneFactory {
     static func makeMatchRoot(for scenario: ReplayScenario) -> Entity {
         let root = Entity()
         root.name = "match-root-\(scenario.id)"
+        root.components.set(BallRollingCache(motion: ReplayBallRollingMotion(track: scenario.ball)))
 
         let pitch = makePitch()
         pitch.name = "pitch"
@@ -835,26 +848,13 @@ enum PitchSceneFactory {
                     entity.isEnabled = true
                 }
                 let isFeatured = scenario.featuredPerspectiveIDs.contains(player.id)
-                let focusScale: Float
-                switch viewMode {
-                case .firstPerson:
-                    // Player POV renders the match at human scale. Perspective
-                    // is created by moving the pitch around the viewer, not by
-                    // enlarging the selected avatar on a miniature table.
-                    focusScale = 1
-                case .tacticalTable:
-                    // The tabletop is an analysis surface, so player identity
-                    // must survive at arm's length. Keep the selected player
-                    // unmistakable while every off-ball runner remains a
-                    // legible footballer instead of collapsing into a peg.
-                    focusScale = isSelected ? 3.15 : (isFeatured ? 2.05 : 1.40)
-                case .touchline:
-                    focusScale = isSelected ? 1.9 : (isFeatured ? 1.4 : 1.08)
-                case .positional:
-                    focusScale = effectiveTriangleMode == .place
-                        ? 1
-                        : (featuredTriangleIDs.contains(player.id) ? 3.05 : 2.65)
-                }
+                let focusScale = ReplayAthleteReviewLayout.focusScale(
+                    viewMode: viewMode,
+                    isSelected: isSelected,
+                    isFeatured: isFeatured,
+                    isShapeRole: featuredTriangleIDs.contains(player.id),
+                    isPhysicalDrill: effectiveTriangleMode == .place
+                )
                 entity.scale = SIMD3<Float>(repeating: focusScale)
                 let isShapeVisualise = scenario.kind == .shapeLab
                     && viewMode == .positional
@@ -935,6 +935,9 @@ enum PitchSceneFactory {
                     }
                     importedMotionIsSupported = false
                 }
+                // Resolve a touch once, including the no-touch result. The skin,
+                // near procedural rig and far rig share this sample; passing the
+                // track down again would infer the same action a second time.
                 let ballAction = athleteBallActionTrack.flatMap {
                     ReplayAthleteMotion.ballActionPose(for: player, ballTrack: $0, at: time)
                 }
@@ -1009,7 +1012,7 @@ enum PitchSceneFactory {
                         time: time,
                         locomotion: locomotion,
                         lookTargetWorldPosition: playerLookTarget,
-                        ballTrack: activeRagdollCue == nil ? athleteBallActionTrack : nil,
+                        ballAction: activeRagdollCue == nil ? ballAction : nil,
                         cache: sceneState,
                         stationaryPose: stationaryPose
                     )
@@ -1028,7 +1031,7 @@ enum PitchSceneFactory {
                         time: time,
                         locomotion: locomotion,
                         lookTargetWorldPosition: playerLookTarget,
-                        ballTrack: athleteBallActionTrack,
+                        ballAction: ballAction,
                         cache: sceneState,
                         stationaryPose: stationaryPose
                     )
@@ -1084,10 +1087,9 @@ enum PitchSceneFactory {
                 presentedBallHeight + visualBallRadiusOffset,
                 presentationBallPosition.z
             ]
-            ball.orientation = simd_quatf(
-                angle: Float(time) * 1.8,
-                axis: simd_normalize(SIMD3<Float>(1, 0.25, 0.1))
-            )
+            ball.orientation = isTriangleView ? ReplayBallRollingMotion.identity
+                : root.components[BallRollingCache.self]?.motion.orientation(at: time)
+                    ?? ReplayBallRollingMotion.identity
             ball.scale = SIMD3<Float>(repeating: ballScale)
             ball.isEnabled = showsBall
         }
@@ -3664,7 +3666,7 @@ enum PitchSceneFactory {
         time: TimeInterval,
         locomotion: PlayerLocomotionSample,
         lookTargetWorldPosition: SIMD3<Float>?,
-        ballTrack: BallTrack?,
+        ballAction: ReplayAthleteBallActionPose?,
         cache: AnnotationSceneCache?,
         stationaryPose: PlayerPose?
     ) {
@@ -3682,7 +3684,7 @@ enum PitchSceneFactory {
                 time: time,
                 locomotion: locomotion,
                 lookTargetWorldPosition: lookTargetWorldPosition,
-                ballTrack: ballTrack,
+                ballAction: ballAction,
                 cache: cache,
                 stationaryPose: stationaryPose
             )
@@ -3749,7 +3751,7 @@ enum PitchSceneFactory {
         time: TimeInterval,
         locomotion: PlayerLocomotionSample,
         lookTargetWorldPosition: SIMD3<Float>?,
-        ballTrack: BallTrack?,
+        ballAction: ReplayAthleteBallActionPose?,
         cache: AnnotationSceneCache?,
         stationaryPose: PlayerPose?
     ) {
@@ -3761,7 +3763,7 @@ enum PitchSceneFactory {
             time: time,
             locomotion: locomotion,
             lookTargetWorldPosition: lookTargetWorldPosition,
-            ballTrack: ballTrack,
+            ballAction: ballAction,
             cache: cache,
             stationaryPose: stationaryPose
         )
@@ -3819,7 +3821,7 @@ enum PitchSceneFactory {
         time: TimeInterval,
         locomotion: PlayerLocomotionSample,
         lookTargetWorldPosition: SIMD3<Float>?,
-        ballTrack: BallTrack?,
+        ballAction: ReplayAthleteBallActionPose?,
         cache: AnnotationSceneCache?,
         stationaryPose: PlayerPose?
     ) {
@@ -3832,7 +3834,7 @@ enum PitchSceneFactory {
                 ? track.gaitPhase(at: time)
                 : locomotion.motion.locomotionPhase,
             lookTargetWorldPosition: lookTargetWorldPosition,
-            ballTrack: ballTrack,
+            ballAction: ballAction,
             stationaryPose: stationaryPose
         )
         ReplayAthleteMotion.apply(pose, to: binding)

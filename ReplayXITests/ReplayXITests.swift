@@ -1215,9 +1215,19 @@ final class ReplayXITests: XCTestCase {
             XCTAssertFalse(labelAccessibility.isAccessibilityElement, player.id)
             XCTAssertEqual(
                 label.position.y,
-                PlaybackSpatialLabels.tacticalLabelHeight(
-                    team: player.team,
-                    shirtNumber: player.shirtNumber
+                max(
+                    PlaybackSpatialLabels.tacticalLabelHeight(
+                        team: player.team, shirtNumber: player.shirtNumber
+                    ),
+                    ReplayAthleteReviewLayout.minimumTagHeight(
+                        athleteScale: ReplayAthleteReviewLayout.focusScale(
+                            viewMode: .tacticalTable,
+                            isSelected: player.id == scenario.defaultPerspectiveID,
+                            isFeatured: scenario.featuredPerspectiveIDs.contains(player.id),
+                            isShapeRole: false
+                        ),
+                        labelScale: label.scale.y
+                    )
                 ),
                 accuracy: 0.000_1,
                 player.id
