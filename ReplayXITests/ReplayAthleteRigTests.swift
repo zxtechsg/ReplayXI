@@ -351,6 +351,25 @@ final class ReplayAthleteRigTests: XCTestCase {
         XCTAssertEqual(fullMetrics.remainingWithin(fullLimits).drawCalls, 258)
     }
 
+    func testElbowsFlexForwardRatherThanHyperextendDuringGaitAndImpact() throws {
+        let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay))
+        let player = try XCTUnwrap(scenario.player(id: "navy-rw"))
+        let rig = try ReplayAthleteFactory.make(for: player, lod: .near)
+        for time in stride(from: 0.0, through: scenario.duration, by: 0.23) {
+            ReplayAthleteMotion.update(rig, from: player, at: time)
+            for elbow in [ReplayAthleteJoint.leftElbow, .rightElbow] {
+                let forearm = rig.joints[elbow].orientation.act(SIMD3<Float>(0, -0.275, 0))
+                XCTAssertGreaterThan(forearm.z, 0, "A footballer's elbows flex toward +Z, not behind the back")
+            }
+        }
+        let cue = PlayerRagdollCue(playerID: player.id, impactTime: 12)
+        ReplayAthleteMotion.apply(ragdoll: PlayerRagdollPlayback.pose(for: cue, at: 13),
+                                  influence: 1, to: rig.joints)
+        for elbow in [ReplayAthleteJoint.leftElbow, .rightElbow] {
+            XCTAssertGreaterThan(rig.joints[elbow].orientation.act(SIMD3<Float>(0, -0.275, 0)).z, 0)
+        }
+    }
+
     func testLocomotionAndRagdollMappingAreSeekDeterministic() throws {
         let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .coachFocus))
         let player = try XCTUnwrap(scenario.player(id: "red-lb"))

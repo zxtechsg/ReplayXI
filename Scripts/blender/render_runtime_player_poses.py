@@ -52,6 +52,7 @@ def main():
     parser.add_argument("--library", type=Path, required=True)
     parser.add_argument("--poses", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--frame-body", action="store_true", help="Frame the full body at each pose, including falls")
     args = parser.parse_args(sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else [])
     if not bpy.app.background or bpy.data.filepath:
         raise RuntimeError("Use an isolated factory-startup background process")
@@ -59,6 +60,7 @@ def main():
     if not output.is_relative_to((REPOSITORY / ".codex-derived").resolve()) or output.exists():
         raise ValueError("Choose a new directory under .codex-derived")
     motion = json.loads((REPOSITORY / "ReplayXI/Resources/Players/ReplayXIRocketboxMotion.json").read_text())
+    source_names = {joint["name"]: joint["sourceName"] for joint in motion["joints"]}
     samples = read_samples(args.poses, len(motion["joints"]))
     bpy.ops.wm.open_mainfile(filepath=str(args.library.resolve()), load_ui=False)
     rig = bpy.data.objects["ReplayXI_Home_Rig"]
@@ -111,13 +113,29 @@ def main():
             bone.rotation_mode = "QUATERNION"
             bone.matrix_basis = rest_local[index].inverted() @ target
         bpy.context.view_layer.update()
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        points = []
+        sections = {}
+        for section in ["Body", "Head"]:
+            mesh = bpy.data.objects[f"ReplayXI_Home_{section}"].evaluated_get(depsgraph)
+            vertices = [mesh.matrix_world @ vertex.co for vertex in mesh.data.vertices]
+            points.extend(vertices)
+            sections[section] = {"minZ": min(p.z for p in vertices),
+                                 "maxZ": max(p.z for p in vertices), "vertices": len(vertices)}
+        if args.frame_body:
+            lower = Vector(tuple(min(point[axis] for point in points) for axis in range(3)))
+            upper = Vector(tuple(max(point[axis] for point in points) for axis in range(3)))
+            centre = (lower + upper) * 0.5
+            camera.location = centre + Vector((2.4, -4.6, 1.5))
+            camera.rotation_euler = (centre - camera.location).to_track_quat("-Z", "Y").to_euler()
+            camera.data.type = "ORTHO"
+            camera.data.ortho_scale = max(2.2, (upper - lower).length * 1.4)
         scene.render.filepath = str(output / f"{sample['name']}.png")
         bpy.ops.render.render(write_still=True)
-        depsgraph = bpy.context.evaluated_depsgraph_get()
-        mesh = bpy.data.objects["ReplayXI_Home_Body"].evaluated_get(depsgraph)
-        points = [mesh.matrix_world @ vertex.co for vertex in mesh.data.vertices]
+        joints = {semantic: list(rig.matrix_world @ rig.pose.bones[source_names[name]].head)
+                  for semantic, name in motion["semanticJoints"].items()}
         report.append({"name": sample["name"], "minZ": min(p.z for p in points),
-                       "maxZ": max(p.z for p in points), "vertices": len(points),
+                       "maxZ": max(p.z for p in points), "vertices": len(points), "sections": sections, "joints": joints,
                        "image": scene.render.filepath})
     (output / "report.json").write_text(json.dumps(report, indent=2) + "\n")
     print("REPLAYXI_RUNTIME_POSES " + json.dumps(report))

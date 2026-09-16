@@ -119,8 +119,24 @@ enum PlayerRagdollPlayback {
     static let fixedTimeStep: Float = 1 / 90
     static let maximumStepCount = 360
 
+    /// One absolute-clock result shared by the skin and its kinematic query rig.
+    /// The solver must not run on separate frame clocks for those two bodies.
+    struct Sample: Sendable {
+        let playerID: String
+        let time: TimeInterval
+        let pose: PlayerRagdollPose
+        let influence: Float
+    }
+
+    static func sample(for cue: PlayerRagdollCue, at time: TimeInterval) -> Sample? {
+        guard time.isFinite, cue.isActive(at: time) else { return nil }
+        return Sample(playerID: cue.playerID, time: time, pose: pose(for: cue, at: time),
+                      influence: cue.influence(at: time))
+    }
+
     static func pose(for cue: PlayerRagdollCue, at time: TimeInterval) -> PlayerRagdollPose {
-        let elapsed = min(max(Float(time - cue.impactTime), 0), Float(cue.duration))
+        // A malformed timestamp must not reach Int(NaN) in the fixed-step loop.
+        let elapsed = time.isFinite ? min(max(Float(time - cue.impactTime), 0), Float(cue.duration)) : 0
         var state = SimulationState(cue: cue)
         let completeSteps = min(Int(elapsed / fixedTimeStep), maximumStepCount)
         if completeSteps > 0 {

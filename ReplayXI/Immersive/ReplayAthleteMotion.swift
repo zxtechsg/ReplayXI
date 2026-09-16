@@ -377,11 +377,13 @@ enum ReplayAthleteMotion {
                 axis: [1, 0, 0]
             ),
             leftElbowOrientation: simd_quatf(
-                angle: elbowBend + (max(-rightFootfall.stride, 0) * tuning.elbowTravel),
+                // Limbs hang down -Y and the footballer faces +Z. Elbow
+                // flexion is -X (forward), opposite to a knee's +X fold.
+                angle: -(elbowBend + (max(-rightFootfall.stride, 0) * tuning.elbowTravel)),
                 axis: [1, 0, 0]
             ),
             rightElbowOrientation: simd_quatf(
-                angle: elbowBend + (max(-leftFootfall.stride, 0) * tuning.elbowTravel),
+                angle: -(elbowBend + (max(-leftFootfall.stride, 0) * tuning.elbowTravel)),
                 axis: [1, 0, 0]
             ),
             leftWristOrientation: simd_quatf(
@@ -627,8 +629,8 @@ enum ReplayAthleteMotion {
             toward: simd_quatf(angle: pose.rightShoulderRoll, axis: [0, 0, 1])
                 * simd_quatf(angle: pose.rightShoulderPitch, axis: [1, 0, 0])
         )
-        blend(.leftElbow, toward: simd_quatf(angle: pose.leftElbow, axis: [1, 0, 0]))
-        blend(.rightElbow, toward: simd_quatf(angle: pose.rightElbow, axis: [1, 0, 0]))
+        blend(.leftElbow, toward: simd_quatf(angle: -pose.leftElbow, axis: [1, 0, 0]))
+        blend(.rightElbow, toward: simd_quatf(angle: -pose.rightElbow, axis: [1, 0, 0]))
         blend(.leftWrist, toward: simd_quatf(angle: pose.leftWrist, axis: [0, 1, 0]))
         blend(.rightWrist, toward: simd_quatf(angle: pose.rightWrist, axis: [0, 1, 0]))
     }

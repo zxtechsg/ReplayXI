@@ -773,13 +773,20 @@ enum PitchSceneFactory {
                 cache: sceneState,
                 admittedPlayerID: importedAthleteID
             )
-            let admittedSkinIDs: Set<String> = if viewMode == .firstPerson {
+            var admittedSkinIDs: Set<String> = if viewMode == .firstPerson {
                 firstPersonDetailedIDs
             } else if scenario.kind == .shapeLab && viewMode == .positional
                         && effectiveTriangleMode == .visualise {
                 featuredTriangleIDs.union(primaryTriangleDefenderID.map { Set([$0]) } ?? [])
             } else {
                 [perspectiveID]
+            }
+            if viewMode != .firstPerson, viewMode != .positional,
+               let resolvedRagdollCue, resolvedRagdollCue.isActive(at: time),
+               scenario.player(id: resolvedRagdollCue.playerID) != nil {
+                // A reviewed impact deserves the near skin even when another
+                // player is selected. At most two skins in these match views.
+                admittedSkinIDs.insert(resolvedRagdollCue.playerID)
             }
             // Release old subjects before iterating the roster. Admission must
             // not depend on whether the new selection sorts before the old one.
@@ -955,6 +962,9 @@ enum PitchSceneFactory {
                     ReplayAthleteMotion.ballActionPose(for: player, ballTrack: $0, at: time)
                 }
                 let hasBallAction = ballAction.map { $0.influence > 0 } ?? false
+                let impactSample = needsDetailedRig ? activeRagdollCue.flatMap {
+                    PlayerRagdollPlayback.sample(for: $0, at: time)
+                } : nil
                 // A forward-only legacy clip must not erase a football touch.
                 if importedBelongsToPlayer && hasBallAction { attachedImportedAthlete?.root.isEnabled = false }
                 let usesLegacySkin = hasImportedAthlete && importedMotionIsSupported && !hasBallAction
@@ -975,7 +985,7 @@ enum PitchSceneFactory {
                 if needsDetailedRig, let skin = sceneState?.skinnedAthletes[player.id] {
                     usesNewSkin = skin.update(at: time, track: player, locomotion: locomotion,
                                              lookTarget: playerLookTarget, ballAction: ballAction,
-                                             hasImpact: activeRagdollCue != nil)
+                                             impact: impactSample)
                 } else {
                     usesNewSkin = false
                 }
@@ -1012,7 +1022,9 @@ enum PitchSceneFactory {
                 let needsFullRigUpdate = entity.isEnabled
                     && needsDetailedRig
                     && !hidesHeadMountedAvatar
-                    && !usesImportedAthlete
+                    // Hidden query bodies still follow the same impact sample
+                    // as the visible skin; suppress meshes, not their poses.
+                    && (!usesImportedAthlete || impactSample != nil)
                 if needsFullRigUpdate {
                     animateRig(
                         of: entity,
@@ -1023,10 +1035,10 @@ enum PitchSceneFactory {
                         ballTrack: activeRagdollCue == nil ? athleteBallActionTrack : nil,
                         cache: sceneState
                     )
-                    if let activeRagdollCue {
+                    if let impactSample {
                         applyRagdollPose(
-                            PlayerRagdollPlayback.pose(for: activeRagdollCue, at: time),
-                            influence: activeRagdollCue.influence(at: time),
+                            impactSample.pose,
+                            influence: impactSample.influence,
                             to: entity,
                             cache: sceneState
                         )

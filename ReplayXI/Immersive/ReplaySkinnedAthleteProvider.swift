@@ -152,6 +152,7 @@ final class ReplaySkinnedAthleteInstance {
     private let headIndex: Int
     private let neckCompensatedChildren: [Int]
     private var footballPose: ReplaySkinnedAthleteFootballPose?
+    private var impactPose: ReplaySkinnedAthleteImpactPose?
 
     init(root: Entity, skinRoot: Entity, model: ModelEntity, front: ModelEntity, back: ModelEntity,
          playerID: String, motion: ReplaySkinnedAthleteMotion) {
@@ -164,6 +165,7 @@ final class ReplaySkinnedAthleteInstance {
         self.motion = motion
         pose = motion.makePoseBuffer()
         footballPose = ReplaySkinnedAthleteFootballPose(motion: motion)
+        impactPose = ReplaySkinnedAthleteImpactPose(motion: motion)
         transforms = model.jointTransforms
         neckIndex = motion.semanticJointIndices["neck"]!
         headIndex = motion.semanticJointIndices["head"]!
@@ -182,10 +184,12 @@ final class ReplaySkinnedAthleteInstance {
 
     @discardableResult
     func update(at time: TimeInterval, track: PlayerTrack, locomotion: PlayerLocomotionSample,
-                lookTarget: SIMD3<Float>?, ballAction: ReplayAthleteBallActionPose?, hasImpact: Bool) -> Bool {
-        // Impacts still use the separately verified fixed-step articulated rig.
-        // Walking, cuts and touches now keep the same textured skin.
-        let supported = !hasImpact && time.isFinite && locomotion.speedMetresPerSecond.isFinite
+                lookTarget: SIMD3<Float>?, ballAction: ReplayAthleteBallActionPose?,
+                impact: PlayerRagdollPlayback.Sample? = nil) -> Bool {
+        // Never apply a stale or different player's collision sample. Unsupported
+        // assets still fail soft to the procedural body rather than disappear.
+        let validImpact = impact.map { $0.playerID == track.id && $0.time == time && impactPose != nil } ?? true
+        let supported = validImpact && time.isFinite && locomotion.speedMetresPerSecond.isFinite
             && locomotion.turnRateDegreesPerSecond.isFinite && locomotion.accelerationMetresPerSecondSquared.isFinite
         root.isEnabled = supported
         guard supported else { return false }
@@ -207,6 +211,9 @@ final class ReplaySkinnedAthleteInstance {
         let look = ReplayAthleteMotion.lookPose(for: track, at: time, locomotion: locomotion,
                                                targetWorldPosition: lookTarget)
         applyLook(look)
+        if let impact {
+            impactPose?.apply(impact.pose, influence: impact.influence, motion: motion, to: &pose)
+        }
         motion.rebuildModelSpaceTransforms(in: &pose)
         for index in transforms.indices {
             transforms[index] = Transform(scale: pose.scales[index], rotation: pose.rotations[index],

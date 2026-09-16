@@ -34,7 +34,7 @@ final class ReplaySkinnedAthleteRuntimeTests: XCTestCase {
         XCTAssertFalse(first.model === second.model)
         XCTAssertEqual(ReplaySkinnedAthleteProvider.materialDrawsPerInstance, 4)
         XCTAssertTrue(first.update(at: 12, track: player, locomotion: jogging(player, at: 12),
-                                  lookTarget: nil, ballAction: nil, hasImpact: false))
+                                  lookTarget: nil, ballAction: nil))
         XCTAssertNotEqual(first.model.jointTransforms, second.model.jointTransforms)
         XCTAssertEqual(first.model.jointNames, first.motion.jointNames)
     }
@@ -43,7 +43,7 @@ final class ReplaySkinnedAthleteRuntimeTests: XCTestCase {
         let (player, skin) = try prepare()
         func seek(_ time: Double) {
             XCTAssertTrue(skin.update(at: time, track: player, locomotion: jogging(player, at: time),
-                                      lookTarget: [9, 0.2, 20], ballAction: nil, hasImpact: false))
+                                      lookTarget: [9, 0.2, 20], ballAction: nil))
         }
         seek(12)
         let first = skin.model.jointTransforms
@@ -73,11 +73,11 @@ final class ReplaySkinnedAthleteRuntimeTests: XCTestCase {
         }
         _ = skin.update(at: time, track: player, locomotion: jogging(player, at: time),
                         lookTarget: target(-1),
-                        ballAction: nil, hasImpact: false)
+                        ballAction: nil)
         let first = skin.pose
         _ = skin.update(at: time, track: player, locomotion: jogging(player, at: time),
                         lookTarget: target(1),
-                        ballAction: nil, hasImpact: false)
+                        ballAction: nil)
         let head = try XCTUnwrap(skin.motion.semanticJointIndices["head"])
         XCTAssertNotEqual(skin.pose.modelSpaceTransforms[head], first.modelSpaceTransforms[head])
         for name in ["leftShoulder", "rightShoulder", "leftWrist", "rightWrist"] {
@@ -89,24 +89,27 @@ final class ReplaySkinnedAthleteRuntimeTests: XCTestCase {
         }
     }
 
-    func testFootballTouchesKeepSkinWhileImpactsUseProceduralFallback() throws {
+    func testFootballTouchesAndImpactsKeepTheSameSkin() throws {
         let (player, skin) = try prepare()
         let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay))
         let time = 13.6
         let motion = jogging(player, at: time)
         let action = try XCTUnwrap(ReplayAthleteMotion.ballActionPose(for: player, ballTrack: scenario.ball, at: time))
         XCTAssertTrue(skin.update(at: time, track: player, locomotion: motion, lookTarget: nil,
-                                  ballAction: nil, hasImpact: false))
+                                  ballAction: nil))
         let running = skin.model.jointTransforms
         XCTAssertTrue(skin.update(at: time, track: player, locomotion: motion, lookTarget: nil,
-                                  ballAction: action, hasImpact: false))
+                                  ballAction: action))
         XCTAssertTrue(skin.root.isEnabled)
         XCTAssertNotEqual(skin.model.jointTransforms, running)
-        XCTAssertFalse(skin.update(at: time, track: player, locomotion: motion, lookTarget: nil,
-                                   ballAction: action, hasImpact: true))
-        XCTAssertFalse(skin.root.isEnabled)
+        let cue = PlayerRagdollCue(playerID: player.id, impactTime: time - 1)
+        let impact = try XCTUnwrap(PlayerRagdollPlayback.sample(for: cue, at: time))
         XCTAssertTrue(skin.update(at: time, track: player, locomotion: motion, lookTarget: nil,
-                                  ballAction: action, hasImpact: false))
+                                  ballAction: action, impact: impact))
+        XCTAssertTrue(skin.root.isEnabled)
+        XCTAssertNotEqual(skin.model.jointTransforms, running)
+        XCTAssertTrue(skin.update(at: time, track: player, locomotion: motion, lookTarget: nil,
+                                  ballAction: action))
     }
 
     private func locomotion(_ player: PlayerTrack, at time: Double, speed: Float, turn: Float = 0,
@@ -127,7 +130,7 @@ final class ReplaySkinnedAthleteRuntimeTests: XCTestCase {
                 let sample = locomotion(player, at: time, speed: speed, turn: turn)
                 XCTAssertEqual(ReplaySkinnedAthleteFootballPose.influence(locomotion: sample, ballAction: nil), 1)
                 XCTAssertTrue(skin.update(at: time, track: player, locomotion: sample,
-                                          lookTarget: nil, ballAction: nil, hasImpact: false))
+                                          lookTarget: nil, ballAction: nil))
                 let soles = skin.motion.footContacts.values.map {
                     (skin.pose.modelSpaceTransforms[$0.footJointIndex] * SIMD4($0.solePoint, 1)).y
                         - skin.motion.geometry.restMinY
@@ -158,7 +161,7 @@ final class ReplaySkinnedAthleteRuntimeTests: XCTestCase {
             for offset: Float in [-0.001, 0.001] {
                 let sample = locomotion(player, at: 12, speed: speed + offset, turn: turn + offset)
                 XCTAssertTrue(skin.update(at: 12, track: player, locomotion: sample,
-                                          lookTarget: nil, ballAction: nil, hasImpact: false))
+                                          lookTarget: nil, ballAction: nil))
                 if let previous {
                     for (before, after) in zip(previous, skin.model.jointTransforms) {
                         XCTAssertLessThan(simd_distance(before.translation, after.translation), 0.004)
@@ -169,10 +172,10 @@ final class ReplaySkinnedAthleteRuntimeTests: XCTestCase {
             }
         }
         let first = locomotion(player, at: 12, speed: 1.4, turn: 100, state: .walk)
-        _ = skin.update(at: 12, track: player, locomotion: first, lookTarget: nil, ballAction: nil, hasImpact: false)
+        _ = skin.update(at: 12, track: player, locomotion: first, lookTarget: nil, ballAction: nil)
         let expected = skin.model.jointTransforms
         let second = locomotion(player, at: 12, speed: 1.4, turn: 100, state: .cut)
-        _ = skin.update(at: 12, track: player, locomotion: second, lookTarget: nil, ballAction: nil, hasImpact: false)
+        _ = skin.update(at: 12, track: player, locomotion: second, lookTarget: nil, ballAction: nil)
         XCTAssertEqual(skin.model.jointTransforms, expected, "A classifier label must never swap the body or pose")
     }
 
@@ -182,7 +185,7 @@ final class ReplaySkinnedAthleteRuntimeTests: XCTestCase {
         func seek(_ time: Double) {
             let action = ReplayAthleteMotion.ballActionPose(for: player, ballTrack: scenario.ball, at: time)
             XCTAssertTrue(skin.update(at: time, track: player, locomotion: player.locomotion(at: time),
-                                      lookTarget: [9, 0.2, 20], ballAction: action, hasImpact: false))
+                                      lookTarget: [9, 0.2, 20], ballAction: action))
         }
         seek(13.6)
         let expected = skin.model.jointTransforms
@@ -206,7 +209,7 @@ final class ReplaySkinnedAthleteRuntimeTests: XCTestCase {
             supportLateralShift: 0.03
         )
         XCTAssertTrue(skin.update(at: 12, track: player, locomotion: locomotion(player, at: 12, speed: 1.1),
-                                  lookTarget: nil, ballAction: action, hasImpact: false))
+                                  lookTarget: nil, ballAction: action))
         let ankles = ["leftAnkle", "rightAnkle"].compactMap { skin.motion.semanticJointIndices[$0] }
         let positiveSide = try XCTUnwrap(ankles.first { position(skin.motion.restPose.modelSpaceTransforms[$0]).x > 0 })
         let negativeSide = try XCTUnwrap(ankles.first { position(skin.motion.restPose.modelSpaceTransforms[$0]).x < 0 })
@@ -218,7 +221,7 @@ final class ReplaySkinnedAthleteRuntimeTests: XCTestCase {
         for time in stride(from: 13.20, through: 14.10, by: 1.0 / 240) {
             let touch = ReplayAthleteMotion.ballActionPose(for: player, ballTrack: scenario.ball, at: time)
             XCTAssertTrue(skin.update(at: time, track: player, locomotion: player.locomotion(at: time),
-                                      lookTarget: nil, ballAction: touch, hasImpact: false))
+                                      lookTarget: nil, ballAction: touch))
             if let previous {
                 for (before, after) in zip(previous, skin.model.jointTransforms) {
                     XCTAssertLessThan(simd_distance(before.translation, after.translation), 0.03)
@@ -232,13 +235,13 @@ final class ReplaySkinnedAthleteRuntimeTests: XCTestCase {
     func testRetargetedPoseReusesBuffersAcrossManySeeks() throws {
         let (player, skin) = try prepare()
         _ = skin.update(at: 12, track: player, locomotion: locomotion(player, at: 12, speed: 1.1),
-                        lookTarget: nil, ballAction: nil, hasImpact: false)
+                        lookTarget: nil, ballAction: nil)
         let translations = skin.pose.translations.withUnsafeBufferPointer { UInt(bitPattern: $0.baseAddress!) }
         let rotations = skin.pose.rotations.withUnsafeBufferPointer { UInt(bitPattern: $0.baseAddress!) }
         let hierarchy = skin.pose.modelSpaceTransforms.withUnsafeBufferPointer { UInt(bitPattern: $0.baseAddress!) }
         for time in stride(from: 15.0, through: 0.0, by: -0.11) {
             _ = skin.update(at: time, track: player, locomotion: locomotion(player, at: time, speed: 2, turn: 150),
-                            lookTarget: nil, ballAction: nil, hasImpact: false)
+                            lookTarget: nil, ballAction: nil)
         }
         XCTAssertEqual(skin.pose.translations.withUnsafeBufferPointer { UInt(bitPattern: $0.baseAddress!) }, translations)
         XCTAssertEqual(skin.pose.rotations.withUnsafeBufferPointer { UInt(bitPattern: $0.baseAddress!) }, rotations)
@@ -261,7 +264,7 @@ final class ReplaySkinnedAthleteRuntimeTests: XCTestCase {
         ] {
             let action = contact ? ReplayAthleteMotion.ballActionPose(for: player, ballTrack: scenario.ball, at: time) : nil
             XCTAssertTrue(skin.update(at: time, track: player, locomotion: locomotion(player, at: time, speed: speed, turn: turn),
-                                      lookTarget: nil, ballAction: action, hasImpact: false))
+                                      lookTarget: nil, ballAction: action))
             samples.append([
                 "name": name, "time": time, "groundOffset": -skin.motion.geometry.restMinY,
                 "translations": skin.pose.translations.map { [$0.x, $0.y, $0.z] },
