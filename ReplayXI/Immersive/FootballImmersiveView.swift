@@ -946,12 +946,16 @@ enum PlaybackLocalOverlayVisibility {
 /// different mark after the selection changes.
 enum PlaybackInlinePanel: Equatable, Sendable {
     case settings
+    case playbackSpeed
     case savedReviews
     case annotationEdit
     case annotationDuration(UUID)
     case annotationGeometry(UUID)
     case annotationLabel(UUID)
     case annotationTracking(UUID)
+
+    /// Speed belongs to the main transport, not the secondary Tools command.
+    var isToolsPanel: Bool { self != .playbackSpeed }
 
     static func toggled(
         current: PlaybackInlinePanel?,
@@ -962,7 +966,7 @@ enum PlaybackInlinePanel: Equatable, Sendable {
 
     func isValid(for selectedAnnotationID: UUID?) -> Bool {
         switch self {
-        case .settings, .savedReviews, .annotationEdit:
+        case .settings, .playbackSpeed, .savedReviews, .annotationEdit:
             true
         case .annotationDuration(let id),
              .annotationGeometry(let id),
@@ -1335,7 +1339,7 @@ private struct PlaybackViewOverlayHUD: View {
                 Image(systemName: mode.systemImage)
                     .font(.headline.weight(.bold))
                 Text(shortViewTitle(mode))
-                    .font(.caption2.monospaced().weight(.black))
+                    .font(.subheadline.weight(.bold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
             }
@@ -1635,6 +1639,7 @@ private struct ImmersiveControlDeck: View {
     @State private var timelineTickClusters: [PlaybackEventRailLayout.TimelineTickCluster] = []
     @State private var timelineTrackWidth: CGFloat = 0
     @State private var timelineScrubState: PlaybackTimelineScrub.GestureState?
+    @ScaledMetric(relativeTo: .subheadline) private var timelineReadoutHeight: CGFloat = 20
     @GestureState private var timelineScrubIsActive = false
     @State private var isClearAnnotationsPending = false
     @State private var inlinePanel: PlaybackInlinePanel?
@@ -1703,7 +1708,7 @@ private struct ImmersiveControlDeck: View {
                 _ = store.cancelCoachMarkGeometryPreview(id: selectedAnnotationID)
             }
             selectedAnnotationID = nil
-            if inlinePanel != .settings && inlinePanel != .savedReviews {
+            if inlinePanel != .settings && inlinePanel != .savedReviews && inlinePanel != .playbackSpeed {
                 inlinePanel = nil
             }
             isClearAnnotationsPending = false
@@ -1717,8 +1722,8 @@ private struct ImmersiveControlDeck: View {
     private var matchPlaybackDeck: some View {
         VStack(alignment: .leading, spacing: 11) {
             if store.selectedScenario.kind == .realWorldReplay {
-                Label("Synthetic preview · reference clip not loaded", systemImage: "info.circle")
-                    .font(.caption.weight(.semibold))
+                Label("Demo match · no video loaded", systemImage: "info.circle")
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(ReplayTheme.orange)
                     .padding(.horizontal, 8)
             }
@@ -1773,6 +1778,7 @@ private struct ImmersiveControlDeck: View {
                 timelineScrubber
                     .layoutPriority(1)
 
+                compactSpeedControlButton
                 compactPlayerControlButton
                 if store.localRole == .coach {
                     annotationToolsButton
@@ -1943,6 +1949,9 @@ private struct ImmersiveControlDeck: View {
                 showsAnnotationTools = false
                 showsToolsShelf = false
             }
+            if arguments.contains("--replayxi-speed-picker") {
+                toggleInlinePanel(.playbackSpeed)
+            }
             #endif
         }
         .task(id: annotationConfirmation) {
@@ -2083,6 +2092,30 @@ private struct ImmersiveControlDeck: View {
         PlaybackControlDeckPreset(rawValue: controlDeckPresetRawValue) ?? .standard
     }
 
+    private var compactSpeedControlButton: some View {
+        Button {
+            toggleInlinePanel(.playbackSpeed)
+        } label: {
+            VStack(spacing: 1) {
+                Text(rateLabel(store.playbackRate))
+                    .font(.headline.monospacedDigit().weight(.bold))
+                Text("Speed")
+                    .font(.caption.weight(.semibold))
+            }
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .frame(width: 74, height: PlaybackControlDeckPresentation.minimumSpatialHitTarget)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(inlinePanel == .playbackSpeed ? ReplayTheme.cyan : .white.opacity(0.10))
+        .foregroundStyle(inlinePanel == .playbackSpeed ? Color.black : Color.white)
+        .disabled(rateControlsAreDisabled)
+        .accessibilityLabel("Playback speed")
+        .accessibilityValue(rateLabel(store.playbackRate))
+        .accessibilityHint("Opens speed choices from quarter speed to four times")
+        .accessibilityAddTraits(inlinePanel == .playbackSpeed ? .isSelected : [])
+    }
+
     private func annotationEditButton(compact: Bool) -> some View {
         Button {
             // The drawing shelf is a top-level compact mode. Leave it before
@@ -2196,6 +2229,16 @@ private struct ImmersiveControlDeck: View {
         switch panel {
         case .settings:
             playbackSettingsShelf
+        case .playbackSpeed:
+            inlineShelf(color: ReplayTheme.cyan) {
+                HStack(spacing: 12) {
+                    inlinePanelHeader(title: "Speed", detail: "REPLAY", systemImage: "speedometer", color: ReplayTheme.cyan)
+                    ForEach(directPlaybackRates, id: \.self) { rate in
+                        playbackRateChoice(rate)
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
         case .savedReviews:
             inlineShelf(color: ReplayTheme.cyan) {
                 ReplayReviewLibraryView {
@@ -2294,7 +2337,7 @@ private struct ImmersiveControlDeck: View {
         } label: {
             Text(title)
                 .font(.subheadline.monospacedDigit().weight(.black))
-                .frame(width: 64, height: 48)
+                .frame(width: 64, height: PlaybackControlDeckPresentation.minimumSpatialHitTarget)
         }
         .buttonStyle(.borderedProminent)
         .tint(.white.opacity(0.10))
@@ -2309,10 +2352,13 @@ private struct ImmersiveControlDeck: View {
         let isSelected = store.playbackRate == rate
         return Button {
             store.setPlaybackRate(rate, broadcast: store.localRole == .coach)
+            if inlinePanel == .playbackSpeed { inlinePanel = nil }
         } label: {
             Text(rateLabel(rate))
                 .font(.subheadline.monospacedDigit().weight(.black))
-                .frame(width: 56, height: 48)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .frame(width: 64, height: PlaybackControlDeckPresentation.minimumSpatialHitTarget)
         }
         .buttonStyle(.borderedProminent)
         .tint(isSelected ? ReplayTheme.cyan : .white.opacity(0.10))
@@ -3530,7 +3576,7 @@ private struct ImmersiveControlDeck: View {
                     Spacer(minLength: 4)
                     Text(formatTime(store.selectedScenario.duration))
                 }
-                .font(.caption2.monospacedDigit().weight(.black))
+                .font(.subheadline.monospacedDigit().weight(.bold))
                 .lineLimit(1)
                 .minimumScaleFactor(0.78)
                 .padding(.horizontal, trackInset)
@@ -3583,8 +3629,8 @@ private struct ImmersiveControlDeck: View {
         .frame(
             minWidth: 230,
             maxWidth: .infinity,
-            minHeight: PlaybackControlDeckPresentation.minimumSpatialHitTarget,
-            maxHeight: PlaybackControlDeckPresentation.minimumSpatialHitTarget
+            minHeight: max(PlaybackControlDeckPresentation.minimumSpatialHitTarget, 40 + timelineReadoutHeight),
+            maxHeight: max(PlaybackControlDeckPresentation.minimumSpatialHitTarget, 40 + timelineReadoutHeight)
         )
         .disabled(timelineControlsAreDisabled)
     }
@@ -4255,7 +4301,7 @@ private struct ImmersiveControlDeck: View {
         return time + visibleDuration <= store.selectedScenario.duration
     }
 
-    private var directPlaybackRates: [Double] { [0.5, 1, 2, 4] }
+    private var directPlaybackRates: [Double] { ReplayStore.availablePlaybackRates }
 
     private var previousCue: CueMoment? {
         store.selectedScenario.moments.last { $0.time < store.playhead - 0.2 }
@@ -4270,11 +4316,11 @@ private struct ImmersiveControlDeck: View {
     }
 
     private var rateControlsAreDisabled: Bool {
-        store.isDrawing || store.hasActiveCoachMarkGeometryPreview
+        !store.canChangePlaybackView
     }
 
     private var primaryPlaybackControlIsDisabled: Bool {
-        store.isDrawing || store.hasActiveCoachMarkGeometryPreview
+        !store.canChangePlaybackView
     }
 
     private var playerControlIsDisabled: Bool {
@@ -4282,14 +4328,14 @@ private struct ImmersiveControlDeck: View {
     }
 
     private var secondaryPlaybackControlsAreDisabled: Bool {
-        store.isDrawing || store.hasActiveCoachMarkGeometryPreview
+        !store.canChangePlaybackView
     }
 
     private var toolsWorkflowIsPresented: Bool {
         showsToolsShelf
             || showsEventStrip
             || showsDecisionStrip
-            || inlinePanel != nil
+            || (inlinePanel?.isToolsPanel ?? false)
             || selectedAnnotation != nil
             || isClearAnnotationsPending
     }
@@ -4505,7 +4551,7 @@ private struct ImmersiveControlDeck: View {
     private func rateLabel(_ rate: Double) -> String {
         rate == rate.rounded()
             ? "\(Int(rate))×"
-            : "\(rate.formatted(.number.precision(.fractionLength(2))))×"
+            : "\(rate.formatted(.number.precision(.fractionLength(0...2))))×"
     }
 }
 

@@ -172,6 +172,7 @@ final class PlaybackControlDeckClarityTests: XCTestCase {
             before: "if isClearAnnotationsPending"
         )
         XCTAssertTrue(baseRow.contains("compactPlayerControlButton"))
+        XCTAssertTrue(baseRow.contains("compactSpeedControlButton"))
         XCTAssertTrue(baseRow.contains("annotationToolsButton"))
         XCTAssertTrue(baseRow.contains("playbackToolsButton"))
         XCTAssertFalse(baseRow.contains("annotationEventsButton"))
@@ -192,6 +193,18 @@ final class PlaybackControlDeckClarityTests: XCTestCase {
         XCTAssertFalse(source.contains("Text(\"MARK\")"))
         XCTAssertFalse(source.contains("Text(\"MORE\")"))
         XCTAssertTrue(source.contains("Eyebrow(text: \"View & Overlays\""))
+    }
+
+    func testSpeedShelfRetractsAndRemainsIndependentOfSelectedAnnotation() {
+        XCTAssertEqual(PlaybackInlinePanel.toggled(current: nil, candidate: .playbackSpeed), .playbackSpeed)
+        XCTAssertNil(PlaybackInlinePanel.toggled(current: .playbackSpeed, candidate: .playbackSpeed))
+        XCTAssertEqual(PlaybackInlinePanel.toggled(current: .settings, candidate: .playbackSpeed), .playbackSpeed)
+        XCTAssertTrue(PlaybackInlinePanel.playbackSpeed.isValid(for: nil))
+        XCTAssertTrue(PlaybackInlinePanel.playbackSpeed.isValid(for: UUID()))
+        XCTAssertFalse(PlaybackInlinePanel.playbackSpeed.isToolsPanel)
+        XCTAssertTrue(PlaybackInlinePanel.settings.isToolsPanel)
+        XCTAssertTrue(PlaybackInlinePanel.savedReviews.isToolsPanel)
+        XCTAssertEqual(ReplayStore.availablePlaybackRates, [0.25, 0.5, 0.75, 1, 1.5, 2, 4])
     }
 
     func testSelectedCoachMarkExposesClearRetractableTwentyTwoPlayerTracking() throws {

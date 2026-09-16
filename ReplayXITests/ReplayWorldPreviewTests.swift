@@ -6,19 +6,13 @@ import XCTest
 
 @MainActor
 final class ReplayWorldPreviewTests: XCTestCase {
-    func testSyntheticWorldPreviewUsesFourBatchedMeshesWithinBudget() {
+    func testSyntheticWorldDoesNotFabricateReconstructionPoints() {
         let root = ReplayWorldPreviewFactory.make()
 
         XCTAssertEqual(root.name, ReplayWorldPreviewFactory.rootName)
-        XCTAssertEqual(root.children.count, ReplayWorldPreviewFactory.materialGroupCount)
-        XCTAssertEqual(ReplayWorldPreviewFactory.splatCount, 640)
-        XCTAssertEqual(ReplayWorldPreviewFactory.estimatedTriangleCount, 2_560)
-        XCTAssertEqual(ReplayWorldPreviewFactory.estimatedVertexCount, 7_680)
-        XCTAssertTrue(root.children.allSatisfy { $0 is ModelEntity })
-        XCTAssertEqual(
-            Set(root.children.map(\.name)),
-            Set((0..<4).map { "world-preview-surfels-\($0)" })
-        )
+        XCTAssertTrue(root.children.isEmpty, "The pitch and players already supply the synthetic world")
+        XCTAssertNil(root.components[ModelComponent.self])
+        XCTAssertNil(root.components[CollisionComponent.self])
     }
 
     func testWorldScenarioIsExplicitlySyntheticAndUsesTrackBoundTeachingMarks() throws {
@@ -70,7 +64,7 @@ final class ReplayWorldPreviewTests: XCTestCase {
 
         let fallback = ReplayWorldPreviewFactory.make(in: fixture.bundle)
         XCTAssertEqual(fallback.name, ReplayWorldPreviewFactory.rootName)
-        XCTAssertEqual(fallback.children.count, ReplayWorldPreviewFactory.materialGroupCount)
+        XCTAssertTrue(fallback.children.isEmpty, "Failed admission must not fabricate a replacement scan")
     }
 
     private func makeAdmissionBundle() throws -> AdmissionFixture {

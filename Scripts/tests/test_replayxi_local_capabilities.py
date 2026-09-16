@@ -46,7 +46,7 @@ class LocalCapabilityTests(unittest.TestCase):
         self.assertIn("PlaybackAttachmentPlacement.needsRecenter", immersive)
         self.assertIn("entity.parent !== controlsAnchor", immersive)
         self.assertNotIn("playback-controls-head-anchor", immersive)
-        self.assertIn("Synthetic preview · reference clip not loaded", immersive)
+        self.assertIn("Demo match · no video loaded", immersive)
 
 
 if __name__ == "__main__":

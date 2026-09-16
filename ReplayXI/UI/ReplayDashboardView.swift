@@ -404,8 +404,8 @@ private struct ScenarioWorkspace: View {
                         Image(systemName: "cube.transparent")
                             .font(.title2).foregroundStyle(ReplayTheme.cyan)
                         VStack(alignment: .leading, spacing: 5) {
-                            Text("Synthetic reconstruction preview").font(.headline)
-                            Text("Explore the scene and add tactical marks. Player paths are authored demo data, not measured match footage. Gaussian reconstruction is not available yet.")
+                            Text("Demo match · no video loaded").font(.headline)
+                            Text("Replay authored player paths, switch POVs and add 3D marks. These movements are simulated, not measured from footage.")
                                 .font(.subheadline).foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }

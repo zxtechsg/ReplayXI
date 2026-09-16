@@ -12,7 +12,7 @@ final class ReplayAppModeTests: XCTestCase {
         ])
         XCTAssertEqual(replays.map(\.id), ["real-world-match-replay"])
         XCTAssertEqual((exercises + replays).map(\.id), catalogue.map(\.id))
-        XCTAssertEqual(ReplayAppMode.matchReplay.subtitle, "Synthetic reconstruction preview")
+        XCTAssertEqual(ReplayAppMode.matchReplay.subtitle, "Synthetic match demo")
     }
 
     func testModeSelectionReturnsRememberedScenarioOnlyWhenItBelongsToMode() {

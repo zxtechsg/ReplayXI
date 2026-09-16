@@ -21,7 +21,7 @@ enum ReplayAppMode: String, CaseIterable, Identifiable, Hashable, Sendable {
     var subtitle: String {
         switch self {
         case .situationRoleplay: "3D plays, POVs and annotations"
-        case .matchReplay: "Synthetic reconstruction preview"
+        case .matchReplay: "Synthetic match demo"
         }
     }
 
@@ -51,7 +51,7 @@ enum ReplayAppMode: String, CaseIterable, Identifiable, Hashable, Sendable {
         case .shapeLab: "Positioning"
         case .passingChannels: "Passing lanes"
         case .perspectiveMatrix: "Compare POVs"
-        case .realWorldReplay: "Reconstruction demo"
+        case .realWorldReplay: "Demo match"
         }
     }
 }
