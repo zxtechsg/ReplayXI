@@ -6,7 +6,8 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "blender"))
-from native_mesh_audit import MAX_BYTES, MAX_VERTICES, blender_texture_pixels, read_samples, validate_samples
+from native_mesh_audit import (MAX_BYTES, MAX_VERTICES, blender_texture_coordinate,
+                              blender_texture_pixels, read_samples, validate_samples)
 
 
 def fixture():
@@ -111,6 +112,21 @@ class NativeMeshAuditTests(unittest.TestCase):
         actual = blender_texture_pixels(texture)
         self.assertEqual(actual, [v / 255 for v in texture["rgba8"][8:] + texture["rgba8"][:8]])
         self.assertEqual(texture, before)
+
+    def test_native_bottom_origin_uvs_do_not_receive_a_second_flip(self):
+        texture = textured_fixture()["samples"][0]["meshes"][0]["texture"]
+        pixels = blender_texture_pixels(texture)
+        for uv, expected in [([0.25, 0.75], [255, 0, 0, 255]),
+                             ([0.25, 0.25], [0, 0, 255, 255])]:
+            u, v = blender_texture_coordinate(uv)
+            self.assertEqual((u, v), tuple(uv))
+            offset = (int(v * texture["height"]) * texture["width"] + int(u * texture["width"])) * 4
+            self.assertEqual(pixels[offset:offset + 4], [value / 255 for value in expected])
+
+    def test_uv_transfer_rejects_unbounded_coordinates(self):
+        for uv in [None, [0], [0, 1, 2], [0, -0.1], [1.1, 0], [True, 0], [float("nan"), 0]]:
+            with self.assertRaisesRegex(ValueError, "UV"):
+                blender_texture_coordinate(uv)
 
 
 if __name__ == "__main__":

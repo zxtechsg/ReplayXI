@@ -1,5 +1,28 @@
 # Replay XI third-party player asset ledger
 
+## Bundled lower-detail Rocketbox derivative — 2026-09-17
+
+`ReplayXIRocketboxLow.usdz` and `ReplayXIRocketboxLowContactSurface.json`
+derive from the same MIT source and original neutral Replay XI kit below.
+No new third-party content was downloaded. The bundled MIT notice still applies.
+
+- USDZ: 1,263,724 bytes; SHA-256
+  `cd8a496a1f89166cf819177c8b959246d130f64ea5dfbd86910488b1dbe849ac`.
+- Full contact profile: 265,785 bytes; SHA-256
+  `76e9cfe574345931ca945495f41a0e2fe872a182d8db4f7e3078a8baa4acf7b1`.
+- 1,707 vertices / 2,129 triangles / 80 original joints / two material sections.
+  Two geometric shirt numbers are added at runtime. Existing body/face palettes
+  and normal maps are reused, rather than a new set of decoded team textures.
+- Blender decimation preserves protected neck, shoulder and crotch seams.
+  Canonical USD bind/rest transforms and motion blocks are preserved. All
+  1,707 weighted vertices participate in this derivative's floor contact.
+- Reproduction and explicit limitations: Loop102; native geometry/pose
+  admission: Loop109; full-contact validation: Loop112; runtime integration:
+  Loop113. This is a simplified licensed model, not FIFA-quality or football mocap.
+- Optional cold-path preparation is independent of the near body. Failed hash,
+  skeleton, material or contact admission leaves the existing fallback usable.
+  The four-skin total and two-skin player-POV caps are not increased.
+
 ## Bundled single-skeleton Rocketbox body — 2026-09-10
 
 `ReplayXIRocketboxAthlete.usdz`, `ReplayXIRocketboxMotion.json`,

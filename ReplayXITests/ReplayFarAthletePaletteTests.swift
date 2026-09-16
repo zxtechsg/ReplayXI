@@ -73,7 +73,7 @@ final class ReplayFarAthletePaletteTests: XCTestCase {
                             XCTAssertTrue(uv.x.isFinite && uv.y.isFinite)
                             XCTAssertEqual(uv.x, 0.5)
                             let relativeHeight = min(max((upperY - position.y) / (upperY - lowerY), 0), 1)
-                            let expectedV = (0.5 + relativeHeight * 63) / 64
+                            let expectedV = 1 - (0.5 + relativeHeight * 63) / 64
                             XCTAssertEqual(uv.y, expectedV, accuracy: 0.000001)
                             XCTAssertGreaterThanOrEqual(uv.y, 0.5 / 64)
                             XCTAssertLessThanOrEqual(uv.y, 63.5 / 64)

@@ -130,6 +130,16 @@ struct ReplayDashboardView: View {
                     print("Replay XI skinned-player preparation failed; using standard rig: \(error)")
                     #endif
                 }
+                // Neighbours use the cheaper canonical skin only inside the
+                // existing four-player budget. Its complete contact profile
+                // and shared kit materials are prepared once, not per frame.
+                do {
+                    try ReplaySkinnedAthleteProvider.prewarmLowDetail()
+                } catch {
+                    #if DEBUG
+                    print("Replay XI low-detail players unavailable; keeping existing player visuals: \(error)")
+                    #endif
+                }
                 // Optional visual admission; a missing/corrupt asset retains the
                 // procedural ball without blocking playback or loading per frame.
                 do {

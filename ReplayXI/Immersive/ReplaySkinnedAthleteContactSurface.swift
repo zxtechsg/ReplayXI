@@ -9,6 +9,18 @@ struct ReplaySkinnedAthleteContactSurface: Sendable {
     static let maximumPayloadBytes = 256 * 1_024
     enum DecodeError: Error, Equatable { case invalid(String) }
 
+    /// The optional low mesh uses every admitted vertex and its actual USD
+    /// inverse binds. Its larger payload must not relax the original profile.
+    enum Profile: Equatable, Sendable {
+        case near
+        case fullLowDetail
+
+        var maximumVertices: Int { self == .near ? 512 : 1_800 }
+        var maximumPayloadBytes: Int { self == .near ? 256 * 1_024 : 512 * 1_024 }
+        var sourceVertexCount: Int { self == .near ? 5_012 : 1_707 }
+        var schemaVersion: Int { self == .near ? 1 : 2 }
+    }
+
     private struct Influence: Sendable {
         let joint: Int
         let localPoint: SIMD4<Float>
@@ -23,6 +35,11 @@ struct ReplaySkinnedAthleteContactSurface: Sendable {
         let jointCount: Int
         let paddingMetres: Float
         let vertices: [Vertex]
+        let profileKind: String?
+        let rootBaseLift: Float?
+        let rootLiftBakedIntoPoints: Bool?
+        let jointNames: [String]?
+        let inverseBindMatricesColumnMajor: [[Float]]?
 
         struct Vertex: Decodable {
             let id: String
@@ -41,17 +58,57 @@ struct ReplaySkinnedAthleteContactSurface: Sendable {
     var influenceCount: Int { influences.count }
 
     init(data: Data, motion: ReplaySkinnedAthleteMotion,
-         assetSHA256: String, motionSHA256: String) throws {
-        guard data.count <= Self.maximumPayloadBytes else { throw DecodeError.invalid("Contact data exceeds budget") }
+         assetSHA256: String, motionSHA256: String, profile: Profile = .near) throws {
+        guard data.count <= profile.maximumPayloadBytes else { throw DecodeError.invalid("Contact data exceeds budget") }
         let document = try JSONDecoder().decode(Document.self, from: data)
-        guard document.schemaVersion == 1,
+        guard document.schemaVersion == profile.schemaVersion,
               document.assetSHA256 == assetSHA256, document.motionSHA256 == motionSHA256,
-              document.sourceVertexCount == 5_012,
+              document.sourceVertexCount == profile.sourceVertexCount,
               document.jointCount == motion.joints.count,
-              (8...Self.maximumVertices).contains(document.vertices.count),
+              (8...profile.maximumVertices).contains(document.vertices.count),
               document.paddingMetres.isFinite, (0.001...0.020).contains(document.paddingMetres)
         else { throw DecodeError.invalid("Contact surface does not match the verified skin") }
-        let inverses = motion.restPose.modelSpaceTransforms.map(\.inverse)
+        let restInverses = motion.restPose.modelSpaceTransforms.map(\.inverse)
+        let inverses: [simd_float4x4]
+        if profile == .fullLowDetail {
+            guard document.profileKind == "full-low-mesh",
+                  document.vertices.count == profile.sourceVertexCount,
+                  document.jointNames == motion.jointNames,
+                  document.rootLiftBakedIntoPoints == false,
+                  let rootLift = document.rootBaseLift, rootLift.isFinite,
+                  abs(rootLift + motion.geometry.restMinY) < 0.000_001,
+                  let matrices = document.inverseBindMatricesColumnMajor,
+                  matrices.count == motion.joints.count else {
+                throw DecodeError.invalid("Incomplete canonical low contact surface")
+            }
+            inverses = try matrices.enumerated().map { index, values in
+                guard values.count == 16, values.allSatisfy({ $0.isFinite && abs($0) <= 4 }) else {
+                    throw DecodeError.invalid("Invalid canonical inverse bind")
+                }
+                let matrix = simd_float4x4(columns: (
+                    SIMD4(values[0], values[1], values[2], values[3]),
+                    SIMD4(values[4], values[5], values[6], values[7]),
+                    SIMD4(values[8], values[9], values[10], values[11]),
+                    SIMD4(values[12], values[13], values[14], values[15])
+                ))
+                // USD retains slightly more bind precision than the rounded
+                // motion sidecar. The measured difference is <0.00014; retain
+                // those exact USD values, but reject another skeleton/basis.
+                for column in 0..<4 {
+                    let difference = abs(matrix[column] - restInverses[index][column])
+                    guard difference.max() <= 0.000_2 else {
+                        throw DecodeError.invalid("Canonical inverse bind does not match motion")
+                    }
+                }
+                guard abs(values[3]) < 0.000_001, abs(values[7]) < 0.000_001,
+                      abs(values[11]) < 0.000_001, abs(values[15] - 1) < 0.000_001 else {
+                    throw DecodeError.invalid("Non-affine canonical inverse bind")
+                }
+                return matrix
+            }
+        } else {
+            inverses = restInverses
+        }
         var ranges: [Range<Int>] = []
         var influences: [Influence] = []
         ranges.reserveCapacity(document.vertices.count)

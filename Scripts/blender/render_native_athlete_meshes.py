@@ -16,7 +16,7 @@ import bpy
 from mathutils import Vector
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from native_mesh_audit import blender_texture_pixels, read_samples
+from native_mesh_audit import blender_texture_coordinate, blender_texture_pixels, read_samples
 from prepare_football_player import USD_TO_BLENDER, flat_material, link_object
 
 REPOSITORY = Path(__file__).resolve().parents[2]
@@ -104,8 +104,8 @@ def main():
                 layer = mesh.uv_layers.new(name="NativeUV")
                 for polygon in mesh.polygons:
                     for loop_index in polygon.loop_indices:
-                        u, v = source["uvs"][mesh.loops[loop_index].vertex_index]
-                        layer.data[loop_index].uv = (u, 1 - v)
+                        uv = source["uvs"][mesh.loops[loop_index].vertex_index]
+                        layer.data[loop_index].uv = blender_texture_coordinate(uv)
             mesh.materials.append(native_material(f"{sample['name']}-tint-{index}", source))
             for polygon in mesh.polygons:
                 polygon.use_smooth = True

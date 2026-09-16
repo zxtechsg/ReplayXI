@@ -119,9 +119,11 @@ enum ReplayFarAthletePaletteProvider {
     static func textureCoordinate(for position: SIMD3<Float>, limb: Limb) -> SIMD2<Float> {
         guard position.y.isFinite else { return [0.5, 0.5] }
         let fraction = min(max((limb.upperY - position.y) / (limb.upperY - limb.lowerY), 0), 1)
-        // Generated mesh UVs address native image row 0 at the limb top.
-        // Half-texel insets avoid wrapping/blending the two end colours.
-        return [0.5, (0.5 + fraction * Float(stripHeight - 1)) / Float(stripHeight)]
+        // RealityKit mesh V is bottom-origin, while image row zero is the
+        // strip's top. Native shader tests check this distinction; reading the
+        // texture bytes alone cannot detect an upside-down sleeve or sock.
+        // Half-texel insets avoid blending the two end colours.
+        return [0.5, 1 - (0.5 + fraction * Float(stripHeight - 1)) / Float(stripHeight)]
     }
 
     static func materials(for configuration: ReplayAthleteConfiguration) -> Materials? {

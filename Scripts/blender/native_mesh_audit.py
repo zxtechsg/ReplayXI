@@ -104,8 +104,8 @@ def validate_texture(texture):
 def blender_texture_pixels(texture):
     """One row flip: Metal row 0 is top; Blender image storage is bottom-up.
 
-    Generated RealityKit mesh UV V=0 also means top. The Blender renderer maps
-    those UVs to V'=1-V separately, so both refer to the same physical row.
+    Native shader controls establish bottom-origin RealityKit mesh UVs, like
+    Blender. Preserve those UVs; a second UV flip masks an upside-down app map.
     No PNG round-trip, colour-space guess or channel swap occurs here: the
     native exporter has already canonicalised RGBA versus BGRA bytes.
     """
@@ -114,6 +114,15 @@ def blender_texture_pixels(texture):
     pixels = texture["rgba8"]
     return [channel / 255 for row in reversed(range(texture["height"]))
             for channel in pixels[row * row_bytes:(row + 1) * row_bytes]]
+
+
+def blender_texture_coordinate(uv):
+    """Keep the native mesh's bottom-origin UV after image storage is flipped."""
+    if not isinstance(uv, (list, tuple)) or len(uv) != 2 or not all(
+        finite_number(value, 1) and value >= 0 for value in uv
+    ):
+        raise ValueError("Invalid native UV coordinate")
+    return tuple(uv)
 
 
 def read_samples(path: Path):

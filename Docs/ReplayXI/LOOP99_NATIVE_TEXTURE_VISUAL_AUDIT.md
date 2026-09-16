@@ -1,5 +1,7 @@
 # Loop 99 — Native texture and UV visual audit
 
+**Correction from Loop 110:** the historical Blender `V' = 1−V` conversion below was not native shader parity; it masked reversed sleeve/sock placement in the app. Native calibrated controls now prove that these generated mesh UVs are bottom-origin. The app UV mapping is corrected, and Blender preserves native V after reordering image storage once. [Loop 110](LOOP110_NATIVE_FAR_PALETTE_ORIENTATION.md) supersedes the UV-origin and band-placement conclusion below. The texture-row, gamut and tint readback controls remain valid.
+
 Scope: test/offline QA for the small far-player material change. No playback readback, asset regeneration, downloaded content or user Blender file edits.
 
 `ReplayNativeTextureAudit` reads the texture actually attached to a native material into a bounded floating-point Metal texture. It accepts only opaque uncompressed RGBA8/BGRA8 colour resources, at most 256 pixels per side and 4,096 pixels total. Exported bytes are canonical RGBA, with the real native pixel format, Display P3 gamut, transfer function and explicit top-left origin. It never substitutes the intended palette for the loaded resource.

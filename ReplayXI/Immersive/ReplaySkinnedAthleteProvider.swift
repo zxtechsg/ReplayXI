@@ -16,11 +16,16 @@ enum ReplaySkinnedAthleteError: Error, Equatable {
 /// by animation controllers, so rewind and shared replay clocks agree.
 @MainActor
 enum ReplaySkinnedAthleteProvider {
+    enum Detail: Hashable, Sendable { case near, lowDetail }
     static let visualRootName = "skinned-athlete-visual"
     static let maximumConcurrentInstances = 4
     static let assetSHA256 = "7cfb694888f111928643e8aca7041d21925f5d55f3f5adbd353a972ca255e772"
     static let motionSHA256 = "d30a7379b81a4b0ea3fef5ebd20ad101911ab4fd521a5be1f6c00c0804f59ce4"
     static let contactSurfaceSHA256 = "71eb134afa27eac0c23500afbd038dd11594a2b5ad30a5a178b303305a49c3ca"
+    static let lowAssetSHA256 = "cd8a496a1f89166cf819177c8b959246d130f64ea5dfbd86910488b1dbe849ac"
+    static let lowContactSurfaceSHA256 = "76e9cfe574345931ca945495f41a0e2fe872a182d8db4f7e3078a8baa4acf7b1"
+    static let lowSkinVertices = 1_707
+    static let lowSkinTriangles = 2_129
     // Two material sections + two geometric numbers, even if the importer
     // coalesces both skin sections into one ModelEntity.
     static let materialDrawsPerInstance = 4
@@ -33,8 +38,16 @@ enum ReplaySkinnedAthleteProvider {
     private static var template: Entity?
     private(set) static var motion: ReplaySkinnedAthleteMotion?
     private static var contactSurface: ReplaySkinnedAthleteContactSurface?
+    private static var lowTemplate: Entity?
+    private static var lowContactSurface: ReplaySkinnedAthleteContactSurface?
     private static var kits: [[PhysicallyBasedMaterial]] = []
     static var isPrewarmed: Bool { template != nil && motion != nil && contactSurface != nil && kits.count == 15 }
+    static var isLowDetailPrewarmed: Bool { isPrewarmed && lowTemplate != nil && lowContactSurface != nil }
+
+    #if DEBUG
+    private static var forcesLowDetailMakeFailure = false
+    private(set) static var lowDetailCloneAttemptCount = 0
+    #endif
 
     static func prewarm(in bundle: Bundle = .main) throws {
         guard !isPrewarmed else { return }
@@ -86,10 +99,54 @@ enum ReplaySkinnedAthleteProvider {
         kits = preparedKits
     }
 
-    static func make(for player: PlayerTrack) throws -> ReplaySkinnedAthleteInstance {
-        guard let template, let motion, let contactSurface, kits.count == 15 else {
+    /// Optional, independent admission. Existing near players remain ready if
+    /// this lower-detail package or its complete contact profile is unavailable.
+    /// Called on the room's cold path only, never during a scene update.
+    static func prewarmLowDetail(in bundle: Bundle = .main) throws {
+        guard !isLowDetailPrewarmed else { return }
+        guard isPrewarmed, let motion else { throw ReplaySkinnedAthleteError.notPrepared }
+        let modelURL = try resource("ReplayXIRocketboxLow", "usdz", bundle)
+        _ = try checkedData(modelURL, expected: lowAssetSHA256)
+        let contactURL = try resource("ReplayXIRocketboxLowContactSurface", "json", bundle)
+        let contacts = try ReplaySkinnedAthleteContactSurface(
+            data: checkedData(contactURL, expected: lowContactSurfaceSHA256), motion: motion,
+            assetSHA256: lowAssetSHA256, motionSHA256: motionSHA256, profile: .fullLowDetail
+        )
+        let loaded = try Entity.load(contentsOf: modelURL)
+        loaded.stopAllAnimations(recursive: true)
+        let models = skinnedModels(in: loaded)
+        guard models.count == 1, let model = models.first,
+              model.jointNames == motion.jointNames, model.jointTransforms.count == motion.joints.count,
+              var component = model.model else { throw ReplaySkinnedAthleteError.invalidSkeleton }
+        let parts = component.mesh.contents.models.flatMap { Array($0.parts) }
+        guard component.materials.count == 2,
+              component.materials.allSatisfy({ $0 is PhysicallyBasedMaterial }),
+              parts.count == 2,
+              parts.contains(where: { $0.id == "Body" && $0.materialIndex == 0 && $0.positions.count == 1_296 }),
+              parts.contains(where: { $0.id == "Head" && $0.materialIndex == 1 && $0.positions.count == 411 }),
+              parts.reduce(0, { $0 + ($1.triangleIndices?.count ?? 0) / 3 }) == lowSkinTriangles
+        else { throw ReplaySkinnedAthleteError.invalidMaterials }
+        // Use the already prepared face/body palettes and normal maps; do not
+        // retain the imported package's default material pair in the template.
+        component.materials = kits[0]
+        model.model = component
+        lowTemplate = loaded
+        lowContactSurface = contacts
+    }
+
+    static func make(for player: PlayerTrack, detail: Detail = .near) throws -> ReplaySkinnedAthleteInstance {
+        let preparedTemplate = detail == .near ? template : lowTemplate
+        let preparedContacts = detail == .near ? contactSurface : lowContactSurface
+        guard let template = preparedTemplate, let motion, let contactSurface = preparedContacts,
+              isPrewarmed, kits.count == 15 else {
             throw ReplaySkinnedAthleteError.notPrepared
         }
+        #if DEBUG
+        if detail == .lowDetail {
+            lowDetailCloneAttemptCount += 1
+            if forcesLowDetailMakeFailure { throw ReplaySkinnedAthleteError.invalidSkeleton }
+        }
+        #endif
         let clone = template.clone(recursive: true)
         clone.stopAllAnimations(recursive: true)
         guard let model = skinnedModels(in: clone).first, var component = model.model else {
@@ -114,7 +171,7 @@ enum ReplaySkinnedAthleteProvider {
         clone.addChild(back)
         return ReplaySkinnedAthleteInstance(root: root, skinRoot: clone, model: model,
                                            front: front, back: back, playerID: player.id, motion: motion,
-                                           contactSurface: contactSurface)
+                                           contactSurface: contactSurface, detail: detail)
     }
 
     static func skinnedModels(in entity: Entity) -> [ModelEntity] {
@@ -140,12 +197,26 @@ enum ReplaySkinnedAthleteProvider {
     }
 
     #if DEBUG
-    static func resetForTesting() { template = nil; motion = nil; contactSurface = nil; kits = [] }
+    static func resetForTesting() {
+        template = nil; motion = nil; contactSurface = nil; kits = []
+        resetLowDetailForTesting()
+    }
+
+    static func resetLowDetailForTesting() {
+        lowTemplate = nil; lowContactSurface = nil
+        forcesLowDetailMakeFailure = false
+        lowDetailCloneAttemptCount = 0
+    }
+
+    static func setLowDetailMakeFailureForTesting(_ enabled: Bool) {
+        forcesLowDetailMakeFailure = enabled
+    }
     #endif
 }
 
 @MainActor
 final class ReplaySkinnedAthleteInstance {
+    let detail: ReplaySkinnedAthleteProvider.Detail
     let root: Entity
     let playerID: String
     let model: ModelEntity
@@ -165,7 +236,9 @@ final class ReplaySkinnedAthleteInstance {
     private var impactPose: ReplaySkinnedAthleteImpactPose?
 
     init(root: Entity, skinRoot: Entity, model: ModelEntity, front: ModelEntity, back: ModelEntity,
-         playerID: String, motion: ReplaySkinnedAthleteMotion, contactSurface: ReplaySkinnedAthleteContactSurface) {
+         playerID: String, motion: ReplaySkinnedAthleteMotion, contactSurface: ReplaySkinnedAthleteContactSurface,
+         detail: ReplaySkinnedAthleteProvider.Detail = .near) {
+        self.detail = detail
         self.root = root
         self.skinRoot = skinRoot
         self.model = model

@@ -84,6 +84,11 @@ enum PitchSceneFactory {
         let tableMarkerBinding: ReplayAthleteJointBinding?
     }
 
+    private struct SkinnedAthleteVariantKey: Hashable {
+        let playerID: String
+        let detail: ReplaySkinnedAthleteProvider.Detail
+    }
+
     /// The scene focus is deliberately semantic. It changes only when a coach
     /// selects a different mark, changes that mark, or opens a different set of
     /// decision receivers—not as the replay clock advances.
@@ -150,7 +155,8 @@ enum PitchSceneFactory {
         var importedAthlete: ReplayImportedAthleteInstance?
         var importedAthleteAttemptedPlayerID: String?
         var skinnedAthletes: [String: ReplaySkinnedAthleteInstance] = [:]
-        var skinnedAthleteFailedIDs: Set<String> = []
+        var skinnedAthleteFailedVariants: Set<SkinnedAthleteVariantKey> = []
+        var lowDetailAdmission = ReplayLowDetailAdmissionPolicy.State()
         // Match roots are immutable with respect to authored player identity.
         // Index their entities once instead of rebuilding a 22-entry Dictionary
         // from RealityKit's child collection on every presentation frame.
@@ -351,6 +357,14 @@ enum PitchSceneFactory {
             poseRefreshes: cache.playerPoseRefreshCount
         )
     }
+
+    #if DEBUG
+    static func skinnedAthletesForTesting(in root: Entity) -> [String: ReplaySkinnedAthleteInstance] {
+        guard let cache = annotationSceneCaches[ObjectIdentifier(root)],
+              cache.root === root else { return [:] }
+        return cache.skinnedAthletes
+    }
+    #endif
 
     // All 22 rigs share immutable geometry. Kits and appearances vary through
     // lightweight materials, avoiding hundreds of duplicate mesh allocations.
@@ -822,7 +836,7 @@ enum PitchSceneFactory {
                 cache: sceneState,
                 admittedPlayerID: importedAthleteID
             )
-            var admittedSkinIDs: Set<String> = if viewMode == .firstPerson {
+            var nearSkinIDs: Set<String> = if viewMode == .firstPerson {
                 firstPersonDetailedIDs
             } else if scenario.kind == .shapeLab && viewMode == .positional
                         && effectiveTriangleMode == .visualise {
@@ -834,16 +848,38 @@ enum PitchSceneFactory {
                let resolvedRagdollCue, resolvedRagdollCue.isActive(at: time),
                scenario.player(id: resolvedRagdollCue.playerID) != nil {
                 // A reviewed impact deserves the near skin even when another
-                // player is selected. At most two skins in these match views.
-                admittedSkinIDs.insert(resolvedRagdollCue.playerID)
+                // player is selected. Near subjects take priority over lows.
+                nearSkinIDs.insert(resolvedRagdollCue.playerID)
             }
-            // Release old subjects before iterating the roster. Admission must
-            // not depend on whether the new selection sorts before the old one.
+            let lowDetailAdmission = ReplayLowDetailAdmissionPolicy.resolve(
+                previous: sceneState?.lowDetailAdmission ?? .init(),
+                scenarioID: scenario.id,
+                scenarioKind: scenario.kind,
+                viewMode: viewMode,
+                perspectiveID: perspectiveID,
+                posesByPlayerID: playerPosesByID,
+                nearPlayerIDs: nearSkinIDs,
+                maximumTotal: ReplaySkinnedAthleteProvider.maximumConcurrentInstances,
+                lowDetailIsReady: ReplaySkinnedAthleteProvider.isLowDetailPrewarmed
+                    && !ReplayImportedAthleteFeatureGate.isEnabled
+            )
+            var admittedSkinDetails = Dictionary(
+                uniqueKeysWithValues: nearSkinIDs.map { ($0, ReplaySkinnedAthleteProvider.Detail.near) }
+            )
+            for id in lowDetailAdmission.playerIDs { admittedSkinDetails[id] = .lowDetail }
+            // Release departed or promoted variants before roster iteration.
+            // Selection order must not delay a near/impact subject by a frame.
             if let sceneState {
-                for id in sceneState.skinnedAthletes.keys.filter({ !admittedSkinIDs.contains($0) }) {
+                sceneState.lowDetailAdmission = lowDetailAdmission
+                for id in sceneState.skinnedAthletes.keys.filter({
+                    admittedSkinDetails[$0] != sceneState.skinnedAthletes[$0]?.detail
+                }) {
                     sceneState.skinnedAthletes.removeValue(forKey: id)?.root.removeFromParent()
                 }
-                sceneState.skinnedAthleteFailedIDs.formIntersection(admittedSkinIDs)
+                let admittedVariants = Set(admittedSkinDetails.map {
+                    SkinnedAthleteVariantKey(playerID: $0.key, detail: $0.value)
+                })
+                sceneState.skinnedAthleteFailedVariants.formIntersection(admittedVariants)
             }
             for player in scenario.players {
                 guard let entity = sceneState?.playerEntity(for: player.id)
@@ -927,11 +963,18 @@ enum PitchSceneFactory {
                             || isSelected
                             || activeRagdollCue != nil
                     )
-                // Keep new skins bounded to the same near-subject selection.
-                // Detaching a subject releases its pose buffers and render root.
-                if !needsDetailedRig, let previous = sceneState?.skinnedAthletes.removeValue(forKey: player.id) {
+                let admittedSkinDetail = admittedSkinDetails[player.id]
+                let canUseAdmittedSkin = entity.isEnabled && !hidesHeadMountedAvatar
+                    && admittedSkinDetail != nil
+                    && (needsDetailedRig || admittedSkinDetail == .lowDetail)
+                // A low visual does not request a detailed procedural/query rig.
+                // Detaching any subject releases its pose buffers and root.
+                if !canUseAdmittedSkin,
+                   let previous = sceneState?.skinnedAthletes.removeValue(forKey: player.id) {
                     previous.root.removeFromParent()
-                    sceneState?.skinnedAthleteFailedIDs.remove(player.id)
+                    sceneState?.skinnedAthleteFailedVariants.remove(
+                        SkinnedAthleteVariantKey(playerID: player.id, detail: previous.detail)
+                    )
                 }
                 if needsDetailedRig,
                    directChild(named: "full-rig", of: entity) == nil,
@@ -987,21 +1030,25 @@ enum PitchSceneFactory {
                 // A forward-only legacy clip must not erase a football touch.
                 if importedBelongsToPlayer && hasBallAction { attachedImportedAthlete?.root.isEnabled = false }
                 let usesLegacySkin = hasImportedAthlete && importedMotionIsSupported && !hasBallAction
-                if needsDetailedRig, ReplaySkinnedAthleteProvider.isPrewarmed,
-                   admittedSkinIDs.contains(player.id),
+                if canUseAdmittedSkin, let admittedSkinDetail,
+                   ReplaySkinnedAthleteProvider.isPrewarmed,
                    !ReplayImportedAthleteFeatureGate.isEnabled,
                    let sceneState, sceneState.skinnedAthletes[player.id] == nil,
                    sceneState.skinnedAthletes.count < ReplaySkinnedAthleteProvider.maximumConcurrentInstances,
-                   !sceneState.skinnedAthleteFailedIDs.contains(player.id) {
-                    if let skin = try? ReplaySkinnedAthleteProvider.make(for: player) {
+                   !sceneState.skinnedAthleteFailedVariants.contains(
+                        SkinnedAthleteVariantKey(playerID: player.id, detail: admittedSkinDetail)
+                   ) {
+                    if let skin = try? ReplaySkinnedAthleteProvider.make(for: player, detail: admittedSkinDetail) {
                         entity.addChild(skin.root)
                         sceneState.skinnedAthletes[player.id] = skin
                     } else {
-                        sceneState.skinnedAthleteFailedIDs.insert(player.id)
+                        sceneState.skinnedAthleteFailedVariants.insert(
+                            SkinnedAthleteVariantKey(playerID: player.id, detail: admittedSkinDetail)
+                        )
                     }
                 }
                 let usesNewSkin: Bool
-                if needsDetailedRig, let skin = sceneState?.skinnedAthletes[player.id] {
+                if canUseAdmittedSkin, let skin = sceneState?.skinnedAthletes[player.id] {
                     usesNewSkin = skin.update(at: time, track: player, locomotion: locomotion,
                                              lookTarget: playerLookTarget, ballAction: ballAction,
                                              impact: impactSample, stationaryPose: stationaryPose)

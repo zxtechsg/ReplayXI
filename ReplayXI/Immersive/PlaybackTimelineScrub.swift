@@ -18,6 +18,9 @@ enum PlaybackTimelineScrub {
         let time: TimeInterval
         let precision: Precision
         fileprivate let previousHorizontalTranslation: Double
+        // Integrate travel before frame quantisation. Rounding each tiny hand
+        // sample separately either loses motion or amplifies it with cadence.
+        fileprivate let accumulatedTime: TimeInterval
     }
 
     static let accessibilityStep: TimeInterval = 1
@@ -32,7 +35,8 @@ enum PlaybackTimelineScrub {
         return GestureState(
             time: safeTime,
             precision: .coarse,
-            previousHorizontalTranslation: 0
+            previousHorizontalTranslation: 0,
+            accumulatedTime: safeTime
         )
     }
 
@@ -67,13 +71,17 @@ enum PlaybackTimelineScrub {
         let safeTime = state.time.isFinite
             ? min(max(state.time, 0), safeDuration)
             : 0
+        let safeAccumulatedTime = state.accumulatedTime.isFinite
+            ? min(max(state.accumulatedTime, 0), safeDuration)
+            : safeTime
         guard railWidth.isFinite, railWidth > 0,
               horizontalTranslation.isFinite,
               verticalTranslation.isFinite else {
             return GestureState(
                 time: safeTime,
                 precision: state.precision,
-                previousHorizontalTranslation: state.previousHorizontalTranslation
+                previousHorizontalTranslation: state.previousHorizontalTranslation,
+                accumulatedTime: safeAccumulatedTime
             )
         }
 
@@ -85,14 +93,22 @@ enum PlaybackTimelineScrub {
         let translatedSeconds = incrementalHorizontalTranslation / Double(railWidth)
             * safeDuration
             * gain
-        var updatedTime = min(max(safeTime + translatedSeconds, 0), safeDuration)
-        if precision == .frame, abs(incrementalHorizontalTranslation) > .ulpOfOne {
-            updatedTime = snappedToFrame(updatedTime, duration: safeDuration)
+        // Leaving frame mode starts from the visible frame, not a hidden
+        // remainder that could make the next forward movement go backwards.
+        let origin = state.precision == .frame && precision != .frame
+            ? safeTime : safeAccumulatedTime
+        let accumulatedTime = min(max(origin + translatedSeconds, 0), safeDuration)
+        var updatedTime = safeTime
+        if abs(incrementalHorizontalTranslation) > .ulpOfOne {
+            updatedTime = precision == .frame
+                ? snappedToFrame(accumulatedTime, duration: safeDuration)
+                : accumulatedTime
         }
         return GestureState(
             time: updatedTime,
             precision: precision,
-            previousHorizontalTranslation: currentHorizontalTranslation
+            previousHorizontalTranslation: currentHorizontalTranslation,
+            accumulatedTime: accumulatedTime
         )
     }
 
