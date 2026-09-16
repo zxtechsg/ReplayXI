@@ -34,6 +34,9 @@ struct ReplayDashboardView: View {
             .ignoresSafeArea()
         }
         .preferredColorScheme(.dark)
+        // Keep a second gesture from starting while presentation is in flight.
+        // An already-open room remains interactive if this window is reopened.
+        .disabled(store.isOpeningImmersive || store.isClosingImmersive)
         .task {
             let clock = ContinuousClock()
             var previous = clock.now
@@ -478,6 +481,11 @@ private struct ShapeFocusDashboard: View {
         return store.shapeFocusStage == .ideal ? .ideal : .problem
     }
 
+    private var canEnterSpatialSetup: Bool {
+        store.localRole == .coach && !store.isRoomPresentationBusy
+            && !store.hasActiveTimelineScrub && !store.hasActiveCoachMarkGeometryPreview
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .center, spacing: 14) {
@@ -499,10 +507,17 @@ private struct ShapeFocusDashboard: View {
                     ShapeFocusStepButton(
                         stage: item,
                         currentStage: stage,
-                        enabled: item != .physical || store.localRole == .coach,
+                        enabled: item != .physical || canEnterSpatialSetup,
                         action: { select(item) }
                     )
                 }
+            }
+
+            if let hint = roomEntryGestureHint(for: store) {
+                Label(hint, systemImage: "hand.draw")
+                    .font(.caption)
+                    .foregroundStyle(ReplayTheme.orange)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Divider()
@@ -579,6 +594,7 @@ private struct ShapeFocusDashboard: View {
                         .buttonStyle(.borderedProminent)
                         .tint(ReplayTheme.signal)
                         .foregroundStyle(.black)
+                        .disabled(!canEnterSpatialSetup)
                     } else {
                         Label("The coach starts physical setup", systemImage: "person.badge.key")
                             .font(.caption2.weight(.semibold))
@@ -676,7 +692,7 @@ private struct ShapeFocusDashboard: View {
     }
 
     private func enterSpatialSetup() {
-        guard store.localRole == .coach else { return }
+        guard canEnterSpatialSetup else { return }
         showIdeal()
         openRoom()
     }
@@ -1117,6 +1133,13 @@ struct DashboardPlayerRailContent {
     }
 }
 
+@MainActor
+private func roomEntryGestureHint(for store: ReplayStore) -> String? {
+    if store.hasActiveTimelineScrub { return "Finish the timeline drag before entering." }
+    if store.hasActiveCoachMarkGeometryPreview { return "Finish the annotation adjustment before entering." }
+    return nil
+}
+
 private struct RoomRail: View {
     @Environment(ReplayStore.self) private var store
 
@@ -1188,6 +1211,7 @@ private struct RoomRail: View {
                 .tint(ReplayTheme.signal)
                 .foregroundStyle(.black)
                 .disabled(store.isRoomPresentationBusy)
+                .disabled(store.hasActiveTimelineScrub || store.hasActiveCoachMarkGeometryPreview)
 
                 if let roomEntryHint {
                     Text(roomEntryHint)
@@ -1219,10 +1243,11 @@ private struct RoomRail: View {
 
     private var roomEntryHint: String? {
         switch store.roomPresentation.phase {
-        case .closed: nil
-        case .opening: "Preparing your spatial view."
-        case .open: "Use Exit in the room to return here."
-        case .closing: "Wait for the room to close before reopening."
+        case .closed:
+            return roomEntryGestureHint(for: store)
+        case .opening: return "Preparing your spatial view."
+        case .open: return "Use Exit in the room to return here."
+        case .closing: return "Wait for the room to close before reopening."
         }
     }
 

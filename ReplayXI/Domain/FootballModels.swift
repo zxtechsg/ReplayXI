@@ -1233,8 +1233,11 @@ struct ReplayPlayerPresentation: Sendable {
                 ? nil
                 : PlayerRagdollCue.authoredDemo(for: scenario)
         }
+        // Physical placement uses the same teaching targets as the ideal
+        // overview. When tracking drops, that overview becomes visible again;
+        // annotation input must not jump back to raw telemetry meanwhile.
         idealTargets = viewMode == .positional
-            && triangleLockMode == .visualise && showsIdealBranch
+            && (showsIdealBranch || triangleLockMode == .place)
             ? scenario.formationTargets
             : []
     }

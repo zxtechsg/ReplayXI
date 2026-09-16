@@ -765,6 +765,10 @@ final class ReplayStore {
     func openLocalPlayerPOV(_ id: String) {
         guard allowsPlaybackViewChange() else { return }
         guard selectedScenario.player(id: id) != nil else { return }
+        guard triangleLockMode != .place else {
+            statusMessage = "End physical placement before changing views."
+            return
+        }
         // Selecting the POV already being rendered is navigation-only. In a
         // shared room it must not turn a following player into a local review,
         // or pause a coach merely because a card/pitch hit resolved to the
@@ -814,6 +818,10 @@ final class ReplayStore {
     func broadcastPerspective(_ id: String) {
         guard allowsPlaybackViewChange() else { return }
         guard localRole == .coach, selectedScenario.player(id: id) != nil else { return }
+        guard triangleLockMode != .place else {
+            statusMessage = "End physical placement before changing views."
+            return
+        }
         isPlaying = false
         localPerspectiveID = id
         coachFocusPerspectiveID = id
@@ -2790,14 +2798,27 @@ final class ReplayStore {
     }
 
     func beginImmersiveOpen() -> UUID? {
-        guard let requestID = roomPresentation.beginOpening() else { return nil }
+        // Opening pauses playback. Do not acquire the room while a scrub or
+        // annotation adjustment owns a checkpoint that could later restore
+        // playback when the dashboard disappears. A paused drawing draft has
+        // no such gesture owner and may carry into the spatial room intact.
+        guard !roomPresentation.isBusy,
+              allowsMutationOutsideEndpointPreview(),
+              let requestID = roomPresentation.beginOpening() else { return nil }
         setPlaying(false)
         statusMessage = "Preparing match players…"
         return requestID
     }
 
     func completeImmersiveOpen(_ requestID: UUID, opened: Bool) -> Bool {
-        roomPresentation.completeOpening(requestID, opened: opened)
+        guard roomPresentation.completeOpening(requestID, opened: opened) else { return false }
+        // Appearance can precede the system result. Keep any newer interaction
+        // message from the visible room instead of overwriting it with "ready".
+        if opened,
+           statusMessage == "Preparing match players…" || statusMessage == "Opening spatial replay…" {
+            statusMessage = "Spatial replay ready"
+        }
+        return true
     }
 
     func immersiveRoomDidAppear(_ requestID: UUID) -> UUID? {
