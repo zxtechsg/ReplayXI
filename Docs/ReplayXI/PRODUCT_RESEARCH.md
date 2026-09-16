@@ -1,13 +1,21 @@
 # Replay XI product research and implementation direction
 
-Last reviewed: 3 September 2026
+Product sources reviewed: 3 September 2026. Scope aligned with the local-only
+app on 17 September; the UI follow-up below rechecked Apple, Hudl Studio and
+Tactic3D, not every older product link.
 
-Replay XI should not imitate a console football game or duplicate a conventional video-analysis suite. Its useful wedge is narrower: take the event-and-telestration workflow analysts already understand, reconstruct one trusted football moment in a common 3D coordinate system, and let a squad inspect it together from any player's freely lookable point of view.
+Current scope is **local Match Replay and Strategy Analysis**. Replay XI uses
+an event-and-annotation workflow to inspect a football moment from selectable,
+freely lookable player viewpoints. Room sharing and Group Activities are out of
+scope. Source-video reconstruction remains pending a usable authorised clip;
+the bundled match is explicitly synthetic. See [spatial UI notes](SPATIAL_UI_RESEARCH.md)
+for the current room-fixed controls and [Loop 52](LOOP52_PRESENTED_ANNOTATION_ALIGNMENT.md)
+for player-bound annotation alignment.
 
 The core review loop is:
 
 1. **Find the moment** — choose a tagged event or decision checkpoint.
-2. **Freeze the decision** — pause everyone on one authoritative match clock.
+2. **Freeze the decision** — pause the local replay on one authoritative match clock.
 3. **Inspect every role** — select a body or number to enter its translation-following, free-look POV without forcing recorded head rotation.
 4. **Draw the correction** — add a pitch-locked run, pass, space, danger area, or player label with an explicit time window.
 5. **Rehearse the next action** — compare the observed state with a coach-authored alternative, then return to playback.
@@ -58,22 +66,22 @@ The core review loop is:
 - Use one deterministic, absolute replay clock for trajectories, gait phase, ball motion, annotation visibility, and optional replay effects. Seeking to the same time must recreate the same frame.
 - Keep normal football movement authored/telemetry-driven. Use physics only for a selected, bounded impact replay, with a deterministic reset path. A 22-body continuously dynamic ragdoll simulation would weaken seeking, cross-device agreement, and frame pacing.
 - Use shared materials, mesh reuse/instancing where practical, distance-based detail, bounded labels, and bounded annotation hierarchies. Profile on device with RealityKit Trace before claiming a stable player count.
-- Share semantic playback state through `GroupSessionMessenger`; do not attempt to stream entity transforms every rendered frame. A nearby group immersive space can align coordinate systems, but app state still needs explicit reliable messages.
+- Keep playback, annotations and saves on this device. Do not add a Group Activities entitlement or transport. Legacy snapshot tests are offline compatibility fixtures, not a shipped sharing feature.
 - Treat free look and recorded facing as two independent transforms. Playback moves the POV origin with the player's track; Vision Pro controls view orientation; a reticle or frustum communicates the recorded facing direction.
-- Give primary immersive controls 48–56-point targets and comparable centre-to-centre spacing. Keep one compact deck on a continuously tracked head anchor below the sightline so it remains reachable through moving POVs; place pitch labels and review evidence in world space. Because permanently head-locked content can be uncomfortable, physical-device QA must test occlusion, lag, and a future pin/recentre escape hatch.
+- Keep the control deck and its submenus in one room-fixed workspace, with a deliberate recenter action. A one-time head-origin capture places the workspace; it does not keep following the wearer's head. Pitch labels stay with the pitch. Maintain large targets and test text wrapping, overlap and reach on an unlocked Simulator/headset. These comfort checks are still pending.
 - Keep all interaction stationary. Physical-position rehearsal must remain consent-gated, small-scale, headset-position-based, and clearly distinct from foot or full-body tracking.
 
-Relevant Apple guidance: [RealityKit](https://developer.apple.com/documentation/RealityKit), [physics joints and pins](https://developer.apple.com/documentation/realitykit/physics-joints-and-pins), [SharePlay for immersive spaces](https://developer.apple.com/documentation/visionos/implementing-shareplay-for-immersive-spaces-in-visionos), [sharing with people nearby](https://developer.apple.com/documentation/groupactivities/configure-your-app-for-sharing-with-people-nearby), [visionOS accessibility](https://developer.apple.com/design/human-interface-guidelines/accessibility), [spatial layout](https://developer.apple.com/design/human-interface-guidelines/spatial-layout), and [visionOS performance analysis](https://developer.apple.com/documentation/visionos/analyzing-the-performance-of-your-visionos-app).
+Relevant Apple guidance: [RealityKit](https://developer.apple.com/documentation/RealityKit), [physics joints and pins](https://developer.apple.com/documentation/realitykit/physics-joints-and-pins), [visionOS accessibility](https://developer.apple.com/design/human-interface-guidelines/accessibility), [spatial layout](https://developer.apple.com/design/human-interface-guidelines/spatial-layout), and [visionOS performance analysis](https://developer.apple.com/documentation/visionos/analyzing-the-performance-of-your-visionos-app).
 
 ## Ordered product slices
 
-### Slice A — credible shared playback
+### Slice A — credible local playback
 
 - Large transport with play/pause, precise scrub, jog, speed, current event, and reset.
 - All 22 players selectable directly by body/number and through a compact roster fallback.
 - Tactical, touchline, and freely lookable Player POV views on one timestamp.
-- Coach preview versus explicit “share this POV” semantics.
-- Late-join snapshot, bounded heartbeat correction, duplicate/out-of-order rejection, and clear solo/live-room status.
+- Clear selected-player versus active-POV semantics; room-role selection must not claim to change the camera.
+- Local autosave and named reviews, paused restoration, safe open/close ownership and clear room status.
 
 ### Slice B — spatial coaching authoring
 
@@ -103,4 +111,4 @@ Relevant Apple guidance: [RealityKit](https://developer.apple.com/documentation/
 - No claim that synthetic figures are photorealistic athletes or that procedural impact poses are biomechanically accurate.
 - No claim that reconstructed Player POV reproduces gaze, perception, or memory unless eye/head telemetry and a validated calibration method are actually supplied.
 - No claim of automated tactical correctness, player grading, cognitive transfer, or injury benefit.
-- No claim of 11- or 20-headset operation until staged physical-device tests establish alignment, latency, thermal behaviour, comfort, and session reliability.
+- No claim of multi-headset operation: this build is local only.

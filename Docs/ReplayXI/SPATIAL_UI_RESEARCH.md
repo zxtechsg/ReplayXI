@@ -35,3 +35,26 @@ Implemented this pass: captured room origin for all five attachment types;
 explicit recenter in View and Settings; stable mode/save IDs; Settings rows.
 Still to validate: manual spatial relocation/recovery, large-text panel overlap,
 and physical comfort. No claim of a complete UI redesign or finished reconstruction.
+
+## 17 September follow-up
+
+- Apple's [design session](https://developer.apple.com/videos/play/wwdc2024/10086/)
+  stresses minimal required movement and a cohesive interface with few windows.
+  Our application: keep the existing room-fixed workspace and group secondary
+  controls. Do not restore continuously head-locked controls or scattered panels.
+- [Hudl Studio](https://business.hudl.com/products/studio) documents tracked
+  player graphics and multi-angle visual feedback. Our application: bodies,
+  shirt tags, annotation endpoints and editing inputs now share the displayed
+  player origin, including impact and ideal-shape views. This is authored-track
+  alignment, not computer-vision tracking.
+- [Tactic3D](https://www.tactic3d.com/football/football-software-playbook-en.php)
+  describes animated plays, timed passes and selectable views. Our application:
+  distinguish a role station from a camera choice, and preserve the chosen
+  replay time when entering POV.
+
+These are design inferences, not copied interfaces or measured product rankings.
+The Apple HIG page returned a JavaScript-only shell during this check; the
+accessible official session transcript supports the Apple notes above.
+The local-only scope supersedes the old sharing/head-anchor recommendations
+in earlier notes. Interactive layout and comfort checks still require an unlocked
+Simulator or headset; automated state tests do not replace them.
