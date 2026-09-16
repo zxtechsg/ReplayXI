@@ -118,6 +118,20 @@ final class LocalPitchAnchorCoordinator {
     @ObservationIgnored private var anchorUpdatesTask: Task<Void, Never>?
     @ObservationIgnored private var poseSamplingTask: Task<Void, Never>?
     @ObservationIgnored private var pitchAnchorRemovalTask: Task<Void, Never>?
+    @ObservationIgnored private var sessionRevision = UUID()
+
+    /// ARKit calls can finish after stop/restart. Never accept their result in a
+    /// different session, even when the underlying provider ignores cancellation.
+    func withSessionLifetime<Value>(
+        _ operation: () async throws -> Value
+    ) async throws -> Value {
+        let revision = sessionRevision
+        try Task.checkCancellation()
+        let result = try await operation()
+        try Task.checkCancellation()
+        guard sessionRevision == revision else { throw CancellationError() }
+        return result
+    }
 
     /// Starts world tracking. Call this only while the app presents a Full Space.
     func start() async {
@@ -134,17 +148,21 @@ final class LocalPitchAnchorCoordinator {
         let provider = WorldTrackingProvider()
         arkitSession = session
         worldTrackingProvider = provider
+        let revision = sessionRevision
 
         anchorUpdatesTask = makeAnchorUpdatesTask(provider: provider)
         poseSamplingTask = makePoseSamplingTask(provider: provider)
 
         do {
             // World tracking alone doesn't request scene reconstruction or plane data.
-            try await session.run([provider])
-            status = .waitingForSharedPitchAnchor
+            try await withSessionLifetime { try await session.run([provider]) }
+            // An anchor update may already have moved the session past startup.
+            if status == .starting { status = .waitingForSharedPitchAnchor }
         } catch {
+            guard sessionRevision == revision else { return }
             tearDownSession()
-            status = .unavailable("World tracking could not start: \(error.localizedDescription)")
+            status = error is CancellationError ? .stopped
+                : .unavailable("World tracking could not start: \(error.localizedDescription)")
         }
     }
 
@@ -164,18 +182,27 @@ final class LocalPitchAnchorCoordinator {
         guard let provider = worldTrackingProvider, arkitSession != nil else {
             throw CoordinatorError.worldTrackingNotRunning
         }
-        guard !isPlacingPitchAnchor else {
+        guard !isPlacingPitchAnchor, pitchAnchorRemovalTask == nil else {
             throw CoordinatorError.placementInProgress
         }
+        let revision = sessionRevision
         isPlacingPitchAnchor = true
-        defer { isPlacingPitchAnchor = false }
+        defer {
+            if sessionRevision == revision { isPlacingPitchAnchor = false }
+        }
 
         let previousAnchor = pitchAnchor
         let newAnchor = WorldAnchor(
             originFromAnchorTransform: transform
         )
 
-        try await provider.addAnchor(newAnchor)
+        do {
+            try await withSessionLifetime { try await provider.addAnchor(newAnchor) }
+        } catch {
+            // Best-effort cleanup also covers cancellation after a successful add.
+            try? await provider.removeAnchor(newAnchor)
+            throw error
+        }
 
         selectedSharedPitchAnchorID = newAnchor.id
         sharedAnchorCache[newAnchor.id] = newAnchor
@@ -190,6 +217,9 @@ final class LocalPitchAnchorCoordinator {
 
         if let previousAnchor, previousAnchor.id != newAnchor.id {
             try? await provider.removeAnchor(previousAnchor)
+            guard sessionRevision == revision, !Task.isCancelled else {
+                throw CancellationError()
+            }
             sharedAnchorCache.removeValue(forKey: previousAnchor.id)
         }
 
@@ -271,21 +301,24 @@ final class LocalPitchAnchorCoordinator {
         let anchor = sharedAnchorCache[localID]
             ?? (pitchAnchor?.id == localID ? pitchAnchor : nil)
         let provider = worldTrackingProvider
+        let revision = sessionRevision
         let removalTask = Task { [weak self] in
             if let provider, let anchor {
                 try? await provider.removeAnchor(anchor)
             }
-            guard let self else { return }
+            guard let self, self.sessionRevision == revision, !Task.isCancelled else { return }
             sharedAnchorCache.removeValue(forKey: localID)
-            locallyPlacedPitchAnchorID = nil
-            placedPitchAnchorLocally = false
+            if locallyPlacedPitchAnchorID == localID {
+                locallyPlacedPitchAnchorID = nil
+                placedPitchAnchorLocally = false
+            }
             if selectedSharedPitchAnchorID == localID {
                 selectSharedPitchAnchor(id: nil)
             }
         }
         pitchAnchorRemovalTask = removalTask
         await removalTask.value
-        pitchAnchorRemovalTask = nil
+        if sessionRevision == revision { pitchAnchorRemovalTask = nil }
     }
 
     private func makeAnchorUpdatesTask(
@@ -417,6 +450,8 @@ final class LocalPitchAnchorCoordinator {
     }
 
     private func tearDownSession() {
+        // Invalidate before stopping providers, so delayed completions are stale.
+        sessionRevision = UUID()
         anchorUpdatesTask?.cancel()
         poseSamplingTask?.cancel()
         anchorUpdatesTask = nil
@@ -455,7 +490,7 @@ extension LocalPitchAnchorCoordinator {
             case .headsetNotTracked:
                 "The headset pose is not currently tracked."
             case .placementInProgress:
-                "A shared pitch origin is already being placed."
+                "Wait for the current pitch origin change to finish."
             }
         }
     }

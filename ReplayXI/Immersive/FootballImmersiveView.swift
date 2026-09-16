@@ -1347,9 +1347,12 @@ private struct PlaybackViewOverlayHUD: View {
         .buttonStyle(.borderedProminent)
         .tint(isSelected ? ReplayTheme.signal : .white.opacity(0.10))
         .foregroundStyle(isSelected ? Color.black : Color.white)
-        .disabled(store.hasActiveCoachMarkGeometryPreview)
+        .disabled(!store.canChangePlaybackView)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(mode.title) view")
+        .accessibilityHint(store.canChangePlaybackView
+            ? "Changes the replay camera"
+            : "Finish or cancel the current gesture first")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
@@ -4275,7 +4278,7 @@ private struct ImmersiveControlDeck: View {
     }
 
     private var playerControlIsDisabled: Bool {
-        store.isDrawing || store.hasActiveCoachMarkGeometryPreview
+        !store.canChangePlaybackView
     }
 
     private var secondaryPlaybackControlsAreDisabled: Bool {

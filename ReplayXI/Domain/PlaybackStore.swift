@@ -258,6 +258,21 @@ final class ReplayStore {
         return true
     }
 
+    /// Camera changes must not move the pitch beneath an unfinished annotation
+    /// or a hand that currently owns a timeline/geometry transaction.
+    var canChangePlaybackView: Bool {
+        !isDrawing && !hasActiveTimelineScrub && !hasActiveCoachMarkGeometryPreview
+    }
+
+    private func allowsPlaybackViewChange() -> Bool {
+        guard allowsMutationOutsideEndpointPreview() else { return false }
+        guard !isDrawing else {
+            statusMessage = "Finish or cancel the annotation first"
+            return false
+        }
+        return true
+    }
+
     convenience init() {
         self.init(scenarios: DemoScenarios.all)
     }
@@ -653,7 +668,7 @@ final class ReplayStore {
     }
 
     func setViewMode(_ mode: ReplayViewMode, broadcast: Bool = true) {
-        guard allowsMutationOutsideEndpointPreview() else { return }
+        guard allowsPlaybackViewChange() else { return }
         guard triangleLockMode != .place || mode == .positional else {
             statusMessage = "End physical placement before changing views."
             return
@@ -672,7 +687,7 @@ final class ReplayStore {
     }
 
     func openLocalPlayerPOV(_ id: String) {
-        guard allowsMutationOutsideEndpointPreview() else { return }
+        guard allowsPlaybackViewChange() else { return }
         guard selectedScenario.player(id: id) != nil else { return }
         // Selecting the POV already being rendered is navigation-only. In a
         // shared room it must not turn a following player into a local review,
@@ -697,7 +712,7 @@ final class ReplayStore {
     }
 
     func setLocalPerspective(_ id: String, entersLocalReview: Bool = true) {
-        guard allowsMutationOutsideEndpointPreview() else { return }
+        guard allowsPlaybackViewChange() else { return }
         guard selectedScenario.player(id: id) != nil else { return }
         if entersLocalReview, isCollaborationActive, localRole == .player {
             followsCoach = false
@@ -721,7 +736,7 @@ final class ReplayStore {
     }
 
     func broadcastPerspective(_ id: String) {
-        guard allowsMutationOutsideEndpointPreview() else { return }
+        guard allowsPlaybackViewChange() else { return }
         guard localRole == .coach, selectedScenario.player(id: id) != nil else { return }
         isPlaying = false
         localPerspectiveID = id

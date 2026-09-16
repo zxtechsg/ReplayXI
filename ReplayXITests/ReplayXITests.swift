@@ -1683,6 +1683,8 @@ final class ReplayXITests: XCTestCase {
         XCTAssertEqual(paused.viewMode, .tacticalTable)
         XCTAssertFalse(paused.isPlaying)
 
+        // View changes now wait until drawing releases the camera frame.
+        store.cancelDrawing()
         store.broadcastPerspective("red-lb")
         let sharedPOV = try XCTUnwrap(coordinator.snapshotForHeartbeat())
         XCTAssertFalse(store.isCoachLocalReview)

@@ -1,10 +1,11 @@
-# Local product goal — 12 September 2026
+# Local product goal — 16 September 2026
 
-Requested budget: **1,000,000,000 tokens total**. This is the user's requested
-ceiling, not an allocation or a reason to consume it. The goal service refused
-replacement because the old blocked goal is unfinished. Its stored objective
-and 5-billion budget have NOT changed; the user must replace that goal in the app.
-Do not mark the old multiplayer objective complete to bypass that restriction.
+Active goal: a **time-boxed improvement run**, ending at **09:00 Singapore time
+on 17 September 2026 (01:00 UTC)**. This replaces the previous token budgets;
+the new goal has no token limit. Check the time before each work batch. Stop
+starting work at 08:50, save verified work, and hand off by 09:00. A one-time
+thread reminder is scheduled for the deadline; it is not a hard process kill.
+Finishing this run does not mean the entire product is complete.
 
 This document records the new authorised product scope, superseding historical
 multiplayer and head-following requirements.
