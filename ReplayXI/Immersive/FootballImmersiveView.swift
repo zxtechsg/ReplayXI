@@ -2453,8 +2453,8 @@ private struct ImmersiveControlDeck: View {
         inlineShelf(color: annotationColor(for: mark.kind)) {
             HStack(spacing: 12) {
                 inlinePanelHeader(
-                    title: "Annotation",
-                    detail: "DURATION",
+                    title: "Duration",
+                    detail: "FROM \(formatTime(mark.revealTime))",
                     systemImage: "timer",
                     color: annotationColor(for: mark.kind)
                 )
@@ -2474,7 +2474,7 @@ private struct ImmersiveControlDeck: View {
                 Spacer(minLength: 8)
 
                 StatusPill(
-                    text: "NOW · \(annotationDurationLabel(mark).uppercased())",
+                    text: "LENGTH · \(annotationDurationLabel(mark).uppercased())",
                     systemImage: "clock.fill",
                     color: annotationColor(for: mark.kind)
                 )
@@ -2488,6 +2488,10 @@ private struct ImmersiveControlDeck: View {
         title: String
     ) -> some View {
         let isSelected = isAnnotationDuration(duration, selectedFor: mark)
+        let fits = CoachMarkTimingPolicy.windowFits(
+            revealTime: mark.revealTime, displayDuration: duration,
+            replayDuration: store.selectedScenario.duration
+        )
         return Button {
             if store.setCoachMarkDuration(id: mark.id, duration: duration) {
                 annotationConfirmation = "DURATION · \(title)"
@@ -2503,8 +2507,10 @@ private struct ImmersiveControlDeck: View {
         .buttonStyle(.borderedProminent)
         .tint(isSelected ? annotationColor(for: mark.kind) : .white.opacity(0.10))
         .foregroundStyle(isSelected ? Color.black : Color.white)
-        .disabled(isSelected)
+        .disabled(isSelected || !fits || !store.canChangePlaybackView)
         .accessibilityLabel(duration == nil ? "Show until replay ends" : "Show for \(title)")
+        .accessibilityHint(fits ? "Sets how long this annotation is shown"
+            : "Not enough replay time remains. Choose To end")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
@@ -4311,9 +4317,10 @@ private struct ImmersiveControlDeck: View {
               store.selectedScenario.duration.isFinite,
               (0...store.selectedScenario.duration).contains(time),
               abs(mark.revealTime - time) >= 0.05 else { return false }
-        guard let hideTime = mark.hideTime else { return true }
-        let visibleDuration = max(hideTime - mark.revealTime, 0)
-        return time + visibleDuration <= store.selectedScenario.duration
+        return CoachMarkTimingPolicy.windowFits(
+            revealTime: time, displayDuration: mark.hideTime.map { $0 - mark.revealTime },
+            replayDuration: store.selectedScenario.duration
+        )
     }
 
     private var directPlaybackRates: [Double] { ReplayStore.availablePlaybackRates }

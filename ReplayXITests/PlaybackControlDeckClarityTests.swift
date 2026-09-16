@@ -229,6 +229,18 @@ final class PlaybackControlDeckClarityTests: XCTestCase {
         XCTAssertTrue(confirmation.contains("Undo can restore your marks"))
     }
 
+    func testAnnotationDurationChoicesUseTheSameBoundsAsTheStore() throws {
+        let source = try immersiveSource()
+        let choice = try sourceSlice(source,
+            after: "private func annotationDurationChoice(", before: "private func annotationGeometryShelf")
+        XCTAssertTrue(choice.contains("CoachMarkTimingPolicy.windowFits"))
+        XCTAssertTrue(choice.contains(".disabled(isSelected || !fits || !store.canChangePlaybackView)"))
+        XCTAssertTrue(choice.contains("Not enough replay time remains. Choose To end"))
+        let move = try sourceSlice(source,
+            after: "private func canMoveAnnotation(", before: "private var directPlaybackRates")
+        XCTAssertTrue(move.contains("CoachMarkTimingPolicy.windowFits"))
+    }
+
     func testSelectedCoachMarkExposesClearRetractableTwentyTwoPlayerTracking() throws {
         let source = try immersiveSource()
         let inspector = try sourceSlice(

@@ -38,8 +38,8 @@ struct CoachMarkEndpointPreviewOwner: Equatable, Sendable {
 @Observable
 final class ReplayStore {
     static let availablePlaybackRates: [Double] = [0.25, 0.5, 0.75, 1, 1.5, 2, 4]
-    static let coachAnnotationDisplayDuration: TimeInterval = 8
-    static let maximumCoachAnnotationDuration: TimeInterval = 30
+    static let coachAnnotationDisplayDuration = CoachMarkTimingPolicy.preferredDuration
+    static let maximumCoachAnnotationDuration = CoachMarkTimingPolicy.maximumDuration
     /// A pitch pinch that begins close to a footballer is treated as authored
     /// from that track. The radius is deliberately tighter than the broad
     /// player-selection target so a coach can still draw a fixed-space mark
@@ -259,8 +259,8 @@ final class ReplayStore {
         return true
     }
 
-    /// Camera changes must not move the pitch beneath an unfinished annotation
-    /// or a hand that currently owns a timeline/geometry transaction.
+    /// Camera/transport changes must not move the pitch beneath an unfinished
+    /// annotation or a hand that owns a timeline/geometry transaction.
     var canChangePlaybackView: Bool {
         !isDrawing && !hasActiveTimelineScrub && !hasActiveCoachMarkGeometryPreview
     }
@@ -520,7 +520,7 @@ final class ReplayStore {
     }
 
     func togglePlayback(broadcast: Bool = true) {
-        guard allowsMutationOutsideEndpointPreview() else { return }
+        guard allowsPlaybackViewChange() else { return }
         guard !isCollaborationActive || localRole == .coach || !broadcast else {
             setFollowingCoach(isLocallyPaused)
             return
@@ -536,6 +536,10 @@ final class ReplayStore {
 
     func setPlaying(_ value: Bool, broadcast: Bool = true) {
         guard allowsMutationOutsideEndpointPreview() else { return }
+        guard !value || !isDrawing else {
+            statusMessage = "Finish or cancel the annotation first"
+            return
+        }
         if broadcast, isCollaborationActive, localRole != .coach {
             setFollowingCoach(value)
             return
@@ -549,7 +553,7 @@ final class ReplayStore {
     }
 
     func seek(to time: TimeInterval, broadcast: Bool = true) {
-        guard allowsMutationOutsideEndpointPreview() else { return }
+        guard allowsPlaybackViewChange() else { return }
         guard !isCollaborationActive || localRole == .coach || !broadcast else { return }
         guard time.isFinite, selectedScenario.duration.isFinite else { return }
         playhead = min(max(time, 0), selectedScenario.duration)
@@ -664,7 +668,7 @@ final class ReplayStore {
     }
 
     func setPlaybackRate(_ rate: Double, broadcast: Bool = true) {
-        guard allowsMutationOutsideEndpointPreview() else { return }
+        guard allowsPlaybackViewChange() else { return }
         guard !isCollaborationActive || localRole == .coach || !broadcast else { return }
         guard rate.isFinite else { return }
         playbackRate = min(max(rate, 0.25), 4)
@@ -806,6 +810,7 @@ final class ReplayStore {
     func beginDrawing(_ kind: CoachMarkKind) {
         guard allowsMutationOutsideEndpointPreview() else { return }
         guard localRole == .coach else { return }
+        guard allowsAnnotationAtCurrentTime() else { return }
         guard marks.count < Self.maximumSharedCoachMarks else {
             isDrawing = false
             pendingDrawStart = nil
@@ -836,6 +841,7 @@ final class ReplayStore {
     func registerPitchTap(_ point: PitchPoint) -> CoachMark? {
         guard allowsMutationOutsideEndpointPreview() else { return nil }
         guard isDrawing, localRole == .coach else { return nil }
+        guard allowsAnnotationAtCurrentTime() else { return nil }
         guard Self.isPointOnPitch(point) else {
             statusMessage = "Choose a point on the pitch"
             return nil
@@ -888,7 +894,7 @@ final class ReplayStore {
             end: point,
             label: label,
             revealTime: playhead,
-            hideTime: playhead + Self.coachAnnotationDisplayDuration,
+            hideTime: defaultCoachMarkHideTime,
             startTrackAnchor: anchors.start,
             endTrackAnchor: anchors.end
         )
@@ -911,7 +917,7 @@ final class ReplayStore {
             statusMessage = "Annotation limit reached. Remove one before labelling."
             return nil
         }
-        guard playhead.isFinite,
+        guard allowsAnnotationAtCurrentTime(),
               let player = selectedScenario.player(id: playerID) else {
             statusMessage = "Player label unavailable"
             return nil
@@ -926,9 +932,13 @@ final class ReplayStore {
             end: position,
             label: "#\(player.shirtNumber) \(player.displayName) · \(player.positionCode)",
             revealTime: playhead,
-            hideTime: playhead + Self.coachAnnotationDisplayDuration,
+            hideTime: defaultCoachMarkHideTime,
             playerID: player.id
         )
+        guard isValidSharedMark(mark, for: selectedScenario) else {
+            statusMessage = "Player label unavailable"
+            return nil
+        }
         marks.append(mark)
         pendingDrawStart = nil
         isDrawing = false
@@ -940,6 +950,7 @@ final class ReplayStore {
     func addPresetMark() {
         guard allowsMutationOutsideEndpointPreview() else { return }
         guard localRole == .coach else { return }
+        guard allowsAnnotationAtCurrentTime() else { return }
         guard marks.count < Self.maximumSharedCoachMarks else {
             statusMessage = "Annotation limit reached. Remove one before adding."
             return
@@ -954,8 +965,11 @@ final class ReplayStore {
         }
         let sampledFocus = activePerspective?.presentationPose(at: playhead).position ?? .zero
         let focus = Self.clampedPitchPoint(sampledFocus)
-        let destination = Self.clampedPitchPoint(
-            PitchPoint(x: focus.x + 7, z: focus.z + 10)
+        // Point back into the field near a boundary. Clamping an outward
+        // arrow at a corner used to collapse its two endpoints into one.
+        let destination = PitchPoint(
+            x: focus.x + (focus.x + 7 <= Self.pitchHalfWidth ? 7 : -7),
+            z: focus.z + (focus.z + 10 <= Self.pitchHalfLength ? 10 : -10)
         )
         let activePlayerAnchor = activePerspective.map {
             CoachMarkTrackAnchor(
@@ -972,7 +986,7 @@ final class ReplayStore {
             end: destination,
             label: selectedTool == .pass ? "Open channel" : "Next movement",
             revealTime: playhead,
-            hideTime: playhead + Self.coachAnnotationDisplayDuration,
+            hideTime: defaultCoachMarkHideTime,
             startTrackAnchor: selectedTool == .space ? nil : activePlayerAnchor,
             endTrackAnchor: selectedTool == .run
                 ? activePlayerAnchor.map {
@@ -986,9 +1000,26 @@ final class ReplayStore {
                 }
                 : nil
         )
+        guard CoachMarkGeometryPolicy.accepts(kind: mark.kind, start: mark.start, end: mark.end),
+              isValidSharedMark(mark, for: selectedScenario) else {
+            statusMessage = "Choose a player inside the pitch"
+            return
+        }
         marks.append(mark)
         statusMessage = "Coach annotation added"
         emitSnapshot()
+    }
+
+    private func allowsAnnotationAtCurrentTime() -> Bool {
+        let valid = CoachMarkTimingPolicy.windowFits(
+            revealTime: playhead, displayDuration: nil, replayDuration: selectedScenario.duration
+        )
+        if !valid { statusMessage = "Choose a time inside this replay" }
+        return valid
+    }
+
+    private var defaultCoachMarkHideTime: TimeInterval? {
+        CoachMarkTimingPolicy.defaultHideTime(revealTime: playhead, replayDuration: selectedScenario.duration)
     }
 
     /// Compatibility entry point: all Undo routes use the same edit history.
@@ -1083,8 +1114,15 @@ final class ReplayStore {
         }
 
         let mark = marks[index]
+        guard CoachMarkTimingPolicy.windowFits(
+            revealTime: revealTime, displayDuration: mark.hideTime.map { $0 - mark.revealTime },
+            replayDuration: selectedScenario.duration
+        ) else {
+            statusMessage = "That annotation window does not fit the replay"
+            return false
+        }
         let shiftedHideTime = mark.hideTime.map {
-            revealTime + ($0 - mark.revealTime)
+            min(revealTime + ($0 - mark.revealTime), selectedScenario.duration)
         }
         let replacement = CoachMark(
             id: mark.id,
@@ -1137,6 +1175,12 @@ final class ReplayStore {
         }
 
         let mark = marks[index]
+        guard CoachMarkTimingPolicy.windowFits(
+            revealTime: mark.revealTime, displayDuration: duration, replayDuration: selectedScenario.duration
+        ) else {
+            statusMessage = "That annotation window does not fit the replay"
+            return false
+        }
         let replacement = CoachMark(
             id: mark.id,
             kind: mark.kind,
@@ -1146,7 +1190,7 @@ final class ReplayStore {
             endElevation: mark.endElevation,
             label: mark.label,
             revealTime: mark.revealTime,
-            hideTime: duration.map { mark.revealTime + $0 },
+            hideTime: duration.map { min(mark.revealTime + $0, selectedScenario.duration) },
             author: mark.author,
             playerID: mark.playerID,
             startTrackAnchor: mark.startTrackAnchor,
@@ -2221,7 +2265,7 @@ final class ReplayStore {
     }
 
     func advance(by delta: TimeInterval) {
-        guard !hasActiveTimelineScrub, !hasActiveCoachMarkGeometryPreview else { return }
+        guard !isDrawing, !hasActiveTimelineScrub, !hasActiveCoachMarkGeometryPreview else { return }
         guard isActivelyPlaying,
               delta.isFinite,
               delta > 0,
