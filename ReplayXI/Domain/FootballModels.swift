@@ -1206,13 +1206,69 @@ struct ReplayScenario: Identifiable, Codable, Hashable, Sendable {
     }
 }
 
+/// One view-specific source for the positions shown on the pitch. Authored
+/// telemetry stays unchanged, but an impact may hold a player at its contact
+/// point and the ideal-shape view may move a role onto its teaching target.
+/// Bodies, identity tags and player-bound annotations must sample this same
+/// context instead of independently choosing between those positions.
+struct ReplayPlayerPresentation: Sendable {
+    let impactCue: PlayerRagdollCue?
+    private let idealTargets: [FormationTarget]
+
+    init(
+        scenario: ReplayScenario,
+        viewMode: ReplayViewMode,
+        showsIdealBranch: Bool = false,
+        triangleLockMode: TriangleLockMode = .visualise,
+        impactCue: PlayerRagdollCue? = nil
+    ) {
+        if viewMode == .positional {
+            self.impactCue = nil
+        } else if let impactCue {
+            self.impactCue = impactCue
+        } else {
+            // The default POV remains upright, with headset-controlled free
+            // look. A caller must explicitly request an impact in that view.
+            self.impactCue = viewMode == .firstPerson
+                ? nil
+                : PlayerRagdollCue.authoredDemo(for: scenario)
+        }
+        idealTargets = viewMode == .positional
+            && triangleLockMode == .visualise && showsIdealBranch
+            ? scenario.formationTargets
+            : []
+    }
+
+    func pose(for player: PlayerTrack, at time: TimeInterval) -> PlayerPose {
+        let source = player.presentationPose(at: time)
+        if let target = idealTargets.first(where: { $0.playerID == player.id }) {
+            return PlayerPose(position: target.position, facingDegrees: source.facingDegrees)
+        }
+        guard let impactCue, impactCue.playerID == player.id,
+              impactCue.isActive(at: time) else { return source }
+        let contact = player.presentationPose(at: impactCue.impactTime)
+        let release = impactCue.telemetryRelease(at: time)
+        return PlayerPose(
+            position: contact.position.interpolated(to: source.position, fraction: release),
+            facingDegrees: ReplayGeometry.interpolateAngle(
+                from: contact.facingDegrees, to: source.facingDegrees, fraction: release
+            )
+        )
+    }
+
+    func poses(in scenario: ReplayScenario, at time: TimeInterval) -> [String: PlayerPose] {
+        Dictionary(uniqueKeysWithValues: scenario.players.map { ($0.id, pose(for: $0, at: time)) })
+    }
+}
+
 extension CoachMark {
     /// Resolves track-relative endpoints at one replay instant. The result is a
     /// pure function of the shared mark, scenario telemetry and timestamp, so
     /// every participant renders the same geometry after a seek or late join.
     func resolvedGeometry(
         in scenario: ReplayScenario,
-        at time: TimeInterval
+        at time: TimeInterval,
+        presentedPlayerPoses: [String: PlayerPose]? = nil
     ) -> ResolvedCoachMarkGeometry {
         let sampleTime = time.isFinite
             ? min(max(time, 0), max(scenario.duration, 0))
@@ -1226,7 +1282,8 @@ extension CoachMark {
                   let player = scenario.player(id: anchor.playerID) else {
                 return fallback
             }
-            let playerPosition = player.presentationPose(at: sampleTime).position
+            let playerPosition = presentedPlayerPoses?[player.id]?.position
+                ?? player.presentationPose(at: sampleTime).position
             return PitchPoint(
                 x: playerPosition.x + anchor.offset.x,
                 z: playerPosition.z + anchor.offset.z
@@ -1239,7 +1296,8 @@ extension CoachMark {
         if kind == .playerLabel,
            let playerID,
            let player = scenario.player(id: playerID) {
-            let position = player.presentationPose(at: sampleTime).position
+            let position = presentedPlayerPoses?[player.id]?.position
+                ?? player.presentationPose(at: sampleTime).position
             return ResolvedCoachMarkGeometry(start: position, end: position)
         }
 
@@ -1267,9 +1325,12 @@ extension CoachMark {
     /// value directly with its existing mark cache and hit-target code.
     func resolvingTrackGeometry(
         in scenario: ReplayScenario,
-        at time: TimeInterval
+        at time: TimeInterval,
+        presentedPlayerPoses: [String: PlayerPose]? = nil
     ) -> CoachMark {
-        let geometry = resolvedGeometry(in: scenario, at: time)
+        let geometry = resolvedGeometry(
+            in: scenario, at: time, presentedPlayerPoses: presentedPlayerPoses
+        )
         guard geometry.start != start || geometry.end != end else { return self }
         return CoachMark(
             id: id,

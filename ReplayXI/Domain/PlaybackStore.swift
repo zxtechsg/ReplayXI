@@ -483,6 +483,37 @@ final class ReplayStore {
         selectedScenario.player(id: activePerspectiveID)
     }
 
+    /// Spatial authoring samples the same view-specific origin as the visible
+    /// body. Raw telemetry would put labels and new run anchors ahead of a
+    /// fallen player, or behind a role moved into the ideal formation.
+    var playerPresentation: ReplayPlayerPresentation {
+        ReplayPlayerPresentation(
+            scenario: selectedScenario,
+            viewMode: viewMode,
+            showsIdealBranch: showsIdealBranch,
+            triangleLockMode: triangleLockMode
+        )
+    }
+
+    func presentedPlayerPose(for player: PlayerTrack, at time: TimeInterval) -> PlayerPose {
+        playerPresentation.pose(for: player, at: time)
+    }
+
+    func presentedCoachMarkGeometry(
+        _ mark: CoachMark,
+        at time: TimeInterval
+    ) -> ResolvedCoachMarkGeometry {
+        let presentation = playerPresentation
+        // A mark has at most two attached players. Avoid sampling the entire
+        // squad for each joystick or direct-handle input sample.
+        let poses = Dictionary(uniqueKeysWithValues: mark.anchoredPlayerIDs.compactMap { id in
+            selectedScenario.player(id: id).map { (id, presentation.pose(for: $0, at: time)) }
+        })
+        return mark.resolvedGeometry(
+            in: selectedScenario, at: time, presentedPlayerPoses: poses
+        )
+    }
+
     var activePerspectiveIndex: Int {
         selectedScenario.players.firstIndex { $0.id == activePerspectiveID } ?? 0
     }
@@ -962,7 +993,7 @@ final class ReplayStore {
 
         isPlaying = false
         selectedTool = .playerLabel
-        let position = player.presentationPose(at: playhead).position
+        let position = presentedPlayerPose(for: player, at: playhead).position
         let mark = CoachMark(
             kind: .playerLabel,
             start: position,
@@ -1000,7 +1031,9 @@ final class ReplayStore {
             labelPlayer(playerID)
             return
         }
-        let sampledFocus = activePerspective?.presentationPose(at: playhead).position ?? .zero
+        let sampledFocus = activePerspective.map {
+            presentedPlayerPose(for: $0, at: playhead).position
+        } ?? .zero
         let focus = Self.clampedPitchPoint(sampledFocus)
         // Point back into the field near a boundary. Clamping an outward
         // arrow at a corner used to collapse its two endpoints into one.
@@ -1336,9 +1369,11 @@ final class ReplayStore {
         }
 
         let mark = marks[index]
-        let resolved = mark.resolvedGeometry(in: selectedScenario, at: playhead)
+        let resolved = presentedCoachMarkGeometry(mark, at: playhead)
         let playerPosition = playerID.flatMap {
-            selectedScenario.player(id: $0)?.presentationPose(at: playhead).position
+            selectedScenario.player(id: $0).map {
+                presentedPlayerPose(for: $0, at: playhead).position
+            }
         }
         let startTrackAnchor = playerID.flatMap { playerID in
             playerPosition.map {
@@ -1520,7 +1555,7 @@ final class ReplayStore {
             return false
         }
         let mark = marks[index]
-        let resolved = mark.resolvedGeometry(in: selectedScenario, at: playhead)
+        let resolved = presentedCoachMarkGeometry(mark, at: playhead)
         var start = resolved.start
         var end = resolved.end
         switch endpoint {
@@ -1719,7 +1754,7 @@ final class ReplayStore {
         }
 
         let mark = marks[index]
-        let currentResolved = mark.resolvedGeometry(in: selectedScenario, at: playhead)
+        let currentResolved = presentedCoachMarkGeometry(mark, at: playhead)
         let baselineStart = existingPreview?.resolvedStart ?? currentResolved.start
         let baselineEnd = existingPreview?.resolvedEnd ?? currentResolved.end
         var start = baselineStart
@@ -1874,7 +1909,7 @@ final class ReplayStore {
         }
 
         let mark = marks[index]
-        let resolved = mark.resolvedGeometry(in: selectedScenario, at: playhead)
+        let resolved = presentedCoachMarkGeometry(mark, at: playhead)
         guard CoachMarkGeometryPolicy.accepts(
             kind: mark.kind,
             start: resolved.start,
@@ -2482,7 +2517,7 @@ final class ReplayStore {
         func nearestAnchor(to point: PitchPoint) -> CoachMarkTrackAnchor? {
             var best: (player: PlayerTrack, distance: Float)?
             for player in selectedScenario.players {
-                let position = player.presentationPose(at: time).position
+                let position = presentedPlayerPose(for: player, at: time).position
                 let distance = ReplayGeometry.distance(position, point)
                 guard distance <= Self.coachMarkTrackSnapDistance else { continue }
                 if let current = best,
@@ -2493,7 +2528,7 @@ final class ReplayStore {
                 best = (player, distance)
             }
             guard let player = best?.player else { return nil }
-            let position = player.presentationPose(at: time).position
+            let position = presentedPlayerPose(for: player, at: time).position
             return CoachMarkTrackAnchor(
                 playerID: player.id,
                 offset: PitchPoint(
@@ -2506,7 +2541,7 @@ final class ReplayStore {
         let startAnchor = nearestAnchor(to: start)
         if kind == .run, let startAnchor,
            let player = selectedScenario.player(id: startAnchor.playerID) {
-            let position = player.presentationPose(at: time).position
+            let position = presentedPlayerPose(for: player, at: time).position
             return (
                 startAnchor,
                 CoachMarkTrackAnchor(
@@ -2559,6 +2594,7 @@ final class ReplayStore {
             )
             hasFiniteBoundedResolvedGeometry = Self.isPointOnPitch(resolved.start)
                 && Self.isPointOnPitch(resolved.end)
+                || (hasValidTrackAnchors && Self.hasBoundedAuthoredPresentation(mark, in: scenario))
         } else {
             hasFiniteBoundedResolvedGeometry = false
         }
@@ -2591,6 +2627,47 @@ final class ReplayStore {
         return scenario.player(id: playerID) != nil
     }
 
+    /// Older marks remain valid against their original telemetry. A newly
+    /// drawn mark can instead use the bundled impact or ideal-shape origin;
+    /// its displayed endpoint may be on the touchline while the upright track
+    /// would move that same offset beyond it. Admit only those exact authored
+    /// alternatives, never a pose supplied by a file, caller or current UI.
+    /// The surrounding validator still checks both stored fallback endpoints,
+    /// finite values, identities and absolute offset limits independently.
+    private static func hasBoundedAuthoredPresentation(
+        _ mark: CoachMark,
+        in scenario: ReplayScenario
+    ) -> Bool {
+        guard mark.followsPlayerTracks else { return false }
+
+        func isBounded(in presentation: ReplayPlayerPresentation) -> Bool {
+            let poses = Dictionary(uniqueKeysWithValues: mark.anchoredPlayerIDs.compactMap { id in
+                scenario.player(id: id).map {
+                    (id, presentation.pose(for: $0, at: mark.revealTime))
+                }
+            })
+            let resolved = mark.resolvedGeometry(
+                in: scenario, at: mark.revealTime, presentedPlayerPoses: poses
+            )
+            return Self.isPointOnPitch(resolved.start) && Self.isPointOnPitch(resolved.end)
+        }
+
+        if let impact = PlayerRagdollCue.authoredDemo(for: scenario),
+           impact.isActive(at: mark.revealTime),
+           isBounded(in: ReplayPlayerPresentation(scenario: scenario, viewMode: .tacticalTable)) {
+            return true
+        }
+        if scenario.kind == .shapeLab,
+           let authoredShape = DemoScenarios.scenario(for: .shapeLab),
+           scenario.id == authoredShape.id,
+           scenario.formationTargets == authoredShape.formationTargets {
+            return isBounded(in: ReplayPlayerPresentation(
+                scenario: scenario, viewMode: .positional, showsIdealBranch: true
+            ))
+        }
+        return false
+    }
+
     private func markReplacingGeometry(
         _ mark: CoachMark,
         start: PitchPoint,
@@ -2606,7 +2683,7 @@ final class ReplayStore {
                   let player = selectedScenario.player(id: anchor.playerID) else {
                 return anchor
             }
-            let playerPosition = player.presentationPose(at: time).position
+            let playerPosition = presentedPlayerPose(for: player, at: time).position
             return CoachMarkTrackAnchor(
                 playerID: anchor.playerID,
                 offset: PitchPoint(

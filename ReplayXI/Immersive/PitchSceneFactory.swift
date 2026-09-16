@@ -206,11 +206,12 @@ enum PitchSceneFactory {
 
         func refreshPlayerPoses(
             for players: [PlayerTrack],
-            at time: TimeInterval
+            at time: TimeInterval,
+            presentation: ReplayPlayerPresentation
         ) -> [String: PlayerPose] {
             playerPoseSamplesByID.removeAll(keepingCapacity: true)
             for player in players {
-                playerPoseSamplesByID[player.id] = player.presentationPose(at: time)
+                playerPoseSamplesByID[player.id] = presentation.pose(for: player, at: time)
             }
             playerPoseRefreshCount &+= 1
             return playerPoseSamplesByID
@@ -641,19 +642,16 @@ enum PitchSceneFactory {
         ragdollCue: PlayerRagdollCue? = nil,
         emphasizesBall: Bool = true
     ) {
-        // A caller-supplied cue supports imported impact data in every view.
-        // The bundled showcase cue stays automatic in external review views,
-        // but never throws an unrequested body through the wearer's near field
-        // in Player POV. A future explicit Impact mode can pass the cue back in.
-        let resolvedRagdollCue: PlayerRagdollCue? = if let ragdollCue {
-            ragdollCue
-        } else if viewMode == .firstPerson {
-            nil
-        } else {
-            PlayerRagdollCue.authoredDemo(for: scenario)
-        }
         let effectiveTriangleMode: TriangleLockMode =
             triangleLockMode == .place && isTrianglePlacementReady ? .place : .visualise
+        let playerPresentation = ReplayPlayerPresentation(
+            scenario: scenario,
+            viewMode: viewMode,
+            showsIdealBranch: showsIdealBranch || effectiveTriangleMode == .place,
+            triangleLockMode: effectiveTriangleMode,
+            impactCue: ragdollCue
+        )
+        let resolvedRagdollCue = playerPresentation.impactCue
         // Endpoint handles must be the sole acquisition targets during direct
         // geometry editing. Player capsules and floating number tags may share
         // the same pitch coordinate as a player-origin run, so suspend those
@@ -673,10 +671,9 @@ enum PitchSceneFactory {
         let sceneState = annotationCache(for: root)
         let playerPosesByID = sceneState?.refreshPlayerPoses(
             for: scenario.players,
-            at: time
-        ) ?? Dictionary(
-            uniqueKeysWithValues: scenario.players.map { ($0.id, $0.presentationPose(at: time)) }
-        )
+            at: time,
+            presentation: playerPresentation
+        ) ?? playerPresentation.poses(in: scenario, at: time)
         let firstPersonVisibleIDs: [String] = if viewMode == .firstPerson {
             nearestVisiblePlayerIDs(
                 players: scenario.players,
@@ -801,7 +798,8 @@ enum PitchSceneFactory {
                     ?? directChild(named: "player-\(player.id)", of: playersRoot)
                 else { continue }
                 let isSelected = player.id == perspectiveID
-                let pose = playerPosesByID[player.id] ?? player.presentationPose(at: time)
+                let pose = playerPosesByID[player.id]
+                    ?? playerPresentation.pose(for: player, at: time)
                 let locomotion = player.locomotion(at: time)
                 // A cue is explicit and singular, so normal telemetry remains
                 // the only animation source for every uncued player. Shape Lab
@@ -816,23 +814,8 @@ enum PitchSceneFactory {
                     nil
                 }
                 let idealTarget = triangleTargetsByPlayerID[player.id]
-                var presentationPosition = showsIdealShape && effectiveTriangleMode == .visualise
-                    ? idealTarget?.position ?? pose.position
-                    : pose.position
-                var presentationFacingDegrees = pose.facingDegrees
-                if let activeRagdollCue {
-                    let impactPose = player.presentationPose(at: activeRagdollCue.impactTime)
-                    let telemetryRelease = activeRagdollCue.telemetryRelease(at: time)
-                    presentationPosition = impactPose.position.interpolated(
-                        to: presentationPosition,
-                        fraction: telemetryRelease
-                    )
-                    presentationFacingDegrees = ReplayGeometry.interpolateAngle(
-                        from: impactPose.facingDegrees,
-                        to: pose.facingDegrees,
-                        fraction: telemetryRelease
-                    )
-                }
+                let presentationPosition = pose.position
+                let presentationFacingDegrees = pose.facingDegrees
                 entity.position = [presentationPosition.x, 0, presentationPosition.z]
                 if showsIdealShape,
                    idealTarget != nil,
@@ -1146,7 +1129,8 @@ enum PitchSceneFactory {
         }
         let selectedPresentationMark = selectedSemanticMark?.resolvingTrackGeometry(
             in: scenario,
-            at: time
+            at: time,
+            presentedPlayerPoses: playerPosesByID
         )
         let validDecisionSnapshot: ReplayDecisionSnapshot? = if !isDrawing,
                                                                 let decisionSnapshot,
@@ -1235,7 +1219,8 @@ enum PitchSceneFactory {
         updateTrackedMarkGeometry(
             cache: annotationCache,
             scenario: scenario,
-            time: time
+            time: time,
+            presentedPlayerPoses: playerPosesByID
         )
 
         PlaybackSpatialLabels.updatePlayerLabels(
@@ -2749,7 +2734,8 @@ enum PitchSceneFactory {
     private static func updateTrackedMarkGeometry(
         cache: AnnotationSceneCache?,
         scenario: ReplayScenario,
-        time: TimeInterval
+        time: TimeInterval,
+        presentedPlayerPoses: [String: PlayerPose]
     ) {
         guard let cache, cache.marksRoot?.isEnabled == true else { return }
         for binding in cache.bindings
@@ -2757,7 +2743,8 @@ enum PitchSceneFactory {
             guard let entity = binding.entity.value, entity.isEnabled else { continue }
             let presentation = binding.mark.resolvingTrackGeometry(
                 in: scenario,
-                at: time
+                at: time,
+                presentedPlayerPoses: presentedPlayerPoses
             )
             _ = updateMarkGeometry(
                 in: entity,
@@ -3455,7 +3442,9 @@ enum PitchSceneFactory {
                 false
             }
             guard label.isEnabled else { continue }
-            let mark = semanticMark.resolvingTrackGeometry(in: scenario, at: time)
+            let mark = semanticMark.resolvingTrackGeometry(
+                in: scenario, at: time, presentedPlayerPoses: posesByPlayerID
+            )
             let anchor: PitchPoint
             if mark.kind == .playerLabel {
                 anchor = mark.playerID.flatMap { posesByPlayerID[$0]?.position } ?? mark.end

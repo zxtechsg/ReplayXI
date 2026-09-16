@@ -402,7 +402,7 @@ struct FootballImmersiveView: View {
         let maximumSquaredDistance = maximumDistance * maximumDistance
         var closest: (player: PlayerTrack, squaredDistance: Float)?
         for player in store.selectedScenario.players {
-            let position = player.presentationPose(at: store.playhead).position
+            let position = store.presentedPlayerPose(for: player, at: store.playhead).position
             let xOffset = position.x - point.x
             let zOffset = position.z - point.z
             let squaredDistance = (xOffset * xOffset) + (zOffset * zOffset)
@@ -470,7 +470,9 @@ struct FootballImmersiveView: View {
                 if store.selectedTool == .playerLabel {
                     store.labelPlayer(playerID)
                 } else {
-                    store.registerPitchTap(player.presentationPose(at: store.playhead).position)
+                    store.registerPitchTap(
+                        store.presentedPlayerPose(for: player, at: store.playhead).position
+                    )
                 }
             } else {
                 openPlayerPOV(playerID)
@@ -562,10 +564,7 @@ struct FootballImmersiveView: View {
             fallback3D: value.location3D,
             in: matchRoot
         ) else { return }
-        let geometry = mark.resolvedGeometry(
-            in: store.selectedScenario,
-            at: store.playhead
-        )
+        let geometry = store.presentedCoachMarkGeometry(mark, at: store.playhead)
         let start = target.role == .start ? point : geometry.start
         let end = target.role == .end ? point : geometry.end
         guard store.updateCoachMarkGeometry(
@@ -603,10 +602,7 @@ struct FootballImmersiveView: View {
             draggedAnnotationTarget = nil
             return
         }
-        let geometry = mark.resolvedGeometry(
-            in: store.selectedScenario,
-            at: store.playhead
-        )
+        let geometry = store.presentedCoachMarkGeometry(mark, at: store.playhead)
         let start = target.role == .start ? point : geometry.start
         let end = target.role == .end ? point : geometry.end
         _ = store.updateCoachMarkGeometry(
@@ -641,7 +637,7 @@ struct FootballImmersiveView: View {
                     // Beginning on a footballer is the natural shorthand for
                     // “this player's run.” Anchor it to the authored pose.
                     start = ReplayStore.clampedPitchPoint(
-                        sourcePlayer.presentationPose(at: store.playhead).position
+                        store.presentedPlayerPose(for: sourcePlayer, at: store.playhead).position
                     )
                 } else if let projectedStart = pitchPoint(
                     for: value,
@@ -752,7 +748,7 @@ struct FootballImmersiveView: View {
                     store.labelPlayer(playerID)
                 } else {
                     _ = store.registerPitchTap(
-                        player.presentationPose(at: store.playhead).position
+                        store.presentedPlayerPose(for: player, at: store.playhead).position
                     )
                 }
             } else {
