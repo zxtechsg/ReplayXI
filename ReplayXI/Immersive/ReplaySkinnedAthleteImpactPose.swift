@@ -38,14 +38,6 @@ struct ReplaySkinnedAthleteImpactPose {
         }
     }
 
-    /// Small calibrated support envelope. Avoid CPU-skinning all 5,012 vertices
-    /// every frame just to keep a reviewed fall above the pitch.
-    private struct Support {
-        let joint: Int
-        let localPoint: SIMD3<Float>
-        let radius: Float
-    }
-
     private let root: Int
     private let spine: Int
     private let head: Int
@@ -54,10 +46,10 @@ struct ReplaySkinnedAthleteImpactPose {
     private let leftArm: Limb
     private let rightArm: Limb
     private let drivenIndices: [Int]
-    private let supports: [Support]
+    private let contactSurface: ReplaySkinnedAthleteContactSurface
     private var target: ReplaySkinnedAthleteMotion.Pose
 
-    init?(motion: ReplaySkinnedAthleteMotion) {
+    init?(motion: ReplaySkinnedAthleteMotion, contactSurface: ReplaySkinnedAthleteContactSurface) {
         guard let root = motion.semanticJointIndices["hips"],
               let spine = motion.semanticJointIndices["spine"],
               let head = motion.semanticJointIndices["head"],
@@ -82,7 +74,7 @@ struct ReplaySkinnedAthleteImpactPose {
             }
         }
         drivenIndices = driven.sorted()
-        supports = Self.supports(motion: motion)
+        self.contactSurface = contactSurface
         target = motion.makePoseBuffer()
     }
 
@@ -160,8 +152,14 @@ struct ReplaySkinnedAthleteImpactPose {
             local.columns.3 = SIMD4(target.translations[index], 1)
             target.modelSpaceTransforms[index] = parentMatrix * local
         }
-        let floor = motion.geometry.restMinY
-        target.translations[root].y += max(floor - minimumSupportY(in: target), 0)
+        let floor = motion.geometry.restMinY + contactSurface.paddingMetres
+        let contactCorrection = floor - minimumSupportY(in: target)
+        // Once the body has landed, let the real skin settle onto the surface.
+        // Preserve the ballistic part of the fall instead of pulling an airborne
+        // boot down just because it is currently the lowest point.
+        let settling = min(max((impact.fallAngle - 1.20) / 0.28, 0), 1)
+        let settledWeight = settling * settling * (3 - 2 * settling)
+        target.translations[root].y += max(contactCorrection, 0) + min(contactCorrection, 0) * settledWeight
         for index in drivenIndices {
             pose.translations[index] += (target.translations[index] - pose.translations[index]) * weight
             var rotation = target.rotations[index]
@@ -174,14 +172,12 @@ struct ReplaySkinnedAthleteImpactPose {
         // both endpoint poses clear it. Ground the blended pose too. Preserve
         // existing source-clip tolerances at the edges instead of adding a pop.
         motion.rebuildModelSpaceTransforms(in: &pose)
-        let blendedFloor = min(originalSupport, floor) * (1 - weight) + floor * weight
+        let blendedFloor = min(originalSupport, motion.geometry.restMinY) * (1 - weight) + floor * weight
         pose.translations[root].y += max(blendedFloor - minimumSupportY(in: pose), 0)
     }
 
     func minimumSupportY(in pose: ReplaySkinnedAthleteMotion.Pose) -> Float {
-        supports.reduce(Float.infinity) { result, support in
-            min(result, (pose.modelSpaceTransforms[support.joint] * SIMD4(support.localPoint, 1)).y - support.radius)
-        }
+        contactSurface.minimumY(in: pose)
     }
 
     private static func limb(_ name: String, isArm: Bool, pivot: Int,
@@ -303,45 +299,6 @@ struct ReplaySkinnedAthleteImpactPose {
                           proximalRotation: simd_normalize(upperRotation),
                           middleRotation: simd_normalize(lowerRotation),
                           distalRotation: simd_normalize(lowerRotation * wristOffset))
-    }
-
-    private static func supports(motion: ReplaySkinnedAthleteMotion) -> [Support] {
-        var result: [Support] = []
-        func append(_ name: String, offset: SIMD3<Float> = .zero, radius: Float) {
-            guard let joint = motion.semanticJointIndices[name] else { return }
-            let rest = motion.restPose.modelSpaceTransforms[joint]
-            let local = rest.inverse * SIMD4(position(rest) + offset, 1)
-            result.append(Support(joint: joint, localPoint: SIMD3(local.x, local.y, local.z), radius: radius))
-        }
-        append("hips", radius: 0.13)
-        append("spine", offset: [0, 0.04, 0], radius: 0.14)
-        append("chest", offset: [0, 0.06, 0], radius: 0.16)
-        append("head", offset: [0, 0.10, 0], radius: 0.125)
-        for side in ["left", "right"] {
-            append(side + "Hip", radius: 0.10)
-            append(side + "Knee", radius: 0.07)
-            append(side + "Ankle", radius: 0.05)
-            append(side + "Shoulder", radius: 0.075)
-            append(side + "Elbow", radius: 0.05)
-            append(side + "Wrist", radius: 0.04)
-            if let elbow = motion.semanticJointIndices[side + "Elbow"],
-               let wrist = motion.semanticJointIndices[side + "Wrist"] {
-                let direction = simd_normalize(position(motion.restPose.modelSpaceTransforms[wrist])
-                    - position(motion.restPose.modelSpaceTransforms[elbow]))
-                append(side + "Wrist", offset: direction * 0.065, radius: 0.055)
-            }
-            if let foot = motion.footContacts[side] {
-                let inverse = motion.restPose.modelSpaceTransforms[foot.footJointIndex].inverse
-                for x: Float in [-0.045, 0.045] {
-                    for z: Float in [-0.09, 0.11] {
-                        let local = inverse * SIMD4(foot.restSoleWorld + SIMD3(x, 0, z), 1)
-                        result.append(Support(joint: foot.footJointIndex,
-                                              localPoint: SIMD3(local.x, local.y, local.z), radius: 0))
-                    }
-                }
-            }
-        }
-        return result
     }
 
     private static func position(_ matrix: simd_float4x4) -> SIMD3<Float> {

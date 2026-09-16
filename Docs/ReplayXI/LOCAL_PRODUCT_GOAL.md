@@ -54,6 +54,8 @@ multiplayer and head-following requirements.
   That rig now stays visible through walking, cuts, passes and reviewed impacts
   using deterministic retargeting. Contact/recovery fidelity still needs work;
   the original segmented body is retained as a fail-soft asset fallback.
+  Impact grounding now uses 339 weighted vertices from the actual Blender skin,
+  reducing the checked landing/settled surface gap from 6–9 cm to about 6 mm.
 - [ ] Obtain the selected reference clip and reconstruct the minute in Blender.
 - [ ] Integrate the replay tracks/world with verified frame/time mapping.
 - [ ] Measure physical-headset performance and fix remaining bottlenecks.

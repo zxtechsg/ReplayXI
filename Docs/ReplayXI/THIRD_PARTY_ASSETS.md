@@ -2,7 +2,8 @@
 
 ## Bundled single-skeleton Rocketbox body — 2026-09-10
 
-`ReplayXIRocketboxAthlete.usdz`, `ReplayXIRocketboxMotion.json` and the fifteen
+`ReplayXIRocketboxAthlete.usdz`, `ReplayXIRocketboxMotion.json`,
+`ReplayXIRocketboxContactSurface.json` and the fifteen
 `ReplayXIRocketbox{Home,Away,Keeper}Skin{0...4}.png` files in
 `ReplayXI/Resources/Players/` derive from the pinned Microsoft Rocketbox source
 below. They are distinct from the older run-only pilot described later.
@@ -18,6 +19,12 @@ below. They are distinct from the older run-only pilot described later.
   `7cfb694888f111928643e8aca7041d21925f5d55f3f5adbd353a972ca255e772`.
 - Motion JSON: 791,827 bytes; SHA-256
   `d30a7379b81a4b0ea3fef5ebd20ad101911ab4fd521a5be1f6c00c0804f59ce4`.
+- Contact JSON: 33,957 bytes; SHA-256
+  `71eb134afa27eac0c23500afbd038dd11594a2b5ad30a5a178b303305a49c3ca`.
+  It retains 339 real skin vertices and 603 weighted influences from the same
+  licensed mesh. `Scripts/blender/build_player_contact_surface.py` reproduces
+  it from the audited Blender library and runtime pose attachments. Calibration
+  covers 206 poses, with less than 3 mm of omitted surface depth and 6 mm padding.
 - 80 joints, 5,012 vertices, 8,146 triangles; shared body/head material sections.
   Smooth vertex normals, normalized weights, common skeleton binding, embedded
   neutral colour/normal maps and source joint ordering are audited after packaging.
@@ -30,8 +37,11 @@ below. They are distinct from the older run-only pilot described later.
   per visible instance. These are asset estimates, not headset frame-time claims.
 
 The app integration uses absolute-time idle/run poses, bounded head look and
-chest-attached geometric shirt numbers. Walks, cuts, ball actions and impacts
-retain the existing procedural football rig until equivalent clips are available.
+chest-attached geometric shirt numbers. Walks, cuts and ball actions retain the
+skin through football-leg retargeting. Reviewed impacts retarget the existing
+fixed-step solver onto the same skin, with weighted surface contact. The old
+procedural football rig remains an asset-failure fallback and a kinematic query
+body. Retargeted motion is not football mocap or a captured get-up animation.
 The near-subject cap is two in player POV and four in other views; distant players
 retain their lower-cost representation. Physical-headset performance and broader
 football motion coverage remain open qualification work.

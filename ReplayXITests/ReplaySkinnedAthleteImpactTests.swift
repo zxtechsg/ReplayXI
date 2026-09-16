@@ -94,7 +94,7 @@ final class ReplaySkinnedAthleteImpactTests: XCTestCase {
 
     func testSupportEnvelopeClearsTurfForAllImpactDirections() throws {
         let (player, _, skin) = try prepare()
-        let retargeter = try XCTUnwrap(ReplaySkinnedAthleteImpactPose(motion: skin.motion))
+        let retargeter = try XCTUnwrap(ReplaySkinnedAthleteImpactPose(motion: skin.motion, contactSurface: skin.contactSurface))
         for angle in stride(from: Float(0), to: 2 * .pi, by: .pi / 4) {
             for impulse: Float in [0.35, 1, 2.1] {
                 let cue = PlayerRagdollCue(playerID: player.id, impactTime: 12, duration: 3.2,
@@ -104,6 +104,11 @@ final class ReplaySkinnedAthleteImpactTests: XCTestCase {
                     XCTAssertEqual(cue.influence(at: cue.impactTime + elapsed), 1)
                     XCTAssertGreaterThanOrEqual(retargeter.minimumSupportY(in: skin.pose)
                         - skin.motion.geometry.restMinY, -0.0001)
+                    if PlayerRagdollPlayback.pose(for: cue, at: cue.impactTime + elapsed).fallAngle >= 1.479 {
+                        XCTAssertEqual(retargeter.minimumSupportY(in: skin.pose) - skin.motion.geometry.restMinY,
+                                       skin.contactSurface.paddingMetres, accuracy: 0.0001,
+                                       "Landed bodies must settle, not hover above oversized support shapes")
+                    }
                 }
             }
         }
@@ -243,5 +248,39 @@ final class ReplaySkinnedAthleteImpactTests: XCTestCase {
         attachment.name = "ReplayXI-ImpactRetarget-Poses.json"
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+
+    func testContactCalibrationPoseGallery() throws {
+        let (player, _, skin) = try prepare()
+        var samples: [[String: Any]] = []
+        var batch = 0
+        for direction in 0..<8 {
+            let angle = Float(direction) * .pi / 4
+            for (strength, impulse) in [Float(0.35), 1, 2.1].enumerated() {
+                let cue = PlayerRagdollCue(playerID: player.id, impactTime: 12, duration: 3.2,
+                                          impactDirection: [sin(angle), cos(angle)], impulse: impulse)
+                for (phase, elapsed) in [0.2, 0.45, 0.9, 2.0].enumerated() {
+                    update(skin, player: player, cue: cue, at: cue.impactTime + elapsed)
+                    samples.append([
+                        "name": "impact-d\(direction)-s\(strength)-p\(phase)",
+                        "time": cue.impactTime + elapsed, "groundOffset": -skin.motion.geometry.restMinY,
+                        "translations": skin.pose.translations.map { [$0.x, $0.y, $0.z] },
+                        "rotations": skin.pose.rotations.map { [$0.vector.x, $0.vector.y, $0.vector.z, $0.vector.w] },
+                        "scales": skin.pose.scales.map { [$0.x, $0.y, $0.z] }
+                    ])
+                }
+                if samples.count == 24 {
+                    let data = try JSONSerialization.data(withJSONObject: ["samples": samples], options: [.sortedKeys])
+                    let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
+                    attachment.name = "ReplayXI-ContactCalibration-\(batch).json"
+                    attachment.lifetime = .keepAlways
+                    add(attachment)
+                    samples.removeAll(keepingCapacity: true)
+                    batch += 1
+                }
+            }
+        }
+        XCTAssertEqual(batch, 4)
+        XCTAssertTrue(samples.isEmpty)
     }
 }

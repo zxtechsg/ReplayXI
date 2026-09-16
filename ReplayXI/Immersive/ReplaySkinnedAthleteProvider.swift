@@ -20,6 +20,7 @@ enum ReplaySkinnedAthleteProvider {
     static let maximumConcurrentInstances = 4
     static let assetSHA256 = "7cfb694888f111928643e8aca7041d21925f5d55f3f5adbd353a972ca255e772"
     static let motionSHA256 = "d30a7379b81a4b0ea3fef5ebd20ad101911ab4fd521a5be1f6c00c0804f59ce4"
+    static let contactSurfaceSHA256 = "71eb134afa27eac0c23500afbd038dd11594a2b5ad30a5a178b303305a49c3ca"
     // Two material sections + two geometric numbers, even if the importer
     // coalesces both skin sections into one ModelEntity.
     static let materialDrawsPerInstance = 4
@@ -31,8 +32,9 @@ enum ReplaySkinnedAthleteProvider {
 
     private static var template: Entity?
     private(set) static var motion: ReplaySkinnedAthleteMotion?
+    private static var contactSurface: ReplaySkinnedAthleteContactSurface?
     private static var kits: [[PhysicallyBasedMaterial]] = []
-    static var isPrewarmed: Bool { template != nil && motion != nil && kits.count == 15 }
+    static var isPrewarmed: Bool { template != nil && motion != nil && contactSurface != nil && kits.count == 15 }
 
     static func prewarm(in bundle: Bundle = .main) throws {
         guard !isPrewarmed else { return }
@@ -40,6 +42,11 @@ enum ReplaySkinnedAthleteProvider {
         _ = try checkedData(modelURL, expected: assetSHA256)
         let motionURL = try resource("ReplayXIRocketboxMotion", "json", bundle)
         let preparedMotion = try ReplaySkinnedAthleteMotion(data: checkedData(motionURL, expected: motionSHA256))
+        let contactURL = try resource("ReplayXIRocketboxContactSurface", "json", bundle)
+        let preparedContactSurface = try ReplaySkinnedAthleteContactSurface(
+            data: checkedData(contactURL, expected: contactSurfaceSHA256), motion: preparedMotion,
+            assetSHA256: assetSHA256, motionSHA256: motionSHA256
+        )
         let loaded = try Entity.load(contentsOf: modelURL)
         loaded.stopAllAnimations(recursive: true)
         let models = skinnedModels(in: loaded)
@@ -75,11 +82,12 @@ enum ReplaySkinnedAthleteProvider {
         // Atomic publication; a missing kit must not expose a half-ready squad.
         template = loaded
         motion = preparedMotion
+        contactSurface = preparedContactSurface
         kits = preparedKits
     }
 
     static func make(for player: PlayerTrack) throws -> ReplaySkinnedAthleteInstance {
-        guard let template, let motion, kits.count == 15 else {
+        guard let template, let motion, let contactSurface, kits.count == 15 else {
             throw ReplaySkinnedAthleteError.notPrepared
         }
         let clone = template.clone(recursive: true)
@@ -105,7 +113,8 @@ enum ReplaySkinnedAthleteProvider {
         clone.addChild(front)
         clone.addChild(back)
         return ReplaySkinnedAthleteInstance(root: root, skinRoot: clone, model: model,
-                                           front: front, back: back, playerID: player.id, motion: motion)
+                                           front: front, back: back, playerID: player.id, motion: motion,
+                                           contactSurface: contactSurface)
     }
 
     static func skinnedModels(in entity: Entity) -> [ModelEntity] {
@@ -131,7 +140,7 @@ enum ReplaySkinnedAthleteProvider {
     }
 
     #if DEBUG
-    static func resetForTesting() { template = nil; motion = nil; kits = [] }
+    static func resetForTesting() { template = nil; motion = nil; contactSurface = nil; kits = [] }
     #endif
 }
 
@@ -144,6 +153,7 @@ final class ReplaySkinnedAthleteInstance {
     let back: ModelEntity
     private let skinRoot: Entity
     let motion: ReplaySkinnedAthleteMotion
+    let contactSurface: ReplaySkinnedAthleteContactSurface
     private(set) var pose: ReplaySkinnedAthleteMotion.Pose
     private var transforms: [Transform]
     private let frontLocal: simd_float4x4
@@ -155,7 +165,7 @@ final class ReplaySkinnedAthleteInstance {
     private var impactPose: ReplaySkinnedAthleteImpactPose?
 
     init(root: Entity, skinRoot: Entity, model: ModelEntity, front: ModelEntity, back: ModelEntity,
-         playerID: String, motion: ReplaySkinnedAthleteMotion) {
+         playerID: String, motion: ReplaySkinnedAthleteMotion, contactSurface: ReplaySkinnedAthleteContactSurface) {
         self.root = root
         self.skinRoot = skinRoot
         self.model = model
@@ -163,9 +173,10 @@ final class ReplaySkinnedAthleteInstance {
         self.back = back
         self.playerID = playerID
         self.motion = motion
+        self.contactSurface = contactSurface
         pose = motion.makePoseBuffer()
         footballPose = ReplaySkinnedAthleteFootballPose(motion: motion)
-        impactPose = ReplaySkinnedAthleteImpactPose(motion: motion)
+        impactPose = ReplaySkinnedAthleteImpactPose(motion: motion, contactSurface: contactSurface)
         transforms = model.jointTransforms
         neckIndex = motion.semanticJointIndices["neck"]!
         headIndex = motion.semanticJointIndices["head"]!
