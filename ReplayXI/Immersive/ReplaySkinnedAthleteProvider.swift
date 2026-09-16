@@ -217,7 +217,9 @@ final class ReplaySkinnedAthleteInstance {
                 for: track, at: time, locomotion: locomotion, gaitPhase: gaitPhase,
                 lookTargetWorldPosition: lookTarget, ballAction: ballAction
             )
-            footballPose?.apply(authored, influence: influence, motion: motion, to: &pose)
+            footballPose?.apply(authored, influence: influence,
+                                armInfluence: ReplaySkinnedAthleteFootballPose.influence(locomotion: locomotion, ballAction: nil),
+                                motion: motion, to: &pose)
         }
         let look = ReplayAthleteMotion.lookPose(for: track, at: time, locomotion: locomotion,
                                                targetWorldPosition: lookTarget)

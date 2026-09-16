@@ -1,7 +1,7 @@
 import Foundation
 import simd
 
-/// Retargets the existing authored football legs onto the licensed skin. The
+/// Retargets the existing authored football gait onto the licensed skin. The
 /// source Biped thighs are children of Spine, not Pelvis; copying local Euler
 /// angles would bend the hips with the chest and put the boots below the turf.
 /// Solve in model space, then recover each joint's real parent-local transform.
@@ -30,20 +30,55 @@ struct ReplaySkinnedAthleteFootballPose {
         let ankleRotation: simd_quatf
     }
 
+    private struct Arm {
+        let shoulder: Int
+        let elbow: Int
+        let wrist: Int
+        let side: ReplayAthleteLeg
+        let shoulderNeutral: simd_quatf
+        let elbowNeutral: simd_quatf
+        let wristNeutral: simd_quatf
+
+        func rotation(for index: Int, authored: ReplayAthleteLocomotionPose,
+                      torso: simd_quatf) -> simd_quatf? {
+            guard index == shoulder || index == elbow || index == wrist else { return nil }
+            let upper = torso * (side == .left ? authored.leftShoulderOrientation : authored.rightShoulderOrientation)
+            if index == shoulder { return simd_normalize(upper * shoulderNeutral) }
+            let lower = upper * (side == .left ? authored.leftElbowOrientation : authored.rightElbowOrientation)
+            if index == elbow { return simd_normalize(lower * elbowNeutral) }
+            let hand = lower * (side == .left ? authored.leftWristOrientation : authored.rightWristOrientation)
+            return simd_normalize(hand * wristNeutral)
+        }
+    }
+
     private let rootIndex: Int
+    private let chestIndex: Int
+    private let inverseRestChestRotation: simd_quatf
     private let left: Leg
     private let right: Leg
+    private let leftArm: Arm
+    private let rightArm: Arm
     private let modifiedIndices: [Int]
+    private let armIndices: [Int]
     private var target: ReplaySkinnedAthleteMotion.Pose
 
     init?(motion: ReplaySkinnedAthleteMotion) {
         guard let root = motion.semanticJointIndices["hips"],
+              let chest = motion.semanticJointIndices["chest"],
               let left = Self.leg("left", root: root, motion: motion),
-              let right = Self.leg("right", root: root, motion: motion) else { return nil }
+              let right = Self.leg("right", root: root, motion: motion),
+              let leftArm = Self.arm("left", root: root, motion: motion),
+              let rightArm = Self.arm("right", root: root, motion: motion) else { return nil }
         rootIndex = root
+        chestIndex = chest
+        inverseRestChestRotation = simd_quatf(motion.restPose.modelSpaceTransforms[chest]).inverse
         self.left = left
         self.right = right
+        self.leftArm = leftArm
+        self.rightArm = rightArm
         modifiedIndices = [root, left.hip, left.knee, left.ankle, right.hip, right.knee, right.ankle]
+        armIndices = [leftArm.shoulder, leftArm.elbow, leftArm.wrist,
+                      rightArm.shoulder, rightArm.elbow, rightArm.wrist]
         target = motion.makePoseBuffer()
     }
 
@@ -61,11 +96,13 @@ struct ReplaySkinnedAthleteFootballPose {
     mutating func apply(
         _ authored: ReplayAthleteLocomotionPose,
         influence: Float,
+        armInfluence: Float,
         motion: ReplaySkinnedAthleteMotion,
         to pose: inout ReplaySkinnedAthleteMotion.Pose
     ) {
         let weight = influence.isFinite ? min(max(influence, 0), 1) : 0
-        guard weight > 0 else { return }
+        let armWeight = armInfluence.isFinite ? min(max(armInfluence, 0), 1) : 0
+        guard weight > 0 || armWeight > 0 else { return }
         for index in motion.joints.indices {
             target.translations[index] = pose.translations[index]
             target.rotations[index] = pose.rotations[index]
@@ -79,8 +116,11 @@ struct ReplaySkinnedAthleteFootballPose {
         let leftTarget = Self.target(for: left, authored: authored, body: body, root: rootPosition)
         let rightTarget = Self.target(for: right, authored: authored, body: body, root: rootPosition)
 
-        // Keep fingers, face, cloth bindings and the source upper-body clip.
-        // Only the pelvis and six football leg joints need retargeting.
+        // Keep the source torso, clavicles, face and fingers. Walking/cutting
+        // arms must use the same opposite-foot clock as the authored legs,
+        // rather than the unrelated source run phase. Source joint translations
+        // stay intact: rotating these six joints cannot stretch an arm.
+        var torso = body
         for index in motion.joints.indices {
             let parent = motion.joints[index].parentIndex
             let parentMatrix = parent < 0 ? matrix_identity_float4x4 : target.modelSpaceTransforms[parent]
@@ -99,12 +139,19 @@ struct ReplaySkinnedAthleteFootballPose {
                 target.translations[index] = SIMD3(localPosition.x, localPosition.y, localPosition.z)
                 target.rotations[index] = simd_normalize(simd_quatf(parentMatrix).inverse * rotation)
             }
+            if armWeight > 0, let rotation = leftArm.rotation(for: index, authored: authored, torso: torso)
+                ?? rightArm.rotation(for: index, authored: authored, torso: torso) {
+                target.rotations[index] = simd_normalize(simd_quatf(parentMatrix).inverse * rotation)
+            }
             var local = simd_float4x4(target.rotations[index])
             local.columns.0 *= target.scales[index].x
             local.columns.1 *= target.scales[index].y
             local.columns.2 *= target.scales[index].z
             local.columns.3 = SIMD4(target.translations[index], 1)
             target.modelSpaceTransforms[index] = parentMatrix * local
+            if index == chestIndex {
+                torso = simd_normalize(simd_quatf(target.modelSpaceTransforms[index]) * inverseRestChestRotation)
+            }
         }
         // Walking, planting and striking all retain a support boot. Correct the
         // actual skin's sole anchors, not the shorter procedural rig's lengths.
@@ -119,6 +166,37 @@ struct ReplaySkinnedAthleteFootballPose {
             }
             pose.rotations[index] = simd_normalize(simd_slerp(pose.rotations[index], rotation, weight))
         }
+        if armWeight > 0 {
+            for index in armIndices {
+                var rotation = target.rotations[index]
+                if simd_dot(pose.rotations[index].vector, rotation.vector) < 0 {
+                    rotation = simd_quatf(vector: -rotation.vector)
+                }
+                pose.rotations[index] = simd_normalize(simd_slerp(pose.rotations[index], rotation, armWeight))
+            }
+        }
+    }
+
+    private static func arm(_ name: String, root: Int, motion: ReplaySkinnedAthleteMotion) -> Arm? {
+        guard let shoulder = motion.semanticJointIndices[name + "Shoulder"],
+              let elbow = motion.semanticJointIndices[name + "Elbow"],
+              let wrist = motion.semanticJointIndices[name + "Wrist"] else { return nil }
+        func position(_ index: Int) -> SIMD3<Float> {
+            let value = motion.restPose.modelSpaceTransforms[index].columns.3
+            return SIMD3(value.x, value.y, value.z)
+        }
+        let upper = position(elbow) - position(shoulder)
+        let lower = position(wrist) - position(elbow)
+        guard simd_length(upper) > 0.1, simd_length(lower) > 0.1 else { return nil }
+        let upperToDown = simd_quatf(from: simd_normalize(upper), to: [0, -1, 0])
+        let lowerToDown = simd_quatf(from: simd_normalize(lower), to: [0, -1, 0])
+        return Arm(
+            shoulder: shoulder, elbow: elbow, wrist: wrist,
+            side: position(shoulder).x < position(root).x ? .left : .right,
+            shoulderNeutral: simd_normalize(upperToDown * simd_quatf(motion.restPose.modelSpaceTransforms[shoulder])),
+            elbowNeutral: simd_normalize(lowerToDown * simd_quatf(motion.restPose.modelSpaceTransforms[elbow])),
+            wristNeutral: simd_normalize(lowerToDown * simd_quatf(motion.restPose.modelSpaceTransforms[wrist]))
+        )
     }
 
     private static func leg(_ name: String, root: Int, motion: ReplaySkinnedAthleteMotion) -> Leg? {
