@@ -2492,7 +2492,7 @@ final class ReplayXITests: XCTestCase {
         XCTAssertTrue(authoredMarks.allSatisfy { store.marks.contains($0) })
 
         store.undoMark()
-        XCTAssertEqual(store.marks, authoredMarks)
+        XCTAssertEqual(store.marks, authoredMarks + [first, second], "Undo must restore the erased mark")
         store.clearMarks()
         XCTAssertEqual(store.marks, authoredMarks)
     }

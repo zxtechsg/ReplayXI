@@ -131,6 +131,7 @@ final class ReplayStore {
     @ObservationIgnored private var isReviewAutosaveReady = false
     @ObservationIgnored private var isRestoringSavedReview = false
     @ObservationIgnored private var retainedScenarioMarks: [String: [CoachMark]] = [:]
+    private var annotationEditHistory: ReplayAnnotationEditHistory
 
     @ObservationIgnored
     var onBroadcastSnapshot: (@MainActor (SharedPlaybackSnapshot) -> Void)?
@@ -286,6 +287,7 @@ final class ReplayStore {
         viewMode = first.defaultViewMode
         localPerspectiveID = first.defaultPerspectiveID
         marks = first.coachMarks
+        annotationEditHistory = ReplayAnnotationEditHistory(marks: first.coachMarks)
         reviewIndexVersionCache.seed(marks: marks)
         isReviewAutosaveReady = true
     }
@@ -389,6 +391,7 @@ final class ReplayStore {
         localPerspectiveID = state.perspectiveID
         retainedScenarioMarks = state.marksByScenario
         marks = state.marks
+        annotationEditHistory.reset(to: marks)
         showsLaneLens = state.showsLaneLens
         shapeFocusStage = selectedScenario.kind == .shapeLab ? state.shapeFocusStage : .problem
         isPlaying = false
@@ -493,6 +496,7 @@ final class ReplayStore {
         isCoachLocalReview = false
         isLocallyPaused = false
         marks = resettingReview ? scenario.coachMarks : (retainedScenarioMarks[id] ?? scenario.coachMarks)
+        annotationEditHistory.reset(to: marks)
         pendingCoachMarkGeometryBaselines.removeAll(keepingCapacity: true)
         removeAllPendingCoachMarkEndpointPreviews()
         sharedPitchAnchorID = nil
@@ -526,7 +530,7 @@ final class ReplayStore {
         }
         isLocallyPaused = false
         isPlaying.toggle()
-        statusMessage = isPlaying ? "Synchronized replay running" : "Replay paused for analysis"
+        statusMessage = isPlaying ? "Replay playing" : "Replay paused"
         if broadcast { emitSnapshot() }
     }
 
@@ -891,7 +895,7 @@ final class ReplayStore {
         marks.append(mark)
         pendingDrawStart = nil
         isDrawing = false
-        statusMessage = "\(selectedTool.title) annotation shared with the squad"
+        statusMessage = "\(selectedTool.title) annotation added"
         emitSnapshot()
         return mark
     }
@@ -928,7 +932,7 @@ final class ReplayStore {
         marks.append(mark)
         pendingDrawStart = nil
         isDrawing = false
-        statusMessage = "Player label shared for #\(player.shirtNumber) \(player.displayName)"
+        statusMessage = "Label added for #\(player.shirtNumber) \(player.displayName)"
         emitSnapshot()
         return mark
     }
@@ -987,20 +991,49 @@ final class ReplayStore {
         emitSnapshot()
     }
 
+    /// Compatibility entry point: all Undo routes use the same edit history.
     func undoMark() {
-        guard allowsMutationOutsideEndpointPreview() else { return }
-        guard localRole == .coach else { return }
-        let authoredIDs = Set(selectedScenario.coachMarks.map(\.id))
-        guard let index = marks.lastIndex(where: { !authoredIDs.contains($0.id) }) else {
-            statusMessage = "No new annotation to undo"
-            return
+        _ = undoAnnotationEdit()
+    }
+
+    var hasAnnotationEditHistory: Bool { annotationEditHistory.canUndo || annotationEditHistory.canRedo }
+    var annotationUndoTitle: String { annotationEditHistory.undoTitle }
+    var annotationRedoTitle: String { annotationEditHistory.redoTitle }
+    var canUndoAnnotationEdit: Bool {
+        localRole == .coach && !isCollaborationActive && canChangePlaybackView && annotationEditHistory.canUndo
+    }
+    var canRedoAnnotationEdit: Bool {
+        localRole == .coach && !isCollaborationActive && canChangePlaybackView && annotationEditHistory.canRedo
+    }
+
+    @discardableResult
+    func undoAnnotationEdit() -> Bool {
+        guard allowsPlaybackViewChange(), localRole == .coach, !isCollaborationActive else { return false }
+        let action = annotationEditHistory.undoTitle
+        guard let restored = annotationEditHistory.undo(current: marks) else {
+            statusMessage = "Nothing to undo"
+            return false
         }
-        let removedID = marks[index].id
-        pendingCoachMarkGeometryBaselines.removeValue(forKey: removedID)
-        removePendingCoachMarkEndpointPreview(for: removedID)
-        marks.remove(at: index)
-        statusMessage = "Last annotation removed"
+        marks = restored
+        isPlaying = false
+        statusMessage = "\(action) complete"
         emitSnapshot()
+        return true
+    }
+
+    @discardableResult
+    func redoAnnotationEdit() -> Bool {
+        guard allowsPlaybackViewChange(), localRole == .coach, !isCollaborationActive else { return false }
+        let action = annotationEditHistory.redoTitle
+        guard let restored = annotationEditHistory.redo(current: marks) else {
+            statusMessage = "Nothing to redo"
+            return false
+        }
+        marks = restored
+        isPlaying = false
+        statusMessage = "\(action) complete"
+        emitSnapshot()
+        return true
     }
 
     /// Removes one coach-created annotation while preserving the scenario's
@@ -1898,6 +1931,7 @@ final class ReplayStore {
               !marks.contains(where: { $0.id == mark.id }),
               isValidSharedMark(mark, for: scenario) else { return false }
         marks.append(mark)
+        annotationEditHistory.reset(to: marks)
         if let snapshot = latestCoachSnapshot,
            snapshot.scenarioID == scenario.id,
            snapshot.marks.count < Self.maximumSharedCoachMarks,
@@ -2344,6 +2378,7 @@ final class ReplayStore {
         coachFocusPerspectiveID = sanitizedSnapshot.coachFocusPerspectiveID
         coachLockEnabled = sanitizedSnapshot.coachLockEnabled
         marks = sanitizedSnapshot.marks
+        annotationEditHistory.reset(to: marks)
         showsLaneLens = sanitizedSnapshot.showsLaneLens
         shapeFocusStage = sanitizedSnapshot.shapeFocusStage
         statusMessage = isLocallyPaused
@@ -2627,6 +2662,12 @@ final class ReplayStore {
     private func emitSnapshot(allowingGeometryPreview: Bool = false) {
         guard !hasActiveTimelineScrub else { return }
         guard allowingGeometryPreview || !hasActiveCoachMarkGeometryPreview else { return }
-        onBroadcastSnapshot?(makeSnapshot())
+        let committed = makeSnapshot()
+        // This legacy-named method is also the local committed-action boundary.
+        // Journal even with no transport callback; previews stay baseline-masked.
+        if !isCollaborationActive, localRole == .coach {
+            annotationEditHistory.record(committed.marks)
+        }
+        onBroadcastSnapshot?(committed)
     }
 }

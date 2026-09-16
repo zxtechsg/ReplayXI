@@ -207,6 +207,28 @@ final class PlaybackControlDeckClarityTests: XCTestCase {
         XCTAssertEqual(ReplayStore.availablePlaybackRates, [0.25, 0.5, 0.75, 1, 1.5, 2, 4])
     }
 
+    func testAnnotationHistoryStaysReachableAfterEraseClearAndUndoingTheLastMark() throws {
+        let source = try immersiveSource()
+        let button = try sourceSlice(source,
+            after: "private func annotationEditButton(compact: Bool) -> some View",
+            before: "private var playbackToolsShelf: some View")
+        XCTAssertTrue(button.contains("clearableCoachAnnotationCount == 0 && !store.hasAnnotationEditHistory"))
+        XCTAssertTrue(button.contains("store.hasActiveTimelineScrub"))
+        let shelf = try sourceSlice(source,
+            after: "private var annotationEditShelf: some View",
+            before: "private func annotationDurationShelf")
+        XCTAssertTrue(shelf.contains("store.annotationUndoTitle"))
+        XCTAssertTrue(shelf.contains("store.annotationRedoTitle"))
+        XCTAssertTrue(shelf.contains("store.canUndoAnnotationEdit"))
+        XCTAssertTrue(shelf.contains("store.canRedoAnnotationEdit"))
+        XCTAssertFalse(source.contains("Removes the newest coach-created annotation"))
+        let confirmation = try sourceSlice(source,
+            after: "private var clearAnnotationsConfirmationStrip: some View",
+            before: "private func applyAnnotationHistory")
+        XCTAssertTrue(confirmation.contains("inlinePanel = .annotationEdit"))
+        XCTAssertTrue(confirmation.contains("Undo can restore your marks"))
+    }
+
     func testSelectedCoachMarkExposesClearRetractableTwentyTwoPlayerTracking() throws {
         let source = try immersiveSource()
         let inspector = try sourceSlice(

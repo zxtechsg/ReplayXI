@@ -1384,7 +1384,7 @@ private struct PlaybackViewOverlayHUD: View {
         .buttonStyle(.borderedProminent)
         .tint(isVisible ? color : .white.opacity(0.10))
         .foregroundStyle(isVisible ? Color.black : Color.white)
-        .disabled(!isEnabled || store.hasActiveCoachMarkGeometryPreview)
+        .disabled(!isEnabled || store.hasActiveCoachMarkGeometryPreview || store.hasActiveTimelineScrub)
         .accessibilityLabel(resolvedAccessibilityName)
         .accessibilityValue(isVisible ? onValue : offValue)
         .accessibilityHint("Turns \(resolvedAccessibilityName.lowercased()) \(isVisible ? "off" : "on")")
@@ -1828,6 +1828,7 @@ private struct ImmersiveControlDeck: View {
         }
         .onChange(of: store.marks.count) { oldCount, newCount in
             guard store.localRole == .coach,
+                  inlinePanel != .annotationEdit,
                   newCount > oldCount,
                   newCount > store.selectedScenario.coachMarks.count,
                   let mark = store.marks.last else { return }
@@ -1863,7 +1864,9 @@ private struct ImmersiveControlDeck: View {
             // Secondary controls belong to the selection that opened them.
             // Never carry a label, duration, geometry, or tracking shelf onto
             // a new mark.
-            inlinePanel = nil
+            // Undo/Redo may erase the selected mark. Keep its history shelf
+            // available so the next action can immediately restore that mark.
+            if inlinePanel != .annotationEdit || selectedID != nil { inlinePanel = nil }
             if selectedID != nil {
                 showsPlayerGrid = false
                 showsAnnotationTools = false
@@ -2080,7 +2083,7 @@ private struct ImmersiveControlDeck: View {
         .buttonStyle(.borderedProminent)
         .tint(showsAnnotationTools ? ReplayTheme.orange : .white.opacity(0.10))
         .foregroundStyle(showsAnnotationTools ? Color.black : Color.white)
-        .disabled(store.hasActiveCoachMarkGeometryPreview)
+        .disabled(!store.canChangePlaybackView)
         .accessibilityLabel("Draw annotations")
         .accessibilityHint(
             showsAnnotationTools ? "Closes drawing tools" : "Opens run, pass, press, zone, and label tools"
@@ -2145,12 +2148,13 @@ private struct ImmersiveControlDeck: View {
         .buttonStyle(.bordered)
         .disabled(
             store.localRole != .coach
-                || clearableCoachAnnotationCount == 0
+                || (clearableCoachAnnotationCount == 0 && !store.hasAnnotationEditHistory)
                 || store.hasActiveCoachMarkGeometryPreview
+                || store.hasActiveTimelineScrub
         )
         .accessibilityLabel("Edit annotations")
         .accessibilityValue("\(clearableCoachAnnotationCount) coach marks")
-        .accessibilityHint("Opens undo and clear controls")
+        .accessibilityHint("Opens undo, redo and clear controls")
         .accessibilityAddTraits(inlinePanel == .annotationEdit ? .isSelected : [])
     }
 
@@ -2402,16 +2406,27 @@ private struct ImmersiveControlDeck: View {
 
                 inlineChoiceDivider
 
-                Button(action: undoLastCoachAnnotation) {
-                    Label("Undo last", systemImage: "arrow.uturn.backward")
+                Button { applyAnnotationHistory(redo: false) } label: {
+                    Label(store.annotationUndoTitle, systemImage: "arrow.uturn.backward")
                         .font(.subheadline.weight(.black))
+                        .lineLimit(1).minimumScaleFactor(0.8)
                         .frame(minWidth: 150, minHeight: 52)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(ReplayTheme.orange)
                 .foregroundStyle(.black)
-                .disabled(!canUndoCoachAnnotation)
-                .accessibilityHint("Removes the newest coach-created annotation")
+                .disabled(!store.canUndoAnnotationEdit)
+                .accessibilityHint("Reverses the last committed annotation action, including erase or clear")
+
+                Button { applyAnnotationHistory(redo: true) } label: {
+                    Label(store.annotationRedoTitle, systemImage: "arrow.uturn.forward")
+                        .font(.subheadline.weight(.black))
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                        .frame(minWidth: 150, minHeight: 52)
+                }
+                .buttonStyle(.bordered)
+                .disabled(!store.canRedoAnnotationEdit)
+                .accessibilityHint("Restores the annotation action that was undone")
 
                 Button(action: armClearAnnotations) {
                     Label("Clear all…", systemImage: "trash.fill")
@@ -2420,7 +2435,7 @@ private struct ImmersiveControlDeck: View {
                 }
                 .buttonStyle(.bordered)
                 .tint(.red)
-                .disabled(clearableCoachAnnotationCount == 0)
+                .disabled(clearableCoachAnnotationCount == 0 || !store.canChangePlaybackView)
                 .accessibilityHint("Opens a confirmation before clearing coach-created annotations")
 
                 Spacer(minLength: 8)
@@ -3074,9 +3089,10 @@ private struct ImmersiveControlDeck: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Eyebrow(text: "Clear \(clearableCoachAnnotationCount) coach marks?", color: .red)
-                Text("Match overlays stay.")
+                Text("Match overlays stay. Undo can restore your marks.")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Spacer(minLength: 8)
@@ -3094,6 +3110,7 @@ private struct ImmersiveControlDeck: View {
                 showsEventStrip = false
                 isClearAnnotationsPending = false
                 annotationConfirmation = "MARKS CLEARED"
+                inlinePanel = .annotationEdit
             } label: {
                 Label("Clear", systemImage: "trash.fill")
                     .font(.subheadline.weight(.black))
@@ -3113,19 +3130,15 @@ private struct ImmersiveControlDeck: View {
         }
     }
 
-    private func undoLastCoachAnnotation() {
-        let previousCount = clearableCoachAnnotationCount
-        store.undoMark()
-        if clearableCoachAnnotationCount < previousCount {
-            if let selectedAnnotationID,
-               !store.marks.contains(where: { $0.id == selectedAnnotationID }) {
-                self.selectedAnnotationID = nil
-            }
-            annotationConfirmation = "LAST MARK UNDONE"
-            if clearableCoachAnnotationCount == 0 {
-                inlinePanel = nil
-            }
+    private func applyAnnotationHistory(redo: Bool) {
+        let changed = redo ? store.redoAnnotationEdit() : store.undoAnnotationEdit()
+        guard changed else { return }
+        if let selectedAnnotationID,
+           !store.marks.contains(where: { $0.id == selectedAnnotationID }) {
+            self.selectedAnnotationID = nil
         }
+        annotationConfirmation = store.statusMessage.uppercased()
+        inlinePanel = .annotationEdit
     }
 
     private func armClearAnnotations() {
@@ -3951,8 +3964,9 @@ private struct ImmersiveControlDeck: View {
                     Button(role: .destructive) {
                         if store.removeCoachMark(id: mark.id) {
                             selectedAnnotationID = nil
-                            showsEventStrip = true
+                            showsEventStrip = false
                             annotationConfirmation = "MARK DELETED"
+                            inlinePanel = .annotationEdit
                         }
                     } label: {
                         Label("Erase", systemImage: "eraser.fill")
@@ -3965,8 +3979,9 @@ private struct ImmersiveControlDeck: View {
                             )
                     }
                     .buttonStyle(.bordered)
+                    .disabled(!store.canChangePlaybackView)
                     .accessibilityLabel("Delete annotation")
-                    .accessibilityHint("Deletes this coach-created annotation")
+                    .accessibilityHint("Erases this annotation and opens Undo")
                 } else {
                     StatusPill(text: "MATCH", systemImage: "lock.fill", color: .secondary)
                 }
@@ -4376,10 +4391,6 @@ private struct ImmersiveControlDeck: View {
         if store.isDrawing { return ReplayTheme.orange }
         if annotationConfirmation != nil { return ReplayTheme.signal }
         return .secondary
-    }
-
-    private var canUndoCoachAnnotation: Bool {
-        store.marks.contains(where: isCoachCreated)
     }
 
     private func handlePrimaryPlaybackAction() {
