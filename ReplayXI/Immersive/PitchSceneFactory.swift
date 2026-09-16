@@ -951,9 +951,10 @@ enum PitchSceneFactory {
                     }
                     importedMotionIsSupported = false
                 }
-                let hasBallAction = athleteBallActionTrack.flatMap {
+                let ballAction = athleteBallActionTrack.flatMap {
                     ReplayAthleteMotion.ballActionPose(for: player, ballTrack: $0, at: time)
-                }.map { $0.influence > 0 } ?? false
+                }
+                let hasBallAction = ballAction.map { $0.influence > 0 } ?? false
                 // A forward-only legacy clip must not erase a football touch.
                 if importedBelongsToPlayer && hasBallAction { attachedImportedAthlete?.root.isEnabled = false }
                 let usesLegacySkin = hasImportedAthlete && importedMotionIsSupported && !hasBallAction
@@ -973,7 +974,7 @@ enum PitchSceneFactory {
                 let usesNewSkin: Bool
                 if needsDetailedRig, let skin = sceneState?.skinnedAthletes[player.id] {
                     usesNewSkin = skin.update(at: time, track: player, locomotion: locomotion,
-                                             lookTarget: playerLookTarget, hasBallAction: hasBallAction,
+                                             lookTarget: playerLookTarget, ballAction: ballAction,
                                              hasImpact: activeRagdollCue != nil)
                 } else {
                     usesNewSkin = false

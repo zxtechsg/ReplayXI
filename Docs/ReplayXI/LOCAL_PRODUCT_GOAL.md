@@ -51,6 +51,8 @@ multiplayer and head-following requirements.
   Integrated: original 32-panel ball (one mesh/two materials, 2,592 triangles)
   and textured pitch with netted goals (two meshes/four materials, 7,234 triangles).
   Original player modelling is still pending; current bodies use the licensed rig.
+  That rig now stays visible through walking, cuts and passes using deterministic
+  football-leg retargeting; impact/ragdoll presentation remains the fallback.
 - [ ] Obtain the selected reference clip and reconstruct the minute in Blender.
 - [ ] Integrate the replay tracks/world with verified frame/time mapping.
 - [ ] Measure physical-headset performance and fix remaining bottlenecks.

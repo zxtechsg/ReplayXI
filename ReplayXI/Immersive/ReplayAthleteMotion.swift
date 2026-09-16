@@ -155,7 +155,8 @@ enum ReplayAthleteMotion {
         locomotion: PlayerLocomotionSample,
         gaitPhase suppliedGaitPhase: Float? = nil,
         lookTargetWorldPosition: SIMD3<Float>? = nil,
-        ballTrack: BallTrack? = nil
+        ballTrack: BallTrack? = nil,
+        ballAction suppliedBallAction: ReplayAthleteBallActionPose? = nil
     ) -> ReplayAthleteLocomotionPose {
         // `PlayerLocomotionState` is deliberately discrete because it is also
         // used for clip admission and tactical semantics.  Driving the visible
@@ -199,7 +200,7 @@ enum ReplayAthleteMotion {
             targetWorldPosition: lookTargetWorldPosition
         )
 
-        let ballAction = ballTrack.flatMap {
+        let ballAction = suppliedBallAction ?? ballTrack.flatMap {
             ballActionPose(for: track, ballTrack: $0, at: time)
         }
         var leftHipLateral: Float = track.isGoalkeeper ? 0.10 : tuning.lateralStance

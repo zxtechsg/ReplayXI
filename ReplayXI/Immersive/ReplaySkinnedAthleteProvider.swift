@@ -151,6 +151,7 @@ final class ReplaySkinnedAthleteInstance {
     private let neckIndex: Int
     private let headIndex: Int
     private let neckCompensatedChildren: [Int]
+    private var footballPose: ReplaySkinnedAthleteFootballPose?
 
     init(root: Entity, skinRoot: Entity, model: ModelEntity, front: ModelEntity, back: ModelEntity,
          playerID: String, motion: ReplaySkinnedAthleteMotion) {
@@ -162,6 +163,7 @@ final class ReplaySkinnedAthleteInstance {
         self.playerID = playerID
         self.motion = motion
         pose = motion.makePoseBuffer()
+        footballPose = ReplaySkinnedAthleteFootballPose(motion: motion)
         transforms = model.jointTransforms
         neckIndex = motion.semanticJointIndices["neck"]!
         headIndex = motion.semanticJointIndices["head"]!
@@ -178,20 +180,30 @@ final class ReplaySkinnedAthleteInstance {
                               translation: motion.numberAnchors.back).matrix
     }
 
-    /// Unsupported actions yield to the existing articulated football rig.
-    /// This does not claim a forward run is a cut, kick or physics ragdoll.
-    static func supports(_ locomotion: PlayerLocomotionSample, hasBallAction: Bool, hasImpact: Bool) -> Bool {
-        !hasBallAction && !hasImpact && locomotion.state != .cut && locomotion.state != .walk
-    }
-
     @discardableResult
     func update(at time: TimeInterval, track: PlayerTrack, locomotion: PlayerLocomotionSample,
-                lookTarget: SIMD3<Float>?, hasBallAction: Bool, hasImpact: Bool) -> Bool {
-        let supported = Self.supports(locomotion, hasBallAction: hasBallAction, hasImpact: hasImpact)
+                lookTarget: SIMD3<Float>?, ballAction: ReplayAthleteBallActionPose?, hasImpact: Bool) -> Bool {
+        // Impacts still use the separately verified fixed-step articulated rig.
+        // Walking, cuts and touches now keep the same textured skin.
+        let supported = !hasImpact && time.isFinite && locomotion.speedMetresPerSecond.isFinite
+            && locomotion.turnRateDegreesPerSecond.isFinite && locomotion.accelerationMetresPerSecondSquared.isFinite
         root.isEnabled = supported
         guard supported else { return false }
-        motion.sample(time: time, locomotionEffort: locomotion.effort,
-                      gaitPhase: track.gaitPhase(at: time), rebuildingModelSpace: false, into: &pose)
+        let gaitPhase = track.gaitPhase(at: time)
+        // Let the idle upper body contribute at walking speeds; the source run
+        // has a deep elbow fold that looks like sprinting when moving slowly.
+        let effort = locomotion.effort
+        let upperBodyEffort = effort * min(max(locomotion.speedMetresPerSecond / 2.4, 0), 1)
+        motion.sample(time: time, locomotionEffort: upperBodyEffort,
+                      gaitPhase: gaitPhase, rebuildingModelSpace: false, into: &pose)
+        let influence = ReplaySkinnedAthleteFootballPose.influence(locomotion: locomotion, ballAction: ballAction)
+        if influence > 0, footballPose != nil {
+            let authored = ReplayAthleteMotion.locomotionPose(
+                for: track, at: time, locomotion: locomotion, gaitPhase: gaitPhase,
+                lookTargetWorldPosition: lookTarget, ballAction: ballAction
+            )
+            footballPose?.apply(authored, influence: influence, motion: motion, to: &pose)
+        }
         let look = ReplayAthleteMotion.lookPose(for: track, at: time, locomotion: locomotion,
                                                targetWorldPosition: lookTarget)
         applyLook(look)
