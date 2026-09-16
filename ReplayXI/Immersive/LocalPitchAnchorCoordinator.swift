@@ -119,6 +119,7 @@ final class LocalPitchAnchorCoordinator {
     @ObservationIgnored private var poseSamplingTask: Task<Void, Never>?
     @ObservationIgnored private var pitchAnchorRemovalTask: Task<Void, Never>?
     @ObservationIgnored private var sessionRevision = UUID()
+    @ObservationIgnored private var placementIntentRevision = UUID()
 
     /// ARKit calls can finish after stop/restart. Never accept their result in a
     /// different session, even when the underlying provider ignores cancellation.
@@ -130,6 +131,17 @@ final class LocalPitchAnchorCoordinator {
         let result = try await operation()
         try Task.checkCancellation()
         guard sessionRevision == revision else { throw CancellationError() }
+        return result
+    }
+
+    /// Ending a drill cancels placement intent without stopping world tracking.
+    /// In particular, an add that finishes after End drill must not re-place it.
+    func withPlacementLifetime<Value>(
+        _ operation: () async throws -> Value
+    ) async throws -> Value {
+        let intent = placementIntentRevision
+        let result = try await withSessionLifetime(operation)
+        guard placementIntentRevision == intent else { throw CancellationError() }
         return result
     }
 
@@ -186,6 +198,7 @@ final class LocalPitchAnchorCoordinator {
             throw CoordinatorError.placementInProgress
         }
         let revision = sessionRevision
+        let intent = placementIntentRevision
         isPlacingPitchAnchor = true
         defer {
             if sessionRevision == revision { isPlacingPitchAnchor = false }
@@ -197,33 +210,42 @@ final class LocalPitchAnchorCoordinator {
         )
 
         do {
-            try await withSessionLifetime { try await provider.addAnchor(newAnchor) }
+            try await withPlacementLifetime { try await provider.addAnchor(newAnchor) }
         } catch {
             // Best-effort cleanup also covers cancellation after a successful add.
             try? await provider.removeAnchor(newAnchor)
             throw error
         }
 
-        selectedSharedPitchAnchorID = newAnchor.id
-        sharedAnchorCache[newAnchor.id] = newAnchor
-        pitchAnchor = newAnchor
-        sharedPitchAnchorID = newAnchor.id
-        pitchOriginTransform = newAnchor.originFromAnchorTransform
-        locallyPlacedPitchAnchorID = newAnchor.id
-        placedPitchAnchorLocally = true
-        isPitchAnchorTracked = newAnchor.isTracked
-        horizontalHeadsetPose = nil
-        status = .localizingPitchAnchor
+        recordLocalPlacement(newAnchor)
 
         if let previousAnchor, previousAnchor.id != newAnchor.id {
             try? await provider.removeAnchor(previousAnchor)
-            guard sessionRevision == revision, !Task.isCancelled else {
+            guard sessionRevision == revision, placementIntentRevision == intent else {
                 throw CancellationError()
             }
             sharedAnchorCache.removeValue(forKey: previousAnchor.id)
+            if Task.isCancelled {
+                await removeLocallyPlacedPitchAnchor()
+                throw CancellationError()
+            }
         }
 
         return newAnchor.id
+    }
+
+    /// Commits one admitted local anchor, synchronously and without suspension.
+    func recordLocalPlacement(_ anchor: WorldAnchor) {
+        selectedSharedPitchAnchorID = anchor.id
+        sharedAnchorCache[anchor.id] = anchor
+        pitchAnchor = anchor
+        sharedPitchAnchorID = anchor.id
+        pitchOriginTransform = anchor.originFromAnchorTransform
+        locallyPlacedPitchAnchorID = anchor.id
+        placedPitchAnchorLocally = true
+        isPitchAnchorTracked = anchor.isTracked
+        horizontalHeadsetPose = nil
+        status = .localizingPitchAnchor
     }
 
     /// Places a yaw-aligned origin at the current headset position.
@@ -293,6 +315,8 @@ final class LocalPitchAnchorCoordinator {
 
     /// Removes only the anchor created by this headset.
     func removeLocallyPlacedPitchAnchor() async {
+        // Invalidate even if addAnchor has not returned an ID to publish yet.
+        placementIntentRevision = UUID()
         if let pitchAnchorRemovalTask {
             await pitchAnchorRemovalTask.value
             return
@@ -302,18 +326,19 @@ final class LocalPitchAnchorCoordinator {
             ?? (pitchAnchor?.id == localID ? pitchAnchor : nil)
         let provider = worldTrackingProvider
         let revision = sessionRevision
-        let removalTask = Task { [weak self] in
+
+        // Retire app state before asking ARKit to remove it. Otherwise its
+        // .removed event can be misreported as unexpected tracking loss.
+        sharedAnchorCache.removeValue(forKey: localID)
+        locallyPlacedPitchAnchorID = nil
+        placedPitchAnchorLocally = false
+        if selectedSharedPitchAnchorID == localID {
+            selectSharedPitchAnchor(id: nil)
+        }
+
+        let removalTask = Task {
             if let provider, let anchor {
                 try? await provider.removeAnchor(anchor)
-            }
-            guard let self, self.sessionRevision == revision, !Task.isCancelled else { return }
-            sharedAnchorCache.removeValue(forKey: localID)
-            if locallyPlacedPitchAnchorID == localID {
-                locallyPlacedPitchAnchorID = nil
-                placedPitchAnchorLocally = false
-            }
-            if selectedSharedPitchAnchorID == localID {
-                selectSharedPitchAnchor(id: nil)
             }
         }
         pitchAnchorRemovalTask = removalTask

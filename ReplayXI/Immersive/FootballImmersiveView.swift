@@ -5158,7 +5158,11 @@ private struct PositioningPanel: View {
                 sharedSpace.selectSharedPitchAnchor(id: anchorID)
                 placementError = nil
                 showsPlacementPreflight = false
+            } catch is CancellationError {
+                // Exit/End drill intentionally invalidates an unfinished add.
+                // Its delayed result must not reopen an error in a newer view.
             } catch {
+                guard store.isImmersiveOpen, showsPlacementPreflight else { return }
                 placementError = error.localizedDescription
             }
         }

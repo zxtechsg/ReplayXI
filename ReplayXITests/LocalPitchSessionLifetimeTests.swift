@@ -1,3 +1,5 @@
+import ARKit
+import simd
 import XCTest
 @testable import ReplayXI
 
@@ -75,6 +77,73 @@ final class LocalPitchSessionLifetimeTests: XCTestCase {
             XCTFail("Provider failure should propagate")
         } catch {
             XCTAssertTrue(error is TestError)
+        }
+    }
+
+    func testEndDrillRejectsPendingPlacementWithoutStoppingSession() async throws {
+        let coordinator = LocalPitchAnchorCoordinator()
+        do {
+            _ = try await coordinator.withPlacementLifetime {
+                // No anchor has been committed yet. Retiring must still cancel
+                // this in-flight placement rather than do nothing.
+                await coordinator.removeLocallyPlacedPitchAnchor()
+                return UUID()
+            }
+            XCTFail("A late add must not restore the ended drill")
+        } catch {
+            XCTAssertTrue(error is CancellationError)
+        }
+        // Retirement is narrower than session invalidation: other world
+        // tracking operations and a deliberately new placement remain valid.
+        let value = try await coordinator.withSessionLifetime { 8 }
+        XCTAssertEqual(value, 8)
+        let newPlacement = try await coordinator.withPlacementLifetime { 9 }
+        XCTAssertEqual(newPlacement, 9)
+    }
+
+    func testExplicitRetirementClearsPublishedAnchorWithoutUnexpectedLossCallback() async {
+        let coordinator = LocalPitchAnchorCoordinator()
+        let anchor = WorldAnchor(originFromAnchorTransform: matrix_identity_float4x4)
+        coordinator.recordLocalPlacement(anchor)
+        XCTAssertEqual(coordinator.sharedPitchAnchorID, anchor.id)
+        XCTAssertTrue(coordinator.placedPitchAnchorLocally)
+        XCTAssertNotNil(coordinator.pitchOriginTransform)
+        coordinator.onSelectedAnchorRemoved = { _ in
+            XCTFail("Explicit retirement is not unexpected tracking loss")
+        }
+
+        await coordinator.removeLocallyPlacedPitchAnchor()
+
+        XCTAssertNil(coordinator.sharedPitchAnchorID)
+        XCTAssertNil(coordinator.pitchOriginTransform)
+        XCTAssertNil(coordinator.horizontalHeadsetPose)
+        XCTAssertFalse(coordinator.placedPitchAnchorLocally)
+        XCTAssertFalse(coordinator.isPitchAnchorTracked)
+        XCTAssertEqual(coordinator.status, .stopped)
+        await coordinator.removeLocallyPlacedPitchAnchor()
+        XCTAssertNil(coordinator.sharedPitchAnchorID)
+    }
+
+    func testRetirementDuringSuspendedAddRejectsResumedOperation() async {
+        let coordinator = LocalPitchAnchorCoordinator()
+        let started = expectation(description: "Placement suspended")
+        var resume: CheckedContinuation<UUID, Never>?
+        let pending = Task { @MainActor in
+            try await coordinator.withPlacementLifetime {
+                await withCheckedContinuation { continuation in
+                    resume = continuation
+                    started.fulfill()
+                }
+            }
+        }
+        await fulfillment(of: [started], timeout: 2)
+        await coordinator.removeLocallyPlacedPitchAnchor()
+        resume?.resume(returning: UUID())
+        do {
+            _ = try await pending.value
+            XCTFail("Retirement must defeat a real delayed completion")
+        } catch {
+            XCTAssertTrue(error is CancellationError)
         }
     }
 }
