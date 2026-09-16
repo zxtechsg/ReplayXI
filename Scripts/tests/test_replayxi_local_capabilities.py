@@ -76,6 +76,25 @@ class LocalCapabilityTests(unittest.TestCase):
         self.assertNotIn("removeLocallyPlacedPitchAnchor()", immersive)
         self.assertIn("await sessionStartTask?.value", coordinator)
 
+    def test_room_presentation_uses_request_tokens_not_independent_flags(self):
+        dashboard = (APP / "UI/ReplayDashboardView.swift").read_text()
+        immersive = (APP / "Immersive/FootballImmersiveView.swift").read_text()
+        store = (APP / "Domain/PlaybackStore.swift").read_text()
+        self.assertIn("store.beginImmersiveOpen()", dashboard)
+        entry = (APP / "ReplayXIApp.swift").read_text()
+        self.assertIn('ImmersiveSpace(id: "ReplayRoom", for: UUID.self)', entry)
+        self.assertIn('openImmersiveSpace(id: "ReplayRoom", value: requestID)', dashboard)
+        self.assertIn("store.completeImmersiveOpen(requestID", dashboard)
+        self.assertIn(".disabled(store.isRoomPresentationBusy)", dashboard)
+        self.assertIn("Closing room…", dashboard)
+        self.assertIn("store.beginImmersiveClose(requestID)", immersive)
+        self.assertIn("store.immersiveRoomDidDisappear(requestID)", immersive)
+        self.assertIn(".allowsHitTesting(acceptsRoomInteraction)", immersive)
+        self.assertIn(".disabled(!acceptsRoomInteraction)", immersive)
+        self.assertIn("guard acceptsRoomInteraction else { return }", immersive)
+        for source in (dashboard, immersive, store):
+            self.assertNotRegex(source, r"is(?:OpeningImmersive|ImmersiveOpen)\s*=")
+
 
 if __name__ == "__main__":
     unittest.main()

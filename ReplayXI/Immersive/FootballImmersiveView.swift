@@ -22,6 +22,11 @@ struct FootballImmersiveView: View {
     @State private var accessibilityActivationSubscription: EventSubscription?
     @State private var controlPlacementRevision = 0
     @State private var pitchTrackingOwner = UUID()
+    let roomPresentationID: UUID
+
+    private var acceptsRoomInteraction: Bool {
+        store.roomPresentation.acceptsInteraction(for: roomPresentationID)
+    }
 
     private var controlDeckPreset: PlaybackControlDeckPreset {
         PlaybackControlDeckPreset(rawValue: controlDeckPresetRawValue) ?? .standard
@@ -196,8 +201,14 @@ struct FootballImmersiveView: View {
 
         }
         .gesture(spatialInteractionGesture)
+        .allowsHitTesting(acceptsRoomInteraction)
+        .disabled(!acceptsRoomInteraction)
+        .onAppear {
+            _ = store.immersiveRoomDidAppear(roomPresentationID)
+        }
         .task(id: store.selectedScenario.kind) {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, store.roomPresentation.owns(roomPresentationID),
+                  !store.isClosingImmersive else { return }
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("--replayxi-pinch-draft") {
                 let start = PitchPoint(x: 11, z: 7)
@@ -233,7 +244,8 @@ struct FootballImmersiveView: View {
                 try? await Task.sleep(
                     for: ReplayPresentationClock.interval(shouldAdvance: shouldAdvance)
                 )
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled, store.roomPresentation.owns(roomPresentationID),
+                      !store.isClosingImmersive else { return }
                 let now = clock.now
                 let duration = previous.duration(to: now)
                 previous = now
@@ -242,17 +254,16 @@ struct FootballImmersiveView: View {
             }
         }
         .onDisappear {
-            // System dismissal is also an exit transaction. Roll transient
-            // geometry back before child controls disappear, then force the
-            // dashboard-facing store into a genuinely paused state.
-            // Clear immersive ownership first. If the child deck disappears
-            // afterward, it must not restore a pre-scrub playing checkpoint
-            // over this definitive exit pause.
-            store.isImmersiveOpen = false
-            store.isOpeningImmersive = false
-            store.prepareForImmersiveExit()
             accessibilityActivationSubscription?.cancel()
             accessibilityActivationSubscription = nil
+            // An old view must not pause, close or edit a newly opened room.
+            let requestID = roomPresentationID
+            guard store.immersiveRoomDidDisappear(requestID) else {
+                annotationStroke = nil
+                draggedAnnotationTarget = nil
+                sharedSpace.stopTracking(for: pitchTrackingOwner)
+                return
+            }
             cancelInterruptedSpatialInteraction()
             if store.isDrawing {
                 store.cancelDrawing()
@@ -270,6 +281,7 @@ struct FootballImmersiveView: View {
             openWindow(id: "ReplayDashboard")
         }
         .onChange(of: store.sharedPitchAnchorID) { _, anchorID in
+            guard sharedSpace.ownsTracking(for: pitchTrackingOwner) else { return }
             sharedSpace.selectSharedPitchAnchor(id: anchorID)
         }
         .onChange(of: store.isDrawing) { _, isDrawing in
@@ -423,6 +435,7 @@ struct FootballImmersiveView: View {
                     isActive = true
                 }
                 .onChanged { value in
+                    guard acceptsRoomInteraction else { return }
                     handleAnnotationDragChanged(value)
                     handleAnnotationStrokeChanged(value)
                 }
@@ -435,6 +448,7 @@ struct FootballImmersiveView: View {
     private func handleSpatialTap(
         _ value: EntityTargetValue<SpatialTapGesture.Value>
     ) {
+        guard acceptsRoomInteraction else { return }
         guard PlaybackSpatialInteractionPolicy.acceptsPitchInteraction(
             hasActiveEndpointPreview: store.hasActiveCoachMarkGeometryPreview,
             hasActiveTimelineScrub: store.hasActiveTimelineScrub
@@ -492,6 +506,7 @@ struct FootballImmersiveView: View {
     /// same annotation and POV commands so existing interaction locks remain
     /// authoritative.
     private func handleAccessibilityActivation(of entity: Entity) {
+        guard acceptsRoomInteraction else { return }
         guard PlaybackSpatialInteractionPolicy.acceptsPitchInteraction(
             hasActiveEndpointPreview: store.hasActiveCoachMarkGeometryPreview,
             hasActiveTimelineScrub: store.hasActiveTimelineScrub
@@ -686,6 +701,11 @@ struct FootballImmersiveView: View {
     private func handleSpatialDragEnded(
         _ value: EntityTargetValue<DragGesture.Value>
     ) {
+        guard acceptsRoomInteraction else {
+            draggedAnnotationTarget = nil
+            annotationStroke = nil
+            return
+        }
         if draggedAnnotationTarget != nil {
             handleAnnotationDragEnded(value)
             return
@@ -776,6 +796,11 @@ struct FootballImmersiveView: View {
     }
 
     private func cancelInterruptedSpatialInteraction() {
+        guard store.roomPresentation.owns(roomPresentationID) else {
+            draggedAnnotationTarget = nil
+            annotationStroke = nil
+            return
+        }
         if let target = draggedAnnotationTarget {
             _ = store.cancelCoachMarkGeometryPreview(id: target.markID)
             draggedAnnotationTarget = nil
@@ -807,8 +832,9 @@ struct FootballImmersiveView: View {
     }
 
     private func exitRoom() {
+        let requestID = roomPresentationID
+        guard store.beginImmersiveClose(requestID) else { return }
         Task {
-            store.prepareForImmersiveExit()
             if store.triangleLockMode == .place {
                 if store.localRole == .coach {
                     store.endTrianglePlacement()
@@ -818,7 +844,7 @@ struct FootballImmersiveView: View {
             }
             await sharedSpace.stopTracking(for: pitchTrackingOwner)?.value
             await dismissImmersiveSpace()
-            store.isImmersiveOpen = false
+            store.completeImmersiveClose(requestID)
         }
     }
 }

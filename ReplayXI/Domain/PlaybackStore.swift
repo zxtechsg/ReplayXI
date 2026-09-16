@@ -123,8 +123,11 @@ final class ReplayStore {
     }
     var showsIdealBranch: Bool { shapeFocusStage == .ideal }
     var showsLaneLens = false { didSet { if oldValue != showsLaneLens { scheduleReviewAutosave() } } }
-    var isImmersiveOpen = false
-    var isOpeningImmersive = false
+    private(set) var roomPresentation = ReplayRoomPresentation()
+    var isImmersiveOpen: Bool { roomPresentation.isOpen }
+    var isOpeningImmersive: Bool { roomPresentation.isOpening }
+    var isClosingImmersive: Bool { roomPresentation.isClosing }
+    var isRoomPresentationBusy: Bool { roomPresentation.isBusy }
     var statusMessage = "Choose a scenario, then enter the review room."
 
     @ObservationIgnored private var reviewAutosaveTask: Task<Void, Never>?
@@ -2673,6 +2676,39 @@ final class ReplayStore {
         isCoachLocalReview = false
         followsCoach = true
         isLocallyPaused = false
+    }
+
+    func beginImmersiveOpen() -> UUID? {
+        guard let requestID = roomPresentation.beginOpening() else { return nil }
+        setPlaying(false)
+        statusMessage = "Preparing match players…"
+        return requestID
+    }
+
+    func completeImmersiveOpen(_ requestID: UUID, opened: Bool) -> Bool {
+        roomPresentation.completeOpening(requestID, opened: opened)
+    }
+
+    func immersiveRoomDidAppear(_ requestID: UUID) -> UUID? {
+        roomPresentation.didAppear(requestID)
+    }
+
+    func beginImmersiveClose(_ requestID: UUID) -> Bool {
+        guard roomPresentation.beginClosing(requestID) else { return false }
+        prepareForImmersiveExit()
+        return true
+    }
+
+    func immersiveRoomDidDisappear(_ requestID: UUID) -> Bool {
+        // Clear visible ownership before child scrub controls disappear. Their
+        // old playback checkpoints must not undo this definitive exit pause.
+        guard roomPresentation.didDisappear(requestID) else { return false }
+        prepareForImmersiveExit()
+        return true
+    }
+
+    func completeImmersiveClose(_ requestID: UUID) {
+        roomPresentation.completeClosing(requestID)
     }
 
     /// Ends any transient annotation adjustment before the immersive scene goes

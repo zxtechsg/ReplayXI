@@ -103,10 +103,7 @@ struct ReplayDashboardView: View {
     }
 
     private func openRoom() {
-        guard !store.isOpeningImmersive, !store.isImmersiveOpen else { return }
-        store.setPlaying(false)
-        store.isOpeningImmersive = true
-        store.statusMessage = "Preparing match players…"
+        guard let requestID = store.beginImmersiveOpen() else { return }
         Task {
             do {
                 // Meshes and geometric shirt digits are finite and shared.
@@ -147,15 +144,15 @@ struct ReplayDashboardView: View {
                     #endif
                 }
             } catch {
-                store.isOpeningImmersive = false
+                guard store.completeImmersiveOpen(requestID, opened: false) else { return }
                 store.statusMessage = "Player renderer could not prepare. Try opening the room again."
                 return
             }
             await Task.yield()
+            guard store.roomPresentation.isOpeningRequest(requestID) else { return }
             store.statusMessage = "Opening spatial replay…"
-            let result = await openImmersiveSpace(id: "ReplayRoom")
-            store.isImmersiveOpen = result == .opened
-            store.isOpeningImmersive = false
+            let result = await openImmersiveSpace(id: "ReplayRoom", value: requestID)
+            guard store.completeImmersiveOpen(requestID, opened: result == .opened) else { return }
             if result == .opened {
                 dismissWindow(id: "ReplayDashboard")
             } else {
@@ -1115,7 +1112,8 @@ private struct RoomRail: View {
 
                 Button(action: openRoom) {
                     Label(
-                        store.isOpeningImmersive ? "Opening room…" : "Enter spatial replay",
+                        store.isClosingImmersive ? "Closing room…"
+                            : store.isOpeningImmersive ? "Opening room…" : "Enter spatial replay",
                         systemImage: "visionpro"
                     )
                     .frame(maxWidth: .infinity)
@@ -1124,7 +1122,7 @@ private struct RoomRail: View {
                 .buttonStyle(.borderedProminent)
                 .tint(ReplayTheme.signal)
                 .foregroundStyle(.black)
-                .disabled(store.isOpeningImmersive || store.isImmersiveOpen)
+                .disabled(store.isRoomPresentationBusy)
 
                 Text(store.statusMessage)
                     .font(.caption2)

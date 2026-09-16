@@ -42,10 +42,13 @@ struct ReplayXIApp: App {
             if phase != .active { store.flushReviewAutosave() }
         }
 
-        ImmersiveSpace(id: "ReplayRoom") {
-            FootballImmersiveView()
-                .environment(store)
-                .environment(sharedSpace)
+        ImmersiveSpace(id: "ReplayRoom", for: UUID.self) { $requestID in
+            if let requestID {
+                FootballImmersiveView(roomPresentationID: requestID)
+                    .id(requestID)
+                    .environment(store)
+                    .environment(sharedSpace)
+            }
         }
         .immersionStyle(selection: .constant(.mixed), in: .mixed)
     }
