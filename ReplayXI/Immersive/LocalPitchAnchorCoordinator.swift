@@ -128,21 +128,42 @@ final class LocalPitchAnchorCoordinator {
     ) async throws -> Value {
         let revision = sessionRevision
         try Task.checkCancellation()
-        let result = try await operation()
+        let outcome: Result<Value, Error>
+        do {
+            outcome = .success(try await operation())
+        } catch {
+            outcome = .failure(error)
+        }
+        // Failure can arrive just as late as success. Check the lifetime before
+        // exposing either outcome to a new room/preflight's error presentation.
         try Task.checkCancellation()
         guard sessionRevision == revision else { throw CancellationError() }
-        return result
+        return try outcome.get()
     }
 
     /// Ending a drill cancels placement intent without stopping world tracking.
     /// In particular, an add that finishes after End drill must not re-place it.
     func withPlacementLifetime<Value>(
-        _ operation: () async throws -> Value
+        _ operation: () async throws -> Value,
+        cleanupOnFailure: () async -> Void = {}
     ) async throws -> Value {
+        let revision = sessionRevision
         let intent = placementIntentRevision
-        let result = try await withSessionLifetime(operation)
-        guard placementIntentRevision == intent else { throw CancellationError() }
-        return result
+        try Task.checkCancellation()
+        do {
+            let result = try await withSessionLifetime(operation)
+            guard placementIntentRevision == intent else { throw CancellationError() }
+            return result
+        } catch {
+            // Cleanup belongs to the original provider/anchor. It may itself
+            // suspend across End drill or a restart, so validate again after it.
+            await cleanupOnFailure()
+            try Task.checkCancellation()
+            guard sessionRevision == revision, placementIntentRevision == intent else {
+                throw CancellationError()
+            }
+            throw error
+        }
     }
 
     /// Starts world tracking. Call this only while the app presents a Full Space.
@@ -209,13 +230,13 @@ final class LocalPitchAnchorCoordinator {
             originFromAnchorTransform: transform
         )
 
-        do {
-            try await withPlacementLifetime { try await provider.addAnchor(newAnchor) }
-        } catch {
-            // Best-effort cleanup also covers cancellation after a successful add.
+        try await withPlacementLifetime({
+            try await provider.addAnchor(newAnchor)
+        }, cleanupOnFailure: {
+            // Also covers cancellation after a successful add. Keep this await
+            // inside the lifetime gate so it cannot publish a stale error.
             try? await provider.removeAnchor(newAnchor)
-            throw error
-        }
+        })
 
         recordLocalPlacement(newAnchor)
 
@@ -314,7 +335,10 @@ final class LocalPitchAnchorCoordinator {
     }
 
     /// Removes only the anchor created by this headset.
-    func removeLocallyPlacedPitchAnchor() async {
+    func removeLocallyPlacedPitchAnchor(ifMatching expectedID: UUID? = nil) async {
+        // A dismissed UI request may finish after a new one has placed an
+        // anchor. Its cleanup owns only the returned ID, not the current drill.
+        if let expectedID, locallyPlacedPitchAnchorID != expectedID { return }
         // Invalidate even if addAnchor has not returned an ID to publish yet.
         placementIntentRevision = UUID()
         if let pitchAnchorRemovalTask {

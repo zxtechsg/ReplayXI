@@ -4761,6 +4761,8 @@ private struct PositioningPanel: View {
     @State private var placementError: String?
     @State private var showsPlacementPreflight = false
     @State private var hasConfirmedClearArea = false
+    @State private var placementAttempt = LocalPitchPlacementAttempt()
+    @State private var placementTask: Task<Void, Never>?
 
     private var stage: ShapeFocusStep {
         if store.triangleLockMode == .place || showsPlacementPreflight { return .physical }
@@ -4799,12 +4801,16 @@ private struct PositioningPanel: View {
         .padding(18)
         .glassBackgroundEffect(in: .rect(cornerRadius: 24))
         .onChange(of: store.triangleLockMode) { _, mode in
-            if mode == .visualise {
-                showsPlacementPreflight = false
-                hasConfirmedClearArea = false
+            if mode == .visualise { resetPlacementPreflight() }
+        }
+        .onChange(of: store.selectedScenarioID) { _, _ in resetPlacementPreflight() }
+        .onChange(of: hasConfirmedClearArea) { _, confirmed in
+            if !confirmed {
+                cancelPlacementRequest()
                 placementError = nil
             }
         }
+        .onDisappear { resetPlacementPreflight() }
     }
 
     private var shapeProgress: some View {
@@ -4955,9 +4961,7 @@ private struct PositioningPanel: View {
 
         HStack(spacing: 8) {
             Button("Back to ideal") {
-                showsPlacementPreflight = false
-                hasConfirmedClearArea = false
-                placementError = nil
+                showIdeal()
             }
             .buttonStyle(.bordered)
 
@@ -5180,17 +5184,13 @@ private struct PositioningPanel: View {
 
     private func showProblem() {
         guard store.triangleLockMode == .visualise else { return }
-        showsPlacementPreflight = false
-        hasConfirmedClearArea = false
-        placementError = nil
+        resetPlacementPreflight()
         store.setShapeFocusStage(.problem)
     }
 
     private func showIdeal() {
         guard store.triangleLockMode == .visualise else { return }
-        showsPlacementPreflight = false
-        hasConfirmedClearArea = false
-        placementError = nil
+        resetPlacementPreflight()
         store.setShapeFocusStage(.ideal)
     }
 
@@ -5202,20 +5202,41 @@ private struct PositioningPanel: View {
 
     private var canPlaceLocalStations: Bool {
         hasConfirmedClearArea && sharedSpace.isRunning && !sharedSpace.isPlacingPitchAnchor
+            && !placementAttempt.isPending
     }
 
     private var placementButtonTitle: String {
-        sharedSpace.isPlacingPitchAnchor ? "Anchoring…" : "Place local stations"
+        if placementAttempt.isPending { return "Anchoring…" }
+        return sharedSpace.isPlacingPitchAnchor ? "Finishing…" : "Place local stations"
+    }
+
+    private func cancelPlacementRequest() {
+        placementAttempt.cancel()
+        placementTask?.cancel()
+        placementTask = nil
+    }
+
+    private func resetPlacementPreflight() {
+        cancelPlacementRequest()
+        showsPlacementPreflight = false
+        hasConfirmedClearArea = false
+        placementError = nil
     }
 
     private func placeLocalStations() {
-        guard canPlaceLocalStations else { return }
-        Task {
+        guard canPlaceLocalStations, let requestID = placementAttempt.begin() else { return }
+        placementError = nil
+        placementTask = Task {
+            defer {
+                // A retired task must not clear the handle of a newer attempt.
+                if placementAttempt.finish(requestID) { placementTask = nil }
+            }
             do {
                 let anchorID = try await sharedSpace.placeLocalPitchAnchorAtCurrentHeadset()
-                guard store.isImmersiveOpen, showsPlacementPreflight,
+                guard placementAttempt.owns(requestID), !Task.isCancelled,
+                      store.isImmersiveOpen, showsPlacementPreflight,
                       hasConfirmedClearArea, store.triangleLockMode == .visualise else {
-                    await sharedSpace.removeLocallyPlacedPitchAnchor()
+                    await sharedSpace.removeLocallyPlacedPitchAnchor(ifMatching: anchorID)
                     return
                 }
                 store.activateLocalTrianglePreview(anchorID: anchorID)
@@ -5223,10 +5244,11 @@ private struct PositioningPanel: View {
                 placementError = nil
                 showsPlacementPreflight = false
             } catch is CancellationError {
-                // Exit/End drill intentionally invalidates an unfinished add.
-                // Its delayed result must not reopen an error in a newer view.
+                // Closing, Back, withdrawn consent and End drill intentionally
+                // cancel an add. Its old result must not reopen an error.
             } catch {
-                guard store.isImmersiveOpen, showsPlacementPreflight else { return }
+                guard placementAttempt.owns(requestID), !Task.isCancelled,
+                      store.isImmersiveOpen, showsPlacementPreflight else { return }
                 placementError = error.localizedDescription
             }
         }

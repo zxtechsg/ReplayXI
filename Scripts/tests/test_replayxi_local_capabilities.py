@@ -48,6 +48,20 @@ class LocalCapabilityTests(unittest.TestCase):
         self.assertNotIn("playback-controls-head-anchor", immersive)
         self.assertIn("Demo match · no video loaded", immersive)
 
+    def test_positioning_panel_owns_and_cancels_its_placement_attempt(self):
+        source = (APP / "Immersive/FootballImmersiveView.swift").read_text()
+        panel = source.split("private struct PositioningPanel: View {", 1)[1].split("\nprivate struct ", 1)[0]
+        self.assertIn("@State private var placementTask: Task<Void, Never>?", panel)
+        self.assertIn("let requestID = placementAttempt.begin()", panel)
+        self.assertEqual(panel.count("placementAttempt.owns(requestID)"), 2)
+        self.assertIn("placementAttempt.finish(requestID)", panel)
+        self.assertIn("placementAttempt.cancel()", panel)
+        self.assertIn("placementTask?.cancel()", panel)
+        self.assertIn(".onChange(of: hasConfirmedClearArea)", panel)
+        self.assertIn(".onDisappear { resetPlacementPreflight() }", panel)
+        self.assertIn(".onChange(of: store.selectedScenarioID) { _, _ in resetPlacementPreflight() }", panel)
+        self.assertIn("removeLocallyPlacedPitchAnchor(ifMatching: anchorID)", panel)
+
 
 if __name__ == "__main__":
     unittest.main()
