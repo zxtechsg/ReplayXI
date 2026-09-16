@@ -238,7 +238,12 @@ final class PlaybackControlDeckClarityTests: XCTestCase {
         XCTAssertTrue(choice.contains("Not enough replay time remains. Choose To end"))
         let move = try sourceSlice(source,
             after: "private func canMoveAnnotation(", before: "private var directPlaybackRates")
-        XCTAssertTrue(move.contains("CoachMarkTimingPolicy.windowFits"))
+        XCTAssertTrue(move.contains("PlaybackAnnotationMovePolicy.canMove(mark, to: time, in: store)"))
+        let projectRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let movePolicy = try String(contentsOf: projectRoot.appendingPathComponent(
+            "ReplayXI/Immersive/PlaybackAnnotationMovePolicy.swift"), encoding: .utf8)
+        XCTAssertTrue(movePolicy.contains("CoachMarkTimingPolicy.windowFits"))
     }
 
     func testSelectedCoachMarkExposesClearRetractableTwentyTwoPlayerTracking() throws {

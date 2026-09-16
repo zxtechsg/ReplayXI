@@ -996,6 +996,10 @@ final class ReplayStore {
             startTrackAnchor: anchors.start,
             endTrackAnchor: anchors.end
         )
+        guard isValidSharedMark(mark, for: selectedScenario) else {
+            statusMessage = "Keep the annotation on the pitch"
+            return nil
+        }
         marks.append(mark)
         pendingDrawStart = nil
         isDrawing = false
@@ -1076,10 +1080,7 @@ final class ReplayStore {
         let activePlayerAnchor = activePerspective.map {
             CoachMarkTrackAnchor(
                 playerID: $0.id,
-                offset: PitchPoint(
-                    x: focus.x - sampledFocus.x,
-                    z: focus.z - sampledFocus.z
-                )
+                offset: Self.authoredTrackOffset(from: sampledFocus, to: focus)
             )
         }
         let mark = CoachMark(
@@ -1094,10 +1095,7 @@ final class ReplayStore {
                 ? activePlayerAnchor.map {
                     CoachMarkTrackAnchor(
                         playerID: $0.playerID,
-                        offset: PitchPoint(
-                            x: destination.x - sampledFocus.x,
-                            z: destination.z - sampledFocus.z
-                        )
+                        offset: Self.authoredTrackOffset(from: sampledFocus, to: destination)
                     )
                 }
                 : nil
@@ -1428,10 +1426,7 @@ final class ReplayStore {
             playerPosition.map {
                 CoachMarkTrackAnchor(
                     playerID: playerID,
-                    offset: PitchPoint(
-                        x: resolved.start.x - $0.x,
-                        z: resolved.start.z - $0.z
-                    )
+                    offset: Self.authoredTrackOffset(from: $0, to: resolved.start)
                 )
             }
         }
@@ -1439,10 +1434,7 @@ final class ReplayStore {
             playerPosition.map {
                 CoachMarkTrackAnchor(
                     playerID: playerID,
-                    offset: PitchPoint(
-                        x: resolved.end.x - $0.x,
-                        z: resolved.end.z - $0.z
-                    )
+                    offset: Self.authoredTrackOffset(from: $0, to: resolved.end)
                 )
             }
         }
@@ -2601,6 +2593,34 @@ final class ReplayStore {
         return true
     }
 
+    /// Local endpoint subtraction can round an exact touchline outward when
+    /// the offset is added back to its player. Move only that generated offset
+    /// one representable step inward. Stored fallback points and decoded
+    /// anchors stay unchanged; the strict import validator gains no tolerance.
+    private static func authoredTrackOffset(from origin: PitchPoint, to endpoint: PitchPoint) -> PitchPoint {
+        func component(from origin: Float, to endpoint: Float, limit: Float) -> Float {
+            let offset = endpoint - origin
+            guard origin.isFinite, endpoint.isFinite,
+                  abs(origin) <= limit, abs(endpoint) <= limit else { return offset }
+            let reconstructed = origin + offset
+            let corrected: Float
+            if reconstructed > limit {
+                corrected = offset.nextDown
+            } else if reconstructed < -limit {
+                corrected = offset.nextUp
+            } else {
+                return offset
+            }
+            let correctedPosition = origin + corrected
+            return correctedPosition.isFinite && abs(correctedPosition) <= limit
+                ? corrected : offset
+        }
+        return PitchPoint(
+            x: component(from: origin.x, to: endpoint.x, limit: pitchHalfWidth),
+            z: component(from: origin.z, to: endpoint.z, limit: pitchHalfLength)
+        )
+    }
+
     /// Shared marks become RealityKit entity trees, so bound both geometry and
     /// presentation data before accepting them. Collection-level duplicate ID
     /// rejection happens in `applyRemote` to keep scene dictionary keys unique.
@@ -2629,10 +2649,7 @@ final class ReplayStore {
             let position = presentedPlayerPose(for: player, at: time).position
             return CoachMarkTrackAnchor(
                 playerID: player.id,
-                offset: PitchPoint(
-                    x: point.x - position.x,
-                    z: point.z - position.z
-                )
+                offset: Self.authoredTrackOffset(from: position, to: point)
             )
         }
 
@@ -2644,10 +2661,7 @@ final class ReplayStore {
                 startAnchor,
                 CoachMarkTrackAnchor(
                     playerID: player.id,
-                    offset: PitchPoint(
-                        x: end.x - position.x,
-                        z: end.z - position.z
-                    )
+                    offset: Self.authoredTrackOffset(from: position, to: end)
                 )
             )
         }
@@ -2784,10 +2798,7 @@ final class ReplayStore {
             let playerPosition = presentedPlayerPose(for: player, at: time).position
             return CoachMarkTrackAnchor(
                 playerID: anchor.playerID,
-                offset: PitchPoint(
-                    x: endpoint.x - playerPosition.x,
-                    z: endpoint.z - playerPosition.z
-                )
+                offset: Self.authoredTrackOffset(from: playerPosition, to: endpoint)
             )
         }
 

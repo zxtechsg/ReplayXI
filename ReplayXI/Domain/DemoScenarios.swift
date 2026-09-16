@@ -244,19 +244,19 @@ enum DemoScenarios {
 
     // MARK: - Scenario 06
 
-    /// The visible reconstruction shell is an original deterministic preview,
-    /// ready to be replaced by a rights-cleared, manifest-validated LingBot-Map
-    /// handoff. Tracking remains the source of tactical truth in both cases.
+    /// This local demo uses authored player and ball paths, not recovered video.
+    /// Future reconstructed visual context must pass the world-admission checks;
+    /// it must not silently replace the replay's player identities or paths.
     private static var realWorldReplay: ReplayScenario {
         ReplayScenario(
             id: "real-world-match-replay",
             kind: .realWorldReplay,
-            title: "Real World Match Replay",
-            strapline: "Generated context. Tracking-grounded truth.",
-            matchContext: "ORIGINAL SYNTHETIC CAPTURE • RECONSTRUCTION PREVIEW",
-            objective: "Review a reconstructed match environment while player IDs, ball state, POV and annotations stay locked to authoritative tracks.",
+            title: "Synthetic match replay",
+            strapline: "Authored play. Local review.",
+            matchContext: "ORIGINAL SYNTHETIC DEMO • AUTHORED PLAYER PATHS",
+            objective: "Replay authored player paths, switch POVs and annotate the play. This demo is simulated, not recovered from video.",
             coachPrompt: "Freeze the release. Link the run to two, the pass to seven and two, then scrub to prove every mark follows the play.",
-            proofPoint: "A generated visual world can add match context without being trusted to invent player identity, position or tactical measurements.",
+            proofPoint: "Review one authored move from any player position, with marks tied to player paths and replay time.",
             duration: sequenceDuration,
             defaultViewMode: .tacticalTable,
             defaultPerspectiveID: "navy-rw",
@@ -264,12 +264,12 @@ enum DemoScenarios {
             players: commonPlayers,
             ball: commonBall,
             moments: [
-                cue("world-source", 0, "ORIGINAL SOURCE", "Rights-safe generated clip", "No broadcast footage, real-club marks or player likenesses enter this reconstruction preview."),
-                cue("world-register", 8.8, "TRACK REGISTRATION", "Visuals meet the match clock", "The generated environment is aligned to the canonical pitch while deterministic tracking remains authoritative."),
-                cue("world-overlap", 11.3, "TRACKED RUN", "Two accelerates outside", "The run arrow is attached to the right-back's telemetry rather than baked into one video frame."),
-                cue("world-release", 13.6, "TRACKED PASS", "Seven finds the outside lane", "Both pass endpoints can follow their identified players through a frame-by-frame review."),
-                cue("world-cutback", 17.5, "SECOND ACTION", "Eight arrives behind the line", "The coach can pause, label and compare the reconstructed context from any player translation with free head look."),
-                cue("world-proof", 24.0, "AUDITABLE HANDOFF", "Visual context, tactical truth separated", "Source rights, generator stages and reconstruction files remain hash-locked in the world manifest.")
+                cue("world-source", 0, "AUTHORED DEMO", "Simulated match, no video", "These player and ball paths are authored. They are not recovered from match footage."),
+                cue("world-register", 8.8, "REPLAY CLOCK", "One local match clock", "Scrub the timeline to review every player and the ball at the same moment."),
+                cue("world-overlap", 11.3, "LINKED RUN", "Two accelerates outside", "The run arrow follows the right-back's authored path as you scrub."),
+                cue("world-release", 13.6, "LINKED PASS", "Seven finds the outside lane", "Each pass endpoint stays linked to its chosen player during replay."),
+                cue("world-cutback", 17.5, "SECOND ACTION", "Eight arrives behind the line", "Pause, label and compare the move from a player's position with free head look."),
+                cue("world-proof", 24.0, "REVIEW AGAIN", "Compare the same move from another POV", "Rewind or switch players to examine this simulated move. Player identities and annotation links stay the same.")
             ],
             coachMarks: [
                 mark(

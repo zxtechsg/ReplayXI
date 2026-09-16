@@ -25,10 +25,11 @@ struct ReplayAthleteMeshAsset {
     let metrics: ReplayAthleteMeshMetrics
 }
 
-/// Original, texture-free football anatomy.  Smooth lofts are cached by part
+/// Original football anatomy. Smooth lofts are cached by part
 /// and LOD, so every player shares immutable vertex/index buffers.  Compared
 /// with scaled balls and boxes, the authored profiles preserve a shoulder,
 /// waist, quadriceps, calf, jaw and boot silhouette under close Player POV.
+/// Only integrated far limbs add height UVs for their small colour strips.
 @MainActor
 enum ReplayAthleteMeshLibrary {
     enum Part: String, Hashable, Sendable {
@@ -234,7 +235,8 @@ enum ReplayAthleteMeshLibrary {
                     .init(y: -0.820, radiusX: 0.069, radiusZ: 0.115, centreZ: 0.055),
                 ],
                 segments: radialSegments,
-                capped: true
+                capped: true,
+                paletteLimb: lod == .far ? .leg : nil
             )
         case .wholeArm:
             generated = try loft(
@@ -247,7 +249,8 @@ enum ReplayAthleteMeshLibrary {
                     .init(y: -0.580, radiusX: 0.041, radiusZ: 0.043, centreZ: 0),
                 ],
                 segments: radialSegments,
-                capped: true
+                capped: true,
+                paletteLimb: lod == .far ? .arm : nil
             )
         case .boot:
             generated = try boot(named: "replay-athlete-boot-\(lod.rawValue)")
@@ -350,7 +353,8 @@ enum ReplayAthleteMeshLibrary {
         named name: String,
         profiles: [RingProfile],
         segments: Int,
-        capped: Bool
+        capped: Bool,
+        paletteLimb: ReplayFarAthletePaletteProvider.Limb? = nil
     ) throws -> ReplayAthleteMeshAsset {
         precondition(profiles.count >= 2)
         precondition(segments >= 3)
@@ -467,7 +471,11 @@ enum ReplayAthleteMeshLibrary {
             }
         }
 
-        return try makeAsset(name: name, positions: positions, normals: normals, indices: indices)
+        let coordinates = paletteLimb.map { limb in
+            positions.map { ReplayFarAthletePaletteProvider.textureCoordinate(for: $0, limb: limb) }
+        }
+        return try makeAsset(name: name, positions: positions, normals: normals,
+                             indices: indices, textureCoordinates: coordinates)
     }
 
     private static func boot(named name: String) throws -> ReplayAthleteMeshAsset {
@@ -508,11 +516,15 @@ enum ReplayAthleteMeshLibrary {
         name: String,
         positions: [SIMD3<Float>],
         normals: [SIMD3<Float>],
-        indices: [UInt32]
+        indices: [UInt32],
+        textureCoordinates: [SIMD2<Float>]? = nil
     ) throws -> ReplayAthleteMeshAsset {
         var descriptor = MeshDescriptor(name: name)
         descriptor.positions = MeshBuffers.Positions(positions)
         descriptor.normals = MeshBuffers.Normals(normals)
+        if let textureCoordinates {
+            descriptor.textureCoordinates = MeshBuffers.TextureCoordinates(textureCoordinates)
+        }
         descriptor.primitives = .triangles(indices)
         let mesh = try MeshResource.generate(from: [descriptor])
         return ReplayAthleteMeshAsset(

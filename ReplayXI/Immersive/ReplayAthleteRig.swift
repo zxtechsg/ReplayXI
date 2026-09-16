@@ -335,6 +335,9 @@ enum ReplayAthleteFactory {
             lods: lods,
             shirtNumbers: Set(players.map { min(max($0.shirtNumber, 0), 99) })
         )
+        if lods.contains(.far) {
+            ReplayFarAthletePaletteProvider.prewarm(for: players)
+        }
         if lods.contains(.near) {
             // Fail softly if a bundled head or texture cannot load. Geometry
             // and material decoding occurs before the immersive frame loop.
@@ -364,6 +367,9 @@ enum ReplayAthleteFactory {
         let hairMaterial = material(configuration.appearance.hair, roughness: 0.96)
         let bootMaterial = material(kit.boots, roughness: 0.50)
         let bootAccentMaterial = material(kit.bootAccent, roughness: 0.66)
+        let farPalette = lod == .far
+            ? ReplayFarAthletePaletteProvider.materials(for: configuration)
+            : nil
         let numberMaterial = UnlitMaterial(
             color: kit.number.uiColor,
             applyPostProcessToneMap: false
@@ -534,7 +540,8 @@ enum ReplayAthleteFactory {
             knee.addChild(ankle)
 
             if lod == .far {
-                try addCustomModel(.wholeLeg, named: "\(side)-leg", to: hip, material: socksMaterial)
+                try addCustomModel(.wholeLeg, named: "\(side)-leg", to: hip,
+                                   material: farPalette?.leg ?? socksMaterial)
             } else {
                 try addCustomModel(.thigh, named: "\(side)-thigh", to: hip, material: skinMaterial)
                 try addCustomModel(.shin, named: "\(side)-shin", to: knee, material: socksMaterial)
@@ -580,7 +587,8 @@ enum ReplayAthleteFactory {
             elbow.addChild(wrist)
 
             if lod == .far {
-                try addCustomModel(.wholeArm, named: "\(side)-arm", to: shoulder, material: shirtMaterial)
+                try addCustomModel(.wholeArm, named: "\(side)-arm", to: shoulder,
+                                   material: farPalette?.arm ?? shirtMaterial)
             } else {
                 try addCustomModel(.sleeve, named: "\(side)-sleeve", to: shoulder, material: shirtMaterial)
                 try addCustomModel(

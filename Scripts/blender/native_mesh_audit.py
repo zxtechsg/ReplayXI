@@ -10,6 +10,9 @@ MAX_BYTES = 2 * 1024 * 1024
 MAX_SAMPLES = 8
 MAX_VERTICES = 8_000
 MAX_INDICES = 48_000
+MAX_TEXTURE_PIXELS = 4096
+TEXTURE_FORMATS = {"rgba8Unorm_srgb": "Display P3", "bgra8Unorm_srgb": "Display P3",
+                   "rgba8Unorm": "Linear DCI-P3 D65", "bgra8Unorm": "Linear DCI-P3 D65"}
 
 
 def finite_number(value, limit):
@@ -57,9 +60,60 @@ def validate_samples(document):
                 raise ValueError("Invalid triangle index or budget")
             if not isinstance(tint, list) or len(tint) != 4 or not all(finite_number(v, 1) and v >= 0 for v in tint):
                 raise ValueError("Invalid RGBA tint")
+            if mesh.get("tintColourSpace") != "Linear Rec.709":
+                raise ValueError("Native tint must explicitly use linear Rec.709 primaries")
+            uvs, texture = mesh.get("uvs"), mesh.get("texture")
+            if uvs is not None:
+                if not isinstance(uvs, list) or len(uvs) != len(points) or not all(
+                    isinstance(uv, list) and len(uv) == 2
+                    and all(finite_number(v, 1) and v >= 0 for v in uv) for uv in uvs
+                ):
+                    raise ValueError("Invalid per-vertex UV coordinates")
+            if texture is not None:
+                if uvs is None:
+                    raise ValueError("Textured meshes require UV coordinates")
+                validate_texture(texture)
         if abs(minimum - sample["minimumY"]) > 0.00001:
             raise ValueError("Native mesh minimum does not match its measurement")
     return samples
+
+
+def validate_texture(texture):
+    if not isinstance(texture, dict):
+        raise ValueError("Invalid native texture")
+    width, height = texture.get("width"), texture.get("height")
+    if not all(type(v) is int and 1 <= v <= 256 for v in (width, height)):
+        raise ValueError("Invalid native texture dimensions")
+    if width * height > MAX_TEXTURE_PIXELS:
+        raise ValueError("Native texture pixel budget exceeded")
+    pixel_format = texture.get("pixelFormat")
+    expected_space = TEXTURE_FORMATS.get(pixel_format) if isinstance(pixel_format, str) else None
+    if expected_space is None or texture.get("colourSpace") != expected_space:
+        raise ValueError("Unsupported native texture colour format")
+    if texture.get("origin") != "top-left":
+        raise ValueError("Native texture origin must be explicit")
+    pixels = texture.get("rgba8")
+    if not isinstance(pixels, list) or len(pixels) != width * height * 4 or not all(
+        type(v) is int and 0 <= v <= 255 for v in pixels
+    ):
+        raise ValueError("Invalid native RGBA8 pixels")
+    if any(pixels[i] != 255 for i in range(3, len(pixels), 4)):
+        raise ValueError("This audit supports opaque colour textures only")
+
+
+def blender_texture_pixels(texture):
+    """One row flip: Metal row 0 is top; Blender image storage is bottom-up.
+
+    Generated RealityKit mesh UV V=0 also means top. The Blender renderer maps
+    those UVs to V'=1-V separately, so both refer to the same physical row.
+    No PNG round-trip, colour-space guess or channel swap occurs here: the
+    native exporter has already canonicalised RGBA versus BGRA bytes.
+    """
+    validate_texture(texture)
+    row_bytes = texture["width"] * 4
+    pixels = texture["rgba8"]
+    return [channel / 255 for row in reversed(range(texture["height"]))
+            for channel in pixels[row * row_bytes:(row + 1) * row_bytes]]
 
 
 def read_samples(path: Path):

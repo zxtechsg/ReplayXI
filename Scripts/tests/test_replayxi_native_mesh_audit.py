@@ -6,13 +6,24 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "blender"))
-from native_mesh_audit import MAX_BYTES, MAX_VERTICES, read_samples, validate_samples
+from native_mesh_audit import MAX_BYTES, MAX_VERTICES, blender_texture_pixels, read_samples, validate_samples
 
 
 def fixture():
     return {"samples": [{"name": "navy-rb-corrected", "time": 12, "minimumY": 0,
         "meshes": [{"name": "qa-triangle", "positions": [[0, 0, 0], [0, 1, 0], [1, 0, 0]],
-                    "indices": [0, 1, 2], "tint": [0.1, 0.2, 0.3, 1]}]}]}
+                    "indices": [0, 1, 2], "tint": [0.1, 0.2, 0.3, 1],
+                    "tintColourSpace": "Linear Rec.709"}]}]}
+
+
+def textured_fixture():
+    document = fixture()
+    mesh = document["samples"][0]["meshes"][0]
+    mesh["uvs"] = [[0, 0], [0, 1], [1, 0]]
+    mesh["texture"] = {"width": 2, "height": 2, "pixelFormat": "rgba8Unorm_srgb",
+        "colourSpace": "Display P3", "origin": "top-left",
+        "rgba8": [255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 31, 79, 151, 255]}
+    return document
 
 
 class NativeMeshAuditTests(unittest.TestCase):
@@ -42,7 +53,8 @@ class NativeMeshAuditTests(unittest.TestCase):
 
     def test_indices_and_tints_are_bounded(self):
         for field, value in [("indices", [0, 1]), ("indices", [0, 1, 3]),
-                             ("indices", [0, True, 2]), ("tint", [1, 0, 0, 1.1])]:
+                             ("indices", [0, True, 2]), ("tint", [1, 0, 0, 1.1]),
+                             ("tintColourSpace", "sRGB"), ("tintColourSpace", None)]:
             document = fixture()
             document["samples"][0]["meshes"][0][field] = value
             with self.assertRaises(ValueError):
@@ -66,6 +78,39 @@ class NativeMeshAuditTests(unittest.TestCase):
             path.write_bytes(b" " * (MAX_BYTES + 1))
             with self.assertRaisesRegex(ValueError, "2 MB"):
                 read_samples(path)
+
+    def test_native_texture_and_uvs_are_preserved(self):
+        document = textured_fixture()
+        before = copy.deepcopy(document)
+        self.assertIs(validate_samples(document), document["samples"])
+        self.assertEqual(document, before)
+
+    def test_uv_count_finiteness_and_range_are_bounded(self):
+        for uvs in [None, [[0, 0]], [[0, 0], [float("nan"), 0], [0, 1]],
+                    [[0, 0], [2, 0], [0, 1]], [[0, 0], [True, 0], [0, 1]]]:
+            document = textured_fixture()
+            document["samples"][0]["meshes"][0]["uvs"] = uvs
+            with self.assertRaisesRegex(ValueError, "UV"):
+                validate_samples(document)
+
+    def test_native_texture_format_dimensions_and_pixels_are_explicit(self):
+        for field, value in [("width", True), ("height", 257), ("width", 256),
+                             ("colourSpace", "sRGB"), ("origin", "bottom-left"),
+                             ("pixelFormat", "astc_4x4_srgb"), ("pixelFormat", []),
+                             ("pixelFormat", {}), ("rgba8", [1, 2, 3]),
+                             ("rgba8", [True, 0, 0, 255] * 4),
+                             ("rgba8", [255, 0, 0, 0] * 4)]:
+            document = textured_fixture()
+            document["samples"][0]["meshes"][0]["texture"][field] = value
+            with self.assertRaises(ValueError):
+                validate_samples(document)
+
+    def test_blender_rows_flip_once_without_changing_channels(self):
+        texture = textured_fixture()["samples"][0]["meshes"][0]["texture"]
+        before = copy.deepcopy(texture)
+        actual = blender_texture_pixels(texture)
+        self.assertEqual(actual, [v / 255 for v in texture["rgba8"][8:] + texture["rgba8"][:8]])
+        self.assertEqual(texture, before)
 
 
 if __name__ == "__main__":

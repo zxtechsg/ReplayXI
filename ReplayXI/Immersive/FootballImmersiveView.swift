@@ -58,7 +58,7 @@ struct FootballImmersiveView: View {
                 accessibilityActivationSubscription = content.subscribe(
                     to: AccessibilityEvents.Activate.self
                 ) { event in
-                    handleAccessibilityActivation(of: event.entity)
+                    handleAccessibilityActivation(event)
                 }
             }
             PitchSceneFactory.update(
@@ -380,22 +380,7 @@ struct FootballImmersiveView: View {
     }
 
     private func playerIDAncestor(of entity: Entity) -> String? {
-        if let decisionPlayerID = DecisionOptionSceneOverlay.playerIDAncestor(of: entity) {
-            return decisionPlayerID
-        }
-        var cursor: Entity? = entity
-        while let current = cursor {
-            let labelPrefix = "player-label-"
-            if current.name.hasPrefix(labelPrefix) {
-                return String(current.name.dropFirst(labelPrefix.count))
-            }
-            let prefix = "player-"
-            if current.name.hasPrefix(prefix) {
-                return String(current.name.dropFirst(prefix.count))
-            }
-            cursor = current.parent
-        }
-        return nil
+        PlaybackAccessibilityActivationRouter.playerIDAncestor(of: entity)
     }
 
     private func nearestPlayer(to point: PitchPoint, maximumDistance: Float) -> PlayerTrack? {
@@ -507,27 +492,15 @@ struct FootballImmersiveView: View {
     /// instead of the app's SpatialTapGesture. Route those events through the
     /// same annotation and POV commands so existing interaction locks remain
     /// authoritative.
-    private func handleAccessibilityActivation(of entity: Entity) {
-        guard acceptsRoomInteraction else { return }
-        guard PlaybackSpatialInteractionPolicy.acceptsPitchInteraction(
-            hasActiveEndpointPreview: store.hasActiveCoachMarkGeometryPreview,
-            hasActiveTimelineScrub: store.hasActiveTimelineScrub
-        ) else { return }
-
-        if let annotationTarget = AnnotationSceneAffordance.targetAncestor(of: entity) {
-            selectedAnnotationID = annotationTarget.markID
-            if let mark = store.marks.first(where: { $0.id == annotationTarget.markID }) {
-                reviewSpatialAnnotation(mark)
-            }
-            return
+    private func handleAccessibilityActivation(_ event: AccessibilityEvents.Activate) {
+        PlaybackAccessibilityActivationRouter.handle(
+            event,
+            store: store,
+            roomPresentationID: roomPresentationID,
+            hasActiveDrawingStroke: annotationStroke != nil
+        ) { annotationID in
+            selectedAnnotationID = annotationID
         }
-
-        // Drawing owns player activations for spatial authoring. Never make an
-        // assistive activation unexpectedly abandon or mutate an active stroke.
-        guard !store.isDrawing,
-              let playerID = playerIDAncestor(of: entity),
-              store.selectedScenario.player(id: playerID) != nil else { return }
-        openPlayerPOV(playerID)
     }
 
     private var selectedAnnotationIsEditable: Bool {
@@ -813,18 +786,7 @@ struct FootballImmersiveView: View {
     }
 
     private func reviewSpatialAnnotation(_ mark: CoachMark) {
-        // A joined player must explicitly enter device-local comfort review
-        // before changing time. Otherwise the UI still claims to follow the
-        // coach and the next heartbeat snaps this headset back unexpectedly.
-        if store.localRole == .player {
-            _ = store.beginLocalReview(at: mark.revealTime)
-            return
-        }
-
-        store.setPlaying(false, broadcast: false)
-        // A coach selecting a shared 3D annotation owns the room's transport,
-        // matching annotation selections made from the event shelf.
-        store.seek(to: mark.revealTime, broadcast: store.localRole == .coach)
+        PlaybackAccessibilityActivationRouter.reviewAnnotation(mark, in: store)
     }
 
     private func exitRoom() {
@@ -4358,6 +4320,7 @@ private struct ImmersiveControlDeck: View {
                         .foregroundStyle(.white.opacity(0.62))
 
                     Button {
+                        guard canMoveAnnotation(mark, to: store.playhead) else { return }
                         store.setPlaying(false, broadcast: false)
                         if store.retimeCoachMark(id: mark.id, to: store.playhead) {
                             annotationConfirmation = "MARK MOVED · \(formatTime(store.playhead))"
@@ -4379,9 +4342,11 @@ private struct ImmersiveControlDeck: View {
                     .accessibilityLabel("Move annotation to current playhead")
                     .accessibilityValue(formatTime(store.playhead))
                     .accessibilityHint(
-                        canMoveAnnotation(mark, to: store.playhead)
-                            ? "Commits the annotation at the time selected on the main timeline"
-                            : "Choose a different time or shorten the annotation duration"
+                        !store.canChangePlaybackView
+                            ? "Finish or cancel the current gesture first"
+                            : (canMoveAnnotation(mark, to: store.playhead)
+                                ? "Commits the annotation at the time selected on the main timeline"
+                                : "Choose a different time or shorten the annotation duration")
                     )
                 }
                 .padding(.horizontal, 8)
@@ -4662,14 +4627,7 @@ private struct ImmersiveControlDeck: View {
         _ mark: CoachMark,
         to time: TimeInterval
     ) -> Bool {
-        guard time.isFinite,
-              store.selectedScenario.duration.isFinite,
-              (0...store.selectedScenario.duration).contains(time),
-              abs(mark.revealTime - time) >= 0.05 else { return false }
-        return CoachMarkTimingPolicy.windowFits(
-            revealTime: time, displayDuration: mark.hideTime.map { $0 - mark.revealTime },
-            replayDuration: store.selectedScenario.duration
-        )
+        PlaybackAnnotationMovePolicy.canMove(mark, to: time, in: store)
     }
 
     private var directPlaybackRates: [Double] { ReplayStore.availablePlaybackRates }

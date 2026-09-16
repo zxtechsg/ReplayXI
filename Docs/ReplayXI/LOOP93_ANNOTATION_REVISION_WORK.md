@@ -41,4 +41,4 @@ Post-fix annotation-sync samples: cold 60.57 / 243.96 ms; 60 steady frames 0.60 
 - `/private/tmp/replayxi-annotation93-sixteen-after-01/243C88C4-4D1E-476D-B8EE-A4082DE58CA2.json`
 - `/private/tmp/replayxi-annotation93-sixtyfour-after-01/8A6C9553-0309-4D26-8BA9-A9D19972612A.json`
 
-Full suite and Release pending parent. Physical-headset validation not performed; no headset claims.
+Full verification is included in backup `1e30829`: `/private/tmp/replayxi-parallel88-95-full-02.xcresult` has 790 tests, 789 passed, one optional skip and zero failures. Unsigned device Release succeeded in `/private/tmp/replayxi-parallel88-95-release-01.log`. Physical-headset validation was not performed; no headset claims.

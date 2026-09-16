@@ -95,8 +95,10 @@ After attachments:
 
 ## Status and limits
 
-All **10 Loop 89 tests pass** in `/private/tmp/replayxi-parallel89-93-postfix-01.xcresult`. That targeted run is 17/17 overall, including the separate Loop 94 visual export and 6 annotation contract/repair cases. Exact world-ancestor independence and reverse/view-repeat assertions now pass without a tolerance change. Full-suite/Release verification is pending the parent's batch run.
+All **10 Loop 89 tests pass** in `/private/tmp/replayxi-parallel89-93-postfix-01.xcresult`. That targeted run is 17/17 overall, including the separate Loop 94 visual export and 6 annotation contract/repair cases. Exact world-ancestor independence and reverse/view-repeat assertions now pass without a tolerance change.
 
 The first full batch, `/private/tmp/replayxi-parallel88-95-full-01.xcresult`, reports 788 passed, 1 optional skip and 1 stale legacy assertion (790 total). `testTabletopSquadLODUsesTelemetryDrivenLimbAnimation` still expected the raw authored body Y, although its `red-lb` 13 s fixture now needs 4.521 mm of far-floor lift. That one old test now retains exact shoulder and body X/Z checks, computes the expected correction on a separate test-owned raw rig, and requires **exact** corrected body Y. It also measures the live far-leg mesh and retains the 1 mm logical-floor bound. This updates the Y contract, not a tolerance escape; the live scene is not mutated by the baseline calculation.
+
+Final full receipt: `/private/tmp/replayxi-parallel88-95-full-02.xcresult`, **789 passed, 1 optional skip, 0 failed (790 total)**. Physical-device Release succeeds in `/private/tmp/replayxi-parallel88-95-release-01.log`. Parent backup: `1e30829`.
 
 Source and tests are frozen. Native builds and Git backup are run by the parent. This agent ran no Blender job and rewrote no asset; the parent is separately preparing a Loop 94 actual-mesh visual audit. Native scene geometry verifies this bounded correction; it does not establish hardware frame rate or substitute for Vision Pro visual QA. This is a far-silhouette floor guard, not a physical foot-lock or a fix for horizontal foot travel.

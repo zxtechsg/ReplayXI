@@ -16,10 +16,34 @@ import bpy
 from mathutils import Vector
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from native_mesh_audit import read_samples
+from native_mesh_audit import blender_texture_pixels, read_samples
 from prepare_football_player import USD_TO_BLENDER, flat_material, link_object
 
 REPOSITORY = Path(__file__).resolve().parents[2]
+
+
+def native_material(name, source):
+    material = flat_material(name, source["tint"])
+    texture = source.get("texture")
+    if texture is None:
+        return material
+    image = bpy.data.images.new(name, width=texture["width"], height=texture["height"], alpha=True)
+    # Preserve the actual RealityKit gamut; the _srgb format suffix alone does
+    # not mean sRGB primaries. Blender's OCIO config performs the colour conversion.
+    image.colorspace_settings.name = texture["colourSpace"]
+    image.pixels.foreach_set(blender_texture_pixels(texture))
+    image.update()
+    nodes, links = material.node_tree.nodes, material.node_tree.links
+    sample = nodes.new("ShaderNodeTexImage")
+    sample.image = image
+    sample.interpolation, sample.extension = "Linear", "EXTEND"
+    tint = nodes.new("ShaderNodeMixRGB")
+    tint.blend_type = "MULTIPLY"
+    tint.inputs[0].default_value = 1
+    tint.inputs[2].default_value = source["tint"]
+    links.new(sample.outputs["Color"], tint.inputs[1])
+    links.new(tint.outputs["Color"], nodes.get("Principled BSDF").inputs["Base Color"])
+    return material
 
 
 def main():
@@ -76,7 +100,13 @@ def main():
             points = [USD_TO_BLENDER @ Vector(point) for point in source["positions"]]
             triangles = [source["indices"][i:i + 3] for i in range(0, len(source["indices"]), 3)]
             mesh.from_pydata(points, [], triangles)
-            mesh.materials.append(flat_material(f"{sample['name']}-tint-{index}", source["tint"]))
+            if source.get("uvs") is not None:
+                layer = mesh.uv_layers.new(name="NativeUV")
+                for polygon in mesh.polygons:
+                    for loop_index in polygon.loop_indices:
+                        u, v = source["uvs"][mesh.loops[loop_index].vertex_index]
+                        layer.data[loop_index].uv = (u, 1 - v)
+            mesh.materials.append(native_material(f"{sample['name']}-tint-{index}", source))
             for polygon in mesh.polygons:
                 polygon.use_smooth = True
             link_object(collection, f"Native_Mesh_{index}", mesh)
@@ -87,10 +117,11 @@ def main():
             "name": sample["name"], "minimumY": sample["minimumY"],
             "vertices": sum(len(mesh["positions"]) for mesh in sample["meshes"]),
             "triangles": sum(len(mesh["indices"]) // 3 for mesh in sample["meshes"]),
+            "texturedMeshes": sum(mesh.get("texture") is not None for mesh in sample["meshes"]),
             "image": scene.render.filepath,
         })
     (output / "report.json").write_text(json.dumps({
-        "source": "actual native player-local static meshes",
+        "source": "actual native player-local static meshes and bounded material texture readback",
         "limit": "Illustrative Blender shading; not final app lighting or headset QA",
         "samples": report,
     }, indent=2) + "\n")
