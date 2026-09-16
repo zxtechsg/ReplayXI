@@ -762,7 +762,7 @@ private struct DashboardTransport: View {
 
                 if let player = store.activePerspective {
                     StatusPill(
-                        text: "Viewing • \(player.team.compactTitle) • #\(player.shirtNumber) \(player.role)",
+                        text: "\(store.viewMode == .firstPerson ? "POV" : "Selected") • \(player.team.compactTitle) • #\(player.shirtNumber) \(player.role)",
                         systemImage: "viewfinder",
                         color: player.team == .home ? ReplayTheme.cyan : ReplayTheme.danger
                     )
@@ -778,7 +778,7 @@ private struct DashboardTransport: View {
                 }
                 .buttonStyle(.bordered)
                 .accessibilityLabel("Back one second")
-                .disabled(playbackControlsAreDisabled)
+                .disabled(!store.canChangePlaybackView)
 
                 Button {
                     store.togglePlayback()
@@ -790,6 +790,7 @@ private struct DashboardTransport: View {
                 .tint(ReplayTheme.signal)
                 .foregroundStyle(.black)
                 .accessibilityLabel(playbackLabel)
+                .disabled(!store.canChangePlaybackView)
 
                 Button {
                     store.skip(by: 1)
@@ -799,7 +800,7 @@ private struct DashboardTransport: View {
                 }
                 .buttonStyle(.bordered)
                 .accessibilityLabel("Forward one second")
-                .disabled(playbackControlsAreDisabled)
+                .disabled(!store.canChangePlaybackView)
 
                 Slider(
                     value: Binding(
@@ -836,7 +837,15 @@ private struct DashboardTransport: View {
                 }
                 .buttonStyle(.bordered)
                 .accessibilityLabel("Playback speed, \(rateLabel(store.playbackRate))")
-                .disabled(playbackControlsAreDisabled)
+                .disabled(!store.canChangePlaybackView)
+            }
+
+            if let editingHint {
+                Label(editingHint, systemImage: "hand.draw")
+                    .font(.caption)
+                    .foregroundStyle(ReplayTheme.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .padding(16)
@@ -851,10 +860,16 @@ private struct DashboardTransport: View {
     }
 
     private var playbackControlsAreDisabled: Bool {
-        store.hasActiveCoachMarkGeometryPreview
+        // A timeline drag must remain enabled while it owns the transaction.
+        // Only an unfinished spatial edit blocks this slider itself.
+        store.isDrawing || store.hasActiveCoachMarkGeometryPreview
     }
 
-
+    private var editingHint: String? {
+        if store.isDrawing { return "Finish or cancel your annotation to use playback and POV controls." }
+        if store.hasActiveCoachMarkGeometryPreview { return "Release the annotation handle to use playback and POV controls." }
+        return nil
+    }
 
     private var playbackIcon: String { store.isActivelyPlaying ? "pause.fill" : "play.fill" }
 
@@ -928,7 +943,7 @@ private struct PlaybackConsole: View {
                         }
                         .buttonStyle(.bordered)
                         .tint(moment.id == store.activeMoment?.id ? ReplayTheme.orange : .white.opacity(0.45))
-                        .disabled(store.hasActiveCoachMarkGeometryPreview)
+                        .disabled(!store.canChangePlaybackView)
                     }
                 }
             }
@@ -954,7 +969,8 @@ private struct PlaybackConsole: View {
                         Image(systemName: "chevron.left")
                     }
                     .buttonStyle(.bordered)
-                    .accessibilityLabel("Previous player lens")
+                    .accessibilityLabel("Previous player POV")
+                    .disabled(!store.canChangePlaybackView)
 
                     Button {
                         openAdjacentPlayerPOV(by: 1)
@@ -962,7 +978,8 @@ private struct PlaybackConsole: View {
                         Image(systemName: "chevron.right")
                     }
                     .buttonStyle(.bordered)
-                    .accessibilityLabel("Next player lens")
+                    .accessibilityLabel("Next player POV")
+                    .disabled(!store.canChangePlaybackView)
                 }
 
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -981,7 +998,11 @@ private struct PlaybackConsole: View {
                                 .frame(minWidth: 112, alignment: .leading)
                             }
                             .buttonStyle(.bordered)
-                            .tint(store.activePerspectiveID == player.id ? ReplayTheme.signal : .white.opacity(0.5))
+                            .tint(store.viewMode == .firstPerson && store.activePerspectiveID == player.id ? ReplayTheme.signal : .white.opacity(0.5))
+                            .disabled(!store.canChangePlaybackView)
+                            .accessibilityLabel("\(player.team.shortTitle), number \(player.shirtNumber), \(player.role), \(player.displayName)")
+                            .accessibilityHint("Open this player's first-person view")
+                            .accessibilityAddTraits(store.viewMode == .firstPerson && store.activePerspectiveID == player.id ? .isSelected : [])
                         }
                     }
                 }
@@ -1012,6 +1033,7 @@ private struct PlaybackConsole: View {
                             }
                             .buttonStyle(.bordered)
                             .tint(store.viewMode == mode ? ReplayTheme.signal : .white.opacity(0.5))
+                            .disabled(!store.canChangePlaybackView)
                             .accessibilityLabel(mode.title)
                             .accessibilityAddTraits(store.viewMode == mode ? .isSelected : [])
                         }
@@ -1052,11 +1074,57 @@ private struct PlaybackConsole: View {
 
 }
 
+/// Keeps a room role distinct from a camera choice. Only real formation
+/// targets may be offered as stations; ordinary replay rows enter player POV.
+struct DashboardPlayerRailContent {
+    let scenario: ReplayScenario
+
+    var isSelectingStation: Bool { scenario.kind == .shapeLab }
+    var title: String { isSelectingStation ? "Role stations" : "Home XI · quick POV" }
+    var instruction: String { isSelectingStation ? "Choose your room role." : "Select a player to enter POV." }
+
+    var players: [PlayerTrack] {
+        if isSelectingStation {
+            return scenario.formationTargets.compactMap {
+                scenario.player(id: $0.playerID)
+            }
+        }
+        return scenario.homePlayers
+    }
+
+    func isSelected(playerID: String, perspectiveID: String, viewMode: ReplayViewMode) -> Bool {
+        playerID == perspectiveID && (isSelectingStation || viewMode == .firstPerson)
+    }
+
+    @MainActor
+    func select(playerID: String, in store: ReplayStore) {
+        guard store.selectedScenarioID == scenario.id,
+              let player = players.first(where: { $0.id == playerID }) else { return }
+        if isSelectingStation {
+            // The store returns no success flag. Capture the same input gate
+            // before the synchronous call: an already-selected ID alone does
+            // not prove success when drawing or another gesture blocks it.
+            let acceptsSelection = store.canChangePlaybackView
+            store.setLocalPerspective(playerID, entersLocalReview: false)
+            if acceptsSelection,
+               store.localPerspectiveID == playerID,
+               let target = scenario.formationTargets.first(where: { $0.playerID == playerID }) {
+                store.statusMessage = "Role station: #\(player.shirtNumber) · \(target.label)"
+            }
+        } else {
+            store.openLocalPlayerPOV(playerID)
+        }
+    }
+}
+
 private struct RoomRail: View {
     @Environment(ReplayStore.self) private var store
-    @Environment(LocalPitchAnchorCoordinator.self) private var sharedSpace
 
     let openRoom: () -> Void
+
+    private var playerRail: DashboardPlayerRailContent {
+        DashboardPlayerRailContent(scenario: store.selectedScenario)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -1074,24 +1142,23 @@ private struct RoomRail: View {
             Rectangle().fill(ReplayTheme.hairline).frame(height: 1)
 
             VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Eyebrow(text: "Home XI perspectives")
-                    Spacer()
-                    Text("11 SIMULATED")
-                        .font(.caption2.monospacedDigit().weight(.bold))
-                        .foregroundStyle(.secondary)
-                }
+                Eyebrow(text: playerRail.title)
+                Text(playerRail.instruction)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 ScrollView {
                     VStack(spacing: 5) {
-                        ForEach(store.selectedScenario.homePlayers) { player in
-                            SeatRow(
+                        ForEach(playerRail.players) { player in
+                            DashboardPlayerRow(
                                 player: player,
-                                state: seatState(playerID: player.id),
-                                selected: store.localPerspectiveID == player.id
+                                selected: isSelected(playerID: player.id),
+                                isStation: playerRail.isSelectingStation
                             ) {
-                                store.setLocalPerspective(player.id)
+                                playerRail.select(playerID: player.id, in: store)
                             }
+                            .disabled(!store.canChangePlaybackView)
                         }
                     }
                 }
@@ -1111,11 +1178,9 @@ private struct RoomRail: View {
                     .fixedSize(horizontal: false, vertical: true)
 
                 Button(action: openRoom) {
-                    Label(
-                        store.isClosingImmersive ? "Closing room…"
-                            : store.isOpeningImmersive ? "Opening room…" : "Enter spatial replay",
-                        systemImage: "visionpro"
-                    )
+                    Label(roomEntryTitle, systemImage: "visionpro")
+                    .font(.headline)
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 4)
                 }
@@ -1124,10 +1189,17 @@ private struct RoomRail: View {
                 .foregroundStyle(.black)
                 .disabled(store.isRoomPresentationBusy)
 
+                if let roomEntryHint {
+                    Text(roomEntryHint)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 Text(store.statusMessage)
-                    .font(.caption2)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(18)
             .background(Color.black.opacity(0.22))
@@ -1136,15 +1208,37 @@ private struct RoomRail: View {
 
 
 
-    private func seatState(playerID: String) -> String {
-        store.localPerspectiveID == playerID ? "VIEWING" : "SIM"
+    private var roomEntryTitle: String {
+        switch store.roomPresentation.phase {
+        case .closed: "Enter spatial replay"
+        case .opening: "Opening room…"
+        case .open: "Room open"
+        case .closing: "Closing room…"
+        }
+    }
+
+    private var roomEntryHint: String? {
+        switch store.roomPresentation.phase {
+        case .closed: nil
+        case .opening: "Preparing your spatial view."
+        case .open: "Use Exit in the room to return here."
+        case .closing: "Wait for the room to close before reopening."
+        }
+    }
+
+    private func isSelected(playerID: String) -> Bool {
+        playerRail.isSelected(
+            playerID: playerID,
+            perspectiveID: playerRail.isSelectingStation ? store.localPerspectiveID : store.activePerspectiveID,
+            viewMode: store.viewMode
+        )
     }
 }
 
-private struct SeatRow: View {
+private struct DashboardPlayerRow: View {
     let player: PlayerTrack
-    let state: String
     let selected: Bool
+    let isStation: Bool
     let action: () -> Void
 
     var body: some View {
@@ -1153,28 +1247,31 @@ private struct SeatRow: View {
                 Text("\(player.shirtNumber)")
                     .font(.caption.monospacedDigit().weight(.black))
                     .foregroundStyle(selected ? .black : .white)
-                    .frame(width: 27, height: 27)
+                    .frame(width: 30, height: 30)
                     .background(selected ? ReplayTheme.signal : Color.white.opacity(0.08), in: Circle())
                 VStack(alignment: .leading, spacing: 1) {
                     Text(player.role)
-                        .font(.caption.weight(.bold))
-                    Text(selected ? "PLAYER POV" : player.displayName)
-                        .font(.caption2)
+                        .font(.subheadline.weight(.bold))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(player.displayName)
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
-                Spacer()
-                Text(state)
-                    .font(.caption2.monospaced().weight(.black))
-                    .foregroundStyle(
-                        state == "LIVE" ? ReplayTheme.signal
-                            : (state == "VIEWING" ? ReplayTheme.cyan : .secondary)
-                    )
+                Spacer(minLength: 4)
+                Image(systemName: selected ? (isStation ? "checkmark.circle.fill" : "viewfinder") : "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(selected ? ReplayTheme.signal : .secondary)
+                    .accessibilityHidden(true)
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .background(selected ? Color.white.opacity(0.06) : .clear, in: RoundedRectangle(cornerRadius: 10))
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("\(player.team.shortTitle), number \(player.shirtNumber), \(player.role), \(player.displayName)")
+        .accessibilityHint(isStation ? "Choose this role station" : "Open this player's first-person view")
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
