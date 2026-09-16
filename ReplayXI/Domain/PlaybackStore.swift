@@ -131,6 +131,8 @@ final class ReplayStore {
     var statusMessage = "Choose a scenario, then enter the review room."
 
     @ObservationIgnored private var reviewAutosaveTask: Task<Void, Never>?
+    @ObservationIgnored private(set) var scheduledReviewAutosaveID: UUID?
+    @ObservationIgnored private var reviewAutosaveDeadline: ContinuousClock.Instant?
     @ObservationIgnored private var isReviewAutosaveReady = false
     @ObservationIgnored private var isRestoringSavedReview = false
     @ObservationIgnored private var retainedScenarioMarks: [String: [CoachMark]] = [:]
@@ -383,7 +385,7 @@ final class ReplayStore {
             statusMessage = "This review could not be opened"
             return false
         }
-        reviewAutosaveTask?.cancel()
+        cancelScheduledReviewAutosave()
         isRestoringSavedReview = true
         resetCollaborationState()
         let state = review.state
@@ -408,20 +410,52 @@ final class ReplayStore {
     /// It never persists the drawing tool or uncommitted first stroke point.
     @discardableResult
     func flushReviewAutosave() -> Bool {
-        reviewAutosaveTask?.cancel()
-        reviewAutosaveTask = nil
+        cancelScheduledReviewAutosave()
         return reviewLibrary.autosave(makeSavedReviewState())
     }
 
     private func scheduleReviewAutosave() {
-        guard isReviewAutosaveReady, !isRestoringSavedReview, reviewLibrary.usesDisk else { return }
-        reviewAutosaveTask?.cancel()
+        guard isReviewAutosaveReady, !isRestoringSavedReview,
+              reviewLibrary.usesDisk, !reviewLibrary.isReadOnly else { return }
+        reviewAutosaveDeadline = ContinuousClock().now.advanced(by: .milliseconds(600))
+        // Scrubs and handle drags update at display rate. Extend the existing
+        // deadline instead of allocating/cancelling a Task for every sample.
+        guard reviewAutosaveTask == nil else { return }
+        let workerID = UUID()
+        scheduledReviewAutosaveID = workerID
         reviewAutosaveTask = Task { @MainActor [weak self] in
-            do { try await Task.sleep(for: .milliseconds(600)) } catch { return }
-            guard !Task.isCancelled, let self else { return }
-            self.reviewAutosaveTask = nil
-            _ = self.reviewLibrary.autosave(self.makeSavedReviewState())
+            // Hold only a deadline across sleep, not the Store. A closed test,
+            // preview or scene must be releasable while its timer is pending.
+            while let deadline = self?.deadlineForReviewAutosave(workerID) {
+                do { try await Task.sleep(until: deadline, clock: .continuous) } catch { return }
+                guard !Task.isCancelled else { return }
+                if self?.finishReviewAutosaveIfDue(workerID, now: ContinuousClock().now) != false { return }
+            }
         }
+    }
+
+    private func deadlineForReviewAutosave(_ workerID: UUID) -> ContinuousClock.Instant? {
+        scheduledReviewAutosaveID == workerID ? reviewAutosaveDeadline : nil
+    }
+
+    /// Returns false only when a newer edit extended this worker's deadline.
+    private func finishReviewAutosaveIfDue(_ workerID: UUID, now: ContinuousClock.Instant) -> Bool {
+        guard scheduledReviewAutosaveID == workerID, let deadline = reviewAutosaveDeadline else { return true }
+        guard now >= deadline else { return false }
+        scheduledReviewAutosaveID = nil
+        reviewAutosaveDeadline = nil
+        reviewAutosaveTask = nil
+        _ = reviewLibrary.autosave(makeSavedReviewState())
+        return true
+    }
+
+    private func cancelScheduledReviewAutosave() {
+        // Retire ownership before cancellation so a late wake cannot clear a
+        // replacement worker or write a pre-restore snapshot over a new review.
+        scheduledReviewAutosaveID = nil
+        reviewAutosaveDeadline = nil
+        reviewAutosaveTask?.cancel()
+        reviewAutosaveTask = nil
     }
 
     var selectedScenario: ReplayScenario {
