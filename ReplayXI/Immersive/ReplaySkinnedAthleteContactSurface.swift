@@ -99,4 +99,21 @@ struct ReplaySkinnedAthleteContactSurface: Sendable {
         }
         return minimum
     }
+
+    /// A sole point alone misses the outside edge of a banked boot. Correct
+    /// the final blended skin instead, including between authored gait poses.
+    /// Only raise penetrations: running flight phases must never be pulled down.
+    /// The validated skeleton has one root at index zero. Its uniform lift can
+    /// update the current hierarchy in place without a second matrix rebuild.
+    @discardableResult
+    func raiseAboveFloor(_ floor: Float, in pose: inout ReplaySkinnedAthleteMotion.Pose) -> Float {
+        guard floor.isFinite, pose.translations.count == jointCount else { return 0 }
+        let lift = floor - minimumY(in: pose)
+        guard lift.isFinite, lift > 0 else { return 0 }
+        pose.translations[0].y += lift
+        for index in pose.modelSpaceTransforms.indices {
+            pose.modelSpaceTransforms[index].columns.3.y += lift
+        }
+        return lift
+    }
 }

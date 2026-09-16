@@ -226,6 +226,7 @@ final class ReplaySkinnedAthleteInstance {
             impactPose?.apply(impact.pose, influence: impact.influence, motion: motion, to: &pose)
         }
         motion.rebuildModelSpaceTransforms(in: &pose)
+        contactSurface.raiseAboveFloor(motion.geometry.restMinY + contactSurface.paddingMetres, in: &pose)
         for index in transforms.indices {
             transforms[index] = Transform(scale: pose.scales[index], rotation: pose.rotations[index],
                                           translation: pose.translations[index])

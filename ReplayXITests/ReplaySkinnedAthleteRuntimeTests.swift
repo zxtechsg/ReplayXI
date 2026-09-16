@@ -135,7 +135,13 @@ final class ReplaySkinnedAthleteRuntimeTests: XCTestCase {
                     (skin.pose.modelSpaceTransforms[$0.footJointIndex] * SIMD4($0.solePoint, 1)).y
                         - skin.motion.geometry.restMinY
                 }
-                XCTAssertEqual(try XCTUnwrap(soles.min()), 0, accuracy: 0.0001)
+                // The ankle's single sole point does not describe the outside
+                // edge of a banked boot. Final placement follows real weighted
+                // skin, so that reference point may sit above the surface.
+                XCTAssertGreaterThanOrEqual(skin.contactSurface.minimumY(in: skin.pose)
+                    - skin.motion.geometry.restMinY, skin.contactSurface.paddingMetres - 0.0001)
+                XCTAssertGreaterThanOrEqual(try XCTUnwrap(soles.min()), -0.001)
+                XCTAssertLessThan(try XCTUnwrap(soles.min()), 0.06)
                 XCTAssertLessThan(try XCTUnwrap(soles.max()), 0.8)
                 XCTAssertTrue(skin.pose.rotations.allSatisfy { abs(simd_length($0.vector) - 1) < 0.0001 })
                 for side in ["left", "right"] {
