@@ -19,7 +19,21 @@ enum PitchSceneFactory {
         let motion: ReplayBallRollingMotion
     }
 
+    /// Procedural model descendants are fixed when a rig is built. Skin
+    /// admission changes their visibility, but time/pose updates do not.
+    private struct ProceduralVisualState: Component {
+        let isEnabled: Bool
+    }
+
     #if DEBUG
+    private(set) static var proceduralVisibilityNodeVisits = 0
+    private(set) static var proceduralVisibilityModelWrites = 0
+
+    static func resetProceduralVisibilityWorkForTesting() {
+        proceduralVisibilityNodeVisits = 0
+        proceduralVisibilityModelWrites = 0
+    }
+
     static func ballRollingMotionForTesting(in root: Entity) -> ReplayBallRollingMotion? {
         root.components[BallRollingCache.self]?.motion
     }
@@ -768,9 +782,13 @@ enum PitchSceneFactory {
         let presentationBallPosition = shapeSourcePosition.map {
             PitchPoint(x: $0.x + 0.55, z: $0.z + 0.25)
         } ?? ballPose.position
+        let ballRadius: Float = 0.11
+        let presentedBallHeight = isTriangleView ? ballRadius : max(ballPose.height, ballRadius)
         let playerLookTarget = SIMD3<Float>(
             presentationBallPosition.x,
-            ballPose.height,
+            // Shape grounds its physical ball; do not aim at hidden replay
+            // loft or the marker's enlarged radius. Match aim stays unchanged.
+            isTriangleView ? presentedBallHeight : ballPose.height,
             presentationBallPosition.z
         )
 
@@ -1075,8 +1093,6 @@ enum PitchSceneFactory {
         case .touchline: 1.5
         case .positional: 1.8
         }
-        let ballRadius: Float = 0.11
-        let presentedBallHeight = isTriangleView ? ballRadius : max(ballPose.height, ballRadius)
         // Larger review markers keep the physical ball's bottom altitude.
         // Scaling about an unchanged centre otherwise buries them in the turf.
         let visualBallRadiusOffset = ballRadius * (ballScale - 1)
@@ -3807,11 +3823,28 @@ enum PitchSceneFactory {
         _ isEnabled: Bool,
         in entity: Entity
     ) {
+        guard entity.components[ProceduralVisualState.self]?.isEnabled != isEnabled else { return }
+        applyProceduralModelVisibility(isEnabled, in: entity)
+        entity.components.set(ProceduralVisualState(isEnabled: isEnabled))
+    }
+
+    /// The sole writer of procedural model enable bits. Impact adds only a
+    /// non-rendering query marker, so a stable rig needs no repeated walk.
+    private static func applyProceduralModelVisibility(
+        _ isEnabled: Bool,
+        in entity: Entity
+    ) {
+        #if DEBUG
+        proceduralVisibilityNodeVisits &+= 1
+        #endif
         if let model = entity as? ModelEntity {
+            #if DEBUG
+            proceduralVisibilityModelWrites &+= 1
+            #endif
             model.isEnabled = isEnabled
         }
         for child in entity.children {
-            setProceduralModelVisualsEnabled(isEnabled, in: child)
+            applyProceduralModelVisibility(isEnabled, in: child)
         }
     }
 

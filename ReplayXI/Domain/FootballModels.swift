@@ -638,10 +638,28 @@ struct PlayerTrack: Identifiable, Codable, Hashable, Sendable {
             // component of the 3D cross product so path and facing turns agree.
             let cross = (incomingZ * outgoingX) - (incomingX * outgoingZ)
             let dot = (incomingX * outgoingX) + (incomingZ * outgoingZ)
-            pathTurn = atan2(cross, dot) * 180 / .pi / seconds
+            let boundedPathTurn = min(max(atan2(cross, dot) * 180 / .pi / seconds, -360), 360)
+            // Direction is poorly constrained during a near-stop. The old
+            // 5 mm switch could admit a full ±360°/s cue in one sample. Fade
+            // confidence over 5–25 mm of travel in both half-windows instead.
+            let confidence = min(max((min(incomingDistance, outgoingDistance) - 0.005) / 0.020, 0), 1)
+            pathTurn = boundedPathTurn * confidence * confidence * (3 - 2 * confidence)
         }
-        let strongestTurn = abs(pathTurn) > abs(facingTurn) ? pathTurn : facingTurn
-        let turnRate = min(max(strongestTurn, -360), 360)
+        let boundedFacingTurn = min(max(facingTurn, -360), 360)
+        let turnRate: Float
+        if pathTurn * boundedFacingTurn < 0 {
+            // When travel and authored body facing disagree, a hard magnitude
+            // winner flips the sign at equal strength. Blend the bounded cues
+            // continuously, while retaining their signs and relative strength.
+            let pathWeight = pathTurn * pathTurn
+            let facingWeight = boundedFacingTurn * boundedFacingTurn
+            turnRate = boundedFacingTurn
+                + ((pathTurn - boundedFacingTurn) * pathWeight / (pathWeight + facingWeight))
+        } else {
+            // Same-sign winners join continuously; pure path cuts and turning
+            // on the spot therefore retain their previous response exactly.
+            turnRate = abs(pathTurn) > abs(boundedFacingTurn) ? pathTurn : boundedFacingTurn
+        }
 
         return PlayerLocomotionSample(
             motion: baseMotion,

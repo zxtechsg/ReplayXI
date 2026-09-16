@@ -3192,6 +3192,9 @@ private struct ImmersiveControlDeck: View {
             .frame(minWidth: 96, minHeight: 52)
 
             Button(role: .destructive) {
+                guard store.canChangePlaybackView,
+                      store.localRole == .coach,
+                      clearableCoachAnnotationCount > 0 else { return }
                 store.clearMarks()
                 selectedAnnotationID = nil
                 showsDecisionStrip = false
@@ -3207,8 +3210,10 @@ private struct ImmersiveControlDeck: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(.red)
-            .disabled(clearableCoachAnnotationCount == 0)
-            .accessibilityHint("Removes coach-created marks but keeps match overlays")
+            .disabled(clearableCoachAnnotationCount == 0 || !store.canChangePlaybackView)
+            .accessibilityHint(store.canChangePlaybackView
+                ? "Removes coach-created marks but keeps match overlays"
+                : "Finish or cancel the current gesture before clearing marks")
         }
         .padding(12)
         .background(.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 17))

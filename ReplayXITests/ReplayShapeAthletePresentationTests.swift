@@ -41,7 +41,7 @@ final class ReplayShapeAthletePresentationTests: XCTestCase {
                 let expected = try ReplayAthleteFactory.make(for: player, lod: .near)
                 ReplayAthleteMotion.update(
                     expected, from: stationary, at: time,
-                    lookTargetWorldPosition: [ball.x, scenario.ball.pose(at: time).height, ball.z]
+                    lookTargetWorldPosition: [ball.x, 0.11, ball.z]
                 )
                 XCTAssertEqual(body.position.x, target.position.x, accuracy: 0.000_1)
                 XCTAssertEqual(body.position.z, target.position.z, accuracy: 0.000_1)
@@ -63,7 +63,7 @@ final class ReplayShapeAthletePresentationTests: XCTestCase {
         update(root, scenario: scenario, time: 12.5, ideal: true)
         update(root, scenario: scenario, time: 12.5, ideal: false)
         let source = try XCTUnwrap(scenario.player(id: scenario.defaultPerspectiveID)).presentationPose(at: 12.5).position
-        let ball = SIMD3<Float>(source.x + 0.55, scenario.ball.pose(at: 12.5).height, source.z + 0.25)
+        let ball = SIMD3<Float>(source.x + 0.55, 0.11, source.z + 0.25)
         for target in scenario.formationTargets {
             let player = try XCTUnwrap(scenario.player(id: target.playerID))
             let body = try XCTUnwrap(root.findEntity(named: "player-\(player.id)"))
@@ -107,7 +107,7 @@ final class ReplayShapeAthletePresentationTests: XCTestCase {
                 let expected = try ReplaySkinnedAthleteProvider.make(for: player)
                 XCTAssertTrue(expected.update(
                     at: stage.time, track: reference, locomotion: reference.locomotion(at: stage.time),
-                    lookTarget: [ball.x, scenario.ball.pose(at: stage.time).height, ball.z], ballAction: nil
+                    lookTarget: [ball.x, 0.11, ball.z], ballAction: nil
                 ))
                 XCTAssertEqual(model.jointTransforms.count, expected.model.jointTransforms.count)
                 for (actual, wanted) in zip(model.jointTransforms, expected.model.jointTransforms) {
@@ -176,7 +176,7 @@ final class ReplayShapeAthletePresentationTests: XCTestCase {
                 let expected = try ReplayAthleteFactory.make(for: player, lod: .near)
                 ReplayAthleteMotion.update(
                     expected, from: reference, at: time,
-                    lookTargetWorldPosition: [ball.x, scenario.ball.pose(at: time).height, ball.z]
+                    lookTargetWorldPosition: [ball.x, 0.11, ball.z]
                 )
                 var actualTransforms: [Transform] = []
                 for joint in ReplayAthleteJoint.allCases {
@@ -220,7 +220,7 @@ final class ReplayShapeAthletePresentationTests: XCTestCase {
         let expected = try ReplayAthleteFactory.make(for: defender, lod: .near)
         ReplayAthleteMotion.update(
             expected, from: defender, at: 12.5,
-            lookTargetWorldPosition: [ball.x, scenario.ball.pose(at: 12.5).height, ball.z]
+            lookTargetWorldPosition: [ball.x, 0.11, ball.z]
         )
         for joint in ReplayAthleteJoint.allCases {
             XCTAssertEqual(
