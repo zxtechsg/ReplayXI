@@ -139,6 +139,13 @@ struct ReplayDashboardView: View {
                     print("Replay XI Blender ball unavailable; using standard ball: \(error)")
                     #endif
                 }
+                do {
+                    try ReplayStrategyPitchProvider.prewarm()
+                } catch {
+                    #if DEBUG
+                    print("Replay XI Blender pitch unavailable; using standard pitch: \(error)")
+                    #endif
+                }
             } catch {
                 store.isOpeningImmersive = false
                 store.statusMessage = "Player renderer could not prepare. Try opening the room again."

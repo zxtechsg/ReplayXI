@@ -48,8 +48,9 @@ multiplayer and head-following requirements.
 - [ ] Visually validate both modes, expanded panels and view switching.
 - [ ] Refine panel movement, recovery and accessibility on hardware.
 - [ ] Build and validate original Blender strategy assets; integrate admitted assets.
-  First asset integrated: original 32-panel ball, one mesh/two materials,
-  2,592 triangles. Original player/pitch work is still pending.
+  Integrated: original 32-panel ball (one mesh/two materials, 2,592 triangles)
+  and textured pitch with netted goals (two meshes/four materials, 7,234 triangles).
+  Original player modelling is still pending; current bodies use the licensed rig.
 - [ ] Obtain the selected reference clip and reconstruct the minute in Blender.
 - [ ] Integrate the replay tracks/world with verified frame/time mapping.
 - [ ] Measure physical-headset performance and fix remaining bottlenecks.

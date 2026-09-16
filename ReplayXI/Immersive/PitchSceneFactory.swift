@@ -368,7 +368,7 @@ enum PitchSceneFactory {
     private static let matchBallShadowMesh = MeshResource.generateCylinder(height: 0.004, radius: 0.145)
     private static let ballEmphasisMesh = MeshResource.generateCylinder(height: 0.010, radius: 0.34)
     private static let tacticalBoardRimMesh = MeshResource.generateBox(
-        size: [pitchWidth + 1.20, 0.52, pitchLength + 1.20],
+        size: [pitchWidth + 5.20, 0.52, pitchLength + 7.20],
         cornerRadius: 0.48
     )
     private static let annotationDraftSegmentMesh = MeshResource.generateBox(
@@ -1330,7 +1330,8 @@ enum PitchSceneFactory {
     }
 
     private static func makePitch() -> Entity {
-        let root = Entity()
+        let preparedPitch = ReplayStrategyPitchProvider.makeInstance()
+        let root = preparedPitch ?? Entity()
 
         // A non-rendering bit records which material set is already applied,
         // keeping the contrast change out of the per-frame playback hot path.
@@ -1356,6 +1357,10 @@ enum PitchSceneFactory {
         boardRim.position.y = -0.30
         boardRim.isEnabled = false
         root.addChild(boardRim)
+
+        // The original Blender asset already supplies the surface, markings
+        // and netted goals. Keep the procedural fallback for failed admission.
+        if preparedPitch != nil { return root }
 
         let field = ModelEntity(
             mesh: .generateBox(size: [pitchWidth, 0.05, pitchLength], cornerRadius: 0.18),
@@ -1423,9 +1428,12 @@ enum PitchSceneFactory {
                   !child.name.hasPrefix("field-stripe-")
             else { continue }
             if let model = child as? ModelEntity {
-                model.model?.materials = [
-                    UnlitMaterial(color: color, applyPostProcessToneMap: false)
-                ]
+                // Preserve the net material in the two-slot Blender mesh.
+                // Replacing the whole array loses its authored material split.
+                if var component = model.model, !component.materials.isEmpty {
+                    component.materials[0] = UnlitMaterial(color: color, applyPostProcessToneMap: false)
+                    model.model = component
+                }
             }
             updatePitchMarkingMaterials(in: child, color: color)
         }
