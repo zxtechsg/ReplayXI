@@ -164,7 +164,7 @@ final class ReplayRoomEntryTests: XCTestCase {
 
         XCTAssertTrue(source.contains(".disabled(store.isOpeningImmersive || store.isClosingImmersive)"))
         XCTAssertTrue(shape.contains("&& !store.hasActiveTimelineScrub && !store.hasActiveCoachMarkGeometryPreview"))
-        XCTAssertTrue(shape.contains("enabled: item != .physical || canEnterSpatialSetup"))
+        XCTAssertTrue(shape.contains("enabled: item == .physical ? canEnterSpatialSetup : canCompareShapes"))
         XCTAssertTrue(shape.contains(".disabled(!canEnterSpatialSetup)"))
         XCTAssertTrue(shape.contains("guard canEnterSpatialSetup else { return }"))
         XCTAssertTrue(shape.contains("roomEntryGestureHint(for: store)"))

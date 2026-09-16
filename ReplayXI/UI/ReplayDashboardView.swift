@@ -486,6 +486,10 @@ private struct ShapeFocusDashboard: View {
             && !store.hasActiveTimelineScrub && !store.hasActiveCoachMarkGeometryPreview
     }
 
+    private var canCompareShapes: Bool {
+        store.triangleLockMode != .place && store.canChangePlaybackView
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .center, spacing: 14) {
@@ -507,7 +511,7 @@ private struct ShapeFocusDashboard: View {
                     ShapeFocusStepButton(
                         stage: item,
                         currentStage: stage,
-                        enabled: item != .physical || canEnterSpatialSetup,
+                        enabled: item == .physical ? canEnterSpatialSetup : canCompareShapes,
                         action: { select(item) }
                     )
                 }
@@ -576,6 +580,7 @@ private struct ShapeFocusDashboard: View {
                     .buttonStyle(.borderedProminent)
                     .tint(ReplayTheme.signal)
                     .foregroundStyle(.black)
+                    .disabled(!canCompareShapes)
                 } else {
                     Button {
                         showProblem()
@@ -583,6 +588,7 @@ private struct ShapeFocusDashboard: View {
                         Label("Compare problem", systemImage: "arrow.uturn.backward")
                     }
                     .buttonStyle(.bordered)
+                    .disabled(!canCompareShapes)
 
                     if store.localRole == .coach {
                         Button {

@@ -865,7 +865,9 @@ final class ReplayStore {
     /// stable positional view. Joined players may inspect a stage locally; doing
     /// so enters comfort pause and never broadcasts over the coach.
     func setShapeFocusStage(_ stage: ShapeFocusStage, broadcast: Bool = true) {
-        guard allowsMutationOutsideEndpointPreview() else { return }
+        // A comparison changes both time and presented player origins. Keep
+        // them fixed until an unfinished mark has been committed or cancelled.
+        guard allowsPlaybackViewChange() else { return }
         guard selectedScenario.kind == .shapeLab else { return }
         guard triangleLockMode == .visualise else {
             statusMessage = "End physical placement before changing the comparison."

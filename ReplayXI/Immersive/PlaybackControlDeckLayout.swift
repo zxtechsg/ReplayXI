@@ -125,3 +125,29 @@ struct PlaybackViewHUDLayout: Equatable, Sendable {
         )
     }
 }
+
+/// Secondary controls may use extra room without widening the main transport.
+/// AX label budgets cover the measured largest caption/headline and speed text;
+/// the rate grid also reserves horizontal room for the system button style.
+struct PlaybackSecondaryControlLayout: Equatable, Sendable {
+    let usesAdaptiveRates: Bool
+    let presetLabelWidth: CGFloat
+    let presetLabelMinimumHeight: CGFloat
+    let rateLabelWidth: CGFloat
+    let rateLabelMinimumHeight: CGFloat
+    let rateMinimumTextScale: CGFloat
+
+    static let rateGridSpacing: CGFloat = 8
+    var rateGridMinimumCellWidth: CGFloat { rateLabelWidth + 48 }
+
+    static func resolve(usesAccessibilityText: Bool) -> PlaybackSecondaryControlLayout {
+        PlaybackSecondaryControlLayout(
+            usesAdaptiveRates: usesAccessibilityText,
+            presetLabelWidth: usesAccessibilityText ? 144 : 80,
+            presetLabelMinimumHeight: usesAccessibilityText ? 84 : 48,
+            rateLabelWidth: usesAccessibilityText ? 104 : 64,
+            rateLabelMinimumHeight: usesAccessibilityText ? 64 : 60,
+            rateMinimumTextScale: usesAccessibilityText ? 1 : 0.8
+        )
+    }
+}

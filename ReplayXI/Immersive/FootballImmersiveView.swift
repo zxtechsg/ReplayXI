@@ -1647,6 +1647,7 @@ private struct AnnotationAdjustmentJoystick: View {
 
 private struct ImmersiveControlDeck: View {
     @Environment(ReplayStore.self) private var store
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var annotationConfirmation: String?
     @State private var showsEventStrip = false
     @State private var showsPlayerGrid = false
@@ -1765,7 +1766,7 @@ private struct ImmersiveControlDeck: View {
                         )
                 }
                 .buttonStyle(.bordered)
-                .disabled(previousCue == nil || timelineControlsAreDisabled)
+                .disabled(previousCue == nil || !store.canChangePlaybackView)
                 .accessibilityLabel("Previous cue")
 
                 Button(action: handlePrimaryPlaybackAction) {
@@ -1789,7 +1790,7 @@ private struct ImmersiveControlDeck: View {
                         )
                 }
                 .buttonStyle(.bordered)
-                .disabled(nextCue == nil || timelineControlsAreDisabled)
+                .disabled(nextCue == nil || !store.canChangePlaybackView)
                 .accessibilityLabel("Next cue")
 
                 timelineScrubber
@@ -2112,6 +2113,20 @@ private struct ImmersiveControlDeck: View {
         PlaybackControlDeckPreset(rawValue: controlDeckPresetRawValue) ?? .standard
     }
 
+    private var secondaryControlLayout: PlaybackSecondaryControlLayout {
+        PlaybackSecondaryControlLayout.resolve(
+            usesAccessibilityText: dynamicTypeSize.isAccessibilitySize
+        )
+    }
+
+    private var canChangeControlPlacement: Bool {
+        PlaybackAttachmentPlacement.canRecenter(
+            isDrawing: store.isDrawing || isPinchDrawing,
+            isScrubbing: store.hasActiveTimelineScrub,
+            isEditingGeometry: store.hasActiveCoachMarkGeometryPreview
+        )
+    }
+
     private var compactSpeedControlButton: some View {
         Button {
             toggleInlinePanel(.playbackSpeed)
@@ -2252,12 +2267,17 @@ private struct ImmersiveControlDeck: View {
             playbackSettingsShelf
         case .playbackSpeed:
             inlineShelf(color: ReplayTheme.cyan) {
-                HStack(spacing: 12) {
-                    inlinePanelHeader(title: "Speed", detail: "REPLAY", systemImage: "speedometer", color: ReplayTheme.cyan)
-                    ForEach(directPlaybackRates, id: \.self) { rate in
-                        playbackRateChoice(rate)
+                if secondaryControlLayout.usesAdaptiveRates {
+                    VStack(alignment: .leading, spacing: 12) {
+                        speedShelfHeader
+                        playbackRateChoices()
                     }
-                    Spacer(minLength: 0)
+                } else {
+                    HStack(spacing: 12) {
+                        speedShelfHeader
+                        playbackRateChoices(spacing: 12)
+                        Spacer(minLength: 0)
+                    }
                 }
             }
         case .savedReviews:
@@ -2303,22 +2323,19 @@ private struct ImmersiveControlDeck: View {
     private var playbackSettingsShelf: some View {
         inlineShelf(color: ReplayTheme.cyan) {
             VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 16) {
-                    inlinePanelHeader(
-                        title: "Playback",
-                        detail: "TIME",
-                        systemImage: "slider.horizontal.3",
-                        color: ReplayTheme.cyan
-                    )
-                    HStack(spacing: 6) {
-                        ForEach(directPlaybackRates, id: \.self) { rate in
-                            playbackRateChoice(rate)
-                        }
+                if secondaryControlLayout.usesAdaptiveRates {
+                    HStack(spacing: 16) {
+                        playbackSettingsHeader
+                        Spacer(minLength: 8)
+                        timelineStepChoices
                     }
-                    Spacer(minLength: 8)
-                    HStack(spacing: 6) {
-                        timelineStepChoice(seconds: -1, title: "−1s")
-                        timelineStepChoice(seconds: 1, title: "+1s")
+                    playbackRateChoices()
+                } else {
+                    HStack(spacing: 16) {
+                        playbackSettingsHeader
+                        playbackRateChoices()
+                        Spacer(minLength: 8)
+                        timelineStepChoices
                     }
                 }
                 Divider()
@@ -2352,6 +2369,47 @@ private struct ImmersiveControlDeck: View {
         }
     }
 
+    private var speedShelfHeader: some View {
+        inlinePanelHeader(title: "Speed", detail: "REPLAY", systemImage: "speedometer", color: ReplayTheme.cyan)
+    }
+
+    private var playbackSettingsHeader: some View {
+        inlinePanelHeader(
+            title: "Playback", detail: "TIME", systemImage: "slider.horizontal.3", color: ReplayTheme.cyan
+        )
+    }
+
+    private var timelineStepChoices: some View {
+        HStack(spacing: 6) {
+            timelineStepChoice(seconds: -1, title: "−1s")
+            timelineStepChoice(seconds: 1, title: "+1s")
+        }
+    }
+
+    @ViewBuilder
+    private func playbackRateChoices(spacing: CGFloat = 6) -> some View {
+        if secondaryControlLayout.usesAdaptiveRates {
+            LazyVGrid(
+                columns: [GridItem(
+                    .adaptive(minimum: secondaryControlLayout.rateGridMinimumCellWidth),
+                    spacing: PlaybackSecondaryControlLayout.rateGridSpacing
+                )],
+                alignment: .leading,
+                spacing: PlaybackSecondaryControlLayout.rateGridSpacing
+            ) {
+                ForEach(directPlaybackRates, id: \.self) { rate in
+                    playbackRateChoice(rate)
+                }
+            }
+        } else {
+            HStack(spacing: spacing) {
+                ForEach(directPlaybackRates, id: \.self) { rate in
+                    playbackRateChoice(rate)
+                }
+            }
+        }
+    }
+
     private func timelineStepChoice(seconds: TimeInterval, title: String) -> some View {
         Button {
             nudgeTimeline(by: seconds)
@@ -2364,7 +2422,7 @@ private struct ImmersiveControlDeck: View {
         .tint(.white.opacity(0.10))
         .foregroundStyle(.white)
         .buttonRepeatBehavior(.enabled)
-        .disabled(timelineControlsAreDisabled)
+        .disabled(!store.canChangePlaybackView)
         .accessibilityLabel(seconds < 0 ? "Back one second" : "Forward one second")
         .accessibilityHint("Pinch and hold to keep stepping")
     }
@@ -2378,8 +2436,9 @@ private struct ImmersiveControlDeck: View {
             Text(rateLabel(rate))
                 .font(.subheadline.monospacedDigit().weight(.black))
                 .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                .frame(width: 64, height: PlaybackControlDeckPresentation.minimumSpatialHitTarget)
+                .minimumScaleFactor(secondaryControlLayout.rateMinimumTextScale)
+                .frame(width: secondaryControlLayout.rateLabelWidth)
+                .frame(minHeight: secondaryControlLayout.rateLabelMinimumHeight)
         }
         .buttonStyle(.borderedProminent)
         .tint(isSelected ? ReplayTheme.cyan : .white.opacity(0.10))
@@ -2392,6 +2451,7 @@ private struct ImmersiveControlDeck: View {
     private func controlDeckChoice(_ preset: PlaybackControlDeckPreset) -> some View {
         let isSelected = controlDeckPreset == preset
         return Button {
+            guard canChangeControlPlacement else { return }
             controlDeckPresetRawValue = preset.rawValue
         } label: {
             VStack(spacing: 1) {
@@ -2401,13 +2461,18 @@ private struct ImmersiveControlDeck: View {
                     .font(.caption2.monospaced().weight(.black))
                     .lineLimit(1)
             }
-            .frame(width: 72, height: 48)
+            .frame(width: secondaryControlLayout.presetLabelWidth)
+            .frame(minHeight: secondaryControlLayout.presetLabelMinimumHeight)
         }
         .buttonStyle(.borderedProminent)
         .tint(isSelected ? ReplayTheme.orange : .white.opacity(0.10))
         .foregroundStyle(isSelected ? Color.black : Color.white)
+        .disabled(!canChangeControlPlacement)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(preset.title) control size")
+        .accessibilityHint(canChangeControlPlacement
+            ? "Adjusts the workspace size and distance once"
+            : "Finish or cancel the current gesture before moving controls")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
@@ -3832,6 +3897,7 @@ private struct ImmersiveControlDeck: View {
         switch event {
         case .cue(let cue):
             Button {
+                guard store.canChangePlaybackView else { return }
                 selectedAnnotationID = nil
                 jump(to: cue)
             } label: {
@@ -3848,11 +3914,12 @@ private struct ImmersiveControlDeck: View {
                     .stroke(.white.opacity(0.11), lineWidth: 1)
             }
             .hoverEffect(.highlight)
-            .disabled(timelineControlsAreDisabled)
+            .disabled(!store.canChangePlaybackView)
             .accessibilityLabel("Cue at \(formatTime(cue.time)), \(cue.headline)")
 
         case .mark(let mark):
             Button {
+                guard store.canChangePlaybackView else { return }
                 showsPlaybackAnnotations = true
                 selectedAnnotationID = mark.id
                 showsDecisionStrip = false
@@ -3874,7 +3941,7 @@ private struct ImmersiveControlDeck: View {
                     .stroke(annotationColor(for: mark.kind).opacity(0.34), lineWidth: 1)
             }
             .hoverEffect(.highlight)
-            .disabled(timelineControlsAreDisabled)
+            .disabled(!store.canChangePlaybackView)
             .accessibilityLabel("\(mark.kind.title) annotation at \(formatTime(mark.revealTime))")
             .accessibilityHint(mark.label)
         }
@@ -4432,16 +4499,19 @@ private struct ImmersiveControlDeck: View {
     }
 
     private func jump(to cue: CueMoment) {
+        guard store.canChangePlaybackView else { return }
         store.setPlaying(false, broadcast: false)
         store.seek(to: cue.time, broadcast: store.localRole == .coach)
     }
 
     private func jump(to mark: CoachMark) {
+        guard store.canChangePlaybackView else { return }
         store.setPlaying(false, broadcast: false)
         store.seek(to: mark.revealTime, broadcast: store.localRole == .coach)
     }
 
     private func nudgeTimeline(by delta: TimeInterval) {
+        guard store.canChangePlaybackView else { return }
         store.setPlaying(false, broadcast: false)
         store.skip(by: delta, broadcast: store.localRole == .coach)
     }
@@ -4543,7 +4613,7 @@ private struct ImmersiveControlDeck: View {
     }
 
     private func adjustTimelineForAccessibility(direction: Int) {
-        guard !timelineControlsAreDisabled else { return }
+        guard store.canChangePlaybackView else { return }
         store.setPlaying(false, broadcast: false)
         let adjustedTime = PlaybackTimelineScrub.adjustedTime(
             store.playhead,
@@ -4930,6 +5000,7 @@ private struct PositioningPanel: View {
             .buttonStyle(.borderedProminent)
             .tint(ReplayTheme.signal)
             .foregroundStyle(.black)
+            .disabled(!stageIsEnabled(.ideal))
         } else {
             HStack(spacing: 8) {
                 Button {
@@ -4938,6 +5009,7 @@ private struct PositioningPanel: View {
                     Label("Compare problem", systemImage: "arrow.uturn.backward")
                 }
                 .buttonStyle(.bordered)
+                .disabled(!stageIsEnabled(.problem))
 
                 if store.localRole == .coach {
                     Button {
@@ -5189,7 +5261,7 @@ private struct PositioningPanel: View {
         if item == .physical {
             return store.localRole == .coach && store.trianglePlacementInputBlockReason == nil
         }
-        return store.triangleLockMode != .place
+        return store.triangleLockMode != .place && store.canChangePlaybackView
     }
 
     private func color(for item: ShapeFocusStep) -> Color {
