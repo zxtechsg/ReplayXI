@@ -57,10 +57,24 @@ class LocalCapabilityTests(unittest.TestCase):
         self.assertIn("placementAttempt.finish(requestID)", panel)
         self.assertIn("placementAttempt.cancel()", panel)
         self.assertIn("placementTask?.cancel()", panel)
+        self.assertIn("!sharedSpace.isRemovingPitchAnchor", panel)
         self.assertIn(".onChange(of: hasConfirmedClearArea)", panel)
         self.assertIn(".onDisappear { resetPlacementPreflight() }", panel)
         self.assertIn(".onChange(of: store.selectedScenarioID) { _, _ in resetPlacementPreflight() }", panel)
         self.assertIn("removeLocallyPlacedPitchAnchor(ifMatching: anchorID)", panel)
+
+    def test_room_teardown_and_store_callbacks_use_exact_ownership(self):
+        entry = (APP / "ReplayXIApp.swift").read_text()
+        immersive = (APP / "Immersive/FootballImmersiveView.swift").read_text()
+        coordinator = (APP / "Immersive/LocalPitchAnchorCoordinator.swift").read_text()
+        self.assertIn("retireLocallyPlacedPitchAnchor(ifMatching: anchorID)", entry)
+        self.assertNotIn("Task { await sharedSpace?", entry)
+        self.assertIn("@State private var pitchTrackingOwner = UUID()", immersive)
+        self.assertIn("sharedSpace.start(for: pitchTrackingOwner)", immersive)
+        self.assertIn("sharedSpace.stopTracking(for: pitchTrackingOwner)", immersive)
+        self.assertNotIn("sharedSpace.stop()", immersive)
+        self.assertNotIn("removeLocallyPlacedPitchAnchor()", immersive)
+        self.assertIn("await sessionStartTask?.value", coordinator)
 
 
 if __name__ == "__main__":

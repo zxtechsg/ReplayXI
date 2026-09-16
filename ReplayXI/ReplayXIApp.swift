@@ -24,8 +24,8 @@ struct ReplayXIApp: App {
         sharedSpace.onSelectedAnchorRemoved = { [weak store] anchorID in
             store?.handleSharedPitchAnchorRemoval(anchorID)
         }
-        store.onRetirePitchAnchor = { [weak sharedSpace] _ in
-            Task { await sharedSpace?.removeLocallyPlacedPitchAnchor() }
+        store.onRetirePitchAnchor = { [weak sharedSpace] anchorID in
+            sharedSpace?.retireLocallyPlacedPitchAnchor(ifMatching: anchorID)
         }
         _store = State(initialValue: store)
         _sharedSpace = State(initialValue: sharedSpace)

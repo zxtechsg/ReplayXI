@@ -21,6 +21,7 @@ struct FootballImmersiveView: View {
     @State private var emphasizesBall = true
     @State private var accessibilityActivationSubscription: EventSubscription?
     @State private var controlPlacementRevision = 0
+    @State private var pitchTrackingOwner = UUID()
 
     private var controlDeckPreset: PlaybackControlDeckPreset {
         PlaybackControlDeckPreset(rawValue: controlDeckPresetRawValue) ?? .standard
@@ -196,6 +197,7 @@ struct FootballImmersiveView: View {
         }
         .gesture(spatialInteractionGesture)
         .task(id: store.selectedScenario.kind) {
+            guard !Task.isCancelled else { return }
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("--replayxi-pinch-draft") {
                 let start = PitchPoint(x: 11, z: 7)
@@ -211,12 +213,12 @@ struct FootballImmersiveView: View {
             if store.selectedScenario.kind == .shapeLab {
                 // World tracking is needed only by the stationary Shape Focus
                 // placement drill. Match review stays on the lighter render path.
-                await sharedSpace.start()
-                guard !Task.isCancelled else { return }
+                await sharedSpace.start(for: pitchTrackingOwner)
+                guard !Task.isCancelled, sharedSpace.isRunning,
+                      sharedSpace.ownsTracking(for: pitchTrackingOwner) else { return }
                 sharedSpace.selectSharedPitchAnchor(id: store.sharedPitchAnchorID)
-            } else if sharedSpace.isRunning {
-                await sharedSpace.removeLocallyPlacedPitchAnchor()
-                sharedSpace.stop()
+            } else {
+                sharedSpace.stopTracking(for: pitchTrackingOwner)
             }
         }
         .task {
@@ -262,16 +264,9 @@ struct FootballImmersiveView: View {
                     store.revokeTrianglePlacementConsentLocally()
                 }
             }
-            if store.localRole == .coach {
-                // The session can reset Store to visualise before this view disappears.
-                // Removal is ownership-safe and prevents an orphaned coach anchor.
-                Task {
-                    await sharedSpace.removeLocallyPlacedPitchAnchor()
-                    sharedSpace.stop()
-                }
-            } else {
-                sharedSpace.stop()
-            }
+            // A late disappearance owns only this room's tracking. It must not
+            // stop a reopened room or remove that room's newly placed anchor.
+            sharedSpace.stopTracking(for: pitchTrackingOwner)
             openWindow(id: "ReplayDashboard")
         }
         .onChange(of: store.sharedPitchAnchorID) { _, anchorID in
@@ -817,11 +812,11 @@ struct FootballImmersiveView: View {
             if store.triangleLockMode == .place {
                 if store.localRole == .coach {
                     store.endTrianglePlacement()
-                    await sharedSpace.removeLocallyPlacedPitchAnchor()
                 } else {
                     store.revokeTrianglePlacementConsentLocally()
                 }
             }
+            await sharedSpace.stopTracking(for: pitchTrackingOwner)?.value
             await dismissImmersiveSpace()
             store.isImmersiveOpen = false
         }
@@ -5082,7 +5077,6 @@ private struct PositioningPanel: View {
             if store.localRole == .coach {
                 Button("End drill") {
                     store.endTrianglePlacement()
-                    Task { await sharedSpace.removeLocallyPlacedPitchAnchor() }
                 }
                 .buttonStyle(.bordered)
             } else {
@@ -5201,13 +5195,15 @@ private struct PositioningPanel: View {
     }
 
     private var canPlaceLocalStations: Bool {
-        hasConfirmedClearArea && sharedSpace.isRunning && !sharedSpace.isPlacingPitchAnchor
+        hasConfirmedClearArea && sharedSpace.isRunning
+            && !sharedSpace.isPlacingPitchAnchor && !sharedSpace.isRemovingPitchAnchor
             && !placementAttempt.isPending
     }
 
     private var placementButtonTitle: String {
         if placementAttempt.isPending { return "Anchoring…" }
-        return sharedSpace.isPlacingPitchAnchor ? "Finishing…" : "Place local stations"
+        return sharedSpace.isPlacingPitchAnchor || sharedSpace.isRemovingPitchAnchor
+            ? "Finishing…" : "Place local stations"
     }
 
     private func cancelPlacementRequest() {
