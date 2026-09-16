@@ -1111,7 +1111,18 @@ enum PitchSceneFactory {
         let isShapeProblem = isTriangleView
             && effectiveTriangleMode == .visualise
             && !showsIdealShape
-        annotationCache?.marksRoot?.isEnabled = isTriangleView ? isShapeProblem : true
+        func canPresentAnnotation(_ mark: CoachMark) -> Bool {
+            guard isTriangleView else { return true }
+            guard effectiveTriangleMode == .visualise else { return false }
+            // The preset pressure overlay belongs only to Problem. A coach's
+            // own marks remain visible in both tabletop comparison stages.
+            // These immutable preset IDs are few; inspect them directly rather
+            // than allocate a Set or filtered mark array at replay cadence.
+            let isPreset = scenario.coachMarks.contains { $0.id == mark.id }
+            return !isPreset || (isShapeProblem && mark.kind == .danger)
+        }
+        annotationCache?.marksRoot?.isEnabled = !isTriangleView
+            || annotationCache?.marks.contains(where: canPresentAnnotation) == true
 
         let selectedBindingCandidate = selectedAnnotationID.flatMap {
             annotationCache?.bindingsByID[$0]
@@ -1121,8 +1132,7 @@ enum PitchSceneFactory {
                                                   let selectedBindingCandidate,
                                                   selectedBindingCandidate.mark.isVisible(at: time)
                                                     || selectedAnnotationIsEditable,
-                                                  !isShapeProblem
-                                                    || selectedBindingCandidate.mark.kind == .danger {
+                                                  canPresentAnnotation(selectedBindingCandidate.mark) {
             selectedBindingCandidate.mark
         } else {
             nil
@@ -1162,7 +1172,8 @@ enum PitchSceneFactory {
             at: time,
             selectedID: spatialFocus.selectedMarkID,
             selectedIsEditable: selectedAnnotationIsEditable,
-            decisionReviewIsVisible: decisionFocusIsVisible
+            decisionReviewIsVisible: decisionFocusIsVisible,
+            isEligible: canPresentAnnotation
         )
         let focusedPlayerIDs = resolvedFocusedPlayerIDs(
             cache: annotationCache,
@@ -1176,10 +1187,8 @@ enum PitchSceneFactory {
                 let isRevealed = binding.mark.isVisible(at: time)
                 let keepsEditableSelectionVisible = selectedAnnotationIsEditable
                     && spatialFocus.selectedMarkID == binding.mark.id
-                entity.isEnabled = renderedAnnotationIDs.contains(binding.mark.id) && (isShapeProblem
-                    ? (isRevealed || keepsEditableSelectionVisible)
-                        && binding.mark.kind == .danger
-                    : isRevealed || keepsEditableSelectionVisible)
+                entity.isEnabled = renderedAnnotationIDs.contains(binding.mark.id)
+                    && (isRevealed || keepsEditableSelectionVisible)
 
                 let isSelected = spatialFocus.selectedMarkID == binding.mark.id
                 let opacity: Float = switch spatialFocus {

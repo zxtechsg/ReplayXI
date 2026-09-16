@@ -53,12 +53,22 @@ enum PlaybackSceneRenderBudget {
         at time: TimeInterval,
         selectedID: UUID?,
         selectedIsEditable: Bool,
-        decisionReviewIsVisible: Bool
+        decisionReviewIsVisible: Bool,
+        isEligible: (CoachMark) -> Bool = { _ in true }
     ) -> Set<UUID> {
+        // Presentation-hidden marks must not reserve either geometry or
+        // selection draws. Keep the cached priority indices over all history;
+        // a mode-specific predicate avoids building a filtered array per frame.
+        let selected = selectedID.flatMap { id in
+            marks.first {
+                $0.id == id && isEligible($0)
+                    && ($0.isVisible(at: time) || selectedIsEditable)
+            }
+        }
         let baseDrawLimit = decisionReviewIsVisible
             ? decisionAnnotationDrawLimit
             : normalAnnotationDrawLimit
-        let selectionReserve: Int = if selectedID == nil {
+        let selectionReserve: Int = if selected == nil {
             0
         } else if selectedIsEditable {
             selectedEditableOverlayDraws
@@ -75,17 +85,17 @@ enum PlaybackSceneRenderBudget {
         result.reserveCapacity(5)
         var consumedDraws = 0
 
-        if let selectedID,
-           let selected = marks.first(where: { $0.id == selectedID }),
-           selected.isVisible(at: time) || selectedIsEditable {
-            result.insert(selectedID)
+        if let selected {
+            result.insert(selected.id)
             consumedDraws += estimatedDraws(for: selected)
         }
 
         for index in priorityIndices {
             guard marks.indices.contains(index) else { continue }
             let mark = marks[index]
-            guard mark.id != selectedID, mark.isVisible(at: time) else { continue }
+            guard mark.id != selected?.id,
+                  isEligible(mark),
+                  mark.isVisible(at: time) else { continue }
             let cost = estimatedDraws(for: mark)
             guard consumedDraws + cost <= drawLimit else { continue }
             result.insert(mark.id)
