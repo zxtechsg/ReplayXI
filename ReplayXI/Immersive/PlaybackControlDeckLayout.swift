@@ -126,6 +126,22 @@ struct PlaybackViewHUDLayout: Equatable, Sendable {
     }
 }
 
+/// Native symbol bounds need more width than the old 34 pt mode frame at
+/// regular XXXL and AX sizes. This changes labels only, not the room anchor.
+struct PlaybackViewHUDSymbolLayout: Equatable, Sendable {
+    let modeIconWidth: CGFloat
+    let disclosureIconWidth: CGFloat
+    let overlayBadgeDiameter: CGFloat
+
+    static func resolve(usesAccessibilityText: Bool) -> PlaybackViewHUDSymbolLayout {
+        PlaybackViewHUDSymbolLayout(
+            modeIconWidth: usesAccessibilityText ? 64 : 40,
+            disclosureIconWidth: 34,
+            overlayBadgeDiameter: usesAccessibilityText ? 40 : 28
+        )
+    }
+}
+
 /// Secondary controls may use extra room without widening the main transport.
 /// AX label budgets cover the measured largest caption/headline and speed text;
 /// the rate grid also reserves horizontal room for the system button style.
@@ -148,6 +164,33 @@ struct PlaybackSecondaryControlLayout: Equatable, Sendable {
             rateLabelWidth: usesAccessibilityText ? 104 : 64,
             rateLabelMinimumHeight: usesAccessibilityText ? 64 : 60,
             rateMinimumTextScale: usesAccessibilityText ? 1 : 0.8
+        )
+    }
+}
+
+/// Label budgets for the compact roster and its three two-line entry buttons.
+/// Normal sizes stay unchanged; AX sizes fit the measured full-size text and
+/// symbols without consuming the main timeline's existing minimum width.
+struct PlaybackPrimaryControlLabelLayout: Equatable, Sendable {
+    let playerLabelWidth: CGFloat
+    let toolsLabelWidth: CGFloat
+    let drawLabelWidth: CGFloat
+    let compactLabelMinimumHeight: CGFloat
+    let playerMinimumTextScale: CGFloat
+    let rosterLabelWidth: CGFloat
+    let rosterLabelMinimumHeight: CGFloat
+    let rosterRoleMinimumTextScale: CGFloat
+
+    static func resolve(usesAccessibilityText: Bool) -> PlaybackPrimaryControlLabelLayout {
+        PlaybackPrimaryControlLabelLayout(
+            playerLabelWidth: usesAccessibilityText ? 168 : 116,
+            toolsLabelWidth: usesAccessibilityText ? 88 : 78,
+            drawLabelWidth: 76,
+            compactLabelMinimumHeight: usesAccessibilityText ? 88 : 60,
+            playerMinimumTextScale: usesAccessibilityText ? 1 : 0.82,
+            rosterLabelWidth: 72,
+            rosterLabelMinimumHeight: usesAccessibilityText ? 72 : 60,
+            rosterRoleMinimumTextScale: usesAccessibilityText ? 1 : 0.75
         )
     }
 }

@@ -36,6 +36,9 @@ enum PlaybackSpatialLabels {
         size: [1.18, 0.32, 0.026],
         cornerRadius: 0.080
     )
+    private struct AnnotationCardMetrics: Component {
+        let boardWidth: Float
+    }
     /// Fixed player identities benefit from mesh reuse, but arbitrary coach
     /// text must not acquire an unbounded process-wide lifetime.
     static let maximumCachedTextMeshes = 64
@@ -206,7 +209,30 @@ enum PlaybackSpatialLabels {
     static func makeAnnotationTag(text: String, color: UIColor) -> Entity {
         let root = Entity()
         root.name = "annotation-label"
-        let boardWidth = min(max(Float(text.count) * 0.088, 1.18), 3.20)
+        let glyph = centeredText(
+            text.uppercased(),
+            fontSize: 0.145,
+            color: .white,
+            cacheKey: "annotation:\(text.uppercased())"
+        )
+        // Character counts cannot predict wide glyphs or uppercase expansion.
+        // Measure once when the card is built, then share its exact width with
+        // selection and hit geometry. Normal labels retain their font size.
+        let textBounds = glyph.visualBounds(relativeTo: glyph)
+        let horizontalTextPadding: Float = 0.24
+        let boardWidth = min(max(
+            estimatedAnnotationBoardWidth(characterCount: text.count),
+            textBounds.extents.x + horizontalTextPadding
+        ), 3.20)
+        let textScale = min(
+            1,
+            (boardWidth - horizontalTextPadding) / max(textBounds.extents.x, 0.000_001),
+            0.24 / max(textBounds.extents.y, 0.000_001)
+        )
+        glyph.scale = SIMD3<Float>(repeating: textScale)
+        glyph.position.x *= textScale
+        glyph.position.y *= textScale
+        root.components.set(AnnotationCardMetrics(boardWidth: boardWidth))
 
         let board = ModelEntity(
             mesh: annotationBoardMesh,
@@ -229,16 +255,20 @@ enum PlaybackSpatialLabels {
         accent.position = [-(boardWidth / 2) + 0.065, 0, 0.025]
         root.addChild(accent)
 
-        let glyph = centeredText(
-            text.uppercased(),
-            fontSize: 0.145,
-            color: .white,
-            cacheKey: "annotation:\(text.uppercased())"
-        )
         glyph.name = "annotation-tag-glyph"
         glyph.position.z = 0.025
         root.addChild(glyph)
         return root
+    }
+
+    /// Constant-time metadata lookup; no text measurement during scene updates.
+    static func annotationBoardWidth(in label: Entity, renderedCharacterCount: Int) -> Float {
+        label.components[AnnotationCardMetrics.self]?.boardWidth
+            ?? estimatedAnnotationBoardWidth(characterCount: renderedCharacterCount)
+    }
+
+    private static func estimatedAnnotationBoardWidth(characterCount: Int) -> Float {
+        min(max(Float(characterCount) * 0.088, 1.18), 3.20)
     }
 
     private static func makePlayerLabel(for player: PlayerTrack) -> Entity {

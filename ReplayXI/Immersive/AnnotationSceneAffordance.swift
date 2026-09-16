@@ -186,7 +186,9 @@ enum AnnotationSceneAffordance {
         for mark: CoachMark,
         renderedText: String
     ) -> Entity {
-        let boardWidth = min(max(Float(renderedText.count) * 0.088, 1.18), 3.20)
+        let boardWidth = PlaybackSpatialLabels.annotationBoardWidth(
+            in: label, renderedCharacterCount: renderedText.count
+        )
         let target = Entity()
         target.name = labelTargetName
         target.components.set(InputTargetComponent(allowedInputTypes: .all))
@@ -646,7 +648,9 @@ enum AnnotationSceneAffordance {
         case .danger, .space, .playerLabel: 0
         }
         let renderedCharacterCount = min(mark.label.count + prefixCount, 22)
-        let boardWidth = min(max(Float(renderedCharacterCount) * 0.088, 1.18), 3.20)
+        let boardWidth = PlaybackSpatialLabels.annotationBoardWidth(
+            in: label, renderedCharacterCount: renderedCharacterCount
+        )
         outline.scale = [
             label.scale.x * ((boardWidth + 0.14) / 1.30),
             label.scale.y,

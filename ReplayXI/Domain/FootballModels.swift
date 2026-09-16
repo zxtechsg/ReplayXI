@@ -643,7 +643,12 @@ struct PlayerTrack: Identifiable, Codable, Hashable, Sendable {
             // 5 mm switch could admit a full ±360°/s cue in one sample. Fade
             // confidence over 5–25 mm of travel in both half-windows instead.
             let confidence = min(max((min(incomingDistance, outgoingDistance) - 0.005) / 0.020, 0), 1)
-            pathTurn = boundedPathTurn * confidence * confidence * (3 - 2 * confidence)
+            // Near idle, small trajectory reversals should not overpower an
+            // independently authored body turn. Keep full path anticipation
+            // once moving; both confidence joins have zero endpoint slope.
+            let moving = min(max((speed - 0.18) / 0.22, 0), 1)
+            let movingConfidence = moving * moving * (3 - 2 * moving)
+            pathTurn = boundedPathTurn * confidence * confidence * (3 - 2 * confidence) * movingConfidence
         }
         let boundedFacingTurn = min(max(facingTurn, -360), 360)
         let turnRate: Float
