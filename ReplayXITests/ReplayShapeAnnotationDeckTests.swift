@@ -134,7 +134,7 @@ final class ReplayShapeAnnotationDeckTests: XCTestCase {
 
     func testAuthoredSelectionExpiryCannotUnmountAnOwningShapeTimeline() throws {
         let store = makeStore(stage: .problem)
-        let preset = try XCTUnwrap(store.selectedScenario.coachMarks.first)
+        let preset = try XCTUnwrap(store.selectedScenario.coachMarks.first { $0.kind == .danger })
         store.seek(to: preset.revealTime, broadcast: false)
         var selectedID: UUID? = preset.id
         XCTAssertEqual(mode(store, hasWorkflow: selectedID != nil), .shapeAnnotations)

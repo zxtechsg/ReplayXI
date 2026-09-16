@@ -9,8 +9,11 @@ the [asset ledger](THIRD_PARTY_ASSETS.md#bundled-single-skeleton-rocketbox-body-
 It reserves two material sections plus two jersey draws per near subject;
 5,012 skin vertices and 8,146 skin triangles are shared before instance skinning.
 The existing procedural budget is **not** the skinned body's geometry budget.
-Walks, cuts, touches and impacts still use the procedural fallback. Headset
-frame-time qualification and more football clips remain pending.
+The admitted near skin now remains visible through walks, cuts, touches and
+reviewed impacts, using deterministic football/impact retargeting. The
+procedural hierarchy remains its interaction and fail-soft fallback, not the
+normal visible body for every action. Headset frame-time qualification and
+football-specific mocap remain pending.
 
 The original procedural athlete renderer can replace
 the close procedural mannequin without importing proprietary football-game
@@ -58,7 +61,7 @@ full-rig
 └── body-root
     └── hips
         ├── spine
-        │   ├── head-root
+        │   ├── neck → head-root
         │   ├── left-shoulder → left-elbow → left-wrist
         │   └── right-shoulder → right-elbow → right-wrist
         ├── left-hip → left-knee → left-ankle
@@ -123,13 +126,14 @@ Primary guidance:
 
 ## Honest fidelity boundary
 
-The new silhouette is materially less blocky and more anatomically coherent,
-but it is still a procedural prototype—not a photogrammetric player, cloth
-simulation or licensed broadcast/game model. It has no facial likeness, texture
-atlas, skin deformation or football mocap. Production realism still requires a
-bespoke or properly licensed one-skeleton athlete, football-specific mocap,
-atlased PBR kit, authored LODs and multi-device physical profiling. The module's
-contract is designed to accept that asset later without changing replay logic.
+The procedural fallback is still a simplified prototype, not a
+photogrammetric player, cloth simulation or licensed broadcast/game model.
+The separate admitted Rocketbox near body does provide a licensed continuous
+weighted skin, kit textures and a single 80-joint skeleton. These are different
+rendering paths; neither makes the seven-model far silhouette realistic.
+Football-specific mocap, stronger original player art, authored skin LODs and
+physical-device profiling remain unfinished. Reviewed impacts are
+deterministic playback, not evidence of a live physically simulated ragdoll.
 
 ## Validation
 

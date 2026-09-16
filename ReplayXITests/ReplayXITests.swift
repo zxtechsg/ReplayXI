@@ -1613,7 +1613,30 @@ final class ReplayXITests: XCTestCase {
         let expected = ReplayAthleteMotion.locomotionPose(for: player, at: 13)
         XCTAssertNotEqual(shoulder.orientation.vector, firstOrientation)
         XCTAssertEqual(shoulder.orientation.vector, expected.leftShoulderOrientation.vector)
-        XCTAssertEqual(body.position, expected.bodyPosition)
+        XCTAssertEqual(body.position.x, expected.bodyPosition.x)
+        XCTAssertEqual(body.position.z, expected.bodyPosition.z)
+
+        // Far legs are rigid silhouettes, unlike the authored knee/ankle chain.
+        // Keep exact telemetry X/Z and articulation, but include their measured
+        // floor correction in the exact Y contract (Loop 89).
+        let rawRig = try ReplayAthleteFactory.make(for: player, lod: .far)
+        ReplayAthleteMotion.apply(expected, to: rawRig.joints)
+        rawRig.joints[.bodyRoot].position = expected.bodyPosition
+        let support = try XCTUnwrap(rawRig.joints.farFloorSupport)
+        let correction = support.upwardCorrection(relativeTo: rawRig.root)
+        XCTAssertGreaterThan(correction, 0, "This fixture exercises the far-floor correction")
+        XCTAssertEqual(body.position.y, expected.bodyPosition.y + correction)
+
+        let actualFloor = try ["left-leg", "right-leg"].flatMap { name in
+            let leg = try XCTUnwrap(marker.findEntity(named: name) as? ModelEntity)
+            return try XCTUnwrap(leg.model).mesh.contents.models.flatMap { mesh in
+                mesh.parts.flatMap { part in
+                    part.positions.elements.map { leg.convert(position: $0, to: root).y }
+                }
+            }
+        }.min()
+        XCTAssertGreaterThanOrEqual(try XCTUnwrap(actualFloor), -0.001,
+                                    "The actual far mesh must also clear the logical pitch")
     }
 
     func testDenseAnnotationAdmissionStaysWithinNormalAndDecisionDrawLimits() {

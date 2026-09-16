@@ -1,6 +1,9 @@
 import RealityKit
 import SwiftUI
 import UIKit
+#if DEBUG
+import Dispatch
+#endif
 
 @MainActor
 enum PitchSceneFactory {
@@ -28,6 +31,24 @@ enum PitchSceneFactory {
     #if DEBUG
     private(set) static var proceduralVisibilityNodeVisits = 0
     private(set) static var proceduralVisibilityModelWrites = 0
+
+    /// Bounded diagnostic counters only; Release does not time or count the
+    /// annotation path. Elapsed values include instrumentation and are not FPS.
+    struct AnnotationSceneWorkCounters: Codable, Equatable {
+        var syncCalls = 0
+        var semanticRevisions = 0
+        var markTreeBuilds = 0
+        var revisionGeometryUpdates = 0
+        var unchangedRevisionGeometryUpdates = 0
+        var trackedGeometryUpdates = 0
+        var syncElapsedNanoseconds: UInt64 = 0
+    }
+
+    private(set) static var annotationSceneWork = AnnotationSceneWorkCounters()
+
+    static func resetAnnotationSceneWorkForTesting() {
+        annotationSceneWork = AnnotationSceneWorkCounters()
+    }
 
     static func resetProceduralVisibilityWorkForTesting() {
         proceduralVisibilityNodeVisits = 0
@@ -1127,21 +1148,13 @@ enum PitchSceneFactory {
         // existing transforms avoids rebuilding every annotation hierarchy at
         // replay cadence.
         let annotationCache = syncMarks(in: root, marks: marks)
-        let isShapeProblem = isTriangleView
-            && effectiveTriangleMode == .visualise
-            && !showsIdealShape
+        let annotationPresentation = PlaybackAnnotationPresentation(
+            viewMode: viewMode,
+            triangleLockMode: triangleLockMode,
+            showsIdealBranch: showsIdealBranch
+        )
         func canPresentAnnotation(_ mark: CoachMark) -> Bool {
-            guard isTriangleView else { return true }
-            // Tracking loss changes how the drill is rendered, not which
-            // editing tools it owns. Do not reopen hidden handles while the
-            // physical station workflow is still active.
-            guard triangleLockMode != .place else { return false }
-            // The preset pressure overlay belongs only to Problem. A coach's
-            // own marks remain visible in both tabletop comparison stages.
-            // These immutable preset IDs are few; inspect them directly rather
-            // than allocate a Set or filtered mark array at replay cadence.
-            let isPreset = scenario.coachMarks.contains { $0.id == mark.id }
-            return !isPreset || (isShapeProblem && mark.kind == .danger)
+            annotationPresentation.isEligible(mark, in: scenario)
         }
         annotationCache?.marksRoot?.isEnabled = !isTriangleView
             || annotationCache?.marks.contains(where: canPresentAnnotation) == true
@@ -2587,11 +2600,22 @@ enum PitchSceneFactory {
         in root: Entity,
         marks: [CoachMark]
     ) -> AnnotationSceneCache? {
+        #if DEBUG
+        let syncStartedAt = DispatchTime.now().uptimeNanoseconds
+        annotationSceneWork.syncCalls &+= 1
+        defer {
+            annotationSceneWork.syncElapsedNanoseconds &+=
+                DispatchTime.now().uptimeNanoseconds &- syncStartedAt
+        }
+        #endif
         guard let cache = annotationCache(for: root),
               let marksRoot = cache.marksRoot
         else { return nil }
         let renderedCount = min(marks.count, ReplayStore.maximumSharedCoachMarks)
         guard !cache.matches(marks, count: renderedCount) else { return cache }
+        #if DEBUG
+        annotationSceneWork.semanticRevisions &+= 1
+        #endif
         let needsRenderPriorityRebuild = cache.renderPriorityIndices.count != renderedCount
             || cache.marks.count != renderedCount
             || (0..<renderedCount).contains(where: { index in
@@ -2617,14 +2641,30 @@ enum PitchSceneFactory {
                 let refreshed: CachedMarkBinding
                 if let existing = cache.bindingsByID[incoming.id],
                    let entity = existing.entity.value {
-                    let canRetainTree = existing.mark.kind == incoming.kind
-                        && existing.mark.label == incoming.label
-                        && updateMarkGeometry(
+                    let canRetainTree: Bool
+                    if existing.mark == incoming,
+                       hasIntactMarkStructure(existing, entity: entity, marksRoot: marksRoot) {
+                        // One endpoint preview must not rewrite every other
+                        // mark's transforms and hit geometry. Track-dependent
+                        // presentation still updates below for admitted marks.
+                        canRetainTree = true
+                    } else if existing.mark.kind == incoming.kind,
+                       existing.mark.label == incoming.label {
+                        #if DEBUG
+                        annotationSceneWork.revisionGeometryUpdates &+= 1
+                        if existing.mark == incoming {
+                            annotationSceneWork.unchangedRevisionGeometryUpdates &+= 1
+                        }
+                        #endif
+                        canRetainTree = updateMarkGeometry(
                             in: entity,
                             from: existing.mark,
                             to: incoming,
                             bodyTarget: existing.bodyTarget.value
                         )
+                    } else {
+                        canRetainTree = false
+                    }
                     if canRetainTree {
                         refreshed = CachedMarkBinding(
                             mark: incoming,
@@ -2704,6 +2744,40 @@ enum PitchSceneFactory {
         return cache
     }
 
+    /// Used only after a semantic revision. Keep the existing repair path for
+    /// incomplete trees rather than treating value equality as proof that their
+    /// RealityKit descendants are still present. Ordinary steady playback does
+    /// not perform these extra hierarchy checks.
+    private static func hasIntactMarkStructure(
+        _ binding: CachedMarkBinding,
+        entity: Entity,
+        marksRoot: Entity
+    ) -> Bool {
+        guard entity.parent === marksRoot,
+              let label = binding.label.value, label.parent === entity,
+              let labelTarget = binding.labelTarget.value, labelTarget.parent === label,
+              let bodyTarget = binding.bodyTarget.value, bodyTarget.parent === entity
+        else { return false }
+
+        if binding.mark.kind == .playerLabel {
+            return binding.playerAttachment.value?.parent === entity
+        }
+        guard directChild(named: "annotation-mark-start-elevation-guide", of: entity) != nil,
+              directChild(named: "annotation-mark-end-elevation-guide", of: entity) != nil
+        else { return false }
+        if binding.mark.kind == .space {
+            return directChild(named: "annotation-mark-space", of: entity) != nil
+        }
+        guard directChild(named: "annotation-mark-arrow", of: entity) != nil else { return false }
+        let pieces = binding.mark.kind == .danger ? 7 : 1
+        for index in 0..<pieces {
+            guard directChild(named: "annotation-mark-segment-\(index)", of: entity) != nil else {
+                return false
+            }
+        }
+        return true
+    }
+
     private static func makeCachedMarkBinding(
         mark: CoachMark,
         entity: Entity
@@ -2778,6 +2852,9 @@ enum PitchSceneFactory {
                 at: time,
                 presentedPlayerPoses: presentedPlayerPoses
             )
+            #if DEBUG
+            annotationSceneWork.trackedGeometryUpdates &+= 1
+            #endif
             _ = updateMarkGeometry(
                 in: entity,
                 from: binding.mark,
@@ -2895,6 +2972,9 @@ enum PitchSceneFactory {
     }
 
     private static func makeMark(_ mark: CoachMark) -> Entity {
+        #if DEBUG
+        annotationSceneWork.markTreeBuilds &+= 1
+        #endif
         let root = Entity()
         root.name = "mark-\(mark.id.uuidString)"
         let color: UIColor

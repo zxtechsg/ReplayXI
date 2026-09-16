@@ -86,6 +86,7 @@ final class PlaybackRosterTextMetricsTests: XCTestCase {
 
     func testRegularLayoutStaysCompactAndAccessibilityLabelsDoNotShrink() {
         let regular = PlaybackPrimaryControlLabelLayout.resolve(usesAccessibilityText: false)
+        XCTAssertEqual(regular.speedLabelWidth, 74)
         XCTAssertEqual(regular.playerLabelWidth, 116)
         XCTAssertEqual(regular.toolsLabelWidth, 78)
         XCTAssertEqual(regular.drawLabelWidth, 76)
@@ -95,6 +96,7 @@ final class PlaybackRosterTextMetricsTests: XCTestCase {
         XCTAssertEqual(regular.rosterLabelMinimumHeight, 60)
         XCTAssertEqual(regular.rosterRoleMinimumTextScale, 0.75)
         let accessible = PlaybackPrimaryControlLabelLayout.resolve(usesAccessibilityText: true)
+        XCTAssertEqual(accessible.speedLabelWidth, 80)
         XCTAssertEqual(accessible.playerMinimumTextScale, 1)
         XCTAssertEqual(accessible.rosterRoleMinimumTextScale, 1)
     }
@@ -104,13 +106,15 @@ final class PlaybackRosterTextMetricsTests: XCTestCase {
         let accessible = PlaybackPrimaryControlLabelLayout.resolve(usesAccessibilityText: true)
         let hitTarget = PlaybackControlDeckPresentation.minimumSpatialHitTarget
         let fixedTransportLabels = 3 * hitTarget + 64 // Exit, previous, play, next.
-        let compactLabels = 74 + accessible.playerLabelWidth
+        let compactLabels = accessible.speedLabelWidth + accessible.playerLabelWidth
             + accessible.drawLabelWidth + accessible.toolsLabelWidth
         // Eight styled buttons, eight row gaps and the live rail's 230 pt
         // minimum. The 48 pt/style reserve is allocation, not a render measure.
         let accessibleRowBudget = fixedTransportLabels + compactLabels + 8 * 48 + 8 * 8 + 230
-        let growth = accessible.playerLabelWidth + accessible.toolsLabelWidth + accessible.drawLabelWidth
-            - regular.playerLabelWidth - regular.toolsLabelWidth - regular.drawLabelWidth
+        let growth = accessible.speedLabelWidth + accessible.playerLabelWidth
+            + accessible.toolsLabelWidth + accessible.drawLabelWidth
+            - regular.speedLabelWidth - regular.playerLabelWidth
+            - regular.toolsLabelWidth - regular.drawLabelWidth
         for preset in PlaybackControlDeckPreset.allCases {
             let regularDeck = PlaybackControlDeckLayout.resolve(preset: preset, usesAccessibilityText: false)
             let accessibleDeck = PlaybackControlDeckLayout.resolve(preset: preset, usesAccessibilityText: true)

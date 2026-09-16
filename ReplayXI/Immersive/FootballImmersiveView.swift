@@ -1797,6 +1797,14 @@ private struct ImmersiveControlDeck: View {
             || inlinePanel?.isAnnotationPanel == true
     }
 
+    private var annotationPresentation: PlaybackAnnotationPresentation {
+        PlaybackAnnotationPresentation(
+            viewMode: store.viewMode,
+            triangleLockMode: store.triangleLockMode,
+            showsIdealBranch: store.showsIdealBranch
+        )
+    }
+
     private var matchPlaybackDeck: some View {
         VStack(alignment: .leading, spacing: 11) {
             if store.selectedScenario.kind == .realWorldReplay {
@@ -1946,6 +1954,15 @@ private struct ImmersiveControlDeck: View {
         }
         .onChange(of: store.reviewIndexVersion) { _, _ in
             rebuildReviewIndex()
+            reconcileAnnotationPresentationSelection()
+        }
+        .onChange(of: annotationPresentation) { _, _ in
+            rebuildReviewIndex()
+            reconcileAnnotationPresentationSelection()
+        }
+        .onChange(of: store.canChangePlaybackView) { _, canChange in
+            guard canChange else { return }
+            reconcileAnnotationPresentationSelection()
         }
         .onChange(of: selectedAnnotationID) { _, selectedID in
             // Secondary controls belong to the selection that opened them.
@@ -2217,7 +2234,8 @@ private struct ImmersiveControlDeck: View {
             }
             .lineLimit(1)
             .minimumScaleFactor(0.8)
-            .frame(width: 74, height: PlaybackControlDeckPresentation.minimumSpatialHitTarget)
+            .frame(width: primaryControlLayout.speedLabelWidth,
+                height: PlaybackControlDeckPresentation.minimumSpatialHitTarget)
         }
         .buttonStyle(.borderedProminent)
         .tint(inlinePanel == .playbackSpeed ? ReplayTheme.cyan : .white.opacity(0.10))
@@ -2250,8 +2268,10 @@ private struct ImmersiveControlDeck: View {
                     Label("Edit marks", systemImage: "eraser.fill")
                         .font(.subheadline.weight(.black))
                         .lineLimit(1)
-                        .minimumScaleFactor(0.78)
-                        .frame(width: 124, height: PlaybackControlDeckPresentation.minimumSpatialHitTarget)
+                        .minimumScaleFactor(toolsShelfLayout.editMinimumTextScale)
+                        .frame(width: toolsShelfLayout.labelWidth(for: .edit),
+                            height: toolsShelfLayout.fixedLabelHeight)
+                        .frame(minHeight: toolsShelfLayout.labelMinimumHeight)
                 }
             }
         }
@@ -2270,52 +2290,88 @@ private struct ImmersiveControlDeck: View {
 
     private var playbackToolsShelf: some View {
         inlineShelf(color: ReplayTheme.cyan) {
-            HStack(spacing: 10) {
-                Button {
-                    showsToolsShelf = false
-                } label: {
-                    Image(systemName: "xmark")
-                        .frame(
-                            minWidth: PlaybackControlDeckPresentation.minimumSpatialHitTarget,
-                            minHeight: PlaybackControlDeckPresentation.minimumSpatialHitTarget
-                        )
+            if toolsShelfLayout.usesAdaptiveGrid {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 10) {
+                        closePlaybackToolsButton
+                        playbackToolsHeading
+                        Spacer(minLength: 6)
+                    }
+                    LazyVGrid(
+                        columns: [GridItem(
+                            .adaptive(minimum: toolsShelfLayout.gridMinimumCellWidth),
+                            spacing: PlaybackToolsShelfLayout.gridSpacing
+                        )],
+                        alignment: .leading,
+                        spacing: PlaybackToolsShelfLayout.gridSpacing
+                    ) {
+                        playbackToolsChoices
+                    }
                 }
-                .buttonStyle(.bordered)
-                .accessibilityLabel("Close playback tools")
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Eyebrow(text: "Playback", color: ReplayTheme.cyan)
-                    Text("TOOLS")
-                        .font(.subheadline.weight(.black))
+            } else {
+                HStack(spacing: 10) {
+                    closePlaybackToolsButton
+                    playbackToolsHeading
+                    inlineChoiceDivider
+                    playbackToolsChoices
+                    Spacer(minLength: 6)
                 }
-                .frame(width: 108, alignment: .leading)
-                .accessibilityElement(children: .combine)
-
-                inlineChoiceDivider
-
-                annotationEventsButton
-                decisionReviewButton
-                settingsToolButton
-                Button {
-                    toggleInlinePanel(.savedReviews)
-                } label: {
-                    Label("Reviews", systemImage: "bookmark")
-                        .font(.subheadline.weight(.bold))
-                        .lineLimit(1)
-                        .frame(width: 126, height: PlaybackControlDeckPresentation.minimumSpatialHitTarget)
-                }
-                .buttonStyle(.bordered)
-                .disabled(secondaryPlaybackControlsAreDisabled)
-                .accessibilityLabel("Saved reviews")
-                .accessibilityHint("Save this moment or load an earlier review")
-
-                if store.localRole == .coach {
-                    annotationEditButton(compact: false)
-                }
-
-                Spacer(minLength: 6)
             }
         }
+    }
+
+    private var closePlaybackToolsButton: some View {
+        Button {
+            showsToolsShelf = false
+        } label: {
+            Image(systemName: "xmark")
+                .frame(
+                    minWidth: PlaybackControlDeckPresentation.minimumSpatialHitTarget,
+                    minHeight: PlaybackControlDeckPresentation.minimumSpatialHitTarget
+                )
+        }
+        .buttonStyle(.bordered)
+        .accessibilityLabel("Close playback tools")
+    }
+
+    private var playbackToolsHeading: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Eyebrow(text: "Playback", color: ReplayTheme.cyan)
+            Text("TOOLS")
+                .font(.subheadline.weight(.black))
+        }
+        .frame(width: toolsShelfLayout.headingWidth, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var playbackToolsChoices: some View {
+        Group {
+            annotationEventsButton
+            decisionReviewButton
+            settingsToolButton
+            Button {
+                toggleInlinePanel(.savedReviews)
+            } label: {
+                Label("Reviews", systemImage: "bookmark")
+                    .font(.subheadline.weight(.bold))
+                    .lineLimit(1)
+                    .frame(width: toolsShelfLayout.labelWidth(for: .reviews),
+                        height: toolsShelfLayout.fixedLabelHeight)
+                    .frame(minHeight: toolsShelfLayout.labelMinimumHeight)
+            }
+            .buttonStyle(.bordered)
+            .disabled(secondaryPlaybackControlsAreDisabled)
+            .accessibilityLabel("Saved reviews")
+            .accessibilityHint("Save this moment or load an earlier review")
+
+            if store.localRole == .coach {
+                annotationEditButton(compact: false)
+            }
+        }
+    }
+
+    private var toolsShelfLayout: PlaybackToolsShelfLayout {
+        PlaybackToolsShelfLayout.resolve(usesAccessibilityText: dynamicTypeSize.isAccessibilitySize)
     }
 
     private var settingsToolButton: some View {
@@ -2325,7 +2381,9 @@ private struct ImmersiveControlDeck: View {
             Label("Settings", systemImage: "slider.horizontal.3")
                 .font(.subheadline.weight(.black))
                 .lineLimit(1)
-                .frame(width: 126, height: PlaybackControlDeckPresentation.minimumSpatialHitTarget)
+                .frame(width: toolsShelfLayout.labelWidth(for: .settings),
+                    height: toolsShelfLayout.fixedLabelHeight)
+                .frame(minHeight: toolsShelfLayout.labelMinimumHeight)
         }
         .buttonStyle(.borderedProminent)
         .tint(.white.opacity(0.10))
@@ -2888,7 +2946,9 @@ private struct ImmersiveControlDeck: View {
             "\(delta > 0 ? "Raise" : "Lower") \(annotationElevationTargetName(target, kind: mark.kind))"
         )
         .accessibilityValue(annotationElevationAccessibilityValue(mark, target: target))
-        .accessibilityHint("Moves vertically by 0.25 metres")
+        .accessibilityHint(store.canChangePlaybackView
+            ? "Moves vertically by 0.25 metres"
+            : "Finish or cancel the current gesture first")
     }
 
     private func canNudgeAnnotationElevation(
@@ -2896,6 +2956,7 @@ private struct ImmersiveControlDeck: View {
         target: CoachMarkElevationTarget,
         delta: Float
     ) -> Bool {
+        guard store.canChangePlaybackView else { return false }
         let elevations: [Float] = switch target {
         case .start: [mark.resolvedStartElevation]
         case .end: [mark.resolvedEndElevation]
@@ -3504,41 +3565,35 @@ private struct ImmersiveControlDeck: View {
         team == .home ? ReplayTheme.cyan : ReplayTheme.orange
     }
 
-    /// Once a tool is active, transport and view controls only compete with
-    /// the instruction the coach is placing. A single-row shelf keeps the
-    /// pitch unobstructed for either one pinch-drag or the two-tap fallback.
+    /// Keep active drawing separate from transport. Large text gets its own
+    /// instruction row so pinch-drag and two-tap guidance stay readable.
     private var annotationDrawingShelf: some View {
-        HStack(spacing: 10) {
-            Button {
-                store.cancelDrawing()
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .frame(width: 28, height: 48)
+        Group {
+            if drawToolLayout.usesStackedShelves {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 10) {
+                        cancelAnnotationButton
+                        drawingInstructionLabel
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        annotationPlayheadLabel
+                        annotationEditButton(compact: true)
+                    }
+                    HStack(spacing: 10) {
+                        annotationToolChoices
+                        Spacer(minLength: 0)
+                    }
+                }
+            } else {
+                HStack(spacing: 10) {
+                    cancelAnnotationButton
+                    drawingInstructionLabel
+                        .frame(width: PlaybackDrawToolLayout.drawingInstructionWidth, alignment: .leading)
+                    annotationToolChoices
+                    Spacer(minLength: 6)
+                    annotationPlayheadLabel
+                    annotationEditButton(compact: true)
+                }
             }
-            .buttonStyle(.bordered)
-            .tint(ReplayTheme.orange)
-            .accessibilityLabel("Cancel annotation")
-
-            Label(annotationInstruction, systemImage: annotationInstructionSystemImage)
-                .font(.subheadline.monospaced().weight(.black))
-                .lineLimit(1)
-                .minimumScaleFactor(0.72)
-                .foregroundStyle(ReplayTheme.orange)
-                .frame(width: 190, alignment: .leading)
-
-            annotationToolButton(.run, label: "Run")
-            annotationToolButton(.pass, label: "Pass")
-            annotationToolButton(.danger, label: "Press")
-            annotationToolButton(.space, label: "Zone")
-            annotationToolButton(.playerLabel, label: "Label")
-
-            Spacer(minLength: 6)
-
-            Text(formatTime(store.playhead))
-                .font(.subheadline.monospacedDigit().weight(.black))
-                .foregroundStyle(.secondary)
-
-            annotationEditButton(compact: true)
         }
         .padding(16)
         .frame(width: deckWidth)
@@ -3551,27 +3606,58 @@ private struct ImmersiveControlDeck: View {
         .glassBackgroundEffect(in: .rect(cornerRadius: 24))
     }
 
+    private var cancelAnnotationButton: some View {
+        Button {
+            store.cancelDrawing()
+        } label: {
+            Image(systemName: "xmark.circle.fill")
+                .frame(width: drawToolLayout.cancelLabelWidth)
+                .frame(minHeight: drawToolLayout.cancelLabelMinimumHeight)
+        }
+        .buttonStyle(.bordered)
+        .tint(ReplayTheme.orange)
+        .accessibilityLabel("Cancel annotation")
+    }
+
+    private var drawingInstructionLabel: some View {
+        Label(annotationInstruction, systemImage: annotationInstructionSystemImage)
+            .font(.subheadline.monospaced().weight(.black))
+            .lineLimit(1)
+            .minimumScaleFactor(drawToolLayout.instructionMinimumScale)
+            .foregroundStyle(ReplayTheme.orange)
+    }
+
+    private var annotationPlayheadLabel: some View {
+        Text(formatTime(store.playhead))
+            .font(.subheadline.monospacedDigit().weight(.black))
+            .foregroundStyle(.secondary)
+            .fixedSize()
+    }
+
     private var coachAnnotationStrip: some View {
-        HStack(spacing: 9) {
-            Label(annotationInstruction, systemImage: annotationInstructionSystemImage)
-                .font(.caption.monospaced().weight(.black))
-                .lineLimit(1)
-                .minimumScaleFactor(0.72)
-                .foregroundStyle(annotationInstructionColor)
-                .frame(width: 180, alignment: .leading)
-                .accessibilityLabel(annotationInstruction)
-
-            annotationToolButton(.run, label: "Run")
-            annotationToolButton(.pass, label: "Pass")
-            annotationToolButton(.danger, label: "Press")
-            annotationToolButton(.space, label: "Zone")
-            annotationToolButton(.playerLabel, label: "Label")
-
-            Spacer(minLength: 6)
-
-            // Timeline remains available from the retractable Tools shelf.
-            // Keep this strip focused on choosing or editing a spatial mark.
-            annotationEditButton(compact: true)
+        Group {
+            if drawToolLayout.usesStackedShelves {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 9) {
+                        coachAnnotationInstruction
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        annotationEditButton(compact: true)
+                    }
+                    HStack(spacing: 9) {
+                        annotationToolChoices
+                        Spacer(minLength: 0)
+                    }
+                }
+            } else {
+                HStack(spacing: 9) {
+                    coachAnnotationInstruction
+                        .frame(width: PlaybackDrawToolLayout.idleInstructionWidth, alignment: .leading)
+                    annotationToolChoices
+                    Spacer(minLength: 6)
+                    // Timeline remains in Tools; keep this strip about marks.
+                    annotationEditButton(compact: true)
+                }
+            }
         }
         .padding(12)
         .background(ReplayTheme.orange.opacity(store.isDrawing ? 0.13 : 0.06), in: RoundedRectangle(cornerRadius: 17))
@@ -3579,6 +3665,29 @@ private struct ImmersiveControlDeck: View {
             RoundedRectangle(cornerRadius: 17)
                 .stroke(ReplayTheme.orange.opacity(store.isDrawing ? 0.38 : 0.16), lineWidth: 1)
         }
+    }
+
+    private var coachAnnotationInstruction: some View {
+        Label(annotationInstruction, systemImage: annotationInstructionSystemImage)
+            .font(.caption.monospaced().weight(.black))
+            .lineLimit(1)
+            .minimumScaleFactor(drawToolLayout.instructionMinimumScale)
+            .foregroundStyle(annotationInstructionColor)
+            .accessibilityLabel(annotationInstruction)
+    }
+
+    private var annotationToolChoices: some View {
+        Group {
+            annotationToolButton(.run, label: "Run")
+            annotationToolButton(.pass, label: "Pass")
+            annotationToolButton(.danger, label: "Press")
+            annotationToolButton(.space, label: "Zone")
+            annotationToolButton(.playerLabel, label: "Label")
+        }
+    }
+
+    private var drawToolLayout: PlaybackDrawToolLayout {
+        PlaybackDrawToolLayout.resolve(usesAccessibilityText: dynamicTypeSize.isAccessibilitySize)
     }
 
     private var povStatusChip: some View {
@@ -3623,7 +3732,8 @@ private struct ImmersiveControlDeck: View {
                     .font(.caption2.monospaced().weight(.black))
                     .lineLimit(1)
             }
-            .frame(width: 70, height: 48)
+            .frame(width: drawToolLayout.labelWidth)
+            .frame(minHeight: drawToolLayout.labelMinimumHeight)
         }
         .buttonStyle(.borderedProminent)
         .tint(isSelected ? ReplayTheme.orange : .white.opacity(0.10))
@@ -3642,11 +3752,9 @@ private struct ImmersiveControlDeck: View {
     private var reviewEvents: [PlaybackReviewEvent] { indexedReviewEvents }
 
     private func rebuildReviewIndex() {
-        let marks = store.marks.sorted {
-            $0.revealTime == $1.revealTime
-                ? $0.id.uuidString < $1.id.uuidString
-                : $0.revealTime < $1.revealTime
-        }
+        let marks = annotationPresentation.orderedReviewMarks(
+            store.marks, in: store.selectedScenario
+        )
         let cueEvents = store.selectedScenario.moments.map(PlaybackReviewEvent.cue)
         let markEvents = marks.map(PlaybackReviewEvent.mark)
         var events = cueEvents
@@ -3663,6 +3771,17 @@ private struct ImmersiveControlDeck: View {
             eventCount: events.count
         )
         rebuildTimelineTickClusters(events: events)
+    }
+
+    private func reconcileAnnotationPresentationSelection() {
+        let retainedID = annotationPresentation.reconciledSelection(
+            selectedAnnotationID,
+            marks: store.marks,
+            scenario: store.selectedScenario,
+            canChangePlaybackView: store.canChangePlaybackView
+        )
+        guard retainedID != selectedAnnotationID else { return }
+        selectedAnnotationID = retainedID
     }
 
     private func rebuildTimelineTickClusters(
@@ -3871,7 +3990,9 @@ private struct ImmersiveControlDeck: View {
             Label("Timeline", systemImage: "list.bullet.rectangle.fill")
                 .font(.subheadline.weight(.black))
                 .lineLimit(1)
-                .frame(width: 126, height: PlaybackControlDeckPresentation.minimumSpatialHitTarget)
+                .frame(width: toolsShelfLayout.labelWidth(for: .timeline),
+                    height: toolsShelfLayout.fixedLabelHeight)
+                .frame(minHeight: toolsShelfLayout.labelMinimumHeight)
         }
         .buttonStyle(.borderedProminent)
         .tint(.white.opacity(0.10))
@@ -3896,7 +4017,9 @@ private struct ImmersiveControlDeck: View {
             Label("Decisions", systemImage: "eye.fill")
                 .font(.subheadline.weight(.black))
                 .lineLimit(1)
-                .frame(width: 132, height: PlaybackControlDeckPresentation.minimumSpatialHitTarget)
+                .frame(width: toolsShelfLayout.labelWidth(for: .decisions),
+                    height: toolsShelfLayout.fixedLabelHeight)
+                .frame(minHeight: toolsShelfLayout.labelMinimumHeight)
         }
         .buttonStyle(.borderedProminent)
         .tint(.white.opacity(0.10))

@@ -168,10 +168,11 @@ struct PlaybackSecondaryControlLayout: Equatable, Sendable {
     }
 }
 
-/// Label budgets for the compact roster and its three two-line entry buttons.
-/// Normal sizes stay unchanged; AX sizes fit the measured full-size text and
-/// symbols without consuming the main timeline's existing minimum width.
+/// Label budgets for the compact roster and transport entry controls. Normal
+/// sizes stay unchanged; AX budgets respect each label's permitted text scale
+/// without consuming the main timeline's existing minimum width.
 struct PlaybackPrimaryControlLabelLayout: Equatable, Sendable {
+    let speedLabelWidth: CGFloat
     let playerLabelWidth: CGFloat
     let toolsLabelWidth: CGFloat
     let drawLabelWidth: CGFloat
@@ -183,6 +184,7 @@ struct PlaybackPrimaryControlLabelLayout: Equatable, Sendable {
 
     static func resolve(usesAccessibilityText: Bool) -> PlaybackPrimaryControlLabelLayout {
         PlaybackPrimaryControlLabelLayout(
+            speedLabelWidth: usesAccessibilityText ? 80 : 74,
             playerLabelWidth: usesAccessibilityText ? 168 : 116,
             toolsLabelWidth: usesAccessibilityText ? 88 : 78,
             drawLabelWidth: 76,
@@ -191,6 +193,44 @@ struct PlaybackPrimaryControlLabelLayout: Equatable, Sendable {
             rosterLabelWidth: 72,
             rosterLabelMinimumHeight: usesAccessibilityText ? 72 : 60,
             rosterRoleMinimumTextScale: usesAccessibilityText ? 1 : 0.75
+        )
+    }
+}
+
+/// Tools are a secondary shelf: keep the normal row, but give AX labels their
+/// measured full-size width and let the choices wrap below a separate header.
+struct PlaybackToolsShelfLayout: Equatable, Sendable {
+    enum Tool: CaseIterable, Equatable, Sendable {
+        case timeline, decisions, settings, reviews, edit
+    }
+
+    let usesAdaptiveGrid: Bool
+    let headingWidth: CGFloat
+    let labelMinimumHeight: CGFloat
+    let fixedLabelHeight: CGFloat?
+    let editMinimumTextScale: CGFloat
+
+    static let labelSpacingAllowance: CGFloat = 12
+    static let gridSpacing: CGFloat = 10
+    // Style padding is an allocation reserve, not a rendered measurement.
+    var gridMinimumCellWidth: CGFloat { 208 + 48 }
+
+    func labelWidth(for tool: Tool) -> CGFloat {
+        if usesAdaptiveGrid { return 208 }
+        return switch tool {
+        case .timeline, .settings, .reviews: 126
+        case .decisions: 132
+        case .edit: 124
+        }
+    }
+
+    static func resolve(usesAccessibilityText: Bool) -> PlaybackToolsShelfLayout {
+        PlaybackToolsShelfLayout(
+            usesAdaptiveGrid: usesAccessibilityText,
+            headingWidth: usesAccessibilityText ? 148 : 108,
+            labelMinimumHeight: 60,
+            fixedLabelHeight: usesAccessibilityText ? nil : 60,
+            editMinimumTextScale: usesAccessibilityText ? 1 : 0.78
         )
     }
 }

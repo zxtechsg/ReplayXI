@@ -260,6 +260,7 @@ enum ReplayAthleteRigError: Error {
 @MainActor
 struct ReplayAthleteJointBinding {
     let root: Entity
+    let farFloorSupport: ReplayFarAthleteFloorSupport?
     private let entities: [ReplayAthleteJoint: Entity]
 
     init(root: Entity) throws {
@@ -279,6 +280,9 @@ struct ReplayAthleteJointBinding {
         }
         self.root = root
         self.entities = resolved
+        self.farFloorSupport = ReplayFarAthleteFloorSupport(
+            leftHip: resolved[.leftHip]!, rightHip: resolved[.rightHip]!
+        )
     }
 
     subscript(_ joint: ReplayAthleteJoint) -> Entity {
