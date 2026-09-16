@@ -194,9 +194,11 @@ final class ReplaySkinnedAthleteInstance {
     }
 
     @discardableResult
-    func update(at time: TimeInterval, track: PlayerTrack, locomotion: PlayerLocomotionSample,
+    func update(at time: TimeInterval, track: PlayerTrack, locomotion suppliedLocomotion: PlayerLocomotionSample,
                 lookTarget: SIMD3<Float>?, ballAction: ReplayAthleteBallActionPose?,
-                impact: PlayerRagdollPlayback.Sample? = nil) -> Bool {
+                impact: PlayerRagdollPlayback.Sample? = nil,
+                stationaryPose: PlayerPose? = nil) -> Bool {
+        let locomotion = stationaryPose == nil ? suppliedLocomotion : track.stationaryLocomotion
         // Never apply a stale or different player's collision sample. Unsupported
         // assets still fail soft to the procedural body rather than disappear.
         let validImpact = impact.map { $0.playerID == track.id && $0.time == time && impactPose != nil } ?? true
@@ -204,7 +206,9 @@ final class ReplaySkinnedAthleteInstance {
             && locomotion.turnRateDegreesPerSecond.isFinite && locomotion.accelerationMetresPerSecondSquared.isFinite
         root.isEnabled = supported
         guard supported else { return false }
-        let gaitPhase = track.gaitPhase(at: time)
+        let gaitPhase = stationaryPose == nil
+            ? track.gaitPhase(at: time)
+            : locomotion.motion.locomotionPhase
         // Let the idle upper body contribute at walking speeds; the source run
         // has a deep elbow fold that looks like sprinting when moving slowly.
         let effort = locomotion.effort
@@ -215,14 +219,16 @@ final class ReplaySkinnedAthleteInstance {
         if influence > 0, footballPose != nil {
             let authored = ReplayAthleteMotion.locomotionPose(
                 for: track, at: time, locomotion: locomotion, gaitPhase: gaitPhase,
-                lookTargetWorldPosition: lookTarget, ballAction: ballAction
+                lookTargetWorldPosition: lookTarget, ballAction: ballAction,
+                stationaryPose: stationaryPose
             )
             footballPose?.apply(authored, influence: influence,
                                 armInfluence: ReplaySkinnedAthleteFootballPose.influence(locomotion: locomotion, ballAction: nil),
                                 motion: motion, to: &pose)
         }
         let look = ReplayAthleteMotion.lookPose(for: track, at: time, locomotion: locomotion,
-                                               targetWorldPosition: lookTarget)
+                                               targetWorldPosition: lookTarget,
+                                               stationaryPose: stationaryPose)
         applyLook(look)
         if let impact {
             impactPose?.apply(impact.pose, influence: impact.influence, motion: motion, to: &pose)

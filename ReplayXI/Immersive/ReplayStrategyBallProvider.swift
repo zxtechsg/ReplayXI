@@ -43,4 +43,8 @@ enum ReplayStrategyBallProvider {
         ((root as? ModelEntity).map { [$0] } ?? [])
             + root.children.flatMap { models(in: $0) }
     }
+
+    #if DEBUG
+    static func resetForTesting() { template = nil }
+    #endif
 }

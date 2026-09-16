@@ -53,7 +53,16 @@ class LocalCapabilityTests(unittest.TestCase):
         panel = source.split("private struct PositioningPanel: View {", 1)[1].split("\nprivate struct ", 1)[0]
         self.assertIn("@State private var placementTask: Task<Void, Never>?", panel)
         self.assertIn("let requestID = placementAttempt.begin()", panel)
-        self.assertEqual(panel.count("placementAttempt.owns(requestID)"), 2)
+        self.assertEqual(panel.count("placementAttempt.owns(requestID)"), 3)
+        rejected = panel.split("guard store.activateLocalTrianglePreview(anchorID: anchorID) else {", 1)[1].split(
+            "sharedSpace.selectSharedPitchAnchor(id: anchorID)", 1
+        )[0]
+        self.assertLess(
+            rejected.index("await sharedSpace.removeLocallyPlacedPitchAnchor(ifMatching: anchorID)"),
+            rejected.index("guard placementAttempt.owns(requestID)"),
+        )
+        self.assertIn("!Task.isCancelled", rejected)
+        self.assertIn("store.trianglePlacementInputBlockReason", rejected)
         self.assertIn("placementAttempt.finish(requestID)", panel)
         self.assertIn("placementAttempt.cancel()", panel)
         self.assertIn("placementTask?.cancel()", panel)

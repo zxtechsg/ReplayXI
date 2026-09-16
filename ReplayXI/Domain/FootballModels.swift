@@ -655,6 +655,22 @@ struct PlayerTrack: Identifiable, Codable, Hashable, Sendable {
         )
     }
 
+    /// A teaching station retains the player's deterministic idle variation,
+    /// without copying its track or advancing a running-distance clock.
+    var stationaryLocomotion: PlayerLocomotionSample {
+        PlayerLocomotionSample(
+            motion: PlayerMotionState(
+                speedMetresPerSecond: 0,
+                distanceTravelled: 0,
+                locomotionPhase: locomotionPhaseOffset
+            ),
+            speedMetresPerSecond: 0,
+            accelerationMetresPerSecondSquared: 0,
+            turnRateDegreesPerSecond: 0,
+            state: .idle
+        )
+    }
+
     private static func shortestAngleDelta(from start: Float, to end: Float) -> Float {
         var delta = (end - start).truncatingRemainder(dividingBy: 360)
         if delta > 180 {
@@ -1257,6 +1273,22 @@ struct ReplayPlayerPresentation: Sendable {
                 from: contact.facingDegrees, to: source.facingDegrees, fraction: release
             )
         )
+    }
+
+    /// Ideal teaching targets stand still and face the displayed ball. Return
+    /// nil for normal replay and untargeted defenders so their motion stays raw.
+    func stationaryPose(
+        for player: PlayerTrack,
+        at time: TimeInterval,
+        facing target: PitchPoint
+    ) -> PlayerPose? {
+        guard let station = idealTargets.first(where: { $0.playerID == player.id }) else { return nil }
+        let dx = target.x - station.position.x
+        let dz = target.z - station.position.z
+        let facing = hypot(dx, dz) > 0.05
+            ? atan2(dx, dz) * 180 / .pi
+            : player.presentationPose(at: time).facingDegrees
+        return PlayerPose(position: station.position, facingDegrees: facing)
     }
 
     func poses(in scenario: ReplayScenario, at time: TimeInterval) -> [String: PlayerPose] {

@@ -546,7 +546,8 @@ struct FootballImmersiveView: View {
         return store.selectedScenario.decisionReview(
             at: store.playhead,
             playerID: store.activePerspectiveID,
-            currentMarks: store.marks
+            currentMarks: store.marks,
+            presentation: store.playerPresentation
         )
     }
 
@@ -605,11 +606,10 @@ struct FootballImmersiveView: View {
         let geometry = store.presentedCoachMarkGeometry(mark, at: store.playhead)
         let start = target.role == .start ? point : geometry.start
         let end = target.role == .end ? point : geometry.end
-        _ = store.updateCoachMarkGeometry(
+        _ = store.commitCoachMarkGeometryPreview(
             id: target.markID,
             start: start,
-            end: end,
-            broadcast: true
+            end: end
         )
         draggedAnnotationTarget = nil
     }
@@ -3719,7 +3719,7 @@ private struct ImmersiveControlDeck: View {
         .buttonStyle(.borderedProminent)
         .tint(.white.opacity(0.10))
         .foregroundStyle(.white)
-        .disabled(secondaryPlaybackControlsAreDisabled || decisionSnapshot == nil)
+        .disabled(secondaryPlaybackControlsAreDisabled || !canShowDecisionOptions)
         .accessibilityLabel("Decision options")
         .accessibilityHint("Pauses and shows the selected player's descriptive passing lanes")
     }
@@ -4310,11 +4310,20 @@ private struct ImmersiveControlDeck: View {
         !store.selectedScenario.coachMarks.contains { $0.id == mark.id }
     }
 
+    private var canShowDecisionOptions: Bool {
+        ReplayDecisionReview.canCreateSnapshot(
+            scenario: store.selectedScenario,
+            at: store.playhead,
+            playerID: store.activePerspectiveID
+        )
+    }
+
     private var decisionSnapshot: ReplayDecisionSnapshot? {
         store.selectedScenario.decisionReview(
             at: store.playhead,
             playerID: store.activePerspectiveID,
-            currentMarks: store.marks
+            currentMarks: store.marks,
+            presentation: store.playerPresentation
         )
     }
 
@@ -4804,6 +4813,16 @@ private struct PositioningPanel: View {
             Divider()
 
             if store.triangleLockMode == .visualise {
+                if let reason = store.trianglePlacementInputBlockReason {
+                    Label(reason, systemImage: "hand.raised.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(ReplayTheme.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if store.isDrawing {
+                        Button("Cancel annotation") { store.cancelDrawing() }
+                            .buttonStyle(.bordered)
+                    }
+                }
                 if showsPlacementPreflight {
                     placementPreflight
                 } else {
@@ -4930,6 +4949,7 @@ private struct PositioningPanel: View {
                     .buttonStyle(.borderedProminent)
                     .tint(ReplayTheme.signal)
                     .foregroundStyle(.black)
+                    .disabled(!stageIsEnabled(.physical))
                 } else {
                     Label("Coach role required for physical setup", systemImage: "person.badge.key")
                         .font(.caption2.weight(.semibold))
@@ -5166,7 +5186,9 @@ private struct PositioningPanel: View {
     }
 
     private func stageIsEnabled(_ item: ShapeFocusStep) -> Bool {
-        if item == .physical { return store.localRole == .coach }
+        if item == .physical {
+            return store.localRole == .coach && store.trianglePlacementInputBlockReason == nil
+        }
         return store.triangleLockMode != .place
     }
 
@@ -5211,7 +5233,8 @@ private struct PositioningPanel: View {
     }
 
     private func beginPhysicalPreflight() {
-        guard store.localRole == .coach, store.triangleLockMode == .visualise else { return }
+        guard store.localRole == .coach, store.triangleLockMode == .visualise,
+              store.trianglePlacementInputBlockReason == nil else { return }
         showIdeal()
         showsPlacementPreflight = true
     }
@@ -5220,6 +5243,10 @@ private struct PositioningPanel: View {
         hasConfirmedClearArea && sharedSpace.isRunning
             && !sharedSpace.isPlacingPitchAnchor && !sharedSpace.isRemovingPitchAnchor
             && !placementAttempt.isPending
+            && store.localRole == .coach
+            && store.isImmersiveOpen && !store.isClosingImmersive
+            && store.triangleLockMode == .visualise
+            && store.trianglePlacementInputBlockReason == nil
     }
 
     private var placementButtonTitle: String {
@@ -5252,12 +5279,22 @@ private struct PositioningPanel: View {
             do {
                 let anchorID = try await sharedSpace.placeLocalPitchAnchorAtCurrentHeadset()
                 guard placementAttempt.owns(requestID), !Task.isCancelled,
-                      store.isImmersiveOpen, showsPlacementPreflight,
+                      store.isImmersiveOpen, !store.isClosingImmersive, showsPlacementPreflight,
                       hasConfirmedClearArea, store.triangleLockMode == .visualise else {
                     await sharedSpace.removeLocallyPlacedPitchAnchor(ifMatching: anchorID)
                     return
                 }
-                store.activateLocalTrianglePreview(anchorID: anchorID)
+                // An edit may start while ARKit creates the origin. Admission
+                // must be rechecked before selecting or revealing that anchor.
+                guard store.activateLocalTrianglePreview(anchorID: anchorID) else {
+                    await sharedSpace.removeLocallyPlacedPitchAnchor(ifMatching: anchorID)
+                    guard placementAttempt.owns(requestID), !Task.isCancelled,
+                          store.isImmersiveOpen, !store.isClosingImmersive,
+                          showsPlacementPreflight else { return }
+                    placementError = store.trianglePlacementInputBlockReason
+                        ?? "Placement was cancelled. Try placing stations again."
+                    return
+                }
                 sharedSpace.selectSharedPitchAnchor(id: anchorID)
                 placementError = nil
                 showsPlacementPreflight = false

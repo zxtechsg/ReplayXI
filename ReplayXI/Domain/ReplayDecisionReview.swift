@@ -235,6 +235,21 @@ struct ReplayDecisionConfiguration: Codable, Hashable, Sendable {
 /// reports geometry and replay evidence rather than assigning a player grade or
 /// claiming that one pass was correct.
 enum ReplayDecisionReview {
+    /// Button availability must not rebuild scans, lane spacing and outcomes.
+    /// Full analysis is only needed once the user opens the comparison.
+    static func canCreateSnapshot(
+        scenario: ReplayScenario,
+        at requestedTime: TimeInterval,
+        playerID: String
+    ) -> Bool {
+        hasValidTime(in: scenario, requestedTime: requestedTime)
+            && scenario.player(id: playerID) != nil
+    }
+
+    private static func hasValidTime(in scenario: ReplayScenario, requestedTime: TimeInterval) -> Bool {
+        requestedTime.isFinite && scenario.duration.isFinite && scenario.duration >= 0
+    }
+
     static func snapshot(
         scenario: ReplayScenario,
         at requestedTime: TimeInterval,
@@ -242,11 +257,10 @@ enum ReplayDecisionReview {
         provenance: ReplayDataProvenance = .syntheticDemo,
         coachSuggestion explicitSuggestion: ReplayCoachSuggestion? = nil,
         currentMarks: [CoachMark]? = nil,
+        presentation: ReplayPlayerPresentation? = nil,
         configuration: ReplayDecisionConfiguration = .standard
     ) -> ReplayDecisionSnapshot? {
-        guard requestedTime.isFinite,
-              scenario.duration.isFinite,
-              scenario.duration >= 0,
+        guard hasValidTime(in: scenario, requestedTime: requestedTime),
               let subject = scenario.player(id: playerID)
         else { return nil }
 
@@ -288,6 +302,7 @@ enum ReplayDecisionReview {
             time: time,
             observedDestination: observedDestination,
             coachSuggestion: suggestion,
+            presentedPlayerPoses: presentation?.poses(in: scenario, at: time),
             configuration: configuration
         )
         let evidence = ReplayDecisionEvidence(
@@ -533,13 +548,21 @@ enum ReplayDecisionReview {
         time: TimeInterval,
         observedDestination: ReplayObservedDestination?,
         coachSuggestion: ReplayCoachSuggestion?,
+        presentedPlayerPoses: [String: PlayerPose]?,
         configuration: ReplayDecisionConfiguration
     ) -> [ReplayPassingLaneOption] {
-        let start = subject.presentationPose(at: time).position
+        // These values describe the players currently shown, unlike the scan,
+        // receiving orientation and observed outcome above, which remain
+        // evidence from the unmodified replay tracks.
+        func position(of player: PlayerTrack) -> PitchPoint {
+            presentedPlayerPoses?[player.id]?.position
+                ?? player.presentationPose(at: time).position
+        }
+        let start = position(of: subject)
         let defenders = scenario.players
             .filter { $0.team != subject.team }
             .map { player in
-                (id: player.id, position: player.presentationPose(at: time).position)
+                (id: player.id, position: position(of: player))
             }
         let forcedIDs = Set([
             observedDestination?.receiverID,
@@ -551,13 +574,13 @@ enum ReplayDecisionReview {
             guard player.team == subject.team, player.id != subject.id else { return false }
             let distance = ReplayGeometry.distance(
                 start,
-                player.presentationPose(at: time).position
+                position(of: player)
             )
             return forcedIDs.contains(player.id) || distance <= maximumDistance
         }
 
         let options = candidates.map { player -> ReplayPassingLaneOption in
-            let end = player.presentationPose(at: time).position
+            let end = position(of: player)
             let passDistance = ReplayGeometry.distance(start, end)
             let nearestLaneDefender = defenders
                 .map { defender in
@@ -688,12 +711,15 @@ extension ReplayScenario {
     /// their own provenance rather than accepting the synthetic demo default.
     /// Pass the store's live mark collection to include shared annotations;
     /// `nil` preserves the scenario marks, while `[]` explicitly clears them.
+    /// A presentation context aligns current lane spacing with the displayed
+    /// players without changing historical scan, orientation or outcome data.
     func decisionReview(
         at time: TimeInterval,
         playerID: String,
         provenance: ReplayDataProvenance = .syntheticDemo,
         coachSuggestion: ReplayCoachSuggestion? = nil,
         currentMarks: [CoachMark]? = nil,
+        presentation: ReplayPlayerPresentation? = nil,
         configuration: ReplayDecisionConfiguration = .standard
     ) -> ReplayDecisionSnapshot? {
         ReplayDecisionReview.snapshot(
@@ -703,6 +729,7 @@ extension ReplayScenario {
             provenance: provenance,
             coachSuggestion: coachSuggestion,
             currentMarks: currentMarks,
+            presentation: presentation,
             configuration: configuration
         )
     }

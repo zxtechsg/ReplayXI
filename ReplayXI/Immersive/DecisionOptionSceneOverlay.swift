@@ -63,7 +63,8 @@ enum DecisionOptionSceneOverlay {
         snapshot: ReplayDecisionSnapshot?,
         scenario: ReplayScenario,
         viewMode: ReplayViewMode,
-        isDrawing: Bool
+        isDrawing: Bool,
+        presentedPlayerPoses: [String: PlayerPose]? = nil
     ) {
         guard let root = matchRoot.children.first(where: { $0.name == rootName }) else {
             return
@@ -78,7 +79,8 @@ enum DecisionOptionSceneOverlay {
         }
 
         root.isEnabled = true
-        let sourcePoint = source.presentationPose(at: snapshot.time).position
+        let sourcePoint = presentedPlayerPoses?[source.id]?.position
+            ?? source.presentationPose(at: snapshot.time).position
         let scale = visualScale(for: viewMode)
         let visibleOptionCount = min(
             snapshot.passingOptions.count,
@@ -99,7 +101,8 @@ enum DecisionOptionSceneOverlay {
             }
 
             let option = snapshot.passingOptions[index]
-            let destination = receiver.presentationPose(at: snapshot.time).position
+            let destination = presentedPlayerPoses?[receiver.id]?.position
+                ?? receiver.presentationPose(at: snapshot.time).position
             slot.isEnabled = true
             let styleChanged = restyleIfNeeded(slot, option: option)
             updateGeometry(

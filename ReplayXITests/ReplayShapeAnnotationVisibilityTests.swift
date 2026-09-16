@@ -30,11 +30,15 @@ final class ReplayShapeAnnotationVisibilityTests: XCTestCase {
         let mark = try addMark(.run, to: store)
         let root = PitchSceneFactory.makeMatchRoot(for: store.selectedScenario)
         store.activateLocalTrianglePreview(anchorID: UUID())
-        update(root, from: store, selectedID: mark.id, placementReady: true)
-        XCTAssertFalse(try XCTUnwrap(root.findEntity(named: "marks-root")).isEnabled)
-        XCTAssertFalse(try XCTUnwrap(root.findEntity(
-            named: AnnotationSceneAffordance.selectionRootName
-        )).isEnabled)
+        for placementReady in [true, false, true] {
+            update(root, from: store, selectedID: mark.id, placementReady: placementReady)
+            XCTAssertEqual(store.triangleLockMode, .place)
+            XCTAssertFalse(try XCTUnwrap(root.findEntity(named: "marks-root")).isEnabled,
+                           "Tracking loss must not expose annotation geometry during a physical drill")
+            XCTAssertFalse(try XCTUnwrap(root.findEntity(
+                named: AnnotationSceneAffordance.selectionRootName
+            )).isEnabled, "Tracking loss must not reopen direct annotation editing")
+        }
         store.endTrianglePlacement()
         update(root, from: store, selectedID: mark.id)
         XCTAssertTrue(try XCTUnwrap(root.findEntity(named: "marks-root")).isEnabled)

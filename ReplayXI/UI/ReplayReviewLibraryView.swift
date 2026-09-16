@@ -25,7 +25,8 @@ struct ReplayReviewLibraryView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Saved reviews").font(.title3.bold())
                     Text(store.reviewSaveStatus)
-                        .font(.subheadline).foregroundStyle(.secondary)
+                        .font(.subheadline)
+                        .foregroundStyle(store.reviewSaveBlockReason == nil ? Color.secondary : ReplayTheme.orange)
                         .lineLimit(2)
                 }
                 Spacer(minLength: 8)
@@ -41,7 +42,7 @@ struct ReplayReviewLibraryView: View {
                 .buttonStyle(.borderedProminent)
                 .foregroundStyle(.black)
                 .disabled(!store.canSaveReview)
-                .accessibilityHint("Saves this moment, player view, and annotations on this device")
+                .accessibilityHint(store.reviewSaveBlockReason ?? "Saves this moment, player view, and annotations on this device")
             }
 
             if let action {

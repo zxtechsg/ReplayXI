@@ -152,12 +152,14 @@ enum ReplayAthleteMotion {
     static func locomotionPose(
         for track: PlayerTrack,
         at time: TimeInterval,
-        locomotion: PlayerLocomotionSample,
+        locomotion suppliedLocomotion: PlayerLocomotionSample,
         gaitPhase suppliedGaitPhase: Float? = nil,
         lookTargetWorldPosition: SIMD3<Float>? = nil,
         ballTrack: BallTrack? = nil,
-        ballAction suppliedBallAction: ReplayAthleteBallActionPose? = nil
+        ballAction suppliedBallAction: ReplayAthleteBallActionPose? = nil,
+        stationaryPose: PlayerPose? = nil
     ) -> ReplayAthleteLocomotionPose {
+        let locomotion = stationaryPose == nil ? suppliedLocomotion : track.stationaryLocomotion
         // `PlayerLocomotionState` is deliberately discrete because it is also
         // used for clip admission and tactical semantics.  Driving the visible
         // body directly from that enum, however, made every classification
@@ -174,7 +176,9 @@ enum ReplayAthleteMotion {
         // Explicitly supplied phases come from PlayerTrack's integrated cadence
         // clock. Tests and external callers that author a one-off descriptor can
         // still use its embedded phase without reconstructing a telemetry track.
-        let phase = suppliedGaitPhase ?? locomotion.motion.locomotionPhase
+        let phase = stationaryPose == nil
+            ? suppliedGaitPhase ?? locomotion.motion.locomotionPhase
+            : locomotion.motion.locomotionPhase
         let leftFootfall = footfall(at: phase, tuning: tuning.footfall)
         let rightFootfall = footfall(at: phase + .pi, tuning: tuning.footfall)
         let cycle = (leftFootfall.stride - rightFootfall.stride) * 0.5
@@ -197,7 +201,8 @@ enum ReplayAthleteMotion {
             for: track,
             at: time,
             locomotion: locomotion,
-            targetWorldPosition: lookTargetWorldPosition
+            targetWorldPosition: lookTargetWorldPosition,
+            stationaryPose: stationaryPose
         )
 
         let ballAction = suppliedBallAction ?? ballTrack.flatMap {
@@ -454,22 +459,30 @@ enum ReplayAthleteMotion {
         for track: PlayerTrack,
         at time: TimeInterval,
         locomotion: PlayerLocomotionSample? = nil,
-        targetWorldPosition: SIMD3<Float>? = nil
+        targetWorldPosition: SIMD3<Float>? = nil,
+        stationaryPose: PlayerPose? = nil
     ) -> ReplayAthleteLookPose {
-        let sample = locomotion ?? track.locomotion(at: time)
+        let sample = stationaryPose == nil
+            ? locomotion ?? track.locomotion(at: time)
+            : track.stationaryLocomotion
         let finiteTime = time.isFinite ? min(max(time, -1_000_000), 1_000_000) : 0
-        let current = track.presentationPose(at: finiteTime)
+        let current = stationaryPose ?? track.presentationPose(at: finiteTime)
         let facing = current.facingDegrees.isFinite ? current.facingDegrees : 0
 
-        let directionWindow: TimeInterval = 0.24
-        let before = track.presentationPose(at: finiteTime - directionWindow).position
-        let after = track.presentationPose(at: finiteTime + directionWindow).position
-        let travelX = after.x - before.x
-        let travelZ = after.z - before.z
-        let travelDistance = hypot(travelX, travelZ)
-        let travelBearing = travelDistance > 0.025
-            ? atan2(travelX, travelZ) * 180 / .pi
-            : facing
+        let travelBearing: Float
+        if stationaryPose != nil {
+            travelBearing = facing
+        } else {
+            let directionWindow: TimeInterval = 0.24
+            let before = track.presentationPose(at: finiteTime - directionWindow).position
+            let after = track.presentationPose(at: finiteTime + directionWindow).position
+            let travelX = after.x - before.x
+            let travelZ = after.z - before.z
+            let travelDistance = hypot(travelX, travelZ)
+            travelBearing = travelDistance > 0.025
+                ? atan2(travelX, travelZ) * 180 / .pi
+                : facing
+        }
         let travelDelta = clampAngleDelta(
             shortestAngleDelta(from: facing, to: travelBearing),
             limit: 100

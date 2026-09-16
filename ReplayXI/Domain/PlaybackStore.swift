@@ -315,13 +315,25 @@ final class ReplayStore {
     }
 
     var autosavedReview: SavedReplayReview? { reviewLibrary.autosavedReview }
+    /// One current reason for both the drawer and its final submit callback.
+    /// Keep the library's diagnostic intact; a blocked copy must not replace
+    /// recovery guidance or leak an in-progress edit into persisted state.
+    var reviewSaveBlockReason: String? {
+        if reviewLibrary.isReadOnly { return reviewLibrary.status }
+        if hasActiveTimelineScrub { return "Finish or cancel the timeline scrub before saving" }
+        if hasActiveCoachMarkGeometryPreview { return "Finish or cancel the annotation adjustment before saving" }
+        if isDrawing { return "Finish or cancel the annotation before saving" }
+        if savedReviews.count >= ReplayReviewLibrary.maximumSavedReviews {
+            return "\(ReplayReviewLibrary.maximumSavedReviews) saves reached. Delete a save first."
+        }
+        return nil
+    }
     var reviewSaveStatus: String {
-        reviewLibrary.usesDisk ? reviewLibrary.status : "\(reviewLibrary.status) · saves are temporary"
+        if let reason = reviewSaveBlockReason { return reason }
+        return reviewLibrary.usesDisk ? reviewLibrary.status : "\(reviewLibrary.status) · saves are temporary"
     }
     var canSaveReview: Bool {
-        !reviewLibrary.isReadOnly
-            && savedReviews.count < ReplayReviewLibrary.maximumSavedReviews
-            && !hasActiveTimelineScrub && !hasActiveCoachMarkGeometryPreview && !isDrawing
+        reviewSaveBlockReason == nil
     }
     var canRestoreSavedReview: Bool {
         !isCollaborationActive && triangleLockMode != .place
@@ -346,8 +358,8 @@ final class ReplayStore {
 
     @discardableResult
     func saveReview(named name: String, state: SavedReplayState? = nil) -> Bool {
-        guard canSaveReview else {
-            statusMessage = "Finish the current edit before saving"
+        if let reason = reviewSaveBlockReason {
+            statusMessage = reason
             return false
         }
         return reviewLibrary.save(named: name, state: state ?? makeSavedReviewState())
@@ -799,6 +811,12 @@ final class ReplayStore {
             isLocallyPaused = true
         }
         localPerspectiveID = id
+        if selectedScenario.kind == .shapeLab, viewMode == .positional,
+           let target = selectedScenario.formationTargets.first(where: { $0.playerID == id }),
+           let player = selectedScenario.player(id: id) {
+            statusMessage = "Role station: #\(player.shirtNumber) · \(target.label)"
+            return
+        }
         if !coachLockEnabled || !followsCoach {
             statusMessage = "Player POV: \(selectedScenario.player(id: id)?.role ?? id)"
         }
@@ -884,6 +902,7 @@ final class ReplayStore {
     }
 
     func beginDrawing(_ kind: CoachMarkKind) {
+        guard allowsAnnotationAuthoring() else { return }
         guard allowsMutationOutsideEndpointPreview() else { return }
         guard localRole == .coach else { return }
         guard allowsAnnotationAtCurrentTime() else { return }
@@ -915,6 +934,7 @@ final class ReplayStore {
 
     @discardableResult
     func registerPitchTap(_ point: PitchPoint) -> CoachMark? {
+        guard allowsAnnotationAuthoring() else { return nil }
         guard allowsMutationOutsideEndpointPreview() else { return nil }
         guard isDrawing, localRole == .coach else { return nil }
         guard allowsAnnotationAtCurrentTime() else { return nil }
@@ -987,6 +1007,7 @@ final class ReplayStore {
     /// playhead, so no second pitch tap or draft geometry is needed.
     @discardableResult
     func labelPlayer(_ playerID: String) -> CoachMark? {
+        guard allowsAnnotationAuthoring() else { return nil }
         guard allowsMutationOutsideEndpointPreview() else { return nil }
         guard localRole == .coach else { return nil }
         guard marks.count < Self.maximumSharedCoachMarks else {
@@ -1024,6 +1045,7 @@ final class ReplayStore {
     }
 
     func addPresetMark() {
+        guard allowsAnnotationAuthoring() else { return }
         guard allowsMutationOutsideEndpointPreview() else { return }
         guard localRole == .coach else { return }
         guard allowsAnnotationAtCurrentTime() else { return }
@@ -1088,6 +1110,14 @@ final class ReplayStore {
         emitSnapshot()
     }
 
+    private func allowsAnnotationAuthoring() -> Bool {
+        guard triangleLockMode != .place else {
+            statusMessage = "End the physical drill before editing annotations"
+            return false
+        }
+        return true
+    }
+
     private func allowsAnnotationAtCurrentTime() -> Bool {
         let valid = CoachMarkTimingPolicy.windowFits(
             revealTime: playhead, displayDuration: nil, replayDuration: selectedScenario.duration
@@ -1109,14 +1139,17 @@ final class ReplayStore {
     var annotationUndoTitle: String { annotationEditHistory.undoTitle }
     var annotationRedoTitle: String { annotationEditHistory.redoTitle }
     var canUndoAnnotationEdit: Bool {
-        localRole == .coach && !isCollaborationActive && canChangePlaybackView && annotationEditHistory.canUndo
+        triangleLockMode != .place && localRole == .coach && !isCollaborationActive
+            && canChangePlaybackView && annotationEditHistory.canUndo
     }
     var canRedoAnnotationEdit: Bool {
-        localRole == .coach && !isCollaborationActive && canChangePlaybackView && annotationEditHistory.canRedo
+        triangleLockMode != .place && localRole == .coach && !isCollaborationActive
+            && canChangePlaybackView && annotationEditHistory.canRedo
     }
 
     @discardableResult
     func undoAnnotationEdit() -> Bool {
+        guard allowsAnnotationAuthoring() else { return false }
         guard allowsPlaybackViewChange(), localRole == .coach, !isCollaborationActive else { return false }
         let action = annotationEditHistory.undoTitle
         guard let restored = annotationEditHistory.undo(current: marks) else {
@@ -1132,6 +1165,7 @@ final class ReplayStore {
 
     @discardableResult
     func redoAnnotationEdit() -> Bool {
+        guard allowsAnnotationAuthoring() else { return false }
         guard allowsPlaybackViewChange(), localRole == .coach, !isCollaborationActive else { return false }
         let action = annotationEditHistory.redoTitle
         guard let restored = annotationEditHistory.redo(current: marks) else {
@@ -1149,6 +1183,7 @@ final class ReplayStore {
     /// authored teaching overlays. This supports mark-specific timeline menus.
     @discardableResult
     func removeCoachMark(id: UUID) -> Bool {
+        guard allowsAnnotationAuthoring() else { return false }
         guard allowsMutationOutsideEndpointPreview() else { return false }
         guard localRole == .coach else { return false }
         let authoredIDs = Set(selectedScenario.coachMarks.map(\.id))
@@ -1172,6 +1207,7 @@ final class ReplayStore {
     /// remain immutable so a local edit cannot erase the teaching baseline.
     @discardableResult
     func retimeCoachMark(id: UUID, to revealTime: TimeInterval) -> Bool {
+        guard allowsAnnotationAuthoring() else { return false }
         guard allowsMutationOutsideEndpointPreview() else { return false }
         guard localRole == .coach,
               revealTime.isFinite,
@@ -1233,6 +1269,7 @@ final class ReplayStore {
     /// the replay; a finite duration creates an explicit timeline window.
     @discardableResult
     func setCoachMarkDuration(id: UUID, duration: TimeInterval?) -> Bool {
+        guard allowsAnnotationAuthoring() else { return false }
         guard allowsMutationOutsideEndpointPreview() else { return false }
         guard localRole == .coach else { return false }
         if let duration {
@@ -1291,6 +1328,7 @@ final class ReplayStore {
     /// locally paused players receive the same concise tactical instruction.
     @discardableResult
     func updateCoachMarkLabel(id: UUID, label: String) -> Bool {
+        guard allowsAnnotationAuthoring() else { return false }
         guard allowsMutationOutsideEndpointPreview() else { return false }
         guard localRole == .coach else { return false }
         let normalizedLabel = label
@@ -1349,6 +1387,7 @@ final class ReplayStore {
     /// toggling tracking never makes an annotation visibly jump.
     @discardableResult
     func setCoachMarkTracking(id: UUID, playerID: String?) -> Bool {
+        guard allowsAnnotationAuthoring() else { return false }
         guard !hasActiveTimelineScrub else {
             statusMessage = "Finish or cancel the timeline scrub first"
             return false
@@ -1448,6 +1487,7 @@ final class ReplayStore {
         end: PitchPoint,
         broadcast: Bool = true
     ) -> Bool {
+        guard allowsAnnotationAuthoring() else { return false }
         guard !hasActiveTimelineScrub else {
             statusMessage = "Finish or cancel the timeline scrub first"
             return false
@@ -1532,6 +1572,19 @@ final class ReplayStore {
         return true
     }
 
+    /// Ends only an existing direct handle transaction. A delayed gesture end
+    /// after cancellation or drill cleanup must not create a fresh edit.
+    @discardableResult
+    func commitCoachMarkGeometryPreview(
+        id: UUID,
+        start: PitchPoint,
+        end: PitchPoint
+    ) -> Bool {
+        guard pendingCoachMarkGeometryBaselines[id] != nil,
+              pendingCoachMarkEndpointPreviews[id] == nil else { return false }
+        return updateCoachMarkGeometry(id: id, start: start, end: end, broadcast: true)
+    }
+
     /// Atomically nudges one handle of a coach-created spatial annotation.
     ///
     /// This is the store-level entry point for accessibility increment and
@@ -1545,6 +1598,7 @@ final class ReplayStore {
         endpoint: CoachMarkEndpoint,
         by delta: PitchPoint
     ) -> Bool {
+        guard allowsAnnotationAuthoring() else { return false }
         guard allowsMutationOutsideEndpointPreview() else { return false }
         guard localRole == .coach else { return false }
         guard delta.x.isFinite, delta.z.isFinite else {
@@ -1630,6 +1684,7 @@ final class ReplayStore {
         target: CoachMarkElevationTarget,
         by delta: Float
     ) -> Bool {
+        guard allowsAnnotationAuthoring() else { return false }
         guard allowsMutationOutsideEndpointPreview() else { return false }
         guard localRole == .coach else { return false }
         guard delta.isFinite, delta != 0 else {
@@ -1716,6 +1771,7 @@ final class ReplayStore {
         gestureID: UUID,
         cumulativeDelta: PitchPoint
     ) -> CoachMarkEndpointPreviewResult? {
+        guard allowsAnnotationAuthoring() else { return nil }
         guard localRole == .coach else { return nil }
         guard !hasActiveTimelineScrub else {
             statusMessage = "Finish or cancel the timeline scrub first"
@@ -1896,6 +1952,14 @@ final class ReplayStore {
         id: UUID,
         gestureID: UUID
     ) -> PitchPoint? {
+        if triangleLockMode == .place {
+            // A delayed lift cannot publish geometry hidden by an active drill.
+            // Keep rollback usable and preserve the drill's definitive pause.
+            _ = cancelCoachMarkEndpointPreview(id: id, gestureID: gestureID)
+            isPlaying = false
+            _ = allowsAnnotationAuthoring()
+            return nil
+        }
         defer { interruptedCoachMarkEndpointGestureIDs.remove(gestureID) }
         guard pendingCoachMarkEndpointPreviews[id]?.gestureID == gestureID,
               let preview = removePendingCoachMarkEndpointPreview(for: id) else {
@@ -2026,6 +2090,7 @@ final class ReplayStore {
     }
 
     func clearMarks() {
+        guard allowsAnnotationAuthoring() else { return }
         guard allowsMutationOutsideEndpointPreview() else { return }
         guard localRole == .coach else { return }
         let authoredIDs = Set(selectedScenario.coachMarks.map(\.id))
@@ -2203,9 +2268,20 @@ final class ReplayStore {
         emitSnapshot()
     }
 
-    func activateTrianglePlacement(anchorID: UUID) {
-        guard allowsMutationOutsideEndpointPreview() else { return }
-        guard localRole == .coach, selectedScenario.kind == .shapeLab else { return }
+    var trianglePlacementInputBlockReason: String? {
+        if hasActiveTimelineScrub { return "Finish or cancel the timeline scrub before placing stations" }
+        if hasActiveCoachMarkGeometryPreview { return "Finish or cancel the annotation adjustment before placing stations" }
+        if isDrawing { return "Finish or cancel the annotation before placing stations" }
+        return nil
+    }
+
+    @discardableResult
+    func activateTrianglePlacement(anchorID: UUID) -> Bool {
+        guard localRole == .coach, selectedScenario.kind == .shapeLab else { return false }
+        if let reason = trianglePlacementInputBlockReason {
+            statusMessage = reason
+            return false
+        }
         prioritizePhysicalTriangleAssignments()
         isPlaying = false
         isLocallyPaused = false
@@ -2218,15 +2294,20 @@ final class ReplayStore {
         hasLocallyAcknowledgedTrianglePlacement = true
         statusMessage = "Physical Triangle Lock ready. Stay still and verify each shared station."
         emitSnapshot()
+        return true
     }
 
     /// Starts a solo, device-local rehearsal. Its WorldAnchor identifier never
     /// appears in `makeSnapshot()`, even if SharePlay begins later.
-    func activateLocalTrianglePreview(anchorID: UUID) {
-        guard allowsMutationOutsideEndpointPreview() else { return }
+    @discardableResult
+    func activateLocalTrianglePreview(anchorID: UUID) -> Bool {
         guard localRole == .coach,
               !isCollaborationActive,
-              selectedScenario.kind == .shapeLab else { return }
+              selectedScenario.kind == .shapeLab else { return false }
+        if let reason = trianglePlacementInputBlockReason {
+            statusMessage = reason
+            return false
+        }
         isPlaying = false
         isLocallyPaused = false
         viewMode = .positional
@@ -2237,6 +2318,7 @@ final class ReplayStore {
         isLocalTrianglePreview = true
         hasLocallyAcknowledgedTrianglePlacement = true
         statusMessage = "Local station preview ready. Stay still and keep movements slow."
+        return true
     }
 
     func acknowledgeTrianglePlacementLocally(
@@ -2265,8 +2347,14 @@ final class ReplayStore {
     }
 
     func endTrianglePlacement() {
-        guard allowsMutationOutsideEndpointPreview() else { return }
         guard localRole == .coach, triangleLockMode == .place else { return }
+        // End drill is an escape, not a competing edit. Restore unpublished
+        // checkpoints before applying the final pause and retiring this anchor.
+        cancelTimelineScrub()
+        rollbackAllCoachMarkGeometryPreviews(interruptingEndpointGesture: true)
+        isDrawing = false
+        pendingDrawStart = nil
+        selectedTool = .run
         let retiredAnchorID = sharedPitchAnchorID
         isPlaying = false
         triangleLockMode = .visualise
@@ -2283,13 +2371,13 @@ final class ReplayStore {
     /// disappeared unexpectedly. The coach republishes the safe tabletop state;
     /// players wait for that authoritative update without trying to recreate it.
     func handleSharedPitchAnchorRemoval(_ anchorID: UUID) {
+        guard sharedPitchAnchorID == anchorID else { return }
         cancelTimelineScrub()
         if hasActiveCoachMarkGeometryPreview {
             rollbackAllCoachMarkGeometryPreviews(
                 interruptingEndpointGesture: hasActiveCoachMarkEndpointPreview
             )
         }
-        guard sharedPitchAnchorID == anchorID else { return }
         sharedPitchAnchorID = nil
         isLocalTrianglePreview = false
         hasLocallyAcknowledgedTrianglePlacement = false

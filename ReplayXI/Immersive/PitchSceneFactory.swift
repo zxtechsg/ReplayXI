@@ -800,7 +800,12 @@ enum PitchSceneFactory {
                 let isSelected = player.id == perspectiveID
                 let pose = playerPosesByID[player.id]
                     ?? playerPresentation.pose(for: player, at: time)
-                let locomotion = player.locomotion(at: time)
+                let stationaryPose = playerPresentation.stationaryPose(
+                    for: player, at: time, facing: presentationBallPosition
+                )
+                let locomotion = stationaryPose == nil
+                    ? player.locomotion(at: time)
+                    : player.stationaryLocomotion
                 // A cue is explicit and singular, so normal telemetry remains
                 // the only animation source for every uncued player. Shape Lab
                 // intentionally ignores impacts because it presents authored
@@ -813,24 +818,13 @@ enum PitchSceneFactory {
                 } else {
                     nil
                 }
-                let idealTarget = triangleTargetsByPlayerID[player.id]
                 let presentationPosition = pose.position
-                let presentationFacingDegrees = pose.facingDegrees
+                let presentationFacingDegrees = stationaryPose?.facingDegrees ?? pose.facingDegrees
                 entity.position = [presentationPosition.x, 0, presentationPosition.z]
-                if showsIdealShape,
-                   idealTarget != nil,
-                   ReplayGeometry.distance(presentationPosition, presentationBallPosition) > 0.05 {
-                    let facingRadians = atan2(
-                        presentationBallPosition.x - presentationPosition.x,
-                        presentationBallPosition.z - presentationPosition.z
-                    )
-                    entity.orientation = simd_quatf(angle: facingRadians, axis: [0, 1, 0])
-                } else {
-                    entity.orientation = simd_quatf(
-                        angle: presentationFacingDegrees * .pi / 180,
-                        axis: [0, 1, 0]
-                    )
-                }
+                entity.orientation = simd_quatf(
+                    angle: presentationFacingDegrees * .pi / 180,
+                    axis: [0, 1, 0]
+                )
                 if viewMode == .positional {
                     entity.isEnabled = effectiveTriangleMode == .visualise
                         && (
@@ -968,7 +962,7 @@ enum PitchSceneFactory {
                 if needsDetailedRig, let skin = sceneState?.skinnedAthletes[player.id] {
                     usesNewSkin = skin.update(at: time, track: player, locomotion: locomotion,
                                              lookTarget: playerLookTarget, ballAction: ballAction,
-                                             impact: impactSample)
+                                             impact: impactSample, stationaryPose: stationaryPose)
                 } else {
                     usesNewSkin = false
                 }
@@ -1016,7 +1010,8 @@ enum PitchSceneFactory {
                         locomotion: locomotion,
                         lookTargetWorldPosition: playerLookTarget,
                         ballTrack: activeRagdollCue == nil ? athleteBallActionTrack : nil,
-                        cache: sceneState
+                        cache: sceneState,
+                        stationaryPose: stationaryPose
                     )
                     if let impactSample {
                         applyRagdollPose(
@@ -1034,7 +1029,8 @@ enum PitchSceneFactory {
                         locomotion: locomotion,
                         lookTargetWorldPosition: playerLookTarget,
                         ballTrack: athleteBallActionTrack,
-                        cache: sceneState
+                        cache: sceneState,
+                        stationaryPose: stationaryPose
                     )
                 }
             }
@@ -1076,11 +1072,16 @@ enum PitchSceneFactory {
         case .touchline: 1.5
         case .positional: 1.8
         }
+        let ballRadius: Float = 0.11
+        let presentedBallHeight = isTriangleView ? ballRadius : max(ballPose.height, ballRadius)
+        // Larger review markers keep the physical ball's bottom altitude.
+        // Scaling about an unchanged centre otherwise buries them in the turf.
+        let visualBallRadiusOffset = ballRadius * (ballScale - 1)
         let showsBall = viewMode != .positional || effectiveTriangleMode == .visualise
         if let ball = directChild(named: "ball", of: root) {
             ball.position = [
                 presentationBallPosition.x,
-                isTriangleView ? 0.11 : max(ballPose.height, 0.11),
+                presentedBallHeight + visualBallRadiusOffset,
                 presentationBallPosition.z
             ]
             ball.orientation = simd_quatf(
@@ -1091,7 +1092,7 @@ enum PitchSceneFactory {
             ball.isEnabled = showsBall
         }
         if let shadow = directChild(named: "ball-shadow", of: root) {
-            let lift = max(ballPose.height - 0.11, 0)
+            let lift = max(presentedBallHeight - ballRadius, 0)
             let spread = 1 + min(lift * 0.16, 0.65)
             shadow.position = [presentationBallPosition.x, 0.006, presentationBallPosition.z]
             shadow.scale = [ballScale * spread, 1, ballScale * spread * 0.74]
@@ -1113,7 +1114,10 @@ enum PitchSceneFactory {
             && !showsIdealShape
         func canPresentAnnotation(_ mark: CoachMark) -> Bool {
             guard isTriangleView else { return true }
-            guard effectiveTriangleMode == .visualise else { return false }
+            // Tracking loss changes how the drill is rendered, not which
+            // editing tools it owns. Do not reopen hidden handles while the
+            // physical station workflow is still active.
+            guard triangleLockMode != .place else { return false }
             // The preset pressure overlay belongs only to Problem. A coach's
             // own marks remain visible in both tabletop comparison stages.
             // These immutable preset IDs are few; inspect them directly rather
@@ -1287,7 +1291,8 @@ enum PitchSceneFactory {
             snapshot: selectedSemanticMark == nil ? validDecisionSnapshot : nil,
             scenario: scenario,
             viewMode: viewMode,
-            isDrawing: isDrawing
+            isDrawing: isDrawing,
+            presentedPlayerPoses: playerPosesByID
         )
 
         if let targets = directChild(named: "targets-root", of: root) {
@@ -3660,7 +3665,8 @@ enum PitchSceneFactory {
         locomotion: PlayerLocomotionSample,
         lookTargetWorldPosition: SIMD3<Float>?,
         ballTrack: BallTrack?,
-        cache: AnnotationSceneCache?
+        cache: AnnotationSceneCache?,
+        stationaryPose: PlayerPose?
     ) {
         guard let marker = directChild(named: "table-marker", of: entity),
               marker.isEnabled else { return }
@@ -3677,7 +3683,8 @@ enum PitchSceneFactory {
                 locomotion: locomotion,
                 lookTargetWorldPosition: lookTargetWorldPosition,
                 ballTrack: ballTrack,
-                cache: cache
+                cache: cache,
+                stationaryPose: stationaryPose
             )
             return
         }
@@ -3697,9 +3704,12 @@ enum PitchSceneFactory {
             for: track,
             at: time,
             locomotion: locomotion,
-            targetWorldPosition: lookTargetWorldPosition
+            targetWorldPosition: lookTargetWorldPosition,
+            stationaryPose: stationaryPose
         )
-        let gaitPhase = track.gaitPhase(at: time)
+        let gaitPhase = stationaryPose == nil
+            ? track.gaitPhase(at: time)
+            : locomotion.motion.locomotionPhase
         let cycle = sin(gaitPhase)
         let doubleCycle = sin(gaitPhase * 2)
         let movingScale: Float = effort > 0.015 ? 1 : 0
@@ -3740,7 +3750,8 @@ enum PitchSceneFactory {
         locomotion: PlayerLocomotionSample,
         lookTargetWorldPosition: SIMD3<Float>?,
         ballTrack: BallTrack?,
-        cache: AnnotationSceneCache?
+        cache: AnnotationSceneCache?,
+        stationaryPose: PlayerPose?
     ) {
         guard let fullRig = directChild(named: "full-rig", of: entity),
               fullRig.isEnabled else { return }
@@ -3751,7 +3762,8 @@ enum PitchSceneFactory {
             locomotion: locomotion,
             lookTargetWorldPosition: lookTargetWorldPosition,
             ballTrack: ballTrack,
-            cache: cache
+            cache: cache,
+            stationaryPose: stationaryPose
         )
     }
 
@@ -3808,16 +3820,20 @@ enum PitchSceneFactory {
         locomotion: PlayerLocomotionSample,
         lookTargetWorldPosition: SIMD3<Float>?,
         ballTrack: BallTrack?,
-        cache: AnnotationSceneCache?
+        cache: AnnotationSceneCache?,
+        stationaryPose: PlayerPose?
     ) {
         guard let binding = athleteBinding(for: fullRig, cache: cache) else { return }
         let pose = ReplayAthleteMotion.locomotionPose(
             for: track,
             at: time,
             locomotion: locomotion,
-            gaitPhase: track.gaitPhase(at: time),
+            gaitPhase: stationaryPose == nil
+                ? track.gaitPhase(at: time)
+                : locomotion.motion.locomotionPhase,
             lookTargetWorldPosition: lookTargetWorldPosition,
-            ballTrack: ballTrack
+            ballTrack: ballTrack,
+            stationaryPose: stationaryPose
         )
         ReplayAthleteMotion.apply(pose, to: binding)
     }
