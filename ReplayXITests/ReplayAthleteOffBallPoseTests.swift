@@ -76,6 +76,60 @@ final class ReplayAthleteOffBallPoseTests: XCTestCase {
         }
     }
 
+    func testRelaxedArmSetIsSmallIndividualContinuousAndYieldsToRunning() {
+        for id in ["red-4", "white-4", "red-6", "white-6"] {
+            for step in 0..<300 {
+                let value = sample(id: id, time: Double(step) / 60)
+                let next = sample(id: id, time: Double(step + 1) / 60)
+                XCTAssertEqual(value.armSetWeight, 1)
+                XCTAssertEqual(value.bracingWeight, 0)
+                for arm in [value.leftArm, value.rightArm] {
+                    XCTAssertTrue((Float(0.0749)...0.1251).contains(arm.forward))
+                    XCTAssertTrue((Float(0.0799)...0.1201).contains(arm.outward))
+                    XCTAssertTrue((Float(0.2999)...0.4001).contains(arm.elbowFlexion))
+                }
+                XCTAssertLessThan(abs(value.leftArm.elbowFlexion - next.leftArm.elbowFlexion), 0.001)
+                XCTAssertLessThan(abs(value.rightArm.elbowFlexion - next.rightArm.elbowFlexion), 0.001)
+            }
+        }
+        XCTAssertNotEqual(sample(id: "red-4").leftArm, sample(id: "white-4").leftArm)
+        XCTAssertNotEqual(sample().leftArm, sample().rightArm)
+        let source = simd_quatf(angle: 0.8, axis: SIMD3<Float>(1, 0, 0))
+        for speed: Float in [2.8, 3.6, 8] {
+            let running = sample(speed: speed)
+            XCTAssertEqual(running.armSetWeight, 0)
+            XCTAssertEqual(running.bracingWeight, 0)
+            XCTAssertEqual(running.shoulder(source, isLeft: true).vector, source.vector)
+            XCTAssertEqual(running.elbow(source, isLeft: false).vector, source.vector)
+        }
+        let braking = sample(speed: 3.6, acceleration: -8)
+        XCTAssertEqual(braking.armSetWeight, 0)
+        XCTAssertEqual(braking.bracingWeight, 1)
+        XCTAssertLessThan(braking.shoulderBrace(isLeft: true).angle, 0.09)
+    }
+
+    func testProceduralIdleArmsBendWithoutMovingLegsOrWristPose() {
+        let player = player(speed: 0)
+        func pose(_ enabled: Bool, stationary: Bool = false) -> ReplayAthleteLocomotionPose {
+            ReplayAthleteMotion.locomotionPose(for: player, at: 3, locomotion: locomotion(),
+                lookTargetWorldPosition: [12, 0.11, 20],
+                stationaryPose: stationary ? player.pose(at: 3) : nil,
+                presentationPose: player.presentationPose(at: 3), allowsOffBallPose: enabled)
+        }
+        let before = pose(false), after = pose(true)
+        XCTAssertEqual(before.bodyPosition, after.bodyPosition)
+        XCTAssertEqual(before.hipsPosition, after.hipsPosition)
+        XCTAssertEqual(Array(allRotations(before)[5...10]), Array(allRotations(after)[5...10]))
+        XCTAssertGreaterThan(after.leftElbowOrientation.angle, 0.29)
+        XCTAssertGreaterThan(after.rightElbowOrientation.angle, 0.29)
+        XCTAssertLessThan(after.leftElbowOrientation.angle, 0.41)
+        XCTAssertLessThan(after.rightElbowOrientation.angle, 0.41)
+        XCTAssertNotEqual(before.leftShoulderOrientation.vector, after.leftShoulderOrientation.vector)
+        XCTAssertEqual(before.leftWristOrientation.vector, after.leftWristOrientation.vector)
+        XCTAssertEqual(before.rightWristOrientation.vector, after.rightWristOrientation.vector)
+        XCTAssertEqual(allRotations(pose(false, stationary: true)), allRotations(pose(true, stationary: true)))
+    }
+
     func testNativeBrakeCorrectionOnlyFillsUnreplacedSourceFraction() {
         XCTAssertEqual(sample(speed: 3.6, acceleration: -8, source: 1).chestPitch, 0.10, accuracy: 0.000001)
         XCTAssertEqual(sample(speed: 3.6, acceleration: 8, source: 1).chestPitch, -0.09, accuracy: 0.000001)
@@ -221,6 +275,29 @@ final class ReplayAthleteOffBallPoseTests: XCTestCase {
             XCTAssertEqual(baseline[0].rotations[chest].vector, baseline[1].rotations[chest].vector)
             XCTAssertNotEqual(active[0].rotations[chest].vector, active[1].rotations[chest].vector)
             for index in skins.indices {
+                let motion = skins[index].motion
+                for side in ["left", "right"] {
+                    let shoulder = try XCTUnwrap(motion.semanticJointIndices[side + "Shoulder"])
+                    let elbow = try XCTUnwrap(motion.semanticJointIndices[side + "Elbow"])
+                    let wrist = try XCTUnwrap(motion.semanticJointIndices[side + "Wrist"])
+                    func point(_ joint: Int) -> SIMD3<Float> {
+                        let p = active[index].modelSpaceTransforms[joint].columns.3
+                        return [p.x, p.y, p.z]
+                    }
+                    let upper = point(elbow) - point(shoulder)
+                    let lower = point(wrist) - point(elbow)
+                    let angle = acos(min(max(simd_dot(simd_normalize(upper), simd_normalize(lower)), -1), 1))
+                    XCTAssertGreaterThan(angle, 0.27, "\(detail) \(side) actual elbow bends")
+                    XCTAssertLessThan(angle, 0.43, "\(detail) \(side) relaxed, not blocking")
+                    XCTAssertNotEqual(active[index].rotations[elbow].vector, baseline[index].rotations[elbow].vector)
+                    XCTAssertEqual(active[index].rotations[wrist].vector, baseline[index].rotations[wrist].vector)
+                    for (a, b) in [(shoulder, elbow), (elbow, wrist)] {
+                        XCTAssertEqual(simd_distance(active[index].modelSpaceTransforms[a].columns.3,
+                                                     active[index].modelSpaceTransforms[b].columns.3),
+                                       simd_distance(motion.restPose.modelSpaceTransforms[a].columns.3,
+                                                     motion.restPose.modelSpaceTransforms[b].columns.3), accuracy: 0.0002)
+                    }
+                }
                 for name in ["hips", "leftHip", "rightHip", "leftKnee", "rightKnee", "leftAnkle", "rightAnkle"] {
                     let joint = try XCTUnwrap(skins[index].motion.semanticJointIndices[name])
                     XCTAssertEqual(active[index].translations[joint], baseline[index].translations[joint])

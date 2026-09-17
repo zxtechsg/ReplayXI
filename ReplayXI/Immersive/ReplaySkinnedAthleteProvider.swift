@@ -240,6 +240,8 @@ final class ReplaySkinnedAthleteInstance {
     private let inverseRestChestRotation: simd_quatf
     private let restHeadRotation: simd_quatf
     private let neckCompensatedChildren: [Int]
+    private let offBallLeftArm: ReplayAthleteOffBallPose.NativeArmBinding?
+    private let offBallRightArm: ReplayAthleteOffBallPose.NativeArmBinding?
     private var footballPose: ReplaySkinnedAthleteFootballPose?
     private var impactPose: ReplaySkinnedAthleteImpactPose?
 
@@ -260,6 +262,8 @@ final class ReplaySkinnedAthleteInstance {
         pose = motion.makePoseBuffer()
         footballPose = ReplaySkinnedAthleteFootballPose(motion: motion, bootMarkers: bootMarkers)
         impactPose = ReplaySkinnedAthleteImpactPose(motion: motion, contactSurface: contactSurface)
+        offBallLeftArm = .init(side: "left", motion: motion)
+        offBallRightArm = .init(side: "right", motion: motion)
         transforms = model.jointTransforms
         neckIndex = motion.semanticJointIndices["neck"]!
         headIndex = motion.semanticJointIndices["head"]!
@@ -391,6 +395,10 @@ final class ReplaySkinnedAthleteInstance {
         }
         pose.rotations[chest] = simd_normalize(parentRotation.inverse * sample.chestRotation
             * parentRotation * pose.rotations[chest])
+        let torso = ReplayAthleteOffBallPose.modelRotation(chest, motion: motion, pose: pose)
+            * inverseRestChestRotation
+        offBallLeftArm?.apply(sample, torso: torso, motion: motion, to: &pose)
+        offBallRightArm?.apply(sample, torso: torso, motion: motion, to: &pose)
     }
 
     private func constrainHeadRelativeToChest() {

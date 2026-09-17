@@ -398,30 +398,30 @@ enum ReplayAthleteMotion {
             rightKneeOrientation: simd_quatf(angle: rightKneeBend, axis: [1, 0, 0]),
             leftAnkleOrientation: simd_quatf(angle: leftAnkleAngle, axis: [1, 0, 0]),
             rightAnkleOrientation: simd_quatf(angle: rightAnkleAngle, axis: [1, 0, 0]),
-            leftShoulderOrientation: simd_quatf(
+            leftShoulderOrientation: offBall.shoulder(simd_quatf(
                 angle: -(keeperReach + balanceReach),
                 axis: [0, 0, 1]
             ) * simd_quatf(
                 angle: rightFootfall.stride * tuning.strideAmplitude * tuning.armSwing,
                 axis: [1, 0, 0]
-            ),
-            rightShoulderOrientation: simd_quatf(
+            ), isLeft: true),
+            rightShoulderOrientation: offBall.shoulder(simd_quatf(
                 angle: keeperReach + balanceReach,
                 axis: [0, 0, 1]
             ) * simd_quatf(
                 angle: leftFootfall.stride * tuning.strideAmplitude * tuning.armSwing,
                 axis: [1, 0, 0]
-            ),
-            leftElbowOrientation: simd_quatf(
+            ), isLeft: false),
+            leftElbowOrientation: offBall.elbow(simd_quatf(
                 // Limbs hang down -Y and the footballer faces +Z. Elbow
                 // flexion is -X (forward), opposite to a knee's +X fold.
                 angle: -(elbowBend + (max(-rightFootfall.stride, 0) * tuning.elbowTravel)),
                 axis: [1, 0, 0]
-            ),
-            rightElbowOrientation: simd_quatf(
+            ), isLeft: true),
+            rightElbowOrientation: offBall.elbow(simd_quatf(
                 angle: -(elbowBend + (max(-leftFootfall.stride, 0) * tuning.elbowTravel)),
                 axis: [1, 0, 0]
-            ),
+            ), isLeft: false),
             leftWristOrientation: simd_quatf(
                 angle: rightFootfall.stride * tuning.wristTravel,
                 axis: [0, 1, 0]

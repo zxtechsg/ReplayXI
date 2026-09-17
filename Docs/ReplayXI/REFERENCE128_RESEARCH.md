@@ -66,6 +66,12 @@ Previously assessed StatsBomb 360 remains sparse event snapshots, not continuous
 
 ## Recommended next steps
 
+The [official FM26 match-day breakdown](https://www.footballmanager.com/fm26/features/where-storytelling-evolves-fm26s-match-day-experience)
+describes volumetric on-ball capture, additional off-ball motion capture and
+contextual animation blending. That is the relevant benchmark: varied football
+motion and well-matched transitions, not simply a higher-polygon body. This pass
+adds bounded secondary behaviour; it does not import that motion library.
+
 1. Calibrate volley timing and planted-header/body-turn poses against the official Training Centre clip. Keep the evidence-labelled authoring workflow; no claim of recovered motion capture.
 2. Request FIFA permission for isolated cable/tactical feeds and high-resolution masters of match minutes 35–36, 80–81 and 108–109. Ask specifically for camera calibration and timecode if available.
 3. If the project qualifies, the user/institution can request WorldPose access and ask whether the exact windows exist. Clarify identity use and whether a named-player MVP presentation is allowed **before** using data.
