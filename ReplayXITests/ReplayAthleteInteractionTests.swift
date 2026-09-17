@@ -199,9 +199,16 @@ final class ReplayAthleteInteractionTests: XCTestCase {
     func testNearbyBallReadinessCrouchesWithoutMovingStationarySoles() throws {
         let player = player()
         let target = SIMD3<Float>(0, 0.11, 2)
-        let base = ReplayAthleteMotion.locomotionPose(for: player, at: 1, lookTargetWorldPosition: target)
+        // Isolate readiness footwork. Off-ball torso/gaze sharing deliberately
+        // changes local head rotation and has its own separate pose tests.
+        let locomotion = player.locomotion(at: 1)
+        let phase = player.gaitPhase(at: 1)
+        let base = ReplayAthleteMotion.locomotionPose(for: player, at: 1,
+            locomotion: locomotion, gaitPhase: phase, lookTargetWorldPosition: target,
+            allowsOffBallPose: false)
         let prepared = ReplayAthleteMotion.locomotionPose(for: player, at: 1,
-            lookTargetWorldPosition: target, presentationPose: .init(position: .zero, facingDegrees: 0))
+            locomotion: locomotion, gaitPhase: phase, lookTargetWorldPosition: target,
+            presentationPose: .init(position: .zero, facingDegrees: 0), allowsOffBallPose: false)
         XCTAssertEqual(prepared.bodyPosition.y, base.bodyPosition.y - 0.02, accuracy: 0.000_01)
         for side in [ReplayAthleteLeg.left, .right] {
             XCTAssertLessThan(simd_distance(foot(prepared, side: side, marker: ReplayAthleteInteractionPose.bootSoleMarker),
