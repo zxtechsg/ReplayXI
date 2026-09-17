@@ -6,13 +6,13 @@ import simd
 /// timing and neutral kits are deliberately approximate.
 enum FootballReferenceScenarios {
     static let sourceURL = URL(string: "https://www.youtube.com/watch?v=RgqKdplLIk4")!
-    static let worldCupIDs = ["final-36-counter-v2", "final-81-volley", "final-108-rebound-v2"]
+    static let worldCupIDs = ["final-36-counter-v2", "final-81-volley-v2", "final-108-rebound-v2"]
     static let ids = worldCupIDs + CityLiverpoolReferenceScenarios.ids
-    static let all: [ReplayScenario] = [WorldCupCounterReference.scenario, volley, rebound] + CityLiverpoolReferenceScenarios.all
+    static let all: [ReplayScenario] = [WorldCupCounterReference.scenario, WorldCupVolleyReference.scenario, rebound] + CityLiverpoolReferenceScenarios.all
     /// Revised routes and contact actors get new IDs. Old saved reviews retain
     /// their original sequence instead of silently moving timed annotations.
-    private static let legacyIDs = ["final-36-counter", "final-108-rebound"]
-    static let legacy: [ReplayScenario] = [legacyCounter, legacyRebound]
+    private static let legacyIDs = ["final-36-counter", "final-81-volley", "final-108-rebound"]
+    static let legacy: [ReplayScenario] = [legacyCounter, legacyVolley, legacyRebound]
 
     static func contains(_ scenario: ReplayScenario) -> Bool {
         ids.contains(scenario.id) || legacyIDs.contains(scenario.id)
@@ -70,7 +70,8 @@ enum FootballReferenceScenarios {
         case ids[0]: return WorldCupCounterReference.touches
         case "final-36-counter": beats = counterBeats
         case "final-108-rebound": beats = legacyReboundBeats
-        case ids[1]: beats = volleyBeats
+        case "final-81-volley": beats = volleyBeats
+        case ids[1]: return WorldCupVolleyReference.touches
         case ids[2]: beats = reboundBeats
         default: return CityLiverpoolReferenceScenarios.touches(for: scenario)
         }
@@ -99,6 +100,17 @@ enum FootballReferenceScenarios {
         }
     }
 
+    /// Optional, explicitly authored body direction, not recovered gaze. Sparse
+    /// angles are interpolated along the shortest turn and retain the same
+    /// 140°/s heading limit as the ordinary route-derived direction.
+    struct FacingWaypoint {
+        let time: Double
+        let degrees: Float
+        init(_ time: Double, _ degrees: Float) {
+            self.time = time; self.degrees = degrees
+        }
+    }
+
     private static var legacyCounter: ReplayScenario {
         make(id: "final-36-counter", title: "The counterattack", minute: "36′", duration: 10.5,
              beats: counterBeats, attacking: .home, perspective: "arg-11",
@@ -118,8 +130,8 @@ enum FootballReferenceScenarios {
              ])
     }
 
-    private static var volley: ReplayScenario {
-        make(id: ids[1], title: "The one-two volley", minute: "81′", duration: 8.5,
+    private static var legacyVolley: ReplayScenario {
+        make(id: "final-81-volley", title: "The one-two volley", minute: "81′", duration: 8.5,
              beats: volleyBeats, attacking: .away, perspective: "fra-10",
              objective: "Pass, turn and attack the return before the defence sets.",
              cues: [(0, "Win it back", "React to the turnover as a unit."),
@@ -169,12 +181,13 @@ enum FootballReferenceScenarios {
     static func make(id: String, title: String, minute: String, duration: Double,
                              beats: [Beat], attacking: FootballTeam, perspective: String,
                              objective: String, cues: [(Double,String,String)],
-                             paths: [String:[Waypoint]]) -> ReplayScenario {
+                             paths: [String:[Waypoint]],
+                             facingPaths: [String:[FacingWaypoint]] = [:]) -> ReplayScenario {
         let ball = BallTrack(keyframes: beats.map {
             BallKeyframe(time: $0.time, position: $0.point, height: $0.height)
         } + [BallKeyframe(time: duration, position: beats.last!.point, height: 0.11)])
         let roster = players(duration: duration, beats: beats, ball: ball,
-                             attacking: attacking, paths: paths, id: id)
+                             attacking: attacking, paths: paths, facingPaths: facingPaths, id: id)
         let featured = Array(beats.map(\.playerID).filter { !$0.isEmpty }.reduce(into: [String]()) {
             if !$0.contains($1) { $0.append($1) }
         })
@@ -192,10 +205,12 @@ enum FootballReferenceScenarios {
     }
 
     private static func players(duration: Double, beats: [Beat], ball: BallTrack,
-                                attacking: FootballTeam, paths: [String:[Waypoint]], id: String) -> [PlayerTrack] {
+                                attacking: FootballTeam, paths: [String:[Waypoint]],
+                                facingPaths: [String:[FacingWaypoint]], id: String) -> [PlayerTrack] {
         let isRebound = id == ids[2] || id == "final-108-rebound"
+        let isVolley = id == ids[1] || id == "final-81-volley"
         let homeNumbers = isRebound ? [23,4,13,19,3,24,5,20,10,22,8]
-            : id == ids[1] ? [23,26,13,19,3,24,7,20,10,9,8] : [23,26,13,19,3,24,7,20,10,9,11]
+            : isVolley ? [23,26,13,19,3,24,7,20,10,9,8] : [23,26,13,19,3,24,7,20,10,9,11]
         let awayNumbers = id.hasPrefix("final-36-counter") ? [1,5,4,18,22,8,14,7,11,9,10]
             : isRebound ? [1,5,4,18,25,8,13,20,12,26,10]
             : [1,5,4,18,25,8,14,20,12,26,10]
@@ -250,8 +265,9 @@ enum FootballReferenceScenarios {
                             ? beats[beatIndex-1].point : beats[beatIndex+1].point
                         desired = SIMD2(target.x-p.x,target.z-p.z)
                     }
-                    if simd_length_squared(desired)>0.0001 {
-                        let target = atan2(desired.x,desired.y)*180/Float.pi
+                    let authoredHeading = facingPaths[playerID].flatMap { facing(at: time, along: $0) }
+                    if authoredHeading != nil || simd_length_squared(desired)>0.0001 {
+                        let target = authoredHeading ?? atan2(desired.x,desired.y)*180/Float.pi
                         let delta = (target-heading+540).truncatingRemainder(dividingBy:360)-180
                         heading += sampleIndex == 0 ? delta : min(max(delta,-14),14)
                     }
@@ -261,5 +277,20 @@ enum FootballReferenceScenarios {
                     shirtNumber:number,team:team,isGoalkeeper:slot==0,keyframes:frames)
             }
         }
+    }
+
+    private static func facing(at time: Double, along path: [FacingWaypoint]) -> Float? {
+        guard let first = path.first, let last = path.last else { return nil }
+        if time <= first.time { return first.degrees }
+        if time >= last.time { return last.degrees }
+        guard let end = path.indices.dropFirst().first(where: { time <= path[$0].time }) else {
+            return last.degrees
+        }
+        let start = path[end - 1]
+        let finish = path[end]
+        let span = finish.time - start.time
+        guard span > 0 else { return start.degrees }
+        return ReplayGeometry.interpolateAngle(from: start.degrees, to: finish.degrees,
+                                               fraction: Float((time - start.time) / span))
     }
 }

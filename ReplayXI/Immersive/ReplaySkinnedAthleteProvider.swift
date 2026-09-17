@@ -311,7 +311,7 @@ final class ReplaySkinnedAthleteInstance {
             cue: interaction, at: time, track: track, presentationPose: stationaryPose ?? presentationPose)
         let movement = stationaryPose == nil
             ? ReplayAthleteMovementIntent.sample(track: track, at: time, presentationPose: presentationPose,
-                                               lookTarget: lookTarget) : nil
+                                               lookTarget: lookTarget, interaction: interaction) : nil
         let influence = max(ReplaySkinnedAthleteFootballPose.influence(locomotion: locomotion, ballAction: ballAction),
                             interactionSample?.influence ?? 0, movement?.influence ?? 0)
         if influence > 0, footballPose != nil {
@@ -352,7 +352,8 @@ final class ReplaySkinnedAthleteInstance {
             // Source Biped axes and torso lengths differ from the generated
             // rig. Solve from the actual model-space chest/head pivots, then
             // recover the chest's true parent-local rotation. No stretching,
-            // root correction or foot transform is introduced by a header.
+            // root correction or foot transform is introduced by this aim step.
+            // Explicit grounded headers plant their feet in footballPose above.
             let chestIndex = motion.numberAnchors.jointIndex
             let chest = pose.modelSpaceTransforms[chestIndex]
             let head = pose.modelSpaceTransforms[headIndex]
@@ -364,7 +365,13 @@ final class ReplaySkinnedAthleteInstance {
             let parentRotation = parent < 0 ? simd_quatf(real: 1, imag: .zero)
                 : simd_quatf(pose.modelSpaceTransforms[parent])
             let world = simd_quatf(chest)
-            let desired = ReplayAthleteInteractionPose.blend(world, aim * world, action.influence)
+            let desired: simd_quatf
+            if action.headerSupportLeg != nil {
+                desired = contactSurface.plantedHeaderAim(aim, weight: action.influence,
+                    pivot: pivot, head: head, ball: ball) * world
+            } else {
+                desired = ReplayAthleteInteractionPose.blend(world, aim * world, action.influence)
+            }
             pose.rotations[chestIndex] = simd_normalize(parentRotation.inverse * desired)
             motion.rebuildModelSpaceTransforms(in: &pose)
         }

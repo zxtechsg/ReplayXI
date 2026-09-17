@@ -124,7 +124,7 @@ struct ReplaySkinnedAthleteFootballPose {
         let rightTarget = Self.target(for: right, authored: authored, body: body, root: rootPosition,
                                       interaction: interaction, marker: bootMarkers?.marker(for: right.ankle),
                                       groundOffset: motion.geometry.restMinY)
-        if let interaction, interaction.kind.usesFeet || interaction.kind == .save, let bootMarkers {
+        if let interaction, interaction.plantsFeet, let bootMarkers {
             for marker in bootMarkers.markers {
                 for index in marker.toeDescendants {
                     target.translations[index] = motion.restPose.translations[index]
@@ -232,7 +232,7 @@ struct ReplaySkinnedAthleteFootballPose {
                 }
             }
         }
-        if let interaction, let bootMarkers, interaction.kind.usesFeet || interaction.kind == .save {
+        if let interaction, let bootMarkers, interaction.plantsFeet {
             let toeWeight = weight * interaction.influence
             for marker in bootMarkers.markers {
                 for index in marker.toeDescendants {
@@ -316,7 +316,7 @@ struct ReplaySkinnedAthleteFootballPose {
         let ankleDelta = kneeDelta * ankle
         let hipPosition = root + body.act(leg.hipOffset)
         let kneePosition = hipPosition + hipDelta.act(SIMD3(0, -leg.upperLength, 0))
-        if let interaction, interaction.kind.usesFeet || interaction.kind == .save, let marker {
+        if let interaction, interaction.plantsFeet, let marker {
             let striking = interaction.kind.usesFeet && leg.side == interaction.kickingLeg
             let foot = simd_normalize((striking ? interaction.footOrientation : interaction.supportFootOrientation)
                                      * leg.ankleNeutralRotation)
@@ -327,7 +327,8 @@ struct ReplaySkinnedAthleteFootballPose {
             if let solved = ReplayAthleteTwoBoneIK.solve(hip: hipPosition, ankle: ankleGoal,
                                                          upperLength: leg.upperLength,
                                                          lowerLength: leg.lowerLength,
-                                                         pole: interaction.footOrientation.act([0, 0, 1])) {
+                                                         pole: (interaction.headerSupportLeg == nil
+                                                            ? interaction.footOrientation : interaction.supportFootOrientation).act([0, 0, 1])) {
                 let blend = interaction.influence
                 let oldAnkle = kneePosition + kneeDelta.act(SIMD3(0, -leg.lowerLength, 0))
                 return LegTarget(

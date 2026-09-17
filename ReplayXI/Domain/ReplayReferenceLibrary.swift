@@ -11,7 +11,7 @@ enum ReplayReferenceLibrary {
             worldCup("ARG–FRA · 36′", start: 2_205, end: 2_220)
         case "final-36-counter":
             worldCup("ARG–FRA · 36′ · Legacy", start: 2_205, end: 2_220)
-        case "final-81-volley":
+        case "final-81-volley-v2", "final-81-volley":
             worldCup("ARG–FRA · 81′", start: 5_439, end: 5_460)
         case "final-108-rebound-v2":
             worldCup("ARG–FRA · 108′", start: 7_779, end: 7_800,

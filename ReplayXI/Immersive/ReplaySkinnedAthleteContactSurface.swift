@@ -53,6 +53,10 @@ struct ReplaySkinnedAthleteContactSurface: Sendable {
     private let ranges: [Range<Int>]
     private let influences: [Influence]
     private let jointCount: Int
+    /// Rigid skull probes from the admitted asset, not a guessed forehead.
+    /// Cached and bounded at load; header aiming never reads a mesh per frame.
+    private let headerPoints: [SIMD4<Float>]
+    var headerProbeCount: Int { headerPoints.count }
 
     var vertexCount: Int { ranges.count }
     var influenceCount: Int { influences.count }
@@ -114,6 +118,8 @@ struct ReplaySkinnedAthleteContactSurface: Sendable {
         ranges.reserveCapacity(document.vertices.count)
         influences.reserveCapacity(document.vertices.count * 4)
         var identities = Set<String>()
+        var skull: [SIMD4<Float>] = []
+        let headJoint = motion.semanticJointIndices["head"]
         for vertex in document.vertices {
             guard !vertex.id.isEmpty, vertex.id.count <= 40, identities.insert(vertex.id).inserted,
                   vertex.position.count == 3, vertex.position.allSatisfy({ $0.isFinite && abs($0) <= 3 }),
@@ -127,6 +133,10 @@ struct ReplaySkinnedAthleteContactSurface: Sendable {
             let total = vertex.weights.reduce(0, +)
             guard abs(total - 1) <= 0.0001 else { throw DecodeError.invalid("Unnormalised contact weights") }
             let point = SIMD4<Float>(vertex.position[0], vertex.position[1], vertex.position[2], 1)
+            if let headJoint, vertex.joints == [headJoint],
+               vertex.position[1] >= motion.geometry.restMinY + motion.geometry.nominalHeight - 0.19 {
+                skull.append(inverses[headJoint] * point)
+            }
             let start = influences.count
             for (joint, weight) in zip(vertex.joints, vertex.weights) {
                 influences.append(Influence(joint: joint, localPoint: inverses[joint] * point, weight: weight / total))
@@ -137,6 +147,64 @@ struct ReplaySkinnedAthleteContactSurface: Sendable {
         self.ranges = ranges
         self.influences = influences
         self.jointCount = document.jointCount
+        if skull.count <= 96 {
+            headerPoints = skull
+        } else {
+            // Evenly cover the source ordering, retaining all six extrema.
+            // Sampling is only an aiming aid; full triangle contact tests are
+            // still the independent acceptance check for every rendered LOD.
+            var chosen = Set((0..<90).map { $0 * (skull.count - 1) / 89 })
+            for axis in 0..<3 {
+                if let low = skull.indices.min(by: { skull[$0][axis] < skull[$1][axis] }) { chosen.insert(low) }
+                if let high = skull.indices.max(by: { skull[$0][axis] < skull[$1][axis] }) { chosen.insert(high) }
+            }
+            headerPoints = chosen.sorted().map { skull[$0] }
+        }
+    }
+
+    /// Stop a planted header's chest aim before its real skull probes pass
+    /// through the ball. This rotates the torso only; no root/foot relocation,
+    /// skeletal stretch, extra full-hierarchy rebuild or scene lookup.
+    @MainActor
+    func plantedHeaderAim(_ aim: simd_quatf, weight: Float, pivot: SIMD3<Float>,
+                          head: simd_float4x4, ball: SIMD3<Float>) -> simd_quatf {
+        let identity = simd_quatf(real: 1, imag: .zero)
+        let desired = ReplayAthleteInteractionPose.blend(identity, aim, weight)
+        guard weight > 0, !headerPoints.isEmpty else { return desired }
+        func clearance(_ delta: simd_quatf) -> Float {
+            var distance = Float.infinity
+            for local in headerPoints {
+                let current = head * local
+                let point = pivot + delta.act(SIMD3(current.x, current.y, current.z) - pivot)
+                distance = min(distance, simd_distance(point, ball))
+            }
+            return distance - ReplayNativeBallPhysics.radius
+        }
+        let padding: Float = 0.008
+        guard clearance(desired) < padding else { return desired }
+        let axis: SIMD3<Float> = abs(aim.angle) > 0.00001 ? aim.axis : [1, 0, 0]
+        let retreat = simd_quatf(angle: -0.45 * weight, axis: axis)
+        var previous: Float = 0
+        var best = desired
+        var bestGap = clearance(desired)
+        for step in 1...8 {
+            let fraction = Float(step) / 8
+            let candidate = ReplayAthleteInteractionPose.blend(desired, retreat, fraction)
+            let gap = clearance(candidate)
+            if gap > bestGap { best = candidate; bestGap = gap }
+            if gap >= padding {
+                var inside = previous
+                var outside = fraction
+                for _ in 0..<10 {
+                    let middle = (inside + outside) * 0.5
+                    let probe = ReplayAthleteInteractionPose.blend(desired, retreat, middle)
+                    if clearance(probe) >= padding { outside = middle } else { inside = middle }
+                }
+                return ReplayAthleteInteractionPose.blend(desired, retreat, outside)
+            }
+            previous = fraction
+        }
+        return best
     }
 
     /// Same linear skinning rule as the source mesh. The caller's model-space

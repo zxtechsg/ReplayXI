@@ -37,7 +37,7 @@ final class NativeBallSceneIntegrationTests: XCTestCase {
     func testPOVChangesAndReverseSeeksKeepTheExactBallSampleAfterCacheEviction() async throws {
         ReplayNativeBallPhysics.resetCacheForTesting()
         defer { ReplayNativeBallPhysics.resetCacheForTesting() }
-        let scenario = try XCTUnwrap(FootballReferenceScenarios.all.first { $0.id == "final-81-volley" })
+        let scenario = try XCTUnwrap(FootballReferenceScenarios.all.first { $0.id == "final-81-volley-v2" })
         let recording = try await prepare(scenario)
         let root = PitchSceneFactory.makeMatchRoot(for: scenario, nativeRecording: recording)
         defer { for child in Array(root.children) { child.removeFromParent() } }

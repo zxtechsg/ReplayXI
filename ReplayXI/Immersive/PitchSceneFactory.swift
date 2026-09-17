@@ -39,14 +39,15 @@ enum PitchSceneFactory {
                 return ReplayAthleteInteractionCue(playerID: touch.playerID, kind: kind,
                     contactTime: touch.time, startTime: touch.time - 0.32, endTime: touch.time + 0.42,
                     kickingLeg: touch.kickingLeg, contactBallWorldPosition: touch.position,
-                    outgoingDirectionWorld: touch.outgoingVelocity)
+                    outgoingDirectionWorld: touch.outgoingVelocity,
+                    headerSupportLeg: touch.headerSupportLeg)
             }, by: \.playerID)
         }
 
         func interaction(for playerID: String, at time: TimeInterval) -> ReplayAthleteInteractionCue? {
             guard let cues = interactions[playerID] else { return nil }
             var nearest: ReplayAthleteInteractionCue?
-            for cue in cues where time >= cue.startTime && time <= cue.endTime {
+            for cue in cues where ReplayAthleteMovementIntent.includesPreparation(cue, at: time) {
                 if nearest == nil || abs(cue.contactTime - time) < abs(nearest!.contactTime - time) {
                     nearest = cue
                 }

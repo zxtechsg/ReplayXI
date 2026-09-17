@@ -86,7 +86,8 @@ final class ReplayReferenceHeaderContactTests: XCTestCase {
         let cue = ReplayAthleteInteractionCue(playerID: player.id, kind: .header,
             contactTime: touch.time, startTime: touch.time - 0.32, endTime: touch.time + 0.42,
             kickingLeg: touch.kickingLeg, contactBallWorldPosition: touch.position,
-            outgoingDirectionWorld: touch.outgoingVelocity)
+            outgoingDirectionWorld: touch.outgoingVelocity,
+            headerSupportLeg: touch.headerSupportLeg)
         try ReplaySkinnedAthleteProvider.prewarm()
         try ReplaySkinnedAthleteProvider.prewarmLowDetail()
         try ReplayFarAthleteHeadProvider.prewarm()

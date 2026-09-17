@@ -8,7 +8,7 @@ final class FootballReferenceScenarioTests: XCTestCase {
         let studies = FootballReferenceScenarios.all
         XCTAssertEqual(studies.count, 5)
         XCTAssertEqual(Set(studies.map(\.id)).count, 5)
-        XCTAssertEqual(Set(DemoScenarios.catalogue.map(\.id)).count, 13)
+        XCTAssertEqual(Set(DemoScenarios.catalogue.map(\.id)).count, 14)
         XCTAssertEqual(ReplayAppMode.situationRoleplay.featuredScenarios(in: DemoScenarios.catalogue).map(\.id),
                        FootballReferenceScenarios.worldCupIDs)
         XCTAssertEqual(ReplayAppMode.matchReplay.featuredScenarios(in: DemoScenarios.catalogue).map(\.id),

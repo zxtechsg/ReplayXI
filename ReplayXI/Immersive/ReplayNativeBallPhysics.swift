@@ -31,10 +31,13 @@ enum ReplayNativeBallPhysics {
         let target: PitchPoint
         let targetHeight: Float
         let arrivalTime: TimeInterval
+        /// Explicit reference technique; nil retains the original header gait.
+        let headerSupportLeg: ReplayAthleteLeg?
 
         init(time: TimeInterval, playerID: String, kind: TouchKind = .pass,
              kickingLeg: ReplayAthleteLeg = .right, target: PitchPoint,
-             targetHeight: Float = 0.11, arrivalTime: TimeInterval) {
+             targetHeight: Float = 0.11, arrivalTime: TimeInterval,
+             headerSupportLeg: ReplayAthleteLeg? = nil) {
             self.time = time
             self.playerID = playerID
             self.kind = kind
@@ -42,6 +45,7 @@ enum ReplayNativeBallPhysics {
             self.target = target
             self.targetHeight = targetHeight
             self.arrivalTime = arrivalTime
+            self.headerSupportLeg = headerSupportLeg
         }
     }
 
@@ -52,6 +56,7 @@ enum ReplayNativeBallPhysics {
         let outgoingVelocity: SIMD3<Float>
         let kind: TouchKind
         let kickingLeg: ReplayAthleteLeg
+        var headerSupportLeg: ReplayAthleteLeg? = nil
     }
 
     struct Sample: Sendable {
@@ -245,6 +250,7 @@ enum ReplayNativeBallPhysics {
         let loft: Float
         let kind: TouchKind
         let kickingLeg: ReplayAthleteLeg
+        var headerSupportLeg: ReplayAthleteLeg? = nil
     }
 
     private static func makeIntents(track: BallTrack, players: [PlayerTrack], plan: [PlannedTouch]?) throws -> [Intent] {
@@ -259,6 +265,7 @@ enum ReplayNativeBallPhysics {
                       touch.arrivalTime <= end + 5, touch.target.x.isFinite, touch.target.z.isFinite,
                       abs(touch.target.x) <= 100, abs(touch.target.z) <= 100,
                       touch.targetHeight.isFinite, (0...25).contains(touch.targetHeight),
+                      touch.headerSupportLeg == nil || touch.kind == .header,
                       let player = players.first(where: { $0.id == touch.playerID }) else {
                     throw Failure.invalidInput
                 }
@@ -266,7 +273,8 @@ enum ReplayNativeBallPhysics {
                 intents.append(Intent(time: touch.time, player: player,
                                       target: [touch.target.x, max(radius, touch.targetHeight), touch.target.z],
                                       arrivalTime: touch.arrivalTime, loft: touch.targetHeight,
-                                      kind: touch.kind, kickingLeg: touch.kickingLeg))
+                                      kind: touch.kind, kickingLeg: touch.kickingLeg,
+                                      headerSupportLeg: touch.headerSupportLeg))
             }
             return intents
         }

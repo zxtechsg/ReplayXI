@@ -19,11 +19,15 @@ struct ReplayAthleteInteractionCue: Equatable, Sendable {
     let contactBallWorldPosition: SIMD3<Float>
     let outgoingDirectionWorld: SIMD3<Float>
     let supportFootWorldPosition: SIMD3<Float>?
+    /// Anatomical side in the source reference. Legacy gait side labels are
+    /// screen-space lanes (+X is `.right`); do not reuse that meaning here.
+    let headerSupportLeg: ReplayAthleteLeg?
 
     init(playerID: String, kind: Kind, contactTime: TimeInterval,
          startTime: TimeInterval, endTime: TimeInterval,
          kickingLeg: ReplayAthleteLeg, contactBallWorldPosition: SIMD3<Float>,
-         outgoingDirectionWorld: SIMD3<Float>, supportFootWorldPosition: SIMD3<Float>? = nil) {
+         outgoingDirectionWorld: SIMD3<Float>, supportFootWorldPosition: SIMD3<Float>? = nil,
+         headerSupportLeg: ReplayAthleteLeg? = nil) {
         self.playerID = playerID
         self.kind = kind
         self.contactTime = contactTime
@@ -33,6 +37,7 @@ struct ReplayAthleteInteractionCue: Equatable, Sendable {
         self.contactBallWorldPosition = contactBallWorldPosition
         self.outgoingDirectionWorld = outgoingDirectionWorld
         self.supportFootWorldPosition = supportFootWorldPosition
+        self.headerSupportLeg = headerSupportLeg
     }
 }
 
@@ -50,8 +55,22 @@ struct ReplayAthleteInteractionSample: Sendable {
     let pelvisTurn: Float
     let upperBodyPitch: Float
     let headPitch: Float
+    var headerSupportLeg: ReplayAthleteLeg? = nil
+
+    /// A +Z-facing athlete's anatomical right is the negative-X gait lane.
+    /// Only the new explicit header technique uses anatomical metadata; old
+    /// kick-side conventions and saved reference contacts remain unchanged.
+    var headerSupportLane: ReplayAthleteLeg? { headerSupportLeg?.opposite }
+
+    var plantsFeet: Bool { kind.usesFeet || kind == .save || (kind == .header && headerSupportLeg != nil) }
 
     func plantedSoleTarget(for side: ReplayAthleteLeg) -> SIMD3<Float> {
+        if kind == .header, let support = headerSupportLane {
+            guard side != support else { return supportSoleTarget }
+            // The receiving header keeps one firm plant and a trailing foot,
+            // rather than freezing both legs midway through a sprint stride.
+            return supportSoleTarget + supportFootOrientation.act([side == .left ? -0.274 : 0.274, 0.035, -0.12])
+        }
         guard side == kickingLeg else { return supportSoleTarget }
         return supportSoleTarget + supportFootOrientation.act([side == .left ? -0.274 : 0.274, 0, 0])
     }
@@ -152,6 +171,7 @@ enum ReplayAthleteInteractionPose {
               cue.endTime > cue.startTime, time >= cue.startTime, time <= cue.endTime,
               valid(cue.contactBallWorldPosition), valid(cue.outgoingDirectionWorld),
               cue.supportFootWorldPosition.map(valid) ?? true,
+              cue.headerSupportLeg == nil || cue.kind == .header,
               (-0.05...(cue.kind.usesFeet ? 1.2 : 2.8)).contains(cue.contactBallWorldPosition.y)
         else { return nil }
         let directionLength = simd_length(cue.outgoingDirectionWorld)
@@ -164,7 +184,8 @@ enum ReplayAthleteInteractionPose {
         let heading = simd_quatf(angle: current.facingDegrees * .pi / 180, axis: [0, 1, 0])
         let contactHeading = simd_quatf(angle: contact.facingDegrees * .pi / 180, axis: [0, 1, 0])
         let contactOrigin = SIMD3<Float>(contact.position.x, 0, contact.position.z)
-        let supportX: Float = cue.kickingLeg == .left ? 0.137 : -0.137
+        let supportLeg = cue.headerSupportLeg?.opposite ?? (cue.kickingLeg == .left ? .right : .left)
+        let supportX: Float = supportLeg == .right ? 0.137 : -0.137
         let supportWorld = cue.supportFootWorldPosition
             ?? (contactOrigin + contactHeading.act([supportX, 0, 0.035]))
 
@@ -216,7 +237,8 @@ enum ReplayAthleteInteractionPose {
             influence: influence,
             pelvisTurn: min(max(yaw, -0.35), 0.35),
             upperBodyPitch: cue.kind == .header ? phase * 0.14 : (cue.kind == .save ? -0.08 : 0),
-            headPitch: cue.kind == .header ? phase * 0.10 : 0
+            headPitch: cue.kind == .header ? phase * 0.10 : 0,
+            headerSupportLeg: cue.headerSupportLeg
         )
     }
 
@@ -239,6 +261,8 @@ enum ReplayAthleteInteractionPose {
             // Even a high parry needs knee room for a real support plant.
             // Zero crouch can put ankle goals beyond the .39+.35m leg shell.
             crouch = min(max(1.08 - sample.ballCentreTarget.y, 0.045), 0.34)
+        } else if sample.kind == .header, sample.headerSupportLeg != nil {
+            crouch = 0.025
         } else { crouch = sample.kind.usesFeet ? 0.045 : 0 }
         let bodyPosition = base.bodyPosition - SIMD3<Float>(0, crouch * weight, 0)
         let hipsPosition = bodyPosition + base.bodyOrientation.act(base.hipsPosition)
@@ -248,7 +272,7 @@ enum ReplayAthleteInteractionPose {
             let hip = side == .left ? base.leftHipOrientation : base.rightHipOrientation
             let knee = side == .left ? base.leftKneeOrientation : base.rightKneeOrientation
             let ankle = side == .left ? base.leftAnkleOrientation : base.rightAnkleOrientation
-            guard sample.kind.usesFeet || sample.kind == .save else { return (hip, knee, ankle) }
+            guard sample.plantsFeet else { return (hip, knee, ankle) }
             let striking = sample.kind.usesFeet && side == sample.kickingLeg
             let orientation = striking ? sample.footOrientation : sample.supportFootOrientation
             let marker = striking ? bootStrikeMarker : bootSoleMarker

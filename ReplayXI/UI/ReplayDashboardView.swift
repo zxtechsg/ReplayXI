@@ -66,7 +66,7 @@ struct ReplayDashboardView: View {
                 "--replayxi-four-minds": "four-minds",
                 "--replayxi-world-replay": "real-world-match-replay",
                 "--replayxi-final-counter": "final-36-counter-v2",
-                "--replayxi-final-volley": "final-81-volley",
+                "--replayxi-final-volley": "final-81-volley-v2",
                 "--replayxi-final-rebound": "final-108-rebound-v2",
                 "--replayxi-city-header": "city-45-overlap-header",
                 "--replayxi-city-cutback": "city-57-underlap-cutback"

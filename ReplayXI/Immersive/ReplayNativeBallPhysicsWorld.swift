@@ -164,7 +164,9 @@ final class ReplayNativeBallPhysicsWorld {
             guard needsLegs else { continue }
             // Boot collision geometry follows the same articulated chain used
             // by the visible rig, including its kick preparation/follow-through.
-            let explicitBoot = cue.map { $0.kind != .header && $0.kind != .save } ?? false
+            let explicitBoot = cue.map {
+                $0.kind.usesFeet && time >= $0.startTime && time <= $0.endTime
+            } ?? false
             setBootShape(body.leftBoot, explicit: explicitBoot)
             setBootShape(body.rightBoot, explicit: explicitBoot)
             let contact = ReplayBallPlayerContact(player: player, ball: track, time: time,
@@ -245,7 +247,8 @@ final class ReplayNativeBallPhysicsWorld {
         return ReplayAthleteInteractionCue(playerID: player.id, kind: kind, contactTime: actualContact,
                                            startTime: actualContact - 0.32, endTime: actualContact + 0.42,
                                            kickingLeg: intent.kickingLeg, contactBallWorldPosition: centre,
-                                           outgoingDirectionWorld: outgoing)
+                                           outgoingDirectionWorld: outgoing,
+                                           headerSupportLeg: intent.headerSupportLeg)
     }
 
     private func move(_ entity: ModelEntity, from start: SIMD3<Float>, to end: SIMD3<Float>, delta: TimeInterval,
@@ -322,7 +325,12 @@ final class ReplayNativeBallPhysicsWorld {
         // ball has missed the receiver, this action cannot magically recover it.
         switch intent.kind {
         case .header:
-            guard distance <= 0.65, (1.55...1.95).contains(ball.position.y) else { return nil }
+            // A planted receiving header cannot claim a high aerial contact
+            // while the licensed athlete's forehead is still below the ball.
+            // Wait for the dropping sphere; keep the original aerial envelope
+            // for headers with no explicit support-foot technique.
+            let maximumHeight: Float = intent.headerSupportLeg == nil ? 1.95 : 1.80
+            guard distance <= 0.65, (1.55...maximumHeight).contains(ball.position.y) else { return nil }
         case .save:
             // Standing parries cannot fire while the ball is still over a
             // metre away. Wait for the sphere to enter the two-hand envelope.
@@ -340,7 +348,8 @@ final class ReplayNativeBallPhysicsWorld {
         applyContactVelocity(desired, spinScale: spinScale)
         let touch = ReplayNativeBallPhysics.Touch(time: time, playerID: intent.player.id,
                                                  position: ball.position, outgoingVelocity: desired,
-                                                 kind: intent.kind, kickingLeg: intent.kickingLeg)
+                                                 kind: intent.kind, kickingLeg: intent.kickingLeg,
+                                                 headerSupportLeg: intent.headerSupportLeg)
         completedTouches.append(touch)
         return touch
     }
@@ -353,7 +362,8 @@ final class ReplayNativeBallPhysicsWorld {
                                              kind: ReplayAthleteInteractionCue.Kind(rawValue: intent.kind.rawValue) ?? .pass,
                                              contactTime: time, startTime: time - 0.32, endTime: time + 0.42,
                                              kickingLeg: intent.kickingLeg, contactBallWorldPosition: ball.position,
-                                             outgoingDirectionWorld: estimate)
+                                             outgoingDirectionWorld: estimate,
+                                             headerSupportLeg: intent.headerSupportLeg)
         let pose = intent.player.presentationPose(at: time)
         // Contact helper only needs the sparse source for the legacy path;
         // with an explicit cue it never infers a kick from these placeholders.

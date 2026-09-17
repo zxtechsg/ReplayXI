@@ -31,15 +31,21 @@ struct ReplayBallPlayerContact: Sendable {
 
     @MainActor
     init(player: PlayerTrack, ball: BallTrack, time: TimeInterval,
-         interaction: ReplayAthleteInteractionCue? = nil, presentationPose: PlayerPose? = nil) {
+        interaction: ReplayAthleteInteractionCue? = nil, presentationPose: PlayerPose? = nil) {
         let playerPose = presentationPose ?? player.presentationPose(at: time)
-        let action = interaction == nil
-            ? ReplayAthleteMotion.ballActionPose(for: player, ballTrack: ball, at: time) : nil
+        let activeInteraction = interaction.map { time >= $0.startTime && time <= $0.endTime } ?? false
+        let action = activeInteraction ? nil
+            : ReplayAthleteMotion.ballActionPose(for: player, ballTrack: ball, at: time)
+        // Share the render-side contact preparation without applying the
+        // interaction twice: the actual strike is still applied once below.
+        let movement = ReplayAthleteMovementIntent.sample(track: player, at: time,
+            presentationPose: presentationPose, lookTarget: nil, interaction: interaction)
         let base = ReplayAthleteMotion.locomotionPose(
             for: player, at: time, locomotion: player.locomotion(at: time),
             gaitPhase: player.gaitPhase(at: time),
             ballAction: action,
-            presentationPose: presentationPose
+            presentationPose: presentationPose,
+            movementIntent: movement
         )
         let pose = interaction.map {
             ReplayAthleteInteractionPose.apply(to: base, cue: $0, at: time,
@@ -51,7 +57,8 @@ struct ReplayBallPlayerContact: Sendable {
         let bodyRotation = heading * pose.bodyOrientation
         let hipsPosition = bodyPosition + bodyRotation.act(pose.hipsPosition)
         let hipsRotation = bodyRotation * pose.hipsOrientation
-        let usesExplicitBoot = interaction.map { $0.kind != .header && $0.kind != .save } ?? false
+        let usesExplicitBoot = activeInteraction
+            && (interaction.map { $0.kind != .header && $0.kind != .save } ?? false)
 
         func leg(x: Float, hip: simd_quatf, knee: simd_quatf,
                  ankle: simd_quatf) -> (Capsule, Capsule, SIMD3<Float>, SIMD3<Float>) {

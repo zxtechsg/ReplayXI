@@ -433,7 +433,8 @@ enum ReplayAthleteMotion {
         )
         let movement = stationaryPose == nil
             ? movementIntent ?? ReplayAthleteMovementIntent.sample(track: track, at: time,
-                presentationPose: presentationPose, lookTarget: lookTargetWorldPosition) : nil
+                presentationPose: presentationPose, lookTarget: lookTargetWorldPosition,
+                interaction: interaction) : nil
         let directed = ReplayAthleteMovementIntent.apply(to: base, sample: movement)
         return ReplayAthleteInteractionPose.apply(to: directed, cue: interaction, at: time,
                                                   track: track,
