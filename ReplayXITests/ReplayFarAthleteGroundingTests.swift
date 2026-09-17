@@ -53,8 +53,9 @@ final class ReplayFarAthleteGroundingTests: XCTestCase {
         return try XCTUnwrap(points.map(\.y).min())
     }
 
-    private func pose(for player: PlayerTrack, scenario: ReplayScenario, time: Double) -> ReplayAthleteLocomotionPose {
-        let ball = scenario.ball.pose(at: time)
+    private func pose(for player: PlayerTrack, scenario: ReplayScenario, time: Double,
+                      presentedBall: BallPose? = nil) -> ReplayAthleteLocomotionPose {
+        let ball = presentedBall ?? scenario.ball.pose(at: time)
         return ReplayAthleteMotion.locomotionPose(for: player, at: time,
                                                  lookTargetWorldPosition: [ball.position.x, ball.height, ball.position.z],
                                                  ballTrack: scenario.ball)
@@ -154,7 +155,9 @@ final class ReplayFarAthleteGroundingTests: XCTestCase {
                 XCTAssertGreaterThan(action.influence, 0.05)
                 update(root, scenario: scenario, time: time, view: view)
                 let (_, marker) = try farMarker(in: root, playerID: playerID)
-                try assertAuthoredPose(pose(for: player, scenario: scenario, time: time), rig: marker, allowsVerticalLift: true)
+                let displayedBall = try XCTUnwrap(PitchSceneFactory.ballPlaybackMotionForTesting(in: root)).pose(at: time)
+                try assertAuthoredPose(pose(for: player, scenario: scenario, time: time, presentedBall: displayedBall),
+                                       rig: marker, allowsVerticalLift: true)
                 let minimum = try minimumY(in: marker, relativeTo: root)
                 XCTAssertGreaterThanOrEqual(minimum, -floorTolerance,
                                            "An active touch must not bury the far support silhouette")
@@ -358,7 +361,8 @@ final class ReplayFarAthleteGroundingTests: XCTestCase {
             var hadClearPose = false
             for frame in 0...60 {
                 let time = start + Double(frame) / 120
-                let authored = pose(for: player, scenario: scenario, time: time)
+                let displayedBall = try XCTUnwrap(PitchSceneFactory.ballPlaybackMotionForTesting(in: root)).pose(at: time)
+                let authored = pose(for: player, scenario: scenario, time: time, presentedBall: displayedBall)
                 ReplayAthleteMotion.apply(authored, to: rawRig.joints)
                 // A separate test-only rig restores the raw authored translation
                 // to measure the old floor error. The visible graph is untouched.

@@ -134,8 +134,8 @@ struct ReplayAthleteKit: Equatable, Sendable {
         case .away:
             return Self(
                 shirt: .init(red: 0.72, green: 0.045, blue: 0.075),
-                trim: .init(red: 0.075, green: 0.08, blue: 0.095),
-                shorts: .init(red: 0.075, green: 0.08, blue: 0.095),
+                trim: .init(red: 0.94, green: 0.95, blue: 0.96),
+                shorts: .init(red: 0.93, green: 0.94, blue: 0.95),
                 socks: .init(red: 0.72, green: 0.045, blue: 0.075),
                 number: .init(red: 0.98, green: 0.98, blue: 0.96),
                 boots: .init(red: 0.018, green: 0.020, blue: 0.024),
@@ -167,13 +167,13 @@ struct ReplayAthleteAppearance: Equatable, Sendable {
             ReplayAthleteColor(red: 0.07, green: 0.055, blue: 0.045),
             ReplayAthleteColor(red: 0.46, green: 0.31, blue: 0.15),
         ]
-        let heights: [Float] = [0.98, 1.015, 0.965, 1.035, 0.995]
-        let widths: [Float] = [0.98, 1.02, 0.97, 1.035, 1]
         return Self(
             skin: skinTones[index],
             hair: hairTones[index],
-            heightScale: heights[index],
-            widthScale: widths[index]
+            // A palette is not measured anatomy. Until height/width are
+            // explicit physical player inputs, every team uses the same body.
+            heightScale: 1,
+            widthScale: 1
         )
     }
 }
@@ -261,6 +261,7 @@ enum ReplayAthleteRigError: Error {
 struct ReplayAthleteJointBinding {
     let root: Entity
     let farFloorSupport: ReplayFarAthleteFloorSupport?
+    let articulatedFar: ReplayArticulatedFarBinding?
     private let entities: [ReplayAthleteJoint: Entity]
 
     init(root: Entity) throws {
@@ -280,9 +281,11 @@ struct ReplayAthleteJointBinding {
         }
         self.root = root
         self.entities = resolved
-        self.farFloorSupport = ReplayFarAthleteFloorSupport(
+        let articulated = ReplayArticulatedFarBinding(root: root, joints: resolved)
+        self.articulatedFar = articulated
+        self.farFloorSupport = articulated == nil ? ReplayFarAthleteFloorSupport(
             leftHip: resolved[.leftHip]!, rightHip: resolved[.rightHip]!
-        )
+        ) : nil
     }
 
     subscript(_ joint: ReplayAthleteJoint) -> Entity {
@@ -370,6 +373,8 @@ enum ReplayAthleteFactory {
         let farPalette = lod == .far
             ? ReplayFarAthletePaletteProvider.materials(for: configuration)
             : nil
+        let farKit = lod == .far && ReplayArticulatedFarProvider.isPrewarmed
+            ? ReplayArticulatedFarKitProvider.materials(for: configuration) : nil
         let numberMaterial = UnlitMaterial(
             color: kit.number.uiColor,
             applyPostProcessToneMap: false
@@ -385,6 +390,28 @@ enum ReplayAthleteFactory {
             orientation: simd_quatf = simd_quatf(),
             scale: SIMD3<Float> = .one
         ) throws -> ModelEntity {
+            let authoredPart: ReplayArticulatedFarProvider.Part?
+            switch part {
+            case .torso: authoredPart = .torso
+            case .shorts: authoredPart = .shorts
+            case .wholeLeg: authoredPart = .leg
+            case .wholeArm: authoredPart = .arm
+            default: authoredPart = nil
+            }
+            if lod == .far, let authoredPart,
+               let model = ReplayArticulatedFarProvider.make(authoredPart, material: material) {
+                model.name = name
+                // This imported skin uses an actual unit identity, so its
+                // local matrix and weighted floor support share one basis.
+                let rotation = orientation.vector == .zero
+                    ? simd_quatf(real: 1, imag: .zero) : orientation
+                model.transform = Transform(scale: scale, rotation: rotation, translation: position)
+                parent.addChild(model)
+                metrics.modelEntities += 1
+                metrics.verticesPerInstance += authoredPart.metrics.vertices
+                metrics.trianglesPerInstance += authoredPart.metrics.triangles
+                return model
+            }
             let asset = try ReplayAthleteMeshLibrary.mesh(for: part, lod: lod)
             let model = ModelEntity(mesh: asset.mesh, materials: [material])
             model.name = name
@@ -440,13 +467,15 @@ enum ReplayAthleteFactory {
         hips.name = ReplayAthleteJoint.hips.rawValue
         hips.position = [0, 0.90, 0]
         bodyRoot.addChild(hips)
-        try addCustomModel(.shorts, named: "shorts", to: hips, material: shortsMaterial)
+        try addCustomModel(.shorts, named: "shorts", to: hips,
+                           material: farKit.map { $0.shorts as any Material } ?? shortsMaterial)
 
         let spine = Entity()
         spine.name = ReplayAthleteJoint.spine.rawValue
         spine.position = [0, 0.14, 0]
         hips.addChild(spine)
-        try addCustomModel(.torso, named: "torso", to: spine, material: shirtMaterial)
+        try addCustomModel(.torso, named: "torso", to: spine,
+                           material: farKit.map { $0.torso as any Material } ?? shirtMaterial)
 
         if lod == .near {
             for (side, x, angle) in [

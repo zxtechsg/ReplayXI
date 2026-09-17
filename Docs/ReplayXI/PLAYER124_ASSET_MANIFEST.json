@@ -1,0 +1,272 @@
+{
+  "schemaVersion": 1,
+  "baselineGitRevision": "b1d907f6ff472dac831a237855f420af60584ead",
+  "originalFarGeometry": {
+    "file": "ReplayXIArticulatedFar.usdz",
+    "sha256": "1a16ed08fe9c9272f5f2c2f4187ad1f747a39f52bc056ffaaacff9cee0c0a307",
+    "bytes": 25268,
+    "parts": {
+      "Shorts": {
+        "vertices": 67,
+        "triangles": 120,
+        "joints": 0
+      },
+      "Arm": {
+        "vertices": 167,
+        "triangles": 300,
+        "joints": 3
+      },
+      "Torso": {
+        "vertices": 151,
+        "triangles": 266,
+        "joints": 0
+      },
+      "Leg": {
+        "vertices": 213,
+        "triangles": 380,
+        "joints": 3
+      }
+    },
+    "completeFarBody": {
+      "vertices": 1464,
+      "triangles": 2495,
+      "models": 7,
+      "limbJoints": 12,
+      "licensedFaceSeparate": true
+    }
+  },
+  "licensedSource": "MIT Microsoft Rocketbox; existing face, skin and full-body geometry retained",
+  "paidReferenceContentCopied": false,
+  "bodyTextureRefinement": {
+    "schemaVersion": 1,
+    "sourceAssetSHA256": "7cfb694888f111928643e8aca7041d21925f5d55f3f5adbd353a972ca255e772",
+    "uvFixtureSHA256": "0a2c17f4dedf58f3bc1b3fbd36a1ddd917244df15498b417dea46855e4a76e83",
+    "geometryUnchanged": true,
+    "normalMapsUnchanged": true,
+    "originalArtwork": true,
+    "paidReferenceContentCopied": false,
+    "textures": [
+      {
+        "file": "ReplayXIRocketboxHomeSkin0.png",
+        "beforeSHA256": "004d6d9ea2162f878e28f80ad1c7dc014a99da60399327698e27da77e8fb0ec2",
+        "afterSHA256": "fa060019aa8f7db608f97197a9388361b9a1247927997b5a095c907d712bb6bb",
+        "changedPixels": 184217,
+        "preservedNonClothPixels": 77922,
+        "size": [
+          512,
+          512
+        ]
+      },
+      {
+        "file": "ReplayXIRocketboxHomeSkin1.png",
+        "beforeSHA256": "ac418d3520980d318e93489ea80efb52b6870359808d95935764611522734728",
+        "afterSHA256": "11c46aecda34e3a8a4802e78562d73e8ffdb987c3aa3bbd8947fd1b4f5fab3fe",
+        "changedPixels": 184219,
+        "preservedNonClothPixels": 77922,
+        "size": [
+          512,
+          512
+        ]
+      },
+      {
+        "file": "ReplayXIRocketboxHomeSkin2.png",
+        "beforeSHA256": "e5c2e1b9e1414377cdf2595c3b2119f0868c2d4f421a9d191995e3b57ab26be9",
+        "afterSHA256": "d1f57df99d2d30e0e2749f27b9f8f494c58407624c6402b29877b1ba7f9156d1",
+        "changedPixels": 184221,
+        "preservedNonClothPixels": 77922,
+        "size": [
+          512,
+          512
+        ]
+      },
+      {
+        "file": "ReplayXIRocketboxHomeSkin3.png",
+        "beforeSHA256": "30e96c713d3cb2ceea29e43080296739757b13d9d4c253b73360fd1e513f095d",
+        "afterSHA256": "f874a15ce05efa8d027fe763816839909c92103829cccc9f8e38f2fcc8a5bb10",
+        "changedPixels": 184217,
+        "preservedNonClothPixels": 77922,
+        "size": [
+          512,
+          512
+        ]
+      },
+      {
+        "file": "ReplayXIRocketboxHomeSkin4.png",
+        "beforeSHA256": "e388db9b35b3d4c7d07d8da519d24ae7e5c7e64d481613cc0d0dde947a263049",
+        "afterSHA256": "16811ff98181621d6e2a9c9cda14fa01ad9dbc3d24ac0ba32733be2eec2ef27d",
+        "changedPixels": 184221,
+        "preservedNonClothPixels": 77922,
+        "size": [
+          512,
+          512
+        ]
+      },
+      {
+        "file": "ReplayXIRocketboxAwaySkin0.png",
+        "beforeSHA256": "1a7e8c57c9354a87681eb5da41f91cba05a765c5020b804f061a91a91f747250",
+        "afterSHA256": "6105c9885ae656247601cc807f536ac3c34b9e9c94b5f464373c9e776342378e",
+        "changedPixels": 184222,
+        "preservedNonClothPixels": 77922,
+        "size": [
+          512,
+          512
+        ]
+      },
+      {
+        "file": "ReplayXIRocketboxAwaySkin1.png",
+        "beforeSHA256": "8a6d9b32d84b90ffede74fb232b30c9eb95891fe6fd4f54afeee02eea9793a55",
+        "afterSHA256": "3a0eed640ad4a127c27ff7961503a544ae9053cb99936224be065b0981f218fa",
+        "changedPixels": 184222,
+        "preservedNonClothPixels": 77922,
+        "size": [
+          512,
+          512
+        ]
+      },
+      {
+        "file": "ReplayXIRocketboxAwaySkin2.png",
+        "beforeSHA256": "939a45290519b74e4d879b7db5cda002740e49c58af0e3cf9376a55a438534e0",
+        "afterSHA256": "f10f627a01c2aa2eddbc5c207e774785eb4c5d54d88f298ed86d0a41bb24af92",
+        "changedPixels": 184222,
+        "preservedNonClothPixels": 77922,
+        "size": [
+          512,
+          512
+        ]
+      },
+      {
+        "file": "ReplayXIRocketboxAwaySkin3.png",
+        "beforeSHA256": "eb582079ff3a832c5276b80ca5400f132a76ce4ca1a3be9043eba1bdeef08725",
+        "afterSHA256": "45e16d091de4424a78c142c0acb3e467b40fb625b2ffc7ba7ade19e7a484fae9",
+        "changedPixels": 184222,
+        "preservedNonClothPixels": 77922,
+        "size": [
+          512,
+          512
+        ]
+      },
+      {
+        "file": "ReplayXIRocketboxAwaySkin4.png",
+        "beforeSHA256": "760fd8c2b9106dfcbb4b00af3c331292ed3d5f8a5c409be7b8c86ea78a5a211c",
+        "afterSHA256": "e32c65b589025ed194e786bd8356981e933d705dc57958ceae7a55c6f9816010",
+        "changedPixels": 184222,
+        "preservedNonClothPixels": 77922,
+        "size": [
+          512,
+          512
+        ]
+      },
+      {
+        "file": "ReplayXIRocketboxKeeperSkin0.png",
+        "beforeSHA256": "15aaf76af3a66abbf3f4af4596def29972d33e898b9733292eb565da9ea4e6b0",
+        "afterSHA256": "18d6e10acc2bce97c173b576e5c73ed108b7447e1923ffa55b46a4134b4a54bb",
+        "changedPixels": 184222,
+        "preservedNonClothPixels": 77922,
+        "size": [
+          512,
+          512
+        ]
+      },
+      {
+        "file": "ReplayXIRocketboxKeeperSkin1.png",
+        "beforeSHA256": "d5c352e4a2dfef8fc48f35168c691ea836b39a37dc65e334d4206863ce72b329",
+        "afterSHA256": "3841eb6978414c5daea1d06e8a6ef2208c35179ba4a0ae5d0c05317d8efad4bb",
+        "changedPixels": 184222,
+        "preservedNonClothPixels": 77922,
+        "size": [
+          512,
+          512
+        ]
+      },
+      {
+        "file": "ReplayXIRocketboxKeeperSkin2.png",
+        "beforeSHA256": "2a0a768aa732620702a7a59e62e77b4acd5f7ef2b32dc210533a69b66cfc0d09",
+        "afterSHA256": "9f545127d37b9e3a1ff71565054034ebac57ea08491fc87b2674d8604fb87ac1",
+        "changedPixels": 184222,
+        "preservedNonClothPixels": 77922,
+        "size": [
+          512,
+          512
+        ]
+      },
+      {
+        "file": "ReplayXIRocketboxKeeperSkin3.png",
+        "beforeSHA256": "eadffeeb12fb0e64aa0eea4d60be3ae34bbb47d14f38b85c1c977cb2f85cfb08",
+        "afterSHA256": "758b0ce9d66dd8707ce493a18404602144b99f066e37ae361c55407a399a7ede",
+        "changedPixels": 184222,
+        "preservedNonClothPixels": 77922,
+        "size": [
+          512,
+          512
+        ]
+      },
+      {
+        "file": "ReplayXIRocketboxKeeperSkin4.png",
+        "beforeSHA256": "99808cdb99c1b3677efcb6bd8990d10bd8ce74a6f3a51cbe987e0d3b587144f7",
+        "afterSHA256": "c88d45155508de4afdfc72da4fd1efb3fc9960adaa6cefb992ab94d333eadcce",
+        "changedPixels": 184222,
+        "preservedNonClothPixels": 77922,
+        "size": [
+          512,
+          512
+        ]
+      }
+    ]
+  },
+  "farKitMaps": {
+    "schemaVersion": 1,
+    "originalArtwork": true,
+    "paidReferenceContentCopied": false,
+    "baseDecodedBytes": 98304,
+    "textures": [
+      {
+        "file": "ReplayXIFarHomeTorso.png",
+        "sha256": "55adc24b12e4ce4de40e411a82e38c051f1893b0ab76e59c2c367f307f08ac97",
+        "canonicalRGBAPixelSHA256": "336d665269a23450f332029953272b3388cbdd16eece89105587b788ffc6d246",
+        "bytes": 380,
+        "width": 64,
+        "height": 64
+      },
+      {
+        "file": "ReplayXIFarHomeShorts.png",
+        "sha256": "ed6ca05134de52c19db9ff188e70bd26e99bcd5f43ae48722a33b4dbf5d24a1f",
+        "canonicalRGBAPixelSHA256": "dc546e92eeb5997280af9f32d15c66fd1cb6183e8760c18033e86ab504b27945",
+        "bytes": 310,
+        "width": 64,
+        "height": 64
+      },
+      {
+        "file": "ReplayXIFarAwayTorso.png",
+        "sha256": "efe6005d08b5a3353528347165500b49686c9a91cab09a2757d66e5f2a884f43",
+        "canonicalRGBAPixelSHA256": "b988e65354b28673d4ed3ba7479f42a37556552ea24e245a146f89ccac912d34",
+        "bytes": 399,
+        "width": 64,
+        "height": 64
+      },
+      {
+        "file": "ReplayXIFarAwayShorts.png",
+        "sha256": "d7796b60abb09ed5e5a63332541393c7b905b1ecf30d6af0a689ff1f268792d1",
+        "canonicalRGBAPixelSHA256": "1c62f90ae3524ebca6f0e4de7eb4a9a4504b111a242bd728ceac36add5a6a5b6",
+        "bytes": 276,
+        "width": 64,
+        "height": 64
+      },
+      {
+        "file": "ReplayXIFarKeeperTorso.png",
+        "sha256": "52bf1f0099fac8677b8b0c831b44a682b98c6e80c97bd46717bbfd345a9803f0",
+        "canonicalRGBAPixelSHA256": "f06be7728f8cfc1645071039b54c191e45575a16715c1801bd53057a68ae7fed",
+        "bytes": 419,
+        "width": 64,
+        "height": 64
+      },
+      {
+        "file": "ReplayXIFarKeeperShorts.png",
+        "sha256": "262d959089c25df83bdcdcb5fb2a01a5899e62f883461482102ff62f310bad63",
+        "canonicalRGBAPixelSHA256": "315f68b0724f05a64660518214ceb8e0a7f7b997d71127b6337302af9cb90be0",
+        "bytes": 294,
+        "width": 64,
+        "height": 64
+      }
+    ]
+  }
+}

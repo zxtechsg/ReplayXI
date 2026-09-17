@@ -75,14 +75,17 @@ final class ReplayShapeBallAimPresentationTests: XCTestCase {
         if usingSkin { try ReplaySkinnedAthleteProvider.prewarm() }
         let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .shapeLab))
         let root = PitchSceneFactory.makeMatchRoot(for: scenario)
+        let ballPlayback = ReplayBallPlaybackMotion(track: scenario.ball, players: scenario.players)
         var report: [[String: Any]] = []
 
         for view in [ReplayViewMode.tacticalTable, .touchline, .firstPerson] {
             update(root, scenario: scenario, time: 14.15, view: .positional, ideal: true)
             for time in [14.15, 25.4, 14.15] {
                 update(root, scenario: scenario, time: time, view: view, ideal: true)
-                let rawBall = scenario.ball.pose(at: time)
-                let target = SIMD3<Float>(rawBall.position.x, rawBall.height, rawBall.position.z)
+                let presentedBall = ballPlayback.pose(at: time)
+                XCTAssertEqual(presentedBall.height, scenario.ball.pose(at: time).height,
+                               accuracy: 0.00001, "Authored loft key moments remain fixed")
+                let target = SIMD3<Float>(presentedBall.position.x, presentedBall.height, presentedBall.position.z)
                 let transforms = try checkVisibleRigs(
                     root, scenario: scenario, time: time, view: view, ideal: true,
                     target: target, usingSkin: usingSkin, report: &report

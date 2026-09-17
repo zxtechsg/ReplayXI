@@ -63,7 +63,12 @@ final class ReplaySpatialHoverDiagnosticsTests: XCTestCase {
             let body = try XCTUnwrap(markRoot.findEntity(named: AnnotationSceneAffordance.bodyTargetName))
             let card = try XCTUnwrap(markRoot.findEntity(named: AnnotationSceneAffordance.labelTargetName))
             let bodyTargets = descendants(of: body).filter { $0.components[CollisionComponent.self] != nil }
-            XCTAssertEqual(bodyTargets.count, kind == .space ? AnnotationSceneAffordance.spaceTargetSegmentCount : 1)
+            let expectedBodyTargets: Int = switch kind {
+            case .space: AnnotationSceneAffordance.spaceTargetSegmentCount
+            case .arc: 16
+            default: 1
+            }
+            XCTAssertEqual(bodyTargets.count, expectedBodyTargets)
 
             for target in bodyTargets + [card] {
                 assertInputTarget(target)

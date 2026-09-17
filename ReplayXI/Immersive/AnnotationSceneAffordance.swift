@@ -146,6 +146,15 @@ enum AnnotationSceneAffordance {
         target.components.set(InputTargetComponent(allowedInputTypes: .all))
         target.components.set(HoverEffectComponent())
         switch mark.kind {
+        case .arc:
+            for index in 0..<16 {
+                let segment = Entity()
+                segment.name = "annotation-arc-body-target-\(index)"
+                segment.components.set(InputTargetComponent(allowedInputTypes: .all))
+                segment.components.set(CollisionComponent(shapes: [pathBodyTargetShape], isStatic: false))
+                segment.components.set(HoverEffectComponent())
+                target.addChild(segment)
+            }
         case .playerLabel:
             target.components.set(
                 CollisionComponent(shapes: [labelBodyTargetShape], isStatic: false)
@@ -262,6 +271,18 @@ enum AnnotationSceneAffordance {
         labelPosition: SIMD3<Float>?
     ) {
         switch mark.kind {
+        case .arc:
+            target.transform = .identity
+            for (index, segment) in target.children.enumerated() where index < 16 {
+                let start = mark.resolvedCurve.point(at: Float(index) / 16, for: mark, baseY: 0.17)
+                let end = mark.resolvedCurve.point(at: Float(index + 1) / 16, for: mark, baseY: 0.17)
+                let direction = end - start
+                let length = simd_length(direction)
+                segment.position = (start + end) / 2
+                segment.orientation = length > 0.0001
+                    ? simd_quatf(from: SIMD3<Float>(0, 0, 1), to: direction / length) : simd_quatf()
+                segment.scale = [1, 1, max(length + 0.12, 0.12)]
+            }
         case .playerLabel:
             target.position = labelPosition ?? [mark.end.x, 2.2, mark.end.z]
             target.orientation = simd_quatf()
@@ -347,14 +368,30 @@ enum AnnotationSceneAffordance {
         }
 
         switch mark.kind {
-        case .run, .pass, .danger:
+        case .run, .pass, .arc, .danger:
             path?.isEnabled = true
             zone?.isEnabled = false
             startHandle?.isEnabled = isEditable
             endHandle?.isEnabled = isEditable
             attached?.isEnabled = false
             if let path {
-                setSegmentTransform(
+                if mark.kind == .arc {
+                    path.transform = .identity
+                    if let rail = path.children.first(where: { $0.name == "annotation-selection-rail" }) as? ModelEntity {
+                        AnnotationArcMesh.update(rail, mark: mark, radius: 0.12 * scale, baseY: lift)
+                    }
+                    if let core = path.children.first(where: { $0.name == "annotation-selection-core" }) as? ModelEntity {
+                        AnnotationArcMesh.update(core, mark: mark, radius: 0.038 * scale, baseY: lift + 0.015)
+                    }
+                } else {
+                    if let rail = path.children.first(where: { $0.name == "annotation-selection-rail" }) as? ModelEntity {
+                        AnnotationArcMesh.reset(rail, mesh: selectionRailMesh)
+                    }
+                    if let core = path.children.first(where: { $0.name == "annotation-selection-core" }) as? ModelEntity {
+                        AnnotationArcMesh.reset(core, mesh: selectionCoreMesh)
+                        core.position = [0, 0.014, 0]
+                    }
+                    setSegmentTransform(
                     path,
                     from: mark.start,
                     to: mark.end,
@@ -362,7 +399,8 @@ enum AnnotationSceneAffordance {
                     endElevation: mark.resolvedEndElevation,
                     y: lift,
                     crossScale: scale * pulse
-                )
+                    )
+                }
             }
             if isEditable {
                 configureHandle(
@@ -645,6 +683,7 @@ enum AnnotationSceneAffordance {
         let prefixCount: Int = switch mark.kind {
         case .run: 6
         case .pass: 7
+        case .arc: 6
         case .danger, .space, .playerLabel: 0
         }
         let renderedCharacterCount = min(mark.label.count + prefixCount, 22)
@@ -770,6 +809,7 @@ enum AnnotationSceneAffordance {
         switch kind {
         case .run: UIColor(red: 1.0, green: 0.42, blue: 0.12, alpha: 0.98)
         case .pass: UIColor(red: 0.22, green: 0.91, blue: 0.88, alpha: 0.98)
+        case .arc: UIColor(red: 0.66, green: 0.52, blue: 1, alpha: 0.98)
         case .danger: UIColor(red: 1.0, green: 0.25, blue: 0.34, alpha: 0.98)
         case .space, .playerLabel: UIColor(red: 0.78, green: 0.94, blue: 0.19, alpha: 0.98)
         }

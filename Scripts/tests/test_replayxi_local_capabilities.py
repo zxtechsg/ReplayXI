@@ -44,7 +44,12 @@ class LocalCapabilityTests(unittest.TestCase):
         self.assertIn("AnchorEntity(.head, trackingMode: .once)", placement)
         self.assertNotIn(".continuous", placement)
         self.assertIn("PlaybackAttachmentPlacement.needsRecenter", immersive)
-        self.assertIn("entity.parent !== controlsAnchor", immersive)
+        # The movable child, not the captured room anchor, owns drag offsets.
+        self.assertIn("PlaybackAttachmentPlacement.contentRoot(in: controlsAnchor)", immersive)
+        self.assertIn("entity.parent !== workspace", immersive)
+        self.assertIn("workspace.addChild(entity)", immersive)
+        self.assertIn("anchor.addChild(root)", placement)
+        self.assertIn("workspace.position = workspaceMove.offset", immersive)
         self.assertNotIn("playback-controls-head-anchor", immersive)
         self.assertIn("Demo match · no video loaded", immersive)
 

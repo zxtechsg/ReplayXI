@@ -963,6 +963,7 @@ struct BallTrack: Codable, Hashable, Sendable {
 enum CoachMarkKind: String, Codable, CaseIterable, Identifiable, Sendable {
     case run
     case pass
+    case arc
     case danger
     case space
     case playerLabel
@@ -973,6 +974,7 @@ enum CoachMarkKind: String, Codable, CaseIterable, Identifiable, Sendable {
         switch self {
         case .run: "Run"
         case .pass: "Pass"
+        case .arc: "Arc"
         case .danger: "Pressure"
         case .space: "Space"
         case .playerLabel: "Player label"
@@ -983,6 +985,7 @@ enum CoachMarkKind: String, Codable, CaseIterable, Identifiable, Sendable {
         switch self {
         case .run: "figure.run"
         case .pass: "arrow.up.right"
+        case .arc: "point.topleft.down.to.point.bottomright.curvepath"
         case .danger: "exclamationmark.triangle"
         case .space: "circle.dashed"
         case .playerLabel: "tag.fill"
@@ -1004,6 +1007,8 @@ enum CoachMarkKind: String, Codable, CaseIterable, Identifiable, Sendable {
             ["Overlap", "Underlap", "Third-player run", "Attack the space", "Hold width"]
         case .pass:
             ["Pass into space", "Switch play", "Bounce pass", "Cutback", "Release the lane"]
+        case .arc:
+            ["Curved run", "Bend around", "Lofted pass", "Overlap", "Curl into space"]
         case .danger:
             ["Press trigger", "Cover shadow", "Track runner", "Protect channel", "Delay"]
         case .space:
@@ -1028,7 +1033,7 @@ enum CoachMarkGeometryPolicy {
 
     static func minimumDistance(for kind: CoachMarkKind) -> Float? {
         switch kind {
-        case .run, .pass, .danger: minimumDirectionalLength
+        case .run, .pass, .arc, .danger: minimumDirectionalLength
         case .space: minimumZoneRadius
         case .playerLabel: nil
         }
@@ -1060,6 +1065,8 @@ struct CoachMark: Identifiable, Codable, Hashable, Sendable {
     /// consume `resolvedStartElevation` / `resolvedEndElevation` instead.
     let startElevation: Float?
     let endElevation: Float?
+    /// Optional for compatibility with reviews saved before curved paths.
+    let curve: CoachMarkCurve?
     let label: String
     let revealTime: TimeInterval
     /// Optional end of the annotation's authored moment. Older replay files
@@ -1084,6 +1091,7 @@ struct CoachMark: Identifiable, Codable, Hashable, Sendable {
         end: PitchPoint,
         startElevation: Float? = nil,
         endElevation: Float? = nil,
+        curve: CoachMarkCurve? = nil,
         label: String,
         revealTime: TimeInterval = 0,
         hideTime: TimeInterval? = nil,
@@ -1098,6 +1106,7 @@ struct CoachMark: Identifiable, Codable, Hashable, Sendable {
         self.end = end
         self.startElevation = startElevation
         self.endElevation = endElevation
+        self.curve = curve
         self.label = label
         self.revealTime = revealTime
         self.hideTime = hideTime
@@ -1113,6 +1122,7 @@ struct CoachMark: Identifiable, Codable, Hashable, Sendable {
 
     var resolvedStartElevation: Float { startElevation ?? 0 }
     var resolvedEndElevation: Float { endElevation ?? 0 }
+    var resolvedCurve: CoachMarkCurve { curve ?? .initial(start: start, end: end) }
 
     var hasSpatialElevation: Bool {
         resolvedStartElevation > 0.001 || resolvedEndElevation > 0.001
@@ -1397,6 +1407,7 @@ extension CoachMark {
             end: geometry.end,
             startElevation: startElevation,
             endElevation: endElevation,
+            curve: curve,
             label: label,
             revealTime: revealTime,
             hideTime: hideTime,

@@ -58,9 +58,10 @@ final class ReplayAthleteActionSamplingTests: XCTestCase {
     func testSharedSamplesPreserveEveryNearAndFarJointAcrossTouchesAndReverseSeek() throws {
         let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay))
         let root = PitchSceneFactory.makeMatchRoot(for: scenario)
+        let ballPlayback = ReplayBallPlaybackMotion(track: scenario.ball, players: scenario.players)
         for time in [10.1, 13.6, 17.5, 32.0, 17.5, 13.6, 10.1] {
             update(root, scenario: scenario, time: time, view: .tacticalTable)
-            let ball = scenario.ball.pose(at: time)
+            let ball = ballPlayback.pose(at: time)
             for (id, lod, name) in [("navy-rw", ReplayAthleteLOD.near, "full-rig"),
                                     ("navy-rb", .far, "table-marker")] {
                 let player = try XCTUnwrap(scenario.player(id: id))
@@ -90,7 +91,7 @@ final class ReplayAthleteActionSamplingTests: XCTestCase {
         update(root, scenario: scenario, time: time, view: .tacticalTable, cue: cue)
         let actual = try XCTUnwrap(root.findEntity(named: "player-\(player.id)")?.findEntity(named: "full-rig"))
         let expected = try ReplayAthleteFactory.make(for: player, lod: .near)
-        let ball = scenario.ball.pose(at: time)
+        let ball = ReplayBallPlaybackMotion(track: scenario.ball, players: scenario.players).pose(at: time)
         ReplayAthleteMotion.update(
             expected, from: player, at: time,
             lookTargetWorldPosition: [ball.position.x, ball.height, ball.position.z],

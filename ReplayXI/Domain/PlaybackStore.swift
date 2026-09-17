@@ -183,11 +183,15 @@ final class ReplayStore {
     @ObservationIgnored
     private var interruptedCoachMarkEndpointGestureIDs: Set<UUID> = []
 
+    @ObservationIgnored private var pendingCoachMarkCurveGestures: [UUID: UUID] = [:]
+    @ObservationIgnored private var finishedCoachMarkCurveGestures: [UUID] = []
+
     private struct CoachMarkGeometry {
         let start: PitchPoint
         let end: PitchPoint
         let startElevation: Float?
         let endElevation: Float?
+        let curve: CoachMarkCurve?
         let startTrackAnchor: CoachMarkTrackAnchor?
         let endTrackAnchor: CoachMarkTrackAnchor?
     }
@@ -975,6 +979,7 @@ final class ReplayStore {
         switch selectedTool {
         case .run: label = "Attack the space"
         case .pass: label = "Release the lane"
+        case .arc: label = "Curved run"
         case .danger: label = "Pressure arrives"
         case .space: label = "Useful space"
         case .playerLabel: return nil
@@ -990,6 +995,7 @@ final class ReplayStore {
             kind: selectedTool,
             start: start,
             end: point,
+            curve: selectedTool == .arc ? .initial(start: start, end: point) : nil,
             label: label,
             revealTime: playhead,
             hideTime: defaultCoachMarkHideTime,
@@ -1087,11 +1093,12 @@ final class ReplayStore {
             kind: selectedTool,
             start: focus,
             end: destination,
+            curve: selectedTool == .arc ? .initial(start: focus, end: destination) : nil,
             label: selectedTool == .pass ? "Open channel" : "Next movement",
             revealTime: playhead,
             hideTime: defaultCoachMarkHideTime,
             startTrackAnchor: selectedTool == .space ? nil : activePlayerAnchor,
-            endTrackAnchor: selectedTool == .run
+            endTrackAnchor: (selectedTool == .run || selectedTool == .arc)
                 ? activePlayerAnchor.map {
                     CoachMarkTrackAnchor(
                         playerID: $0.playerID,
@@ -1245,6 +1252,7 @@ final class ReplayStore {
             end: mark.end,
             startElevation: mark.startElevation,
             endElevation: mark.endElevation,
+            curve: mark.curve,
             label: mark.label,
             revealTime: revealTime,
             hideTime: shiftedHideTime,
@@ -1303,6 +1311,7 @@ final class ReplayStore {
             end: mark.end,
             startElevation: mark.startElevation,
             endElevation: mark.endElevation,
+            curve: mark.curve,
             label: mark.label,
             revealTime: mark.revealTime,
             hideTime: duration.map { min(mark.revealTime + $0, selectedScenario.duration) },
@@ -1362,6 +1371,7 @@ final class ReplayStore {
             end: mark.end,
             startElevation: mark.startElevation,
             endElevation: mark.endElevation,
+            curve: mark.curve,
             label: normalizedLabel,
             revealTime: mark.revealTime,
             hideTime: mark.hideTime,
@@ -1445,6 +1455,7 @@ final class ReplayStore {
             end: resolved.end,
             startElevation: mark.startElevation,
             endElevation: mark.endElevation,
+            curve: mark.curve,
             label: mark.label,
             revealTime: mark.revealTime,
             hideTime: mark.hideTime,
@@ -1479,6 +1490,7 @@ final class ReplayStore {
         id: UUID,
         start: PitchPoint,
         end: PitchPoint,
+        curve: CoachMarkCurve? = nil,
         broadcast: Bool = true
     ) -> Bool {
         guard allowsAnnotationAuthoring() else { return false }
@@ -1491,6 +1503,10 @@ final class ReplayStore {
         // a second mark—stays serialized behind it.
         guard !hasActiveCoachMarkEndpointPreview else {
             statusMessage = "Finish or cancel the joystick adjustment first"
+            return false
+        }
+        guard pendingCoachMarkCurveGestures[id] == nil || curve != nil else {
+            statusMessage = "Finish the curve adjustment first"
             return false
         }
         guard pendingCoachMarkGeometryBaselines.isEmpty
@@ -1513,6 +1529,7 @@ final class ReplayStore {
             mark,
             start: start,
             end: end,
+            curve: curve,
             resolvingTrackOffsetsAt: playhead
         )
         guard isValidSharedMark(replacement, for: selectedScenario) else {
@@ -1544,6 +1561,7 @@ final class ReplayStore {
                 end: mark.end,
                 startElevation: mark.startElevation,
                 endElevation: mark.endElevation,
+                curve: mark.curve,
                 startTrackAnchor: mark.startTrackAnchor,
                 endTrackAnchor: mark.endTrackAnchor
             )
@@ -1557,6 +1575,7 @@ final class ReplayStore {
             isPlaying = false
             if isCollaborationActive { emitSnapshot(allowingGeometryPreview: true) }
         } else if broadcast {
+            if curve != nil { isPlaying = false }
             statusMessage = "Annotation position updated"
             // The final sample may equal the preview already on screen. The
             // baseline mask changed even when marks.didSet observes no change.
@@ -1564,6 +1583,68 @@ final class ReplayStore {
             emitSnapshot()
         }
         return true
+    }
+
+    /// Curve dragging uses the same masked save/Undo baseline as endpoint
+    /// editing, but a distinct gesture token prevents stale or competing pads
+    /// from committing another input's preview.
+    func isCoachMarkCurvePreviewOwner(id: UUID, gestureID: UUID) -> Bool {
+        pendingCoachMarkCurveGestures[id] == gestureID && pendingCoachMarkGeometryBaselines[id] != nil
+    }
+
+    @discardableResult
+    func previewCoachMarkCurve(id: UUID, gestureID: UUID, curve: CoachMarkCurve) -> Bool {
+        guard !finishedCoachMarkCurveGestures.contains(gestureID),
+              !isDrawing, curve.isValid,
+              let mark = marks.first(where: { $0.id == id }), mark.kind == .arc else { return false }
+        let owner = pendingCoachMarkCurveGestures[id]
+        guard owner == gestureID || (owner == nil && !hasActiveCoachMarkGeometryPreview) else { return false }
+        if owner != nil && pendingCoachMarkGeometryBaselines[id] == nil { return false }
+        pendingCoachMarkCurveGestures[id] = gestureID
+        let resolved = presentedCoachMarkGeometry(mark, at: playhead)
+        let accepted = updateCoachMarkGeometry(id: id, start: resolved.start, end: resolved.end,
+                                               curve: curve, broadcast: false)
+        if !accepted && owner == nil { pendingCoachMarkCurveGestures.removeValue(forKey: id) }
+        return accepted
+    }
+
+    @discardableResult
+    func commitCoachMarkCurvePreview(id: UUID, gestureID: UUID) -> Bool {
+        guard pendingCoachMarkCurveGestures[id] == gestureID,
+              pendingCoachMarkGeometryBaselines[id] != nil,
+              let mark = marks.first(where: { $0.id == id }), mark.kind == .arc else { return false }
+        let resolved = presentedCoachMarkGeometry(mark, at: playhead)
+        let accepted = updateCoachMarkGeometry(id: id, start: resolved.start, end: resolved.end,
+                                               curve: mark.resolvedCurve, broadcast: true)
+        finishCoachMarkCurveGesture(id: id, gestureID: gestureID)
+        return accepted
+    }
+
+    @discardableResult
+    func cancelCoachMarkCurvePreview(id: UUID, gestureID: UUID) -> Bool {
+        guard pendingCoachMarkCurveGestures[id] == gestureID else { return false }
+        let result = cancelCoachMarkGeometryPreview(id: id)
+        finishCoachMarkCurveGesture(id: id, gestureID: gestureID)
+        return result
+    }
+
+    @discardableResult
+    func nudgeCoachMarkCurve(id: UUID, bendDelta: Float, liftDelta: Float) -> Bool {
+        guard allowsMutationOutsideEndpointPreview(), !isDrawing,
+              bendDelta.isFinite, liftDelta.isFinite,
+              let mark = marks.first(where: { $0.id == id }), mark.kind == .arc else { return false }
+        let curve = CoachMarkCurve(bend: mark.resolvedCurve.bend + bendDelta,
+                                   lift: mark.resolvedCurve.lift + liftDelta).clamped()
+        guard curve != mark.resolvedCurve else { return false }
+        let resolved = presentedCoachMarkGeometry(mark, at: playhead)
+        return updateCoachMarkGeometry(id: id, start: resolved.start, end: resolved.end, curve: curve)
+    }
+
+    private func finishCoachMarkCurveGesture(id: UUID, gestureID: UUID) {
+        guard pendingCoachMarkCurveGestures[id] == gestureID else { return }
+        pendingCoachMarkCurveGestures.removeValue(forKey: id)
+        finishedCoachMarkCurveGestures.append(gestureID)
+        if finishedCoachMarkCurveGestures.count > 128 { finishedCoachMarkCurveGestures.removeFirst() }
     }
 
     /// Ends only an existing direct handle transaction. A delayed gesture end
@@ -1723,6 +1804,7 @@ final class ReplayStore {
             end: mark.end,
             startElevation: start > 0.001 ? start : nil,
             endElevation: end > 0.001 ? end : nil,
+            curve: mark.curve,
             label: mark.label,
             revealTime: mark.revealTime,
             hideTime: mark.hideTime,
@@ -1893,6 +1975,7 @@ final class ReplayStore {
                 end: mark.end,
                 startElevation: mark.startElevation,
                 endElevation: mark.endElevation,
+                curve: mark.curve,
                 startTrackAnchor: mark.startTrackAnchor,
                 endTrackAnchor: mark.endTrackAnchor
             )
@@ -2062,11 +2145,17 @@ final class ReplayStore {
             return false
         }
         marks[index] = markRestoringGeometry(marks[index], from: baseline)
+        if let gestureID = pendingCoachMarkCurveGestures[id] {
+            finishCoachMarkCurveGesture(id: id, gestureID: gestureID)
+        }
         statusMessage = "Annotation move cancelled"
         return true
     }
 
     private func rollbackCoachMarkGeometryPreview(id: UUID, index: Int) {
+        if let gestureID = pendingCoachMarkCurveGestures[id] {
+            finishCoachMarkCurveGesture(id: id, gestureID: gestureID)
+        }
         removePendingCoachMarkEndpointPreview(for: id)
         guard let baseline = pendingCoachMarkGeometryBaselines.removeValue(forKey: id) else {
             return
@@ -2654,7 +2743,7 @@ final class ReplayStore {
         }
 
         let startAnchor = nearestAnchor(to: start)
-        if kind == .run, let startAnchor,
+        if (kind == .run || kind == .arc), let startAnchor,
            let player = selectedScenario.player(id: startAnchor.playerID) {
             let position = presentedPlayerPose(for: player, at: time).position
             return (
@@ -2722,6 +2811,7 @@ final class ReplayStore {
             && mark.author.utf8.count <= Self.maximumCoachMarkLabelLength * 4
         guard hasFiniteBoundedGeometry,
               hasValidElevation,
+              mark.kind == .arc ? (mark.curve?.isValid ?? true) : mark.curve == nil,
               hasCoherentZoneElevation,
               hasValidTrackAnchors,
               hasFiniteBoundedResolvedGeometry,
@@ -2784,6 +2874,7 @@ final class ReplayStore {
         _ mark: CoachMark,
         start: PitchPoint,
         end: PitchPoint,
+        curve: CoachMarkCurve? = nil,
         resolvingTrackOffsetsAt time: TimeInterval? = nil
     ) -> CoachMark {
         func adjustedAnchor(
@@ -2809,6 +2900,7 @@ final class ReplayStore {
             end: end,
             startElevation: mark.startElevation,
             endElevation: mark.endElevation,
+            curve: curve ?? mark.curve,
             label: mark.label,
             revealTime: mark.revealTime,
             hideTime: mark.hideTime,
@@ -2830,6 +2922,7 @@ final class ReplayStore {
             end: baseline.end,
             startElevation: baseline.startElevation,
             endElevation: baseline.endElevation,
+            curve: baseline.curve,
             label: mark.label,
             revealTime: mark.revealTime,
             hideTime: mark.hideTime,
@@ -2858,6 +2951,9 @@ final class ReplayStore {
     private func rollbackAllCoachMarkGeometryPreviews(
         interruptingEndpointGesture: Bool = false
     ) {
+        for (id, gestureID) in Array(pendingCoachMarkCurveGestures) {
+            finishCoachMarkCurveGesture(id: id, gestureID: gestureID)
+        }
         guard !pendingCoachMarkGeometryBaselines.isEmpty ||
                 !pendingCoachMarkEndpointPreviews.isEmpty else { return }
         if interruptingEndpointGesture {

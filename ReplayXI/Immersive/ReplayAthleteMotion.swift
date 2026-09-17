@@ -602,7 +602,10 @@ enum ReplayAthleteMotion {
         binding[.rightElbow].orientation = pose.rightElbowOrientation
         binding[.leftWrist].orientation = pose.leftWristOrientation
         binding[.rightWrist].orientation = pose.rightWristOrientation
-        if let support = binding.farFloorSupport {
+        if let articulated = binding.articulatedFar {
+            articulated.update()
+            binding[.bodyRoot].position.y += articulated.upwardCorrection(relativeTo: binding.root)
+        } else if let support = binding.farFloorSupport {
             binding[.bodyRoot].position.y += support.upwardCorrection(relativeTo: binding.root)
         }
     }

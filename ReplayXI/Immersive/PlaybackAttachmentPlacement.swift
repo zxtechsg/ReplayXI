@@ -4,6 +4,7 @@ import RealityKit
 /// `.once` samples the initial wearer pose; it never follows subsequent head motion.
 enum PlaybackAttachmentPlacement {
     static let anchorName = "playback-controls-room-anchor"
+    static let contentRootName = "playback-controls-movable-workspace"
     static let attachmentIDs = [
         "room-header", "coach-console", "playback-view-hud",
         "perspective-matrix", "position-status",
@@ -18,6 +19,16 @@ enum PlaybackAttachmentPlacement {
         anchor.name = anchorName
         anchor.components.set(Revision(value: revision))
         return anchor
+    }
+
+    static func contentRoot(in anchor: AnchorEntity) -> Entity {
+        if let existing = anchor.children.first(where: { $0.name == contentRootName }) {
+            return existing
+        }
+        let root = Entity()
+        root.name = contentRootName
+        anchor.addChild(root)
+        return root
     }
 
     /// Only an explicit user request changes the workspace origin. No frame loop,

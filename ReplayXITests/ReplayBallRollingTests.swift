@@ -20,7 +20,7 @@ final class ReplayBallRollingTests: XCTestCase {
         let player = PlayerTrack(
             id: "ball-roll-viewer", displayName: "Viewer", role: "Midfielder", shirtNumber: 8,
             team: .home, isGoalkeeper: false,
-            keyframes: [.init(time: 0, position: .zero, facingDegrees: 0)]
+            keyframes: [.init(time: 0, position: .init(x: -30, z: -40), facingDegrees: 0)]
         )
         return ReplayScenario(
             id: "ball-roll-fixture", kind: .squadReplay, title: "Rolling fixture", strapline: "",
@@ -100,8 +100,9 @@ final class ReplayBallRollingTests: XCTestCase {
         ]))
         let root = PitchSceneFactory.makeMatchRoot(for: scenario)
         let first = simd_quatf(angle: .pi / 2, axis: [0, 0, -1])
+        let path = ReplayBallPlaybackMotion(track: scenario.ball, players: scenario.players)
         for time in [1.0, 1.25, 1.5, 1.75, 2, 2.5, 3] {
-            let nextAngle = Float(min(max(time - 1, 0), 1)) * .pi / 2
+            let nextAngle = path.pose(at: time).position.z / ReplayBallRollingMotion.nominalRadius
             let expected = simd_quatf(angle: nextAngle, axis: [1, 0, 0]) * first
             assertRotation(try update(root, scenario: scenario, time: time), matches: expected,
                            "World-space segment rotations must compose, not restart, at \(time)")
@@ -251,7 +252,7 @@ final class ReplayBallRollingTests: XCTestCase {
         let scenario = scenario(ball: .init(keyframes: [frame(0, x: 0, z: 0), frame(2, x: 1, z: 2)]))
         let root = PitchSceneFactory.makeMatchRoot(for: scenario)
         let prepared = try XCTUnwrap(PitchSceneFactory.ballRollingMotionForTesting(in: root))
-        XCTAssertEqual(prepared.segmentCount, 1)
+        XCTAssertEqual(prepared.segmentCount, 180)
         var otherRoots: [Entity] = []
         for _ in 0..<8 { otherRoots.append(PitchSceneFactory.makeMatchRoot(for: scenario)) }
         let other = try XCTUnwrap(PitchSceneFactory.ballRollingMotionForTesting(in: otherRoots[0]))

@@ -21,6 +21,8 @@ struct FootballImmersiveView: View {
     @State private var emphasizesBall = true
     @State private var accessibilityActivationSubscription: EventSubscription?
     @State private var controlPlacementRevision = 0
+    @State private var workspaceMove = PlaybackWorkspaceMove()
+    @State private var movingWorkspace: Entity?
     @State private var pitchTrackingOwner = UUID()
     let roomPresentationID: UUID
 
@@ -156,6 +158,8 @@ struct FootballImmersiveView: View {
                 Attachment(id: "room-header") {
                     ImmersiveRoomHeader()
                         .frame(width: 650)
+                        .disabled(workspaceMove.isActive)
+                        .allowsHitTesting(!workspaceMove.isActive)
                 }
             }
 
@@ -172,6 +176,8 @@ struct FootballImmersiveView: View {
                     exit: exitRoom
                 )
                     .frame(width: controlDeckLayout.attachmentWidth)
+                    .disabled(workspaceMove.isActive)
+                    .allowsHitTesting(!workspaceMove.isActive)
             }
 
             if store.selectedScenario.kind != .shapeLab {
@@ -182,6 +188,8 @@ struct FootballImmersiveView: View {
                         recenterControls: recenterControls
                     )
                     .frame(width: viewHUDLayout.attachmentWidth)
+                    .disabled(workspaceMove.isActive)
+                    .allowsHitTesting(!workspaceMove.isActive)
                 }
             }
 
@@ -189,6 +197,8 @@ struct FootballImmersiveView: View {
                 Attachment(id: "perspective-matrix") {
                     PerspectiveMatrixPanel()
                         .frame(width: 520)
+                        .disabled(workspaceMove.isActive)
+                        .allowsHitTesting(!workspaceMove.isActive)
                 }
             }
 
@@ -196,6 +206,8 @@ struct FootballImmersiveView: View {
                 Attachment(id: "position-status") {
                     PositioningPanel()
                         .frame(width: 460)
+                        .disabled(workspaceMove.isActive)
+                        .allowsHitTesting(!workspaceMove.isActive)
                 }
             }
 
@@ -254,6 +266,7 @@ struct FootballImmersiveView: View {
             }
         }
         .onDisappear {
+            cancelWorkspaceMove()
             accessibilityActivationSubscription?.cancel()
             accessibilityActivationSubscription = nil
             // An old view must not pause, close or edit a newly opened room.
@@ -290,6 +303,20 @@ struct FootballImmersiveView: View {
         .onChange(of: store.selectedTool) { _, _ in
             annotationStroke = nil
         }
+        .onChange(of: store.selectedScenarioID) { _, _ in
+            cancelWorkspaceMove(rejectCurrentGesture: workspaceMove.isActive)
+        }
+        .onChange(of: controlDeckPresetRawValue) { _, _ in
+            cancelWorkspaceMove(rejectCurrentGesture: workspaceMove.isActive)
+        }
+        .onChange(of: dynamicTypeSize) { _, _ in
+            cancelWorkspaceMove(rejectCurrentGesture: workspaceMove.isActive)
+        }
+        .onChange(of: canMoveWorkspace) { _, isAllowed in
+            if !isAllowed, workspaceMove.isActive {
+                cancelWorkspaceMove(rejectCurrentGesture: true)
+            }
+        }
         .onChange(of: showsPlaybackAnnotations) { _, isVisible in
             guard !isVisible else { return }
             // This root owns the RealityView handle-drag state, so tear it
@@ -312,6 +339,7 @@ struct FootballImmersiveView: View {
         }
         .onChange(of: spatialDragIsActive) { wasActive, isActive in
             guard wasActive, !isActive else { return }
+            cancelWorkspaceMove()
             cancelInterruptedSpatialInteraction()
         }
     }
@@ -321,14 +349,27 @@ struct FootballImmersiveView: View {
         attachments: RealityViewAttachments,
         controlsAnchor: AnchorEntity
     ) {
+        let workspace = PlaybackAttachmentPlacement.contentRoot(in: controlsAnchor)
+        workspace.position = workspaceMove.offset
         for id in PlaybackAttachmentPlacement.attachmentIDs {
             if let entity = attachments.entity(for: id) {
                 entity.name = id
-                if entity.parent !== controlsAnchor {
-                    controlsAnchor.addChild(entity)
+                if entity.parent !== workspace {
+                    workspace.addChild(entity)
                 }
             }
         }
+        let handle: Entity
+        if let existing = workspace.children.first(where: { $0.name == PlaybackWorkspaceGrabHandle.name }) {
+            handle = existing
+        } else {
+            handle = PlaybackWorkspaceGrabHandle.make()
+            workspace.addChild(handle)
+        }
+        handle.position = PlaybackWorkspaceGrabHandle.position(for: controlDeckLayout)
+        handle.scale = SIMD3<Float>(repeating: controlDeckLayout.uniformScale)
+        PlaybackWorkspaceGrabHandle.update(handle,
+            isAvailable: canMoveWorkspace, isMoving: workspaceMove.isActive)
         updateAttachmentPositions(attachments)
     }
 
@@ -350,13 +391,57 @@ struct FootballImmersiveView: View {
     }
 
     private func recenterControls() {
+        guard !workspaceMove.isActive else { return }
         guard PlaybackAttachmentPlacement.canRecenter(
             isDrawing: store.isDrawing || annotationStroke != nil,
             isScrubbing: store.hasActiveTimelineScrub,
             isEditingGeometry: store.hasActiveCoachMarkGeometryPreview
         ) else { return }
+        workspaceMove.reset()
         controlPlacementRevision &+= 1
         store.statusMessage = "Controls placed here — look around freely"
+    }
+
+    private var canMoveWorkspace: Bool {
+        acceptsRoomInteraction && PlaybackAttachmentPlacement.canRecenter(
+            isDrawing: store.isDrawing || annotationStroke != nil,
+            isScrubbing: store.hasActiveTimelineScrub,
+            isEditingGeometry: store.hasActiveCoachMarkGeometryPreview
+        )
+    }
+
+    /// Convert the cumulative drag vector into the unchanged room anchor,
+    /// not the moving workspace. This prevents feedback drift while dragging.
+    @discardableResult
+    private func handleWorkspaceDragChanged(_ value: EntityTargetValue<DragGesture.Value>) -> Bool {
+        guard let handle = PlaybackWorkspaceGrabHandle.ancestor(of: value.entity),
+              let workspace = handle.parent,
+              workspace.name == PlaybackAttachmentPlacement.contentRootName,
+              let anchor = workspace.parent as? AnchorEntity else { return false }
+        let translation = value.convert(value.translation3D, from: .local, to: anchor)
+        let accepted = workspaceMove.preview(roomID: roomPresentationID,
+            cumulativeTranslation: translation, isAllowed: canMoveWorkspace)
+        workspace.position = workspaceMove.offset
+        if accepted { movingWorkspace = workspace }
+        return true
+    }
+
+    private func cancelWorkspaceMove(rejectCurrentGesture: Bool = false) {
+        workspaceMove.cancel(rejectCurrentGesture: rejectCurrentGesture)
+        movingWorkspace?.position = workspaceMove.offset
+        movingWorkspace = nil
+    }
+
+    private func finishWorkspaceMove(_ value: EntityTargetValue<DragGesture.Value>) {
+        guard acceptsRoomInteraction, canMoveWorkspace,
+              let handle = PlaybackWorkspaceGrabHandle.ancestor(of: value.entity),
+              handle.parent === movingWorkspace else {
+            cancelWorkspaceMove()
+            return
+        }
+        _ = handleWorkspaceDragChanged(value)
+        _ = workspaceMove.commit(roomID: roomPresentationID)
+        movingWorkspace = nil
     }
 
     /// Annotation visibility is a wearer-local analysis preference. Keep the
@@ -421,6 +506,8 @@ struct FootballImmersiveView: View {
                 }
                 .onChanged { value in
                     guard acceptsRoomInteraction else { return }
+                    if handleWorkspaceDragChanged(value) { return }
+                    guard !workspaceMove.isActive else { return }
                     handleAnnotationDragChanged(value)
                     handleAnnotationStrokeChanged(value)
                 }
@@ -433,7 +520,8 @@ struct FootballImmersiveView: View {
     private func handleSpatialTap(
         _ value: EntityTargetValue<SpatialTapGesture.Value>
     ) {
-        guard acceptsRoomInteraction else { return }
+        guard acceptsRoomInteraction, !workspaceMove.isActive else { return }
+        if PlaybackWorkspaceGrabHandle.ancestor(of: value.entity) != nil { return }
         guard PlaybackSpatialInteractionPolicy.acceptsPitchInteraction(
             hasActiveEndpointPreview: store.hasActiveCoachMarkGeometryPreview,
             hasActiveTimelineScrub: store.hasActiveTimelineScrub
@@ -493,6 +581,7 @@ struct FootballImmersiveView: View {
     /// same annotation and POV commands so existing interaction locks remain
     /// authoritative.
     private func handleAccessibilityActivation(_ event: AccessibilityEvents.Activate) {
+        guard !workspaceMove.isActive else { return }
         PlaybackAccessibilityActivationRouter.handle(
             event,
             store: store,
@@ -670,6 +759,10 @@ struct FootballImmersiveView: View {
     private func handleSpatialDragEnded(
         _ value: EntityTargetValue<DragGesture.Value>
     ) {
+        if workspaceMove.isActive || PlaybackWorkspaceGrabHandle.ancestor(of: value.entity) != nil {
+            finishWorkspaceMove(value)
+            return
+        }
         guard acceptsRoomInteraction else {
             draggedAnnotationTarget = nil
             annotationStroke = nil
@@ -2021,6 +2114,20 @@ private struct ImmersiveControlDeck: View {
             if arguments.contains("--replayxi-speed-picker") {
                 toggleInlinePanel(.playbackSpeed)
             }
+            if arguments.contains("--replayxi-arc-review"),
+               let mark = store.marks.last(where: { $0.kind == .arc }) {
+                selectedAnnotationID = mark.id
+                showsDecisionStrip = false
+                showsEventStrip = false
+                showsAnnotationTools = false
+                showsToolsShelf = false
+                // DEBUG visual fixture only. Let selection's normal observer
+                // close the old shelf before opening this mark's real editor.
+                try? await Task.sleep(for: .milliseconds(80))
+                if !Task.isCancelled, selectedAnnotationID == mark.id {
+                    inlinePanel = .annotationGeometry(mark.id)
+                }
+            }
             #endif
         }
         .task(id: annotationConfirmation) {
@@ -2155,7 +2262,7 @@ private struct ImmersiveControlDeck: View {
         .disabled(!store.canChangePlaybackView)
         .accessibilityLabel("Draw annotations")
         .accessibilityHint(
-            showsAnnotationTools ? "Closes drawing tools" : "Opens run, pass, press, zone, and label tools"
+            showsAnnotationTools ? "Closes drawing tools" : "Opens run, pass, arc, press, zone, and label tools"
         )
         .accessibilityAddTraits(showsAnnotationTools ? .isSelected : [])
     }
@@ -2727,6 +2834,20 @@ private struct ImmersiveControlDeck: View {
 
     private func annotationGeometryShelf(_ mark: CoachMark) -> some View {
         inlineShelf(color: annotationColor(for: mark.kind)) {
+            VStack(alignment: .leading, spacing: 12) {
+                annotationEndpointGeometryRow(mark)
+                if mark.kind == .arc {
+                    Divider()
+                    AnnotationCurveAdjustmentPad(markID: mark.id, color: annotationColor(for: mark.kind)) {
+                        annotationConfirmation = "CURVE UPDATED"
+                    }
+                    .id(mark.id)
+                }
+            }
+        }
+    }
+
+    private func annotationEndpointGeometryRow(_ mark: CoachMark) -> some View {
             HStack(spacing: 12) {
                 inlinePanelHeader(
                     title: "Drag to steer",
@@ -2807,7 +2928,6 @@ private struct ImmersiveControlDeck: View {
 
                 annotationElevationControls(mark)
             }
-        }
     }
 
     @ViewBuilder
@@ -2970,7 +3090,7 @@ private struct ImmersiveControlDeck: View {
     private func annotationEndPointTitle(for kind: CoachMarkKind) -> String {
         switch kind {
         case .space: "EDGE"
-        case .run, .pass, .danger: "ARROW TIP"
+        case .run, .pass, .arc, .danger: "ARROW TIP"
         case .playerLabel: "PLAYER"
         }
     }
@@ -3678,6 +3798,7 @@ private struct ImmersiveControlDeck: View {
         Group {
             annotationToolButton(.run, label: "Run")
             annotationToolButton(.pass, label: "Pass")
+            annotationToolButton(.arc, label: "Arc")
             annotationToolButton(.danger, label: "Press")
             annotationToolButton(.space, label: "Zone")
             annotationToolButton(.playerLabel, label: "Label")
@@ -4795,6 +4916,7 @@ private struct ImmersiveControlDeck: View {
         switch kind {
         case .run: ReplayTheme.orange
         case .pass: ReplayTheme.cyan
+        case .arc: Color(red: 0.66, green: 0.52, blue: 1)
         case .danger: .red
         case .space, .playerLabel: ReplayTheme.signal
         }

@@ -18,6 +18,110 @@ private final class ReplayRenderCompletion: @unchecked Sendable {
 /// physical-headset validation. The calibration must pass before PNG export.
 @MainActor
 final class ReplayRealityRendererAuditTests: XCTestCase {
+    func testCapturesCurvedAndLiftedAnnotationWithNativeGeometry() async throws {
+        let calibrationFrame = try await renderCalibration()
+        let probe = try ReplayRealityRendererAudit.probe(calibrationFrame)
+        let matches = probe.candidates.filter { $0.maximumChannelError <= 4 }
+        XCTAssertEqual(matches.count, 1)
+        let calibration = try XCTUnwrap(matches.first)
+        let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay))
+        let root = PitchSceneFactory.makeMatchRoot(for: scenario)
+        defer { for child in Array(root.children) { child.removeFromParent() } }
+        let arc = CoachMark(kind: .arc, start: .init(x: -8, z: -2), end: .init(x: 8, z: -2),
+                            curve: .init(bend: 3.2, lift: 1.2), label: "Bend around defender")
+        PitchSceneFactory.update(root: root, scenario: scenario, time: 0,
+            viewMode: .firstPerson, perspectiveID: scenario.defaultPerspectiveID,
+            marks: [arc], showsLaneLens: false, isDrawing: false, positionalOriginTransform: nil)
+        let mark = try XCTUnwrap(root.findEntity(named: "mark-\(arc.id.uuidString)"))
+        mark.removeFromParent()
+        let scene = Entity()
+        scene.addChild(mark)
+        let turf = ModelEntity(mesh: .generateBox(size: [23, 0.02, 15]),
+                               materials: [UnlitMaterial(color: UIColor(red: 0.08, green: 0.20, blue: 0.12, alpha: 1))])
+        turf.position.y = -0.05
+        scene.addChild(turf)
+        let camera = PerspectiveCamera()
+        camera.camera = PerspectiveCameraComponent(near: 0.05, far: 100, fieldOfViewInDegrees: 55)
+        camera.look(at: [0, 0.5, 0], from: [0, 12, 18], relativeTo: nil)
+        let frame = try await render(entities: [scene, camera], camera: camera, size: 512).frame
+        let rgba = frame.topFirstRGBA(calibration.rawRowsAreTopFirst)
+        var purplePixels = 0
+        for offset in stride(from: 0, to: rgba.count, by: 4) {
+            if Int(rgba[offset]) > Int(rgba[offset + 1]) + 15,
+               Int(rgba[offset + 2]) > Int(rgba[offset + 1]) + 30 { purplePixels += 1 }
+        }
+        XCTAssertGreaterThan(purplePixels, 50, "The actual curved tube must render, not only its caption")
+        try attachPNG(frame, calibration: calibration, named: "ReplayXI-EditableArc-Native.png")
+    }
+
+    func testCapturesActualBootAndBallContactsBeforeAndAfterPresentationRepair() async throws {
+        try XCTSkipIf(ReplayImportedAthleteFeatureGate.isEnabled, "Captures the normal local player skin")
+        let probe = try ReplayRealityRendererAudit.probe(try await renderCalibration())
+        let matches = probe.candidates.filter { $0.maximumChannelError <= 4 }
+        XCTAssertEqual(matches.count, 1)
+        let calibration = try XCTUnwrap(matches.first)
+        try ReplaySkinnedAthleteProvider.prewarm()
+        try ReplayStrategyBallProvider.prewarm()
+        let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay))
+        struct ContactReport: Encodable {
+            let player: String
+            let time: Double
+            let sourcePosition: [Float]
+            let correctedPosition: [Float]
+            let scope: String
+        }
+        for (playerID, time) in [("navy-rw", 13.6), ("navy-rb", 17.5), ("navy-cf", 24.0)] {
+            let player = try XCTUnwrap(scenario.player(id: playerID))
+            let pose = player.presentationPose(at: time)
+            let match = PitchSceneFactory.makeMatchRoot(for: scenario)
+            defer { for child in Array(match.children) { child.removeFromParent() } }
+            PitchSceneFactory.update(root: match, scenario: scenario, time: time,
+                viewMode: .tacticalTable, perspectiveID: playerID, marks: [],
+                showsLaneLens: false, isDrawing: false, positionalOriginTransform: nil)
+            let actor = try XCTUnwrap(match.findEntity(named: "player-\(playerID)"))
+            XCTAssertTrue(try XCTUnwrap(actor.findEntity(named: ReplaySkinnedAthleteProvider.visualRootName)).isEnabled)
+            let ball = try XCTUnwrap(match.findEntity(named: "ball"))
+            let corrected = ball.position - SIMD3<Float>(pose.position.x, 0, pose.position.z)
+            let sourcePose = scenario.ball.pose(at: time)
+            let source = SIMD3<Float>(sourcePose.position.x - pose.position.x,
+                                      sourcePose.height, sourcePose.position.z - pose.position.z)
+            XCTAssertGreaterThan(simd_distance(source, corrected), 0.4)
+            XCTAssertEqual(ball.scale, SIMD3<Float>(repeating: 1))
+            actor.removeFromParent()
+            ball.removeFromParent()
+            actor.position = .zero
+            let scene = Entity()
+            scene.orientation = simd_quatf(angle: -pose.facingDegrees * .pi / 180, axis: [0, 1, 0])
+            scene.addChild(actor)
+            scene.addChild(ball)
+            let turf = ModelEntity(mesh: .generateBox(size: [4, 0.02, 4]),
+                                   materials: [UnlitMaterial(color: UIColor(red: 0.08, green: 0.20,
+                                                                          blue: 0.12, alpha: 1))])
+            turf.position.y = -0.012
+            scene.addChild(turf)
+            let key = DirectionalLight()
+            key.light.intensity = 2_200
+            key.look(at: [0, 0.5, 0], from: [3, 4, 3], relativeTo: nil)
+            let fill = DirectionalLight()
+            fill.light.intensity = 600
+            fill.look(at: [0, 0.5, 0], from: [-3, 2, 2], relativeTo: nil)
+            let camera = PerspectiveCamera()
+            camera.camera = PerspectiveCameraComponent(near: 0.05, far: 20, fieldOfViewInDegrees: 40)
+            camera.look(at: [0, 0.48, 0.10], from: [1.8, 1.0, 2.15], relativeTo: nil)
+            for (name, position) in [("source-centre", source), ("corrected-contact", corrected)] {
+                ball.position = position
+                let capture = try await render(entities: [scene, key, fill, camera], camera: camera, size: 512)
+                try attachPNG(capture.frame, calibration: calibration,
+                              named: "ReplayXI-BallContact-\(playerID)-\(name).png")
+            }
+            try attachJSON(ContactReport(player: playerID, time: time,
+                sourcePosition: [source.x, source.y, source.z],
+                correctedPosition: [corrected.x, corrected.y, corrected.z],
+                scope: "Actual native skin and ball, lower-body crop; no UI or headset capture"),
+                named: "ReplayXI-BallContact-\(playerID).json")
+        }
+    }
+
     func testCapturesWholeTouchlineReplayWithTimedAnnotationsAndBundledAssets() async throws {
         // A fixed audit camera, not a UI screenshot or headset capture. Keep
         // the actual Touchline root transform and its existing label observer.
@@ -62,7 +166,7 @@ final class ReplayRealityRendererAuditTests: XCTestCase {
         let ball = try XCTUnwrap(match.findEntity(named: "ball"))
         XCTAssertTrue(ball.isEnabledInHierarchy)
         XCTAssertTrue(try XCTUnwrap(ball.findEntity(named: ReplayStrategyBallProvider.visualRootName)).isEnabledInHierarchy)
-        let ballPose = scenario.ball.pose(at: time)
+        let ballPose = ReplayBallPlaybackMotion(track: scenario.ball, players: scenario.players).pose(at: time)
         XCTAssertEqual(ball.position.x, ballPose.position.x)
         XCTAssertEqual(ball.position.z, ballPose.position.z)
 

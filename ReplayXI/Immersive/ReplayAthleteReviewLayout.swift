@@ -1,7 +1,7 @@
 import Foundation
 
-/// One scale policy for the athlete and its independent identity tag. Keeping
-/// these together prevents a review-sized body from growing through its label.
+/// Actors remain human-sized in pitch coordinates in every review view.
+/// Selection belongs to rings/tags, never a bigger body or collision envelope.
 enum ReplayAthleteReviewLayout {
     /// Conservative pitch-local head envelope for the bundled grounded rigs,
     /// including their appearance scales and locomotion. It stays constant as
@@ -16,16 +16,10 @@ enum ReplayAthleteReviewLayout {
         isShapeRole: Bool,
         isPhysicalDrill: Bool = false
     ) -> Float {
-        switch viewMode {
-        case .firstPerson:
-            1
-        case .tacticalTable:
-            isSelected ? 3.15 : (isFeatured ? 2.05 : 1.40)
-        case .touchline:
-            isSelected ? 1.9 : (isFeatured ? 1.4 : 1.08)
-        case .positional:
-            isPhysicalDrill ? 1 : (isShapeRole ? 3.05 : 2.65)
-        }
+        // Keep the call contract shared with tag placement. View transforms
+        // scale the whole pitch; a featured home player must not grow relative
+        // to an opponent, the ball, a passing lane or the wearer's viewpoint.
+        1
     }
 
     static func minimumTagHeight(athleteScale: Float, labelScale: Float) -> Float {

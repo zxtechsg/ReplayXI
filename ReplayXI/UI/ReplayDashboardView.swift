@@ -97,6 +97,14 @@ struct ReplayDashboardView: View {
                 _ = store.registerPitchTap(PitchPoint(x: 14, z: 9))
                 _ = store.registerPitchTap(PitchPoint(x: 25, z: 22))
             }
+            if arguments.contains("--replayxi-arc-review") {
+                store.beginDrawing(.arc)
+                _ = store.registerPitchTap(PitchPoint(x: 5, z: 5))
+                if let mark = store.registerPitchTap(PitchPoint(x: 24, z: 20)) {
+                    _ = store.updateCoachMarkGeometry(id: mark.id, start: mark.start, end: mark.end,
+                                                       curve: .init(bend: 4, lift: 1))
+                }
+            }
             if arguments.contains("--replayxi-autostart") {
                 try? await Task.sleep(for: .milliseconds(750))
                 openRoom()
@@ -149,6 +157,19 @@ struct ReplayDashboardView: View {
                     print("Replay XI distant-player faces unavailable; keeping standard heads: \(error)")
                     #endif
                 }
+                // Original Blender anatomy bends at knees/elbows while
+                // retaining the far family's seven-model budget. Preparation
+                // is explicit; a failed asset keeps the established fallback.
+                do {
+                    try ReplayArticulatedFarProvider.prewarm()
+                } catch {
+                    #if DEBUG
+                    print("Replay XI articulated players unavailable; keeping standard bodies: \(error)")
+                    #endif
+                }
+                // Optional original kit maps share six tiny textures across
+                // the whole squad. Missing maps retain the solid team colours.
+                _ = try? ReplayArticulatedFarKitProvider.prewarm()
                 // Optional visual admission; a missing/corrupt asset retains the
                 // procedural ball without blocking playback or loading per frame.
                 do {

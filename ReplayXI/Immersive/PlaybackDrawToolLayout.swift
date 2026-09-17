@@ -1,7 +1,7 @@
 import CoreGraphics
 
-/// Large-text drawing keeps the instruction above its five tools instead of
-/// compressing both into one row. Normal controls retain their existing size.
+/// Six tools get a separate row from the instruction at every text size.
+/// Existing label/hit sizes are kept instead of squeezing in a sixth tool.
 struct PlaybackDrawToolLayout: Equatable, Sendable {
     let usesStackedShelves: Bool
     let labelWidth: CGFloat
@@ -12,13 +12,14 @@ struct PlaybackDrawToolLayout: Equatable, Sendable {
 
     static let drawingInstructionWidth: CGFloat = 190
     static let idleInstructionWidth: CGFloat = 180
+    static let toolCount = 6
 
     static func resolve(usesAccessibilityText: Bool) -> PlaybackDrawToolLayout {
         PlaybackDrawToolLayout(
-            usesStackedShelves: usesAccessibilityText,
+            usesStackedShelves: true,
             labelWidth: usesAccessibilityText ? 88 : 70,
             labelMinimumHeight: usesAccessibilityText ? 84 : 48,
-            instructionMinimumScale: usesAccessibilityText ? 1 : 0.72,
+            instructionMinimumScale: 1,
             cancelLabelWidth: usesAccessibilityText ? 60 : 28,
             cancelLabelMinimumHeight: usesAccessibilityText ? 60 : 48
         )

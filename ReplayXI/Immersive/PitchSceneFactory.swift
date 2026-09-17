@@ -22,6 +22,10 @@ enum PitchSceneFactory {
         let motion: ReplayBallRollingMotion
     }
 
+    private struct BallPlaybackCache: Component {
+        let motion: ReplayBallPlaybackMotion
+    }
+
     /// Procedural model descendants are fixed when a rig is built. Skin
     /// admission changes their visibility, but time/pose updates do not.
     private struct ProceduralVisualState: Component {
@@ -57,6 +61,10 @@ enum PitchSceneFactory {
 
     static func ballRollingMotionForTesting(in root: Entity) -> ReplayBallRollingMotion? {
         root.components[BallRollingCache.self]?.motion
+    }
+
+    static func ballPlaybackMotionForTesting(in root: Entity) -> ReplayBallPlaybackMotion? {
+        root.components[BallPlaybackCache.self]?.motion
     }
     #endif
 
@@ -577,7 +585,9 @@ enum PitchSceneFactory {
     static func makeMatchRoot(for scenario: ReplayScenario) -> Entity {
         let root = Entity()
         root.name = "match-root-\(scenario.id)"
-        root.components.set(BallRollingCache(motion: ReplayBallRollingMotion(track: scenario.ball)))
+        let ballPlayback = ReplayBallPlaybackMotion.prepared(track: scenario.ball, players: scenario.players)
+        root.components.set(BallPlaybackCache(motion: ballPlayback))
+        root.components.set(BallRollingCache(motion: ballPlayback.rolling))
 
         let pitch = makePitch()
         pitch.name = "pitch"
@@ -799,10 +809,12 @@ enum PitchSceneFactory {
         } else {
             nil
         }
-        let ballPose = scenario.ball.pose(at: time)
+        let ballPose = root.components[BallPlaybackCache.self]?.motion.pose(at: time)
+            ?? scenario.ball.pose(at: time)
         // Shape Lab can substitute ideal player and ball presentation positions.
-        // Match views alone may infer render-only touches from the authoritative
-        // replay tracks; this never mutates the tactical ball path.
+        // Match views infer action TIMING from authoritative tracks. The ball's
+        // prepared contact path and the player's gaze share the presented pose;
+        // source events and saved telemetry remain untouched.
         let athleteBallActionTrack: BallTrack? = isTriangleView ? nil : scenario.ball
         let shapeSourcePosition: PitchPoint? = if isTriangleView,
                                                   let source = scenario.player(id: scenario.defaultPerspectiveID) {
@@ -1160,9 +1172,7 @@ enum PitchSceneFactory {
         }
 
         let ballScale: Float = switch viewMode {
-        case .firstPerson: 1
-        case .tacticalTable: 3.2
-        case .touchline: 1.5
+        case .firstPerson, .tacticalTable, .touchline: 1
         case .positional: 1.8
         }
         // Larger review markers keep the physical ball's bottom altitude.
@@ -1190,7 +1200,9 @@ enum PitchSceneFactory {
         }
         if let emphasis = directChild(named: "ball-emphasis", of: root) {
             emphasis.position = [presentationBallPosition.x, 0.012, presentationBallPosition.z]
-            emphasis.scale = SIMD3<Float>(repeating: ballScale)
+            // Readability belongs to the ring, not an inflated physical ball.
+            let emphasisScale: Float = viewMode == .tacticalTable ? 3.2 : ballScale
+            emphasis.scale = SIMD3<Float>(repeating: emphasisScale)
             emphasis.isEnabled = showsBall && emphasizesBall
         }
 
@@ -2996,6 +3008,11 @@ enum PitchSceneFactory {
         switch mark.kind {
         case .space, .playerLabel:
             return ReplayGeometry.distance(point, mark.start)
+        case .arc:
+            return (0...CoachMarkCurve.segmentCount).reduce(Float.greatestFiniteMagnitude) { nearest, index in
+                let sample = mark.resolvedCurve.point(at: Float(index) / Float(CoachMarkCurve.segmentCount), for: mark)
+                return min(nearest, ReplayGeometry.distance(point, PitchPoint(x: sample.x, z: sample.z)))
+            }
         case .run, .pass, .danger:
             let vx = mark.end.x - mark.start.x
             let vz = mark.end.z - mark.start.z
@@ -3032,6 +3049,7 @@ enum PitchSceneFactory {
         switch mark.kind {
         case .run: color = UIColor(red: 1.0, green: 0.42, blue: 0.12, alpha: 0.92)
         case .pass: color = UIColor(red: 0.22, green: 0.91, blue: 0.88, alpha: 0.92)
+        case .arc: color = UIColor(red: 0.66, green: 0.52, blue: 1, alpha: 0.95)
         case .danger: color = UIColor(red: 1.0, green: 0.25, blue: 0.34, alpha: 0.9)
         case .space: color = UIColor(red: 0.78, green: 0.94, blue: 0.19, alpha: 0.78)
         case .playerLabel: color = UIColor(red: 0.78, green: 0.94, blue: 0.19, alpha: 0.92)
@@ -3099,6 +3117,18 @@ enum PitchSceneFactory {
             return root
         }
 
+        if mark.kind == .arc {
+            let path = ModelEntity(mesh: annotationMarkSegmentMesh, materials: [UnlitMaterial(color: color)])
+            path.name = "annotation-mark-segment-0"
+            AnnotationArcMesh.update(path, mark: mark)
+            root.addChild(path)
+            let arrow = ModelEntity(mesh: annotationMarkArrowMesh, materials: [UnlitMaterial(color: color)])
+            arrow.name = "annotation-mark-arrow"
+            configureArcArrow(arrow, mark: mark)
+            root.addChild(arrow)
+            return root
+        }
+
         let pieces = mark.kind == .danger ? 7 : 1
         for index in 0..<pieces {
             let startFraction = Float(index) / Float(pieces)
@@ -3159,6 +3189,16 @@ enum PitchSceneFactory {
         )
 
         switch incoming.kind {
+        case .arc:
+            guard let path = directChild(named: "annotation-mark-segment-0", of: entity) as? ModelEntity,
+                  let arrow = directChild(named: "annotation-mark-arrow", of: entity),
+                  let startGuide = directChild(named: "annotation-mark-start-elevation-guide", of: entity),
+                  let endGuide = directChild(named: "annotation-mark-end-elevation-guide", of: entity)
+            else { return false }
+            configureAnnotationElevationGuide(startGuide, at: incoming.start, elevation: incoming.resolvedStartElevation)
+            configureAnnotationElevationGuide(endGuide, at: incoming.end, elevation: incoming.resolvedEndElevation)
+            configureArcArrow(arrow, mark: incoming)
+            return AnnotationArcMesh.update(path, mark: incoming)
         case .playerLabel:
             return directChild(
                 named: AnnotationSceneAffordance.playerAttachmentName,
@@ -3268,6 +3308,15 @@ enum PitchSceneFactory {
         }
     }
 
+    private static func configureArcArrow(_ arrow: Entity, mark: CoachMark) {
+        let tangent = mark.resolvedCurve.endTangent(for: mark)
+        arrow.position = mark.resolvedCurve.point(at: 1, for: mark, baseY: 0.12)
+        arrow.isEnabled = simd_length_squared(tangent) > 0.0001
+        if arrow.isEnabled {
+            arrow.orientation = simd_quatf(from: SIMD3<Float>(0, 1, 0), to: simd_normalize(tangent))
+        }
+    }
+
     private static func makeAnnotationDraftRoot() -> Entity {
         let root = Entity()
         root.name = "annotation-draft-root"
@@ -3347,6 +3396,11 @@ enum PitchSceneFactory {
         path.name = "annotation-draft-stroke-path"
         stroke.addChild(path)
 
+        let arc = ModelEntity(mesh: annotationMarkSegmentMesh, materials: [segmentMaterial])
+        arc.name = "annotation-draft-stroke-arc"
+        arc.isEnabled = false
+        stroke.addChild(arc)
+
         let arrow = ModelEntity(
             mesh: annotationMarkArrowMesh,
             materials: [segmentMaterial]
@@ -3364,7 +3418,7 @@ enum PitchSceneFactory {
 
         let labels = Entity()
         labels.name = "annotation-label"
-        for candidateKind in [CoachMarkKind.run, .pass, .danger, .space] {
+        for candidateKind in [CoachMarkKind.run, .pass, .arc, .danger, .space] {
             let label = PlaybackSpatialLabels.makeAnnotationTag(
                 text: "\(candidateKind.title.uppercased()) · START",
                 color: draftColor(for: candidateKind)
@@ -3416,7 +3470,7 @@ enum PitchSceneFactory {
         guard let label = directChild(named: "annotation-label", of: draft) else { return }
         var hasActiveLabel = false
         var needsVisualRestyle = true
-        for candidate in [CoachMarkKind.run, .pass, .danger, .space] {
+        for candidate in [CoachMarkKind.run, .pass, .arc, .danger, .space] {
             guard let candidateLabel = directChild(
                 named: "annotation-draft-label-\(candidate.rawValue)",
                 of: label
@@ -3448,6 +3502,7 @@ enum PitchSceneFactory {
             }
             for name in [
                 "annotation-draft-stroke-path",
+                "annotation-draft-stroke-arc",
                 "annotation-draft-stroke-arrow",
                 "annotation-draft-stroke-zone",
             ] {
@@ -3508,6 +3563,24 @@ enum PitchSceneFactory {
         let path = directChild(named: "annotation-draft-stroke-path", of: stroke)
         let arrow = directChild(named: "annotation-draft-stroke-arrow", of: stroke)
         let zone = directChild(named: "annotation-draft-stroke-zone", of: stroke)
+        let arc = directChild(named: "annotation-draft-stroke-arc", of: stroke) as? ModelEntity
+        arc?.isEnabled = kind == .arc
+
+        if kind == .arc {
+            path?.isEnabled = false
+            zone?.isEnabled = false
+            arrow?.isEnabled = true
+            let mark = CoachMark(kind: .arc, start: start, end: end, label: "Arc preview")
+            if let arc {
+                AnnotationArcMesh.update(arc, mark: mark)
+                arc.position = [-start.x, 0, -start.z]
+            }
+            if let arrow {
+                configureArcArrow(arrow, mark: mark)
+                arrow.position -= SIMD3<Float>(start.x, 0, start.z)
+            }
+            return
+        }
 
         if kind == .space {
             path?.isEnabled = false
@@ -3542,6 +3615,7 @@ enum PitchSceneFactory {
         switch kind {
         case .run: UIColor(red: 1.0, green: 0.42, blue: 0.12, alpha: 1)
         case .pass: UIColor(red: 0.22, green: 0.91, blue: 0.88, alpha: 1)
+        case .arc: UIColor(red: 0.66, green: 0.52, blue: 1, alpha: 1)
         case .danger: UIColor(red: 1.0, green: 0.25, blue: 0.34, alpha: 1)
         case .space, .playerLabel: UIColor(red: 0.78, green: 0.94, blue: 0.19, alpha: 1)
         }
@@ -3551,6 +3625,7 @@ enum PitchSceneFactory {
         let prefix: String = switch mark.kind {
         case .run: "RUN · "
         case .pass: "PASS · "
+        case .arc: "ARC · "
         default: ""
         }
         let complete = prefix + mark.label
@@ -3612,13 +3687,19 @@ enum PitchSceneFactory {
             if mark.kind == .playerLabel {
                 anchor = mark.playerID.flatMap { posesByPlayerID[$0]?.position } ?? mark.end
             } else {
-                let pathAnchor = mark.start.interpolated(to: mark.end, fraction: 0.70)
+                let pathAnchor: PitchPoint
+                if mark.kind == .arc {
+                    let arcAnchor = mark.resolvedCurve.point(at: 0.70, for: mark)
+                    pathAnchor = PitchPoint(x: arcAnchor.x, z: arcAnchor.z)
+                } else {
+                    pathAnchor = mark.start.interpolated(to: mark.end, fraction: 0.70)
+                }
                 let dx = mark.end.x - mark.start.x
                 let dz = mark.end.z - mark.start.z
                 let length = hypot(dx, dz)
                 if length > 0.001 {
                     let side: Float = switch mark.kind {
-                    case .run, .danger: 1
+                    case .run, .arc, .danger: 1
                     case .pass, .space: -1
                     case .playerLabel: 0
                     }
@@ -3641,6 +3722,8 @@ enum PitchSceneFactory {
                 0
             } else if mark.kind == .space {
                 (mark.resolvedStartElevation + mark.resolvedEndElevation) / 2
+            } else if mark.kind == .arc {
+                mark.resolvedCurve.point(at: 0.70, for: mark).y
             } else {
                 mark.resolvedStartElevation
                     + ((mark.resolvedEndElevation - mark.resolvedStartElevation) * 0.70)

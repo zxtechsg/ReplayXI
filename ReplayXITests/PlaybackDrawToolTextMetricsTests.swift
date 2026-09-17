@@ -13,12 +13,12 @@ final class PlaybackDrawToolTextMetricsTests: XCTestCase {
         .accessibilityExtraExtraLarge, .accessibilityExtraExtraExtraLarge
     ]
     private let tools: [(CoachMarkKind, String)] = [
-        (.run, "RUN"), (.pass, "PASS"), (.danger, "PRESS"), (.space, "ZONE"), (.playerLabel, "LABEL")
+        (.run, "RUN"), (.pass, "PASS"), (.arc, "ARC"), (.danger, "PRESS"), (.space, "ZONE"), (.playerLabel, "LABEL")
     ]
 
     func testEveryDrawToolHasFiniteNativeMeasurementsAtEveryTextSize() throws {
         let records = try categories.flatMap(metrics)
-        XCTAssertEqual(records.count, 60)
+        XCTAssertEqual(records.count, 72)
         XCTAssertTrue(records.allSatisfy {
             $0.textWidth > 0 && $0.symbolWidth > 0 && $0.stackHeight > 0
         })
@@ -51,12 +51,13 @@ final class PlaybackDrawToolTextMetricsTests: XCTestCase {
         }
     }
 
-    func testRegularPolicyPreservesExistingCompactSizes() {
+    func testRegularPolicyKeepsLabelSizesAndSeparatesTheSixToolsFromInstructions() {
         let layout = PlaybackDrawToolLayout.resolve(usesAccessibilityText: false)
-        XCTAssertFalse(layout.usesStackedShelves)
+        XCTAssertTrue(layout.usesStackedShelves)
+        XCTAssertEqual(PlaybackDrawToolLayout.toolCount, tools.count)
         XCTAssertEqual(layout.labelWidth, 70)
         XCTAssertEqual(layout.labelMinimumHeight, 48)
-        XCTAssertEqual(layout.instructionMinimumScale, 0.72)
+        XCTAssertEqual(layout.instructionMinimumScale, 1)
         XCTAssertEqual(layout.cancelLabelWidth, 28)
         XCTAssertEqual(layout.cancelLabelMinimumHeight, 48)
         XCTAssertEqual(PlaybackDrawToolLayout.drawingInstructionWidth, 190)
@@ -71,11 +72,11 @@ final class PlaybackDrawToolTextMetricsTests: XCTestCase {
                     usesAccessibilityText: category.isAccessibilityCategory)
                 // Reserve 48 pt native button-style allowance per button.
                 // These are allocations, not rendered SwiftUI measurements.
-                let toolWidths = 5 * (layout.labelWidth + 48)
+                let toolWidths = CGFloat(PlaybackDrawToolLayout.toolCount) * (layout.labelWidth + 48)
                 if layout.usesStackedShelves {
                     XCTAssertEqual(layout.instructionMinimumScale, 1)
-                    XCTAssertLessThanOrEqual(toolWidths + 5 * 10, deck.contentWidth - 32)
-                    XCTAssertLessThanOrEqual(toolWidths + 5 * 9, deck.contentWidth - 44 - 24)
+                    XCTAssertLessThanOrEqual(toolWidths + CGFloat(tools.count) * 10, deck.contentWidth - 32)
+                    XCTAssertLessThanOrEqual(toolWidths + CGFloat(tools.count) * 9, deck.contentWidth - 44 - 24)
                 } else {
                     let timestamp = timestampWidth(for: category)
                     let drawing = layout.cancelLabelWidth + 48
@@ -137,7 +138,7 @@ final class PlaybackDrawToolTextMetricsTests: XCTestCase {
         XCTAssertTrue(tool.contains(".frame(minHeight: drawToolLayout.labelMinimumHeight)"))
         XCTAssertFalse(tool.contains("minimumScaleFactor"))
         let shelves = try slice(source, after: "private var annotationDrawingShelf:", before: "private var povStatusChip:")
-        for title in ["Run", "Pass", "Press", "Zone", "Label"] {
+        for title in ["Run", "Pass", "Arc", "Press", "Zone", "Label"] {
             XCTAssertEqual(shelves.components(separatedBy: "label: \"\(title)\"").count - 1, 1)
         }
         XCTAssertEqual(shelves.components(separatedBy: "if drawToolLayout.usesStackedShelves").count - 1, 2)

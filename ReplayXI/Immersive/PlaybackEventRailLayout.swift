@@ -312,6 +312,7 @@ struct PlaybackReviewIndexFingerprint: Equatable, Sendable {
         case .danger: 2
         case .space: 3
         case .playerLabel: 4
+        case .arc: 5
         }
     }
 

@@ -10,7 +10,7 @@ final class ReplayBallGroundClearanceTests: XCTestCase {
     }
 
     private let views: [(ReplayViewMode, Float)] = [
-        (.firstPerson, 1), (.tacticalTable, 3.2), (.touchline, 1.5), (.positional, 1.8),
+        (.firstPerson, 1), (.tacticalTable, 1), (.touchline, 1), (.positional, 1.8),
     ]
 
     private func scene(usingBlender: Bool) throws -> (ReplayScenario, Entity, Entity, Entity) {

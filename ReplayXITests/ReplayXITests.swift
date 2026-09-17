@@ -1270,7 +1270,7 @@ final class ReplayXITests: XCTestCase {
         )
         let pitch = try XCTUnwrap(root.findEntity(named: "pitch"))
         XCTAssertTrue(try XCTUnwrap(pitch.findEntity(named: "tactical-board-rim")).isEnabled)
-        XCTAssertEqual(try XCTUnwrap(root.findEntity(named: "ball")).scale.x, 3.2, accuracy: 0.000_1)
+        XCTAssertEqual(try XCTUnwrap(root.findEntity(named: "ball")).scale.x, 1, accuracy: 0.000_1)
     }
 
     func testFirstPersonCapsSpatialLabelsAndRemovesWearerHitTarget() throws {

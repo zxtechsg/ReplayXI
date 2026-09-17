@@ -15,7 +15,7 @@ enum PlaybackSceneRenderBudget {
 
     static func estimatedDraws(for kind: CoachMarkKind) -> Int {
         switch kind {
-        case .run, .pass:
+        case .run, .pass, .arc:
             5 // board + accent + glyph + path + arrow
         case .danger:
             11 // board + accent + glyph + seven dashes + arrow
