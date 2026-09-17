@@ -126,7 +126,8 @@ enum ReplayAthleteMotion {
                 lookTargetWorldPosition: lookTargetWorldPosition,
                 ballTrack: ballTrack,
                 interaction: interaction,
-                presentationPose: presentationPose
+                presentationPose: presentationPose,
+                allowsOffBallPose: !(ragdollCue.map { $0.playerID == track.id && $0.isActive(at: time) } ?? false)
             ),
             to: instance.joints
         )
@@ -176,7 +177,8 @@ enum ReplayAthleteMotion {
         stationaryPose: PlayerPose? = nil,
         interaction: ReplayAthleteInteractionCue? = nil,
         presentationPose: PlayerPose? = nil,
-        movementIntent: ReplayAthleteMovementIntent.Sample? = nil
+        movementIntent: ReplayAthleteMovementIntent.Sample? = nil,
+        allowsOffBallPose: Bool = true
     ) -> ReplayAthleteLocomotionPose {
         let locomotion = stationaryPose == nil ? suppliedLocomotion : track.stationaryLocomotion
         // `PlayerLocomotionState` is deliberately discrete because it is also
@@ -327,6 +329,15 @@ enum ReplayAthleteMotion {
         let stabilizedHeadRoll = (-inheritedGaitRoll * 0.72)
             + (cutBank * 0.40)
             + (doubleCycle * tuning.headRoll * 0.18)
+        let offBallEnabled = allowsOffBallPose && presentationPose != nil
+            && stationaryPose == nil && lookTargetWorldPosition != nil
+        let interactionInfluence = offBallEnabled
+            ? ReplayAthleteInteractionPose.sample(cue: interaction, at: time, track: track,
+                                                  presentationPose: presentationPose)?.influence ?? 0 : 0
+        let offBall = ReplayAthleteOffBallPose.sample(
+            playerID: track.id, at: time, locomotion: locomotion, look: look,
+            actionInfluence: max(interactionInfluence, ballAction?.influence ?? 0), enabled: offBallEnabled)
+        let sharedLook = offBall.adjusting(look)
 
         let base = ReplayAthleteLocomotionPose(
             // A planted boot owns vertical placement. During the flight phase,
@@ -353,30 +364,30 @@ enum ReplayAthleteMotion {
                 axis: [0, 0, 1]
             ) * simd_quatf(angle: cycle * tuning.pelvisYaw, axis: [0, 1, 0]),
             spineOrientation: simd_quatf(
-                angle: (-forwardLean * 0.90) + breathingPitch,
+                angle: (-forwardLean * 0.90) + breathingPitch + offBall.chestPitch,
                 axis: [1, 0, 0]
             )
                 * simd_quatf(
-                    angle: (-doubleCycle * tuning.spineRoll) + (cutBank * 0.62),
+                    angle: (-doubleCycle * tuning.spineRoll) + (cutBank * 0.62) + offBall.chestRoll,
                     axis: [0, 0, 1]
                 )
-                * simd_quatf(angle: -cycle * tuning.spineYaw, axis: [0, 1, 0]),
+                * simd_quatf(angle: -cycle * tuning.spineYaw + offBall.chestYaw, axis: [0, 1, 0]),
             neckOrientation: simd_quatf(
-                angle: (forwardLean * 0.30) + look.neckPitchRadians
+                angle: (forwardLean * 0.30) + sharedLook.neckPitchRadians
                     - (breathingPitch * 0.55),
                 axis: [1, 0, 0]
             ) * simd_quatf(angle: stabilizedHeadRoll * 0.38, axis: [0, 0, 1])
                 * simd_quatf(
-                    angle: look.neckYawRadians + (cycle * tuning.spineYaw * 0.30),
+                    angle: sharedLook.neckYawRadians + (cycle * tuning.spineYaw * 0.30),
                     axis: [0, 1, 0]
                 ),
             headOrientation: simd_quatf(
-                angle: (forwardLean * 0.54) + look.headPitchRadians
+                angle: (forwardLean * 0.54) + sharedLook.headPitchRadians
                     - (breathingPitch * 0.45),
                 axis: [1, 0, 0]
             ) * simd_quatf(angle: stabilizedHeadRoll * 0.62, axis: [0, 0, 1])
                 * simd_quatf(
-                    angle: look.headYawRadians + (cycle * tuning.spineYaw * 0.70),
+                    angle: sharedLook.headYawRadians + (cycle * tuning.spineYaw * 0.70),
                     axis: [0, 1, 0]
                 ),
             leftHipOrientation: simd_quatf(angle: leftHipLateral, axis: [0, 0, 1])

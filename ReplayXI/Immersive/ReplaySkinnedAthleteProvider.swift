@@ -284,7 +284,8 @@ final class ReplaySkinnedAthleteInstance {
                 impact: PlayerRagdollPlayback.Sample? = nil,
                 stationaryPose: PlayerPose? = nil,
                 interaction: ReplayAthleteInteractionCue? = nil,
-                presentationPose: PlayerPose? = nil) -> Bool {
+                presentationPose: PlayerPose? = nil,
+                allowsOffBallPose: Bool = true) -> Bool {
         let locomotion = stationaryPose == nil ? suppliedLocomotion : track.stationaryLocomotion
         // Never apply a stale or different player's collision sample. Unsupported
         // assets still fail soft to the procedural body rather than disappear.
@@ -314,17 +315,25 @@ final class ReplaySkinnedAthleteInstance {
                 for: track, at: time, locomotion: locomotion, gaitPhase: gaitPhase,
                 lookTargetWorldPosition: lookTarget, ballAction: ballAction,
                 stationaryPose: stationaryPose, interaction: interaction, presentationPose: presentationPose,
-                movementIntent: movement
+                movementIntent: movement, allowsOffBallPose: false
             )
             footballPose?.apply(authored, influence: influence,
                                 armInfluence: max(ReplaySkinnedAthleteFootballPose.influence(locomotion: locomotion, ballAction: nil),
                                                   interactionSample?.influence ?? 0, movement?.readiness ?? 0),
                                 motion: motion, to: &pose, interaction: interactionSample)
         }
-        let look = ReplayAthleteMotion.lookPose(for: track, at: time, locomotion: locomotion,
+        let baseLook = ReplayAthleteMotion.lookPose(for: track, at: time, locomotion: locomotion,
                                                targetWorldPosition: lookTarget,
                                                stationaryPose: stationaryPose,
                                                presentationPose: presentationPose)
+        let offBall = ReplayAthleteOffBallPose.sample(
+            playerID: track.id, at: time, locomotion: locomotion, look: baseLook,
+            actionInfluence: max(interactionSample?.influence ?? 0, ballAction?.influence ?? 0),
+            sourceFraction: 1 - influence,
+            enabled: allowsOffBallPose && presentationPose != nil && stationaryPose == nil
+                && impact == nil && lookTarget != nil)
+        applyOffBall(offBall)
+        let look = offBall.adjusting(baseLook)
         if let action = interactionSample {
             applyLook(ReplayAthleteLookPose(neckYawRadians: look.neckYawRadians,
                 headYawRadians: look.headYawRadians,
@@ -367,6 +376,21 @@ final class ReplaySkinnedAthleteInstance {
         back.transform = Transform(matrix: chest * backLocal)
         skinRoot.position.y = -motion.geometry.restMinY
         return true
+    }
+
+    private func applyOffBall(_ sample: ReplayAthleteOffBallPose.Sample) {
+        guard !sample.isIdentity else { return }
+        let chest = motion.numberAnchors.jointIndex
+        // Compose only the short parent chain; no extra full-skeleton rebuild
+        // or temporary arrays. The chest's descendants follow without stretch.
+        var parent = motion.joints[chest].parentIndex
+        var parentRotation = simd_quatf(real: 1, imag: .zero)
+        while parent >= 0 {
+            parentRotation = pose.rotations[parent] * parentRotation
+            parent = motion.joints[parent].parentIndex
+        }
+        pose.rotations[chest] = simd_normalize(parentRotation.inverse * sample.chestRotation
+            * parentRotation * pose.rotations[chest])
     }
 
     private func constrainHeadRelativeToChest() {

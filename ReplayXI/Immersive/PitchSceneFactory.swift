@@ -872,7 +872,7 @@ enum PitchSceneFactory {
         } ?? ballPose.position
         let ballRadius: Float = 0.11
         let presentedBallHeight = isTriangleView ? ballRadius : max(ballPose.height, ballRadius)
-        let playerLookTarget = SIMD3<Float>(
+        let ballLookTarget = SIMD3<Float>(
             presentationBallPosition.x,
             // Shape grounds its physical ball; do not aim at hidden replay
             // loft or the marker's enlarged radius. Match aim stays unchanged.
@@ -1083,6 +1083,16 @@ enum PitchSceneFactory {
                 let interaction = activeRagdollCue == nil
                     ? nativeBall?.interaction(for: player.id, at: time) : nil
                 let motionPresentation = nativeBall == nil ? nil : pose
+                let playerLookTarget: SIMD3<Float>
+                if let nativeBall, stationaryPose == nil, activeRagdollCue == nil {
+                    playerLookTarget = ReplayAthleteTacticalAttention.target(
+                        for: player, at: time, pose: pose, ball: ballLookTarget,
+                        players: scenario.players, poses: playerPosesByID,
+                        contacts: nativeBall.interactions[player.id] ?? []
+                    )
+                } else {
+                    playerLookTarget = ballLookTarget
+                }
                 let hasBallAction = interaction != nil || (ballAction.map { $0.influence > 0 } ?? false)
                 let impactSample = needsDetailedRig ? activeRagdollCue.flatMap {
                     PlayerRagdollPlayback.sample(for: $0, at: time)
@@ -1163,7 +1173,8 @@ enum PitchSceneFactory {
                         cache: sceneState,
                         stationaryPose: stationaryPose,
                         interaction: interaction,
-                        presentationPose: motionPresentation
+                        presentationPose: motionPresentation,
+                        allowsOffBallPose: activeRagdollCue == nil
                     )
                     if let impactSample {
                         applyRagdollPose(
@@ -1184,7 +1195,8 @@ enum PitchSceneFactory {
                         cache: sceneState,
                         stationaryPose: stationaryPose,
                         interaction: interaction,
-                        presentationPose: motionPresentation
+                        presentationPose: motionPresentation,
+                        allowsOffBallPose: activeRagdollCue == nil
                     )
                 }
             }
@@ -3950,7 +3962,8 @@ enum PitchSceneFactory {
         cache: AnnotationSceneCache?,
         stationaryPose: PlayerPose?,
         interaction: ReplayAthleteInteractionCue?,
-        presentationPose: PlayerPose?
+        presentationPose: PlayerPose?,
+        allowsOffBallPose: Bool
     ) {
         guard let marker = directChild(named: "table-marker", of: entity),
               marker.isEnabled else { return }
@@ -3970,7 +3983,8 @@ enum PitchSceneFactory {
                 cache: cache,
                 stationaryPose: stationaryPose,
                 interaction: interaction,
-                presentationPose: presentationPose
+                presentationPose: presentationPose,
+                allowsOffBallPose: allowsOffBallPose
             )
             return
         }
@@ -4040,7 +4054,8 @@ enum PitchSceneFactory {
         cache: AnnotationSceneCache?,
         stationaryPose: PlayerPose?,
         interaction: ReplayAthleteInteractionCue?,
-        presentationPose: PlayerPose?
+        presentationPose: PlayerPose?,
+        allowsOffBallPose: Bool
     ) {
         guard let fullRig = directChild(named: "full-rig", of: entity),
               fullRig.isEnabled else { return }
@@ -4054,7 +4069,8 @@ enum PitchSceneFactory {
             cache: cache,
             stationaryPose: stationaryPose,
             interaction: interaction,
-            presentationPose: presentationPose
+            presentationPose: presentationPose,
+            allowsOffBallPose: allowsOffBallPose
         )
     }
 
@@ -4131,7 +4147,8 @@ enum PitchSceneFactory {
         cache: AnnotationSceneCache?,
         stationaryPose: PlayerPose?,
         interaction: ReplayAthleteInteractionCue?,
-        presentationPose: PlayerPose?
+        presentationPose: PlayerPose?,
+        allowsOffBallPose: Bool
     ) {
         guard let binding = athleteBinding(for: fullRig, cache: cache) else { return }
         let pose = ReplayAthleteMotion.locomotionPose(
@@ -4145,7 +4162,8 @@ enum PitchSceneFactory {
             ballAction: ballAction,
             stationaryPose: stationaryPose,
             interaction: interaction,
-            presentationPose: presentationPose
+            presentationPose: presentationPose,
+            allowsOffBallPose: allowsOffBallPose
         )
         ReplayAthleteMotion.apply(pose, to: binding)
     }
