@@ -24,11 +24,33 @@ struct FootballImmersiveView: View {
     @State private var workspaceMove = PlaybackWorkspaceMove()
     @State private var movingWorkspace: Entity?
     @State private var pitchTrackingOwner = UUID()
+    @State private var nativeAdmission = NativeReplaySceneAdmission()
+    @State private var nativePreparationRetry = 0
     let roomPresentationID: UUID
 
     private var acceptsRoomInteraction: Bool {
         store.roomPresentation.acceptsInteraction(for: roomPresentationID)
     }
+
+    private var preparedNativeRecording: ReplayNativeBallPhysics.Recording? {
+        let scenario = store.selectedScenario
+        guard FootballReferenceScenarios.contains(scenario) else { return nil }
+        if let retained = nativeAdmission.recording(for: scenario.id, roomID: roomPresentationID) {
+            return retained
+        }
+        // Dashboard admission already prepares new studies. Reuse its exact
+        // recording immediately, without another bake or a loading flash.
+        guard let cached = ReplayNativeBallPhysics.cached(track: scenario.ball, players: scenario.players,
+            plannedTouches: FootballReferenceScenarios.touches(for: scenario)),
+              NativeReplaySceneAdmission.isUsable(cached) else { return nil }
+        return cached
+    }
+
+    private var isMatchSceneReady: Bool {
+        !FootballReferenceScenarios.contains(store.selectedScenario) || preparedNativeRecording != nil
+    }
+
+    private var acceptsMatchInteraction: Bool { acceptsRoomInteraction && isMatchSceneReady }
 
     private var controlDeckPreset: PlaybackControlDeckPreset {
         PlaybackControlDeckPreset(rawValue: controlDeckPresetRawValue) ?? .standard
@@ -50,8 +72,10 @@ struct FootballImmersiveView: View {
 
     var body: some View {
         RealityView { content, attachments in
-            let root = PitchSceneFactory.makeMatchRoot(for: store.selectedScenario)
-            content.add(root)
+            let recording = preparedNativeRecording
+            let root = isMatchSceneReady
+                ? PitchSceneFactory.makeMatchRoot(for: store.selectedScenario, nativeRecording: recording) : nil
+            if let root { content.add(root) }
             let controlsAnchor = PlaybackAttachmentPlacement.makeAnchor(
                 revision: controlPlacementRevision
             )
@@ -63,7 +87,8 @@ struct FootballImmersiveView: View {
                     handleAccessibilityActivation(event)
                 }
             }
-            PitchSceneFactory.update(
+            if let root {
+                PitchSceneFactory.update(
                 root: root,
                 scenario: store.selectedScenario,
                 time: store.playhead,
@@ -89,7 +114,8 @@ struct FootballImmersiveView: View {
                 showsIdealBranch: store.showsIdealBranch,
                 emphasizesBall: emphasizesBall
             )
-            applyLocalOverlayVisibility(to: root)
+                applyLocalOverlayVisibility(to: root)
+            }
             addAttachments(
                 to: content,
                 attachments: attachments,
@@ -97,13 +123,20 @@ struct FootballImmersiveView: View {
             )
         } update: { content, attachments in
             let expectedName = "match-root-\(store.selectedScenarioID)"
-            var root = content.entities.first { $0.name == expectedName }
+            let recording = preparedNativeRecording
+            let sceneIsReady = isMatchSceneReady
+            // Saved-review restore and the dashboard can both change studies
+            // while this room stays open. Never create a native-study root
+            // with the old authored fallback while its preparation is pending.
+            for entity in content.entities where entity.name.hasPrefix("match-root-")
+                && (!sceneIsReady || entity.name != expectedName) {
+                content.remove(entity)
+            }
+            var root = sceneIsReady ? content.entities.first { $0.name == expectedName } : nil
 
-            if root == nil {
-                for entity in content.entities where entity.name.hasPrefix("match-root-") {
-                    content.remove(entity)
-                }
-                let replacement = PitchSceneFactory.makeMatchRoot(for: store.selectedScenario)
+            if sceneIsReady, root == nil {
+                let replacement = PitchSceneFactory.makeMatchRoot(for: store.selectedScenario,
+                                                                   nativeRecording: recording)
                 content.add(replacement)
                 root = replacement
             }
@@ -164,7 +197,9 @@ struct FootballImmersiveView: View {
             }
 
             Attachment(id: "coach-console") {
-                ImmersiveControlDeck(
+                Group {
+                    if isMatchSceneReady {
+                        ImmersiveControlDeck(
                     selectedAnnotationID: $selectedAnnotationID,
                     showsDecisionStrip: $showsDecisionStrip,
                     showsPlaybackAnnotations: $showsPlaybackAnnotations,
@@ -174,13 +209,17 @@ struct FootballImmersiveView: View {
                     isPinchDrawingReady: annotationStroke?.isReadyToCommit == true,
                     recenterControls: recenterControls,
                     exit: exitRoom
-                )
+                        )
+                    } else {
+                        nativePreparationPanel
+                    }
+                }
                     .frame(width: controlDeckLayout.attachmentWidth)
                     .disabled(workspaceMove.isActive)
                     .allowsHitTesting(!workspaceMove.isActive)
             }
 
-            if store.selectedScenario.kind != .shapeLab {
+            if store.selectedScenario.kind != .shapeLab, isMatchSceneReady {
                 Attachment(id: "playback-view-hud") {
                     PlaybackViewOverlayHUD(
                         showsPlaybackAnnotations: $showsPlaybackAnnotations,
@@ -218,6 +257,10 @@ struct FootballImmersiveView: View {
         .onAppear {
             _ = store.immersiveRoomDidAppear(roomPresentationID)
         }
+        .task(id: NativeReplaySceneAdmission.TaskID(scenarioID: store.selectedScenarioID,
+                                                     retry: nativePreparationRetry)) {
+            await prepareSelectedNativeScene()
+        }
         .task(id: store.selectedScenario.kind) {
             guard !Task.isCancelled, store.roomPresentation.owns(roomPresentationID),
                   !store.isClosingImmersive else { return }
@@ -252,7 +295,8 @@ struct FootballImmersiveView: View {
                 // started during an idle poll, the next active frame begins
                 // from that wake instant rather than charging paused time to
                 // the transport and producing a visible jump.
-                let shouldAdvance = store.isActivelyPlaying
+                let scenarioID = store.selectedScenarioID
+                let shouldAdvance = store.isActivelyPlaying && isMatchSceneReady
                 try? await Task.sleep(
                     for: ReplayPresentationClock.interval(shouldAdvance: shouldAdvance)
                 )
@@ -261,11 +305,12 @@ struct FootballImmersiveView: View {
                 let now = clock.now
                 let duration = previous.duration(to: now)
                 previous = now
-                guard shouldAdvance else { continue }
+                guard shouldAdvance, isMatchSceneReady, store.selectedScenarioID == scenarioID else { continue }
                 store.advance(by: ReplayPresentationClock.seconds(duration))
             }
         }
         .onDisappear {
+            nativeAdmission.cancel()
             cancelWorkspaceMove()
             accessibilityActivationSubscription?.cancel()
             accessibilityActivationSubscription = nil
@@ -305,6 +350,9 @@ struct FootballImmersiveView: View {
         }
         .onChange(of: store.selectedScenarioID) { _, _ in
             cancelWorkspaceMove(rejectCurrentGesture: workspaceMove.isActive)
+            annotationStroke = nil
+            draggedAnnotationTarget = nil
+            selectedAnnotationID = nil
         }
         .onChange(of: controlDeckPresetRawValue) { _, _ in
             cancelWorkspaceMove(rejectCurrentGesture: workspaceMove.isActive)
@@ -344,6 +392,65 @@ struct FootballImmersiveView: View {
         }
     }
 
+    private var nativePreparationPanel: some View {
+        let failed = nativeAdmission.hasFailed(for: store.selectedScenarioID, roomID: roomPresentationID)
+        return HStack(spacing: 16) {
+            if failed {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.title2)
+                    .foregroundStyle(.yellow)
+                    .accessibilityHidden(true)
+            } else {
+                ProgressView()
+                    .accessibilityLabel("Preparing ball physics")
+            }
+            Text(failed ? "Replay unavailable" : "Preparing replay…")
+                .font(.headline)
+            Spacer(minLength: 12)
+            if failed {
+                Button {
+                    nativePreparationRetry &+= 1
+                } label: {
+                    Label("Retry", systemImage: "arrow.clockwise")
+                        .frame(minHeight: 44)
+                }
+                .buttonStyle(.borderedProminent)
+                .accessibilityHint("Prepares the selected match again")
+            }
+            Button(action: exitRoom) {
+                Image(systemName: "xmark")
+                    .font(.title3.weight(.semibold))
+                    .frame(width: 48, height: 48)
+            }
+            .buttonStyle(.bordered)
+            .accessibilityLabel("Exit replay")
+            .help("Exit replay")
+        }
+        .padding(24)
+        .glassBackgroundEffect()
+    }
+
+    @MainActor
+    private func prepareSelectedNativeScene() async {
+        let scenario = store.selectedScenario
+        guard !Task.isCancelled, store.roomPresentation.owns(roomPresentationID),
+              !store.isClosingImmersive else { return }
+        let request = nativeAdmission.begin(scenarioID: scenario.id, roomID: roomPresentationID)
+        guard FootballReferenceScenarios.contains(scenario) else { return }
+        do {
+            let recording = try await ReplayNativeBallPhysics.prewarm(track: scenario.ball,
+                players: scenario.players, plannedTouches: FootballReferenceScenarios.touches(for: scenario))
+            guard !Task.isCancelled else { return }
+            _ = nativeAdmission.complete(recording, request: request,
+                currentScenarioID: store.selectedScenarioID,
+                roomIsOwned: store.roomPresentation.owns(roomPresentationID) && !store.isClosingImmersive)
+        } catch {
+            guard !Task.isCancelled else { return }
+            _ = nativeAdmission.fail(request: request, currentScenarioID: store.selectedScenarioID,
+                roomIsOwned: store.roomPresentation.owns(roomPresentationID) && !store.isClosingImmersive)
+        }
+    }
+
     private func addAttachments(
         to content: RealityViewContent,
         attachments: RealityViewAttachments,
@@ -357,6 +464,10 @@ struct FootballImmersiveView: View {
                 if entity.parent !== workspace {
                     workspace.addChild(entity)
                 }
+            } else {
+                // Conditional HUDs must not remain interactive during native
+                // preparation or after restoring a different exercise.
+                workspace.children.first(where: { $0.name == id })?.removeFromParent()
             }
         }
         let handle: Entity
@@ -507,6 +618,7 @@ struct FootballImmersiveView: View {
                 .onChanged { value in
                     guard acceptsRoomInteraction else { return }
                     if handleWorkspaceDragChanged(value) { return }
+                    guard acceptsMatchInteraction else { return }
                     guard !workspaceMove.isActive else { return }
                     handleAnnotationDragChanged(value)
                     handleAnnotationStrokeChanged(value)
@@ -520,7 +632,7 @@ struct FootballImmersiveView: View {
     private func handleSpatialTap(
         _ value: EntityTargetValue<SpatialTapGesture.Value>
     ) {
-        guard acceptsRoomInteraction, !workspaceMove.isActive else { return }
+        guard acceptsMatchInteraction, !workspaceMove.isActive else { return }
         if PlaybackWorkspaceGrabHandle.ancestor(of: value.entity) != nil { return }
         guard PlaybackSpatialInteractionPolicy.acceptsPitchInteraction(
             hasActiveEndpointPreview: store.hasActiveCoachMarkGeometryPreview,
@@ -581,7 +693,7 @@ struct FootballImmersiveView: View {
     /// same annotation and POV commands so existing interaction locks remain
     /// authoritative.
     private func handleAccessibilityActivation(_ event: AccessibilityEvents.Activate) {
-        guard !workspaceMove.isActive else { return }
+        guard acceptsMatchInteraction, !workspaceMove.isActive else { return }
         PlaybackAccessibilityActivationRouter.handle(
             event,
             store: store,
@@ -763,7 +875,7 @@ struct FootballImmersiveView: View {
             finishWorkspaceMove(value)
             return
         }
-        guard acceptsRoomInteraction else {
+        guard acceptsMatchInteraction else {
             draggedAnnotationTarget = nil
             annotationStroke = nil
             return
@@ -897,6 +1009,80 @@ struct FootballImmersiveView: View {
             await dismissImmersiveSpace()
             store.completeImmersiveClose(requestID)
         }
+    }
+}
+
+/// Transient, wearer-local admission. It never edits playback or saved review
+/// data. Request identity rejects late preparation from another study, retry,
+/// or dismissed room; retaining the recording also survives cache eviction.
+@MainActor
+struct NativeReplaySceneAdmission {
+    struct TaskID: Hashable {
+        let scenarioID: String
+        let retry: Int
+    }
+
+    struct Request: Equatable {
+        let scenarioID: String
+        let roomID: UUID
+        let token = UUID()
+    }
+
+    private var request: Request?
+    private var retainedRecording: ReplayNativeBallPhysics.Recording?
+    private var failed = false
+
+    static func isUsable(_ recording: ReplayNativeBallPhysics.Recording) -> Bool {
+        recording.missedTouchCount == 0 && recording.nativeStepCount > 0
+    }
+
+    mutating func begin(scenarioID: String, roomID: UUID) -> Request {
+        let next = Request(scenarioID: scenarioID, roomID: roomID)
+        request = next
+        retainedRecording = nil
+        failed = false
+        return next
+    }
+
+    @discardableResult
+    mutating func complete(_ recording: ReplayNativeBallPhysics.Recording, request completed: Request,
+                           currentScenarioID: String, roomIsOwned: Bool) -> Bool {
+        guard accepts(completed, currentScenarioID: currentScenarioID, roomIsOwned: roomIsOwned) else { return false }
+        guard Self.isUsable(recording) else {
+            failed = true
+            retainedRecording = nil
+            return false
+        }
+        retainedRecording = recording
+        failed = false
+        return true
+    }
+
+    @discardableResult
+    mutating func fail(request completed: Request, currentScenarioID: String, roomIsOwned: Bool) -> Bool {
+        guard accepts(completed, currentScenarioID: currentScenarioID, roomIsOwned: roomIsOwned) else { return false }
+        retainedRecording = nil
+        failed = true
+        return true
+    }
+
+    func recording(for scenarioID: String, roomID: UUID) -> ReplayNativeBallPhysics.Recording? {
+        guard request?.scenarioID == scenarioID, request?.roomID == roomID else { return nil }
+        return retainedRecording
+    }
+
+    func hasFailed(for scenarioID: String, roomID: UUID) -> Bool {
+        request?.scenarioID == scenarioID && request?.roomID == roomID && failed
+    }
+
+    mutating func cancel() {
+        request = nil
+        retainedRecording = nil
+        failed = false
+    }
+
+    private func accepts(_ completed: Request, currentScenarioID: String, roomIsOwned: Bool) -> Bool {
+        roomIsOwned && completed == request && currentScenarioID == completed.scenarioID
     }
 }
 
@@ -2148,13 +2334,8 @@ private struct ImmersiveControlDeck: View {
         Button {
             togglePlaybackToolsShelf()
         } label: {
-            VStack(spacing: 1) {
-                Image(systemName: "square.grid.2x2.fill")
-                    .font(.headline.weight(.black))
-                Text("TOOLS")
-                    .font(.caption.monospaced().weight(.black))
-                    .lineLimit(1)
-            }
+            Image(systemName: "square.grid.2x2.fill")
+                .font(.title2.weight(.semibold))
             .frame(width: primaryControlLayout.toolsLabelWidth)
             .frame(minHeight: primaryControlLayout.compactLabelMinimumHeight)
         }
@@ -2162,6 +2343,7 @@ private struct ImmersiveControlDeck: View {
         .tint(toolsWorkflowIsPresented ? ReplayTheme.cyan : .white.opacity(0.10))
         .foregroundStyle(toolsWorkflowIsPresented ? Color.black : Color.white)
         .disabled(secondaryPlaybackControlsAreDisabled)
+        .help("Playback tools")
         .accessibilityLabel("Playback tools")
         .accessibilityValue(
             "Timeline, decision review, settings"
@@ -2200,6 +2382,7 @@ private struct ImmersiveControlDeck: View {
         .tint(showsPlayerGrid ? ReplayTheme.signal : .white.opacity(0.10))
         .foregroundStyle(showsPlayerGrid ? Color.black : Color.white)
         .disabled(playerControlIsDisabled)
+        .help(activePlayerAccessibilityLabel)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
             activePlayerAccessibilityLabel
@@ -2246,13 +2429,8 @@ private struct ImmersiveControlDeck: View {
                 showsPlaybackAnnotations = true
             }
         } label: {
-            VStack(spacing: 1) {
-                Image(systemName: "pencil.and.outline")
-                    .font(.headline.weight(.bold))
-                Text("DRAW")
-                    .font(.caption.monospaced().weight(.black))
-                    .lineLimit(1)
-            }
+            Image(systemName: "pencil.and.outline")
+                .font(.title2.weight(.semibold))
             .frame(width: primaryControlLayout.drawLabelWidth)
             .frame(minHeight: primaryControlLayout.compactLabelMinimumHeight)
         }
@@ -2260,6 +2438,7 @@ private struct ImmersiveControlDeck: View {
         .tint(showsAnnotationTools ? ReplayTheme.orange : .white.opacity(0.10))
         .foregroundStyle(showsAnnotationTools ? Color.black : Color.white)
         .disabled(!store.canChangePlaybackView)
+        .help("Draw annotations")
         .accessibilityLabel("Draw annotations")
         .accessibilityHint(
             showsAnnotationTools ? "Closes drawing tools" : "Opens run, pass, arc, press, zone, and label tools"
@@ -2295,12 +2474,8 @@ private struct ImmersiveControlDeck: View {
         Button {
             toggleInlinePanel(.playbackSpeed)
         } label: {
-            VStack(spacing: 1) {
-                Text(rateLabel(store.playbackRate))
-                    .font(.headline.monospacedDigit().weight(.bold))
-                Text("Speed")
-                    .font(.caption.weight(.semibold))
-            }
+            Text(rateLabel(store.playbackRate))
+                .font(.headline.monospacedDigit().weight(.bold))
             .lineLimit(1)
             .minimumScaleFactor(0.8)
             .frame(width: primaryControlLayout.speedLabelWidth,
@@ -2310,6 +2485,7 @@ private struct ImmersiveControlDeck: View {
         .tint(inlinePanel == .playbackSpeed ? ReplayTheme.cyan : .white.opacity(0.10))
         .foregroundStyle(inlinePanel == .playbackSpeed ? Color.black : Color.white)
         .disabled(rateControlsAreDisabled)
+        .help("Playback speed")
         .accessibilityLabel("Playback speed")
         .accessibilityValue(rateLabel(store.playbackRate))
         .accessibilityHint("Opens speed choices from quarter speed to four times")
@@ -3196,11 +3372,13 @@ private struct ImmersiveControlDeck: View {
         mark: CoachMark
     ) -> some View {
         HStack(spacing: 6) {
-            Text(team == .home ? "HOME" : "OPPOSITION")
+            Text(FootballReferenceScenarios.contains(store.selectedScenario)
+                 ? FootballReferenceScenarios.teamTitle(team, in: store.selectedScenario).prefix(3).uppercased()
+                 : (team == .home ? "HOME" : "OPPOSITION"))
                 .font(.caption2.monospaced().weight(.black))
                 .foregroundStyle(teamAccent(team))
                 .frame(width: 92, alignment: .leading)
-                .accessibilityLabel(team.shortTitle)
+                .accessibilityLabel(FootballReferenceScenarios.teamTitle(team, in: store.selectedScenario))
 
             ForEach(players.prefix(11)) { player in
                 annotationTrackingPlayerButton(player, mark: mark)
@@ -3250,7 +3428,7 @@ private struct ImmersiveControlDeck: View {
         .disabled(!store.canChangePlaybackView)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
-            "Follow \(player.team.shortTitle) number \(player.shirtNumber), \(player.role)"
+            "Follow \(FootballReferenceScenarios.teamTitle(player.team, in: store.selectedScenario)) number \(player.shirtNumber), \(player.role)"
         )
         .accessibilityHint(store.canChangePlaybackView
             ? "Keeps both annotation points at their current offsets from this player"
@@ -3608,7 +3786,9 @@ private struct ImmersiveControlDeck: View {
     ) -> some View {
         HStack(spacing: 6) {
             VStack(alignment: .leading, spacing: 1) {
-                Text(team == .home ? "HOME" : "AWAY")
+                Text(FootballReferenceScenarios.contains(store.selectedScenario)
+                     ? FootballReferenceScenarios.teamTitle(team, in: store.selectedScenario).prefix(3).uppercased()
+                     : (team == .home ? "HOME" : "AWAY"))
                     .font(.caption2.monospaced().weight(.black))
                     .foregroundStyle(teamAccent(team))
                 Text("XI")
@@ -3617,7 +3797,7 @@ private struct ImmersiveControlDeck: View {
             }
             .frame(width: 72, alignment: .leading)
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(team.shortTitle)
+            .accessibilityLabel(FootballReferenceScenarios.teamTitle(team, in: store.selectedScenario))
 
             ForEach(players.prefix(11)) { player in
                 perspectivePlayerButton(player)
@@ -3661,7 +3841,7 @@ private struct ImmersiveControlDeck: View {
         .disabled(playerControlIsDisabled)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
-            "\(player.team.shortTitle), number \(player.shirtNumber), \(player.role)"
+            "\(FootballReferenceScenarios.teamTitle(player.team, in: store.selectedScenario)), number \(player.shirtNumber), \(player.role)"
         )
         .accessibilityHint(playerPOVAccessibilityHint)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
@@ -3844,19 +4024,15 @@ private struct ImmersiveControlDeck: View {
             showsPlaybackAnnotations = true
             store.beginDrawing(kind)
         } label: {
-            VStack(spacing: 1) {
-                Image(systemName: kind.systemImage)
-                    .font(.headline.weight(.bold))
-                Text(label.uppercased())
-                    .font(.caption2.monospaced().weight(.black))
-                    .lineLimit(1)
-            }
+            Image(systemName: kind.systemImage)
+                .font(.title2.weight(.semibold))
             .frame(width: drawToolLayout.labelWidth)
             .frame(minHeight: drawToolLayout.labelMinimumHeight)
         }
         .buttonStyle(.borderedProminent)
         .tint(isSelected ? ReplayTheme.orange : .white.opacity(0.10))
         .foregroundStyle(isSelected ? Color.black : Color.white)
+        .help("\(label) annotation")
         .accessibilityLabel("\(label) annotation")
         .accessibilityHint(
             kind == .playerLabel
@@ -4615,7 +4791,7 @@ private struct ImmersiveControlDeck: View {
         guard mark.followsPlayerTracks else { return "Fixed to pitch" }
         if let playerID = annotationTrackingPlayerID(mark),
            let player = store.selectedScenario.player(id: playerID) {
-            return "Both points follow \(player.team.shortTitle) number \(player.shirtNumber)"
+            return "Both points follow \(FootballReferenceScenarios.teamTitle(player.team, in: store.selectedScenario)) number \(player.shirtNumber)"
         }
         return "Annotation points currently use different player tracks"
     }

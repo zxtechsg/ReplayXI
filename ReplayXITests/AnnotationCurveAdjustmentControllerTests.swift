@@ -162,13 +162,91 @@ final class AnnotationCurveAdjustmentControllerTests: XCTestCase {
         XCTAssertTrue(source.contains("AnnotationCurveAdjustmentPad(markID: mark.id"))
         let pad = try String(contentsOf: root.appendingPathComponent(
             "ReplayXI/Immersive/AnnotationCurveAdjustmentPad.swift"), encoding: .utf8)
-        XCTAssertTrue(pad.contains("controller.finish(in: store, markID: markID, translation: value.translation)"))
+        XCTAssertTrue(pad.contains("controller.finish(in: store, markID: markID, translation: value.translation, mode: mode)"))
         XCTAssertTrue(pad.contains(".onDisappear { controller.cancel(in: store) }"))
         XCTAssertTrue(pad.contains(".onChange(of: markID)"))
         XCTAssertTrue(pad.contains(".onChange(of: dragIsActive)"))
         XCTAssertTrue(pad.contains(".onChange(of: isEnabled)"))
         XCTAssertTrue(pad.contains(".accessibilityAction(named: \"Increase bend\")"))
         XCTAssertTrue(pad.contains(".accessibilityAction(named: \"Lift arc\")"))
+        XCTAssertTrue(pad.contains(".accessibilityAction(named: \"Increase curve\")"))
+        XCTAssertTrue(pad.contains(".accessibilityAction(named: \"Rotate arc anticlockwise\")"))
+        XCTAssertTrue(pad.contains(".disabled(controller.isActive)"))
+        XCTAssertTrue(pad.contains(".help(choice == .shape"))
+    }
+
+    func testParametricJoystickChangesAmountAndAngleFromOneCapturedBaseline() throws {
+        let (store, mark) = try makeArc()
+        let before = store.marks
+        let controller = AnnotationCurveAdjustmentController()
+        XCTAssertTrue(controller.preview(in: store, markID: mark.id,
+            translation: CGSize(width: 20, height: -20), mode: .shape))
+        let transaction = try XCTUnwrap(controller.transaction)
+        XCTAssertEqual(transaction.mode, .shape)
+        XCTAssertTrue(controller.preview(in: store, markID: mark.id,
+            translation: CGSize(width: 28, height: -28), mode: .shape))
+        let preview = try current(mark.id, in: store)
+        XCTAssertEqual(preview.resolvedCurve.amount, mark.resolvedCurve.amount + 0.75, accuracy: 0.000_01)
+        XCTAssertEqual(preview.resolvedCurve.rollDegrees, 15)
+        XCTAssertEqual(preview.start, mark.start)
+        XCTAssertEqual(preview.end, mark.end)
+        XCTAssertEqual(store.makeSavedReviewState().marks, before)
+        XCTAssertEqual(controller.transaction, transaction)
+        XCTAssertTrue(controller.finish(in: store, markID: mark.id,
+            translation: CGSize(width: 36, height: -36), mode: .shape))
+        XCTAssertEqual(try current(mark.id, in: store).resolvedCurve.rollDegrees, 20)
+        XCTAssertTrue(store.undoAnnotationEdit())
+        XCTAssertEqual(store.marks, before)
+    }
+
+    func testModeChangeDuringDragCancelsRatherThanReinterpretingGesture() throws {
+        let (store, mark) = try makeArc()
+        let before = store.marks
+        let controller = AnnotationCurveAdjustmentController()
+        XCTAssertTrue(controller.preview(in: store, markID: mark.id,
+            translation: CGSize(width: 20, height: -20), mode: .shape))
+        XCTAssertFalse(controller.preview(in: store, markID: mark.id,
+            translation: CGSize(width: 28, height: -28), mode: .offset))
+        XCTAssertEqual(store.marks, before)
+        XCTAssertFalse(controller.isActive)
+        XCTAssertFalse(controller.finish(in: store, markID: mark.id,
+            translation: CGSize(width: 28, height: -28), mode: .shape))
+        XCTAssertEqual(store.marks, before)
+    }
+
+    func testAtomicAngleAndOffsetChangesPreserveEachOtherAndAreOneUndoEach() throws {
+        let (store, mark) = try makeArc()
+        let controller = AnnotationCurveAdjustmentController()
+        XCTAssertTrue(controller.adjust(in: store, markID: mark.id, mode: .shape, horizontal: 0, vertical: 30))
+        let rotated = try current(mark.id, in: store)
+        XCTAssertEqual(rotated.resolvedCurve.rollDegrees, 30)
+        XCTAssertEqual(rotated.resolvedCurve.bend, mark.resolvedCurve.bend)
+        XCTAssertTrue(controller.adjust(in: store, markID: mark.id, mode: .offset, horizontal: 0.25, vertical: 0.25))
+        let offset = try current(mark.id, in: store)
+        XCTAssertEqual(offset.resolvedCurve.rollDegrees, 30)
+        XCTAssertEqual(offset.resolvedCurve.bend, rotated.resolvedCurve.bend + 0.25, accuracy: 0.000_01)
+        XCTAssertEqual(offset.resolvedCurve.lift, 0.25)
+        XCTAssertTrue(store.undoAnnotationEdit())
+        XCTAssertEqual(try current(mark.id, in: store), rotated)
+        XCTAssertTrue(store.undoAnnotationEdit())
+        XCTAssertEqual(try current(mark.id, in: store), mark)
+        XCTAssertFalse(store.hasActiveCoachMarkGeometryPreview)
+    }
+
+    func testParametricNudgesRejectNonfiniteInputAndRespectTimelineOwnership() throws {
+        let (store, mark) = try makeArc()
+        let before = store.marks
+        let controller = AnnotationCurveAdjustmentController()
+        XCTAssertFalse(controller.adjust(in: store, markID: mark.id, mode: .shape, horizontal: .nan, vertical: 5))
+        XCTAssertFalse(controller.adjust(in: store, markID: mark.id, mode: .shape, horizontal: 0, vertical: .infinity))
+        XCTAssertEqual(store.marks, before)
+        XCTAssertTrue(store.beginTimelineScrub())
+        XCTAssertFalse(controller.adjust(in: store, markID: mark.id, mode: .shape, horizontal: 0.25, vertical: 5))
+        XCTAssertEqual(store.marks, before)
+        store.cancelTimelineScrub()
+        XCTAssertTrue(controller.adjust(in: store, markID: mark.id, mode: .shape, horizontal: 0, vertical: 1000))
+        XCTAssertEqual(try current(mark.id, in: store).resolvedCurve.rollDegrees, 180)
+        XCTAssertFalse(controller.canAdjust(in: store, markID: mark.id, mode: .shape, horizontal: 0, vertical: 5))
     }
 
     private func makeArc() throws -> (ReplayStore, CoachMark) {

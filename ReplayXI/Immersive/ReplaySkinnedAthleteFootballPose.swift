@@ -38,6 +38,8 @@ struct ReplaySkinnedAthleteFootballPose {
         let shoulderNeutral: simd_quatf
         let elbowNeutral: simd_quatf
         let wristNeutral: simd_quatf
+        let upperLength: Float
+        let lowerLength: Float
 
         func rotation(for index: Int, authored: ReplayAthleteLocomotionPose,
                       torso: simd_quatf) -> simd_quatf? {
@@ -60,9 +62,10 @@ struct ReplaySkinnedAthleteFootballPose {
     private let rightArm: Arm
     private let modifiedIndices: [Int]
     private let armIndices: [Int]
+    private let bootMarkers: ReplaySkinnedAthleteBootMarkers?
     private var target: ReplaySkinnedAthleteMotion.Pose
 
-    init?(motion: ReplaySkinnedAthleteMotion) {
+    init?(motion: ReplaySkinnedAthleteMotion, bootMarkers: ReplaySkinnedAthleteBootMarkers? = nil) {
         guard let root = motion.semanticJointIndices["hips"],
               let chest = motion.semanticJointIndices["chest"],
               let left = Self.leg("left", root: root, motion: motion),
@@ -76,6 +79,7 @@ struct ReplaySkinnedAthleteFootballPose {
         self.right = right
         self.leftArm = leftArm
         self.rightArm = rightArm
+        self.bootMarkers = bootMarkers
         modifiedIndices = [root, left.hip, left.knee, left.ankle, right.hip, right.knee, right.ankle]
         armIndices = [leftArm.shoulder, leftArm.elbow, leftArm.wrist,
                       rightArm.shoulder, rightArm.elbow, rightArm.wrist]
@@ -98,7 +102,8 @@ struct ReplaySkinnedAthleteFootballPose {
         influence: Float,
         armInfluence: Float,
         motion: ReplaySkinnedAthleteMotion,
-        to pose: inout ReplaySkinnedAthleteMotion.Pose
+        to pose: inout ReplaySkinnedAthleteMotion.Pose,
+        interaction: ReplayAthleteInteractionSample? = nil
     ) {
         let weight = influence.isFinite ? min(max(influence, 0), 1) : 0
         let armWeight = armInfluence.isFinite ? min(max(armInfluence, 0), 1) : 0
@@ -113,18 +118,45 @@ struct ReplaySkinnedAthleteFootballPose {
             + authored.bodyPosition + authored.hipsPosition - SIMD3<Float>(0, 0.90, 0)
         target.translations[rootIndex] = rootPosition
         target.rotations[rootIndex] = simd_normalize(body * motion.restPose.rotations[rootIndex])
-        let leftTarget = Self.target(for: left, authored: authored, body: body, root: rootPosition)
-        let rightTarget = Self.target(for: right, authored: authored, body: body, root: rootPosition)
+        let leftTarget = Self.target(for: left, authored: authored, body: body, root: rootPosition,
+                                     interaction: interaction, marker: bootMarkers?.marker(for: left.ankle),
+                                     groundOffset: motion.geometry.restMinY)
+        let rightTarget = Self.target(for: right, authored: authored, body: body, root: rootPosition,
+                                      interaction: interaction, marker: bootMarkers?.marker(for: right.ankle),
+                                      groundOffset: motion.geometry.restMinY)
+        if let interaction, interaction.kind.usesFeet || interaction.kind == .save, let bootMarkers {
+            for marker in bootMarkers.markers {
+                for index in marker.toeDescendants {
+                    target.translations[index] = motion.restPose.translations[index]
+                    target.rotations[index] = motion.restPose.rotations[index]
+                }
+            }
+        }
 
         // Keep the source torso, clavicles, face and fingers. Walking/cutting
         // arms must use the same opposite-foot clock as the authored legs,
         // rather than the unrelated source run phase. Source joint translations
         // stay intact: rotating these six joints cannot stretch an arm.
         var torso = body
+        var leftParry: ReplayAthleteParryIK.Solution?
+        var rightParry: ReplayAthleteParryIK.Solution?
         for index in motion.joints.indices {
             let parent = motion.joints[index].parentIndex
             let parentMatrix = parent < 0 ? matrix_identity_float4x4 : target.modelSpaceTransforms[parent]
-            let desired: (SIMD3<Float>, simd_quatf)?
+            if let interaction, interaction.kind == .save,
+               index == leftArm.shoulder || index == rightArm.shoulder {
+                let centre = interaction.ballCentreTarget + SIMD3<Float>(0, motion.geometry.restMinY, 0)
+                let shoulder4 = parentMatrix * SIMD4(target.translations[index], 1)
+                let shoulder = SIMD3<Float>(shoulder4.x, shoulder4.y, shoulder4.z)
+                if index == leftArm.shoulder {
+                    leftParry = ReplayAthleteParryIK.solve(ballCentre: centre, shoulder: shoulder,
+                        side: leftArm.side, upperLength: leftArm.upperLength, lowerLength: leftArm.lowerLength)
+                } else if index == rightArm.shoulder {
+                    rightParry = ReplayAthleteParryIK.solve(ballCentre: centre, shoulder: shoulder,
+                        side: rightArm.side, upperLength: rightArm.upperLength, lowerLength: rightArm.lowerLength)
+                }
+            }
+            var desired: (SIMD3<Float>, simd_quatf)?
             switch index {
             case left.hip: desired = (leftTarget.hipPosition, leftTarget.hipRotation)
             case left.knee: desired = (leftTarget.kneePosition, leftTarget.kneeRotation)
@@ -134,12 +166,30 @@ struct ReplaySkinnedAthleteFootballPose {
             case right.ankle: desired = (rightTarget.anklePosition, rightTarget.ankleRotation)
             default: desired = nil
             }
+            var parryRotation: simd_quatf?
+            func parry(_ arm: Arm, _ solved: ReplayAthleteParryIK.Solution?) {
+                guard let solved else { return }
+                if index == arm.shoulder { parryRotation = solved.upperRotation * arm.shoulderNeutral }
+                if index == arm.elbow { desired = (solved.elbow, solved.lowerRotation * arm.elbowNeutral) }
+                if index == arm.wrist { desired = (solved.wrist, solved.handRotation * arm.wristNeutral) }
+            }
+            parry(leftArm, leftParry)
+            parry(rightArm, rightParry)
             if let (position, rotation) = desired {
                 let localPosition = parentMatrix.inverse * SIMD4<Float>(position, 1)
                 target.translations[index] = SIMD3(localPosition.x, localPosition.y, localPosition.z)
                 target.rotations[index] = simd_normalize(simd_quatf(parentMatrix).inverse * rotation)
             }
-            if armWeight > 0, let rotation = leftArm.rotation(for: index, authored: authored, torso: torso)
+            if let parryRotation {
+                target.rotations[index] = simd_normalize(simd_quatf(parentMatrix).inverse * parryRotation)
+            }
+            if index == chestIndex, let interaction {
+                let delta = simd_quatf(angle: interaction.upperBodyPitch * interaction.influence,
+                                      axis: motion.joints[index].localRightAxis)
+                target.rotations[index] = simd_normalize(target.rotations[index] * delta)
+            }
+            if armWeight > 0, interaction?.kind != .save,
+               let rotation = leftArm.rotation(for: index, authored: authored, torso: torso)
                 ?? rightArm.rotation(for: index, authored: authored, torso: torso) {
                 target.rotations[index] = simd_normalize(simd_quatf(parentMatrix).inverse * rotation)
             }
@@ -173,7 +223,24 @@ struct ReplaySkinnedAthleteFootballPose {
                     rotation = simd_quatf(vector: -rotation.vector)
                 }
                 pose.rotations[index] = simd_normalize(simd_slerp(pose.rotations[index], rotation, armWeight))
+                if interaction?.kind == .save {
+                    pose.translations[index] += (target.translations[index] - pose.translations[index]) * armWeight
+                }
             }
+        }
+        if let interaction, let bootMarkers, interaction.kind.usesFeet || interaction.kind == .save {
+            let toeWeight = weight * interaction.influence
+            for marker in bootMarkers.markers {
+                for index in marker.toeDescendants {
+                    pose.translations[index] += (target.translations[index] - pose.translations[index]) * toeWeight
+                    pose.rotations[index] = ReplayAthleteInteractionPose.blend(
+                        pose.rotations[index], target.rotations[index], toeWeight)
+                }
+            }
+        }
+        if let interaction {
+            pose.rotations[chestIndex] = ReplayAthleteInteractionPose.blend(
+                pose.rotations[chestIndex], target.rotations[chestIndex], weight * interaction.influence)
         }
     }
 
@@ -195,7 +262,8 @@ struct ReplaySkinnedAthleteFootballPose {
             side: position(shoulder).x < position(root).x ? .left : .right,
             shoulderNeutral: simd_normalize(upperToDown * simd_quatf(motion.restPose.modelSpaceTransforms[shoulder])),
             elbowNeutral: simd_normalize(lowerToDown * simd_quatf(motion.restPose.modelSpaceTransforms[elbow])),
-            wristNeutral: simd_normalize(lowerToDown * simd_quatf(motion.restPose.modelSpaceTransforms[wrist]))
+            wristNeutral: simd_normalize(lowerToDown * simd_quatf(motion.restPose.modelSpaceTransforms[wrist])),
+            upperLength: simd_length(upper), lowerLength: simd_length(lower)
         )
     }
 
@@ -231,7 +299,10 @@ struct ReplaySkinnedAthleteFootballPose {
 
     private static func target(
         for leg: Leg, authored: ReplayAthleteLocomotionPose,
-        body: simd_quatf, root: SIMD3<Float>
+        body: simd_quatf, root: SIMD3<Float>,
+        interaction: ReplayAthleteInteractionSample? = nil,
+        marker: ReplaySkinnedAthleteBootMarkers.Marker? = nil,
+        groundOffset: Float = 0
     ) -> LegTarget {
         let hip = leg.side == .left ? authored.leftHipOrientation : authored.rightHipOrientation
         let knee = leg.side == .left ? authored.leftKneeOrientation : authored.rightKneeOrientation
@@ -241,6 +312,32 @@ struct ReplaySkinnedAthleteFootballPose {
         let ankleDelta = kneeDelta * ankle
         let hipPosition = root + body.act(leg.hipOffset)
         let kneePosition = hipPosition + hipDelta.act(SIMD3(0, -leg.upperLength, 0))
+        if let interaction, interaction.kind.usesFeet || interaction.kind == .save, let marker {
+            let striking = interaction.kind.usesFeet && leg.side == interaction.kickingLeg
+            let foot = simd_normalize((striking ? interaction.footOrientation : interaction.supportFootOrientation)
+                                     * leg.ankleNeutralRotation)
+            let localMarker = striking ? marker.ankleLocalPosition : leg.solePoint
+            let surface = (striking ? interaction.strikeSurfaceTarget : interaction.plantedSoleTarget(for: leg.side))
+                + SIMD3<Float>(0, groundOffset, 0)
+            let ankleGoal = surface - foot.act(localMarker)
+            if let solved = ReplayAthleteTwoBoneIK.solve(hip: hipPosition, ankle: ankleGoal,
+                                                         upperLength: leg.upperLength,
+                                                         lowerLength: leg.lowerLength,
+                                                         pole: interaction.footOrientation.act([0, 0, 1])) {
+                let blend = interaction.influence
+                let oldAnkle = kneePosition + kneeDelta.act(SIMD3(0, -leg.lowerLength, 0))
+                return LegTarget(
+                    hipPosition: hipPosition,
+                    kneePosition: kneePosition + (solved.knee - kneePosition) * blend,
+                    anklePosition: oldAnkle + (solved.ankle - oldAnkle) * blend,
+                    hipRotation: ReplayAthleteInteractionPose.blend(hipDelta * leg.hipNeutralRotation,
+                        solved.upperRotation * leg.hipNeutralRotation, blend),
+                    kneeRotation: ReplayAthleteInteractionPose.blend(kneeDelta * leg.kneeNeutralRotation,
+                        solved.lowerRotation * leg.kneeNeutralRotation, blend),
+                    ankleRotation: ReplayAthleteInteractionPose.blend(ankleDelta * leg.ankleNeutralRotation, foot, blend)
+                )
+            }
+        }
         return LegTarget(
             hipPosition: hipPosition, kneePosition: kneePosition,
             anklePosition: kneePosition + kneeDelta.act(SIMD3(0, -leg.lowerLength, 0)),

@@ -74,6 +74,11 @@ enum AnnotationArcMesh {
         normals.reserveCapacity((steps + 1) * sides)
         indices.reserveCapacity(steps * sides * 6)
         let curve = mark.resolvedCurve
+        let start = curve.point(at: 0, for: mark)
+        let end = curve.point(at: 1, for: mark)
+        let plane = simd_cross(curve.controlPoint(for: mark) - start, end - start)
+        let stablePlaneNormal: SIMD3<Float>? = simd_length_squared(plane) > 0.000_001
+            ? simd_normalize(plane) : nil
         for ring in 0...steps {
             let t = Float(ring) / Float(steps)
             let center = curve.point(at: t, for: mark, baseY: baseY)
@@ -82,7 +87,9 @@ enum AnnotationArcMesh {
             let delta = after - before
             let tangent = simd_length_squared(delta) > 0.0000001 ? simd_normalize(delta) : SIMD3<Float>(0, 0, 1)
             let reference = abs(tangent.y) > 0.95 ? SIMD3<Float>(1, 0, 0) : SIMD3<Float>(0, 1, 0)
-            let side = simd_normalize(simd_cross(reference, tangent))
+            // Quadratics are planar. A shared binormal avoids the old ring
+            // frame flip when an angled 3D arc crosses the vertical threshold.
+            let side = stablePlaneNormal ?? simd_normalize(simd_cross(reference, tangent))
             let up = simd_normalize(simd_cross(tangent, side))
             for corner in 0..<sides {
                 let angle = Float(corner) * 2 * .pi / Float(sides)

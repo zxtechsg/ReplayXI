@@ -38,8 +38,10 @@ enum ReplaySkinnedAthleteProvider {
     private static var template: Entity?
     private(set) static var motion: ReplaySkinnedAthleteMotion?
     private static var contactSurface: ReplaySkinnedAthleteContactSurface?
+    private static var bootMarkers: ReplaySkinnedAthleteBootMarkers?
     private static var lowTemplate: Entity?
     private static var lowContactSurface: ReplaySkinnedAthleteContactSurface?
+    private static var lowBootMarkers: ReplaySkinnedAthleteBootMarkers?
     private static var kits: [[PhysicallyBasedMaterial]] = []
     static var isPrewarmed: Bool { template != nil && motion != nil && contactSurface != nil && kits.count == 15 }
     static var isLowDetailPrewarmed: Bool { isPrewarmed && lowTemplate != nil && lowContactSurface != nil }
@@ -96,6 +98,7 @@ enum ReplaySkinnedAthleteProvider {
         template = loaded
         motion = preparedMotion
         contactSurface = preparedContactSurface
+        bootMarkers = ReplaySkinnedAthleteBootMarkers(model: model, motion: preparedMotion)
         kits = preparedKits
     }
 
@@ -132,6 +135,7 @@ enum ReplaySkinnedAthleteProvider {
         model.model = component
         lowTemplate = loaded
         lowContactSurface = contacts
+        lowBootMarkers = ReplaySkinnedAthleteBootMarkers(model: model, motion: motion)
     }
 
     static func make(for player: PlayerTrack, detail: Detail = .near) throws -> ReplaySkinnedAthleteInstance {
@@ -171,7 +175,8 @@ enum ReplaySkinnedAthleteProvider {
         clone.addChild(back)
         return ReplaySkinnedAthleteInstance(root: root, skinRoot: clone, model: model,
                                            front: front, back: back, playerID: player.id, motion: motion,
-                                           contactSurface: contactSurface, detail: detail)
+                                           contactSurface: contactSurface, detail: detail,
+                                           bootMarkers: detail == .near ? bootMarkers : lowBootMarkers)
     }
 
     static func skinnedModels(in entity: Entity) -> [ModelEntity] {
@@ -198,12 +203,12 @@ enum ReplaySkinnedAthleteProvider {
 
     #if DEBUG
     static func resetForTesting() {
-        template = nil; motion = nil; contactSurface = nil; kits = []
+        template = nil; motion = nil; contactSurface = nil; bootMarkers = nil; kits = []
         resetLowDetailForTesting()
     }
 
     static func resetLowDetailForTesting() {
-        lowTemplate = nil; lowContactSurface = nil
+        lowTemplate = nil; lowContactSurface = nil; lowBootMarkers = nil
         forcesLowDetailMakeFailure = false
         lowDetailCloneAttemptCount = 0
     }
@@ -225,6 +230,7 @@ final class ReplaySkinnedAthleteInstance {
     private let skinRoot: Entity
     let motion: ReplaySkinnedAthleteMotion
     let contactSurface: ReplaySkinnedAthleteContactSurface
+    let bootMarkers: ReplaySkinnedAthleteBootMarkers?
     private(set) var pose: ReplaySkinnedAthleteMotion.Pose
     private var transforms: [Transform]
     private let frontLocal: simd_float4x4
@@ -237,7 +243,8 @@ final class ReplaySkinnedAthleteInstance {
 
     init(root: Entity, skinRoot: Entity, model: ModelEntity, front: ModelEntity, back: ModelEntity,
          playerID: String, motion: ReplaySkinnedAthleteMotion, contactSurface: ReplaySkinnedAthleteContactSurface,
-         detail: ReplaySkinnedAthleteProvider.Detail = .near) {
+         detail: ReplaySkinnedAthleteProvider.Detail = .near,
+         bootMarkers: ReplaySkinnedAthleteBootMarkers? = nil) {
         self.detail = detail
         self.root = root
         self.skinRoot = skinRoot
@@ -247,8 +254,9 @@ final class ReplaySkinnedAthleteInstance {
         self.playerID = playerID
         self.motion = motion
         self.contactSurface = contactSurface
+        self.bootMarkers = bootMarkers
         pose = motion.makePoseBuffer()
-        footballPose = ReplaySkinnedAthleteFootballPose(motion: motion)
+        footballPose = ReplaySkinnedAthleteFootballPose(motion: motion, bootMarkers: bootMarkers)
         impactPose = ReplaySkinnedAthleteImpactPose(motion: motion, contactSurface: contactSurface)
         transforms = model.jointTransforms
         neckIndex = motion.semanticJointIndices["neck"]!
@@ -270,7 +278,9 @@ final class ReplaySkinnedAthleteInstance {
     func update(at time: TimeInterval, track: PlayerTrack, locomotion suppliedLocomotion: PlayerLocomotionSample,
                 lookTarget: SIMD3<Float>?, ballAction: ReplayAthleteBallActionPose?,
                 impact: PlayerRagdollPlayback.Sample? = nil,
-                stationaryPose: PlayerPose? = nil) -> Bool {
+                stationaryPose: PlayerPose? = nil,
+                interaction: ReplayAthleteInteractionCue? = nil,
+                presentationPose: PlayerPose? = nil) -> Bool {
         let locomotion = stationaryPose == nil ? suppliedLocomotion : track.stationaryLocomotion
         // Never apply a stale or different player's collision sample. Unsupported
         // assets still fail soft to the procedural body rather than disappear.
@@ -288,21 +298,35 @@ final class ReplaySkinnedAthleteInstance {
         let upperBodyEffort = effort * min(max(locomotion.speedMetresPerSecond / 2.4, 0), 1)
         motion.sample(time: time, locomotionEffort: upperBodyEffort,
                       gaitPhase: gaitPhase, rebuildingModelSpace: false, into: &pose)
-        let influence = ReplaySkinnedAthleteFootballPose.influence(locomotion: locomotion, ballAction: ballAction)
+        let interactionSample = ReplayAthleteInteractionPose.sample(
+            cue: interaction, at: time, track: track, presentationPose: stationaryPose ?? presentationPose)
+        let movement = stationaryPose == nil
+            ? ReplayAthleteMovementIntent.sample(track: track, at: time, presentationPose: presentationPose,
+                                               lookTarget: lookTarget) : nil
+        let influence = max(ReplaySkinnedAthleteFootballPose.influence(locomotion: locomotion, ballAction: ballAction),
+                            interactionSample?.influence ?? 0, movement?.influence ?? 0)
         if influence > 0, footballPose != nil {
             let authored = ReplayAthleteMotion.locomotionPose(
                 for: track, at: time, locomotion: locomotion, gaitPhase: gaitPhase,
                 lookTargetWorldPosition: lookTarget, ballAction: ballAction,
-                stationaryPose: stationaryPose
+                stationaryPose: stationaryPose, interaction: interaction, presentationPose: presentationPose,
+                movementIntent: movement
             )
             footballPose?.apply(authored, influence: influence,
-                                armInfluence: ReplaySkinnedAthleteFootballPose.influence(locomotion: locomotion, ballAction: nil),
-                                motion: motion, to: &pose)
+                                armInfluence: max(ReplaySkinnedAthleteFootballPose.influence(locomotion: locomotion, ballAction: nil),
+                                                  interactionSample?.influence ?? 0, movement?.readiness ?? 0),
+                                motion: motion, to: &pose, interaction: interactionSample)
         }
         let look = ReplayAthleteMotion.lookPose(for: track, at: time, locomotion: locomotion,
                                                targetWorldPosition: lookTarget,
-                                               stationaryPose: stationaryPose)
-        applyLook(look)
+                                               stationaryPose: stationaryPose,
+                                               presentationPose: presentationPose)
+        if let action = interactionSample {
+            applyLook(ReplayAthleteLookPose(neckYawRadians: look.neckYawRadians,
+                headYawRadians: look.headYawRadians,
+                neckPitchRadians: look.neckPitchRadians,
+                headPitchRadians: look.headPitchRadians + action.headPitch * action.influence))
+        } else { applyLook(look) }
         if let impact {
             impactPose?.apply(impact.pose, influence: impact.influence, motion: motion, to: &pose)
         }

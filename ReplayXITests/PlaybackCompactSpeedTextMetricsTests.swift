@@ -3,10 +3,8 @@ import UIKit
 import XCTest
 @testable import ReplayXI
 
-/// Compact Speed uses a different font from the secondary rate choices.
-/// Minimum budgets allow both Text lines to reach the existing 0.8 scale;
-/// the VStack's 1 pt gap is not a scaled Text element. These are native font
-/// budgets, not proof of SwiftUI's actual compression or rendered padding.
+/// The compact speed control shows only its useful numeric value. These are
+/// native font budgets, not proof of SwiftUI compression or rendered padding.
 @MainActor
 final class PlaybackCompactSpeedTextMetricsTests: XCTestCase {
     private let categories: [UIContentSizeCategory] = [
@@ -15,7 +13,7 @@ final class PlaybackCompactSpeedTextMetricsTests: XCTestCase {
         .accessibilityExtraExtraLarge, .accessibilityExtraExtraExtraLarge
     ]
 
-    func testEveryTextSizeHasNativeCompactSpeedAndCaptionMeasurements() throws {
+    func testEveryTextSizeHasNativeCompactSpeedMeasurements() throws {
         let records = categories.map(metrics)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -26,26 +24,23 @@ final class PlaybackCompactSpeedTextMetricsTests: XCTestCase {
         XCTAssertEqual(records.count, 12)
         for record in records {
             XCTAssertEqual(record.rates.map(\.rate), ReplayStore.availablePlaybackRates)
-            XCTAssertGreaterThan(record.captionWidth, 0)
             XCTAssertGreaterThan(record.minimumStackHeight, 0)
         }
     }
 
-    func testEveryRateAndCaptionFitThePermittedMinimumWidth() {
+    func testEveryRateFitsThePermittedMinimumWidth() {
         for record in categories.map(metrics) {
             for rate in record.rates {
                 XCTAssertLessThanOrEqual(rate.minimumWidth, record.widthLimit,
                     "\(record.category): \(rate.title), at the allowed 0.8 scale")
             }
-            XCTAssertLessThanOrEqual(record.captionMinimumWidth, record.widthLimit,
-                "\(record.category): Speed caption, at the allowed 0.8 scale")
         }
     }
 
-    func testThePermittedMinimumStackIncludesTheUnscaledOnePointGap() {
+    func testTheSingleRateLineFitsThePermittedMinimumHeight() {
         for record in categories.map(metrics) {
             XCTAssertEqual(record.minimumStackHeight,
-                (record.rateLineHeight + record.captionLineHeight) * record.minimumScale + record.lineGap)
+                record.rateLineHeight * record.minimumScale)
             XCTAssertLessThanOrEqual(record.minimumStackHeight, record.heightLimit, record.category)
         }
     }
@@ -60,7 +55,6 @@ final class PlaybackCompactSpeedTextMetricsTests: XCTestCase {
                 XCTAssertLessThanOrEqual(rate.minimumWidth, record.widthLimit,
                     "\(record.category): \(rate.title)")
             }
-            XCTAssertLessThanOrEqual(record.captionMinimumWidth, record.widthLimit, record.category)
             XCTAssertLessThanOrEqual(record.minimumStackHeight, record.heightLimit, record.category)
         }
     }
@@ -73,9 +67,9 @@ final class PlaybackCompactSpeedTextMetricsTests: XCTestCase {
             before: "private func annotationEditButton(")
         XCTAssertTrue(button.contains("Text(rateLabel(store.playbackRate))"))
         XCTAssertTrue(button.contains(".font(.headline.monospacedDigit().weight(.bold))"))
-        XCTAssertTrue(button.contains("Text(\"Speed\")"))
-        XCTAssertTrue(button.contains(".font(.caption.weight(.semibold))"))
-        XCTAssertTrue(button.contains("VStack(spacing: 1)"))
+        XCTAssertFalse(button.contains("Text(\"Speed\")"))
+        XCTAssertFalse(button.contains("VStack(spacing: 1)"))
+        XCTAssertTrue(button.contains(".help(\"Playback speed\")"))
         XCTAssertTrue(button.contains(".lineLimit(1)"))
         XCTAssertTrue(button.contains(".minimumScaleFactor(0.8)"))
         XCTAssertTrue(button.contains(".frame(width: primaryControlLayout.speedLabelWidth,"))
@@ -111,12 +105,7 @@ final class PlaybackCompactSpeedTextMetricsTests: XCTestCase {
         let category: String
         let rateFontPointSize: Double
         let rateLineHeight: Double
-        let captionFontPointSize: Double
-        let captionLineHeight: Double
-        let captionWidth: Double
-        let captionMinimumWidth: Double
         let minimumScale: Double
-        let lineGap: Double
         let fullStackHeight: Double
         let minimumStackHeight: Double
         let widthLimit: Double
@@ -135,13 +124,10 @@ final class PlaybackCompactSpeedTextMetricsTests: XCTestCase {
         let traits = UITraitCollection(preferredContentSizeCategory: category)
         let rateFont = UIFont.monospacedDigitSystemFont(ofSize: UIFont.preferredFont(
             forTextStyle: .headline, compatibleWith: traits).pointSize, weight: .bold)
-        let captionFont = UIFont.systemFont(ofSize: UIFont.preferredFont(
-            forTextStyle: .caption1, compatibleWith: traits).pointSize, weight: .semibold)
         let minimumScale = 0.8
         let layout = PlaybackPrimaryControlLabelLayout.resolve(
             usesAccessibilityText: category.isAccessibilityCategory)
-        let captionWidth = textWidth("Speed", font: captionFont)
-        let lineHeights = Double(rateFont.lineHeight + captionFont.lineHeight)
+        let lineHeights = Double(rateFont.lineHeight)
         let rates = ReplayStore.availablePlaybackRates.map { rate in
             // Same formatter as the source-checked private view method; this
             // probe checks font budgets, not a replacement rendering path.
@@ -154,10 +140,8 @@ final class PlaybackCompactSpeedTextMetricsTests: XCTestCase {
         }
         return Metrics(category: category.rawValue,
             rateFontPointSize: Double(rateFont.pointSize), rateLineHeight: Double(rateFont.lineHeight),
-            captionFontPointSize: Double(captionFont.pointSize), captionLineHeight: Double(captionFont.lineHeight),
-            captionWidth: captionWidth, captionMinimumWidth: captionWidth * minimumScale,
-            minimumScale: minimumScale, lineGap: 1,
-            fullStackHeight: lineHeights + 1, minimumStackHeight: lineHeights * minimumScale + 1,
+            minimumScale: minimumScale,
+            fullStackHeight: lineHeights, minimumStackHeight: lineHeights * minimumScale,
             widthLimit: Double(layout.speedLabelWidth),
             heightLimit: Double(PlaybackControlDeckPresentation.minimumSpatialHitTarget),
             rates: rates)

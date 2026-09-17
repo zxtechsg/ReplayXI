@@ -26,6 +26,35 @@ enum PitchSceneFactory {
         let motion: ReplayBallPlaybackMotion
     }
 
+    /// The physics solver runs only during preparation. Rendering, scrubbing
+    /// and every POV read the same immutable ball/contact recording.
+    private struct NativeBallCache: Component {
+        let recording: ReplayNativeBallPhysics.Recording
+        let interactions: [String: [ReplayAthleteInteractionCue]]
+
+        init(recording: ReplayNativeBallPhysics.Recording) {
+            self.recording = recording
+            interactions = Dictionary(grouping: recording.touches.compactMap { touch in
+                guard let kind = ReplayAthleteInteractionCue.Kind(rawValue: touch.kind.rawValue) else { return nil }
+                return ReplayAthleteInteractionCue(playerID: touch.playerID, kind: kind,
+                    contactTime: touch.time, startTime: touch.time - 0.32, endTime: touch.time + 0.42,
+                    kickingLeg: touch.kickingLeg, contactBallWorldPosition: touch.position,
+                    outgoingDirectionWorld: touch.outgoingVelocity)
+            }, by: \.playerID)
+        }
+
+        func interaction(for playerID: String, at time: TimeInterval) -> ReplayAthleteInteractionCue? {
+            guard let cues = interactions[playerID] else { return nil }
+            var nearest: ReplayAthleteInteractionCue?
+            for cue in cues where time >= cue.startTime && time <= cue.endTime {
+                if nearest == nil || abs(cue.contactTime - time) < abs(nearest!.contactTime - time) {
+                    nearest = cue
+                }
+            }
+            return nearest
+        }
+    }
+
     /// Procedural model descendants are fixed when a rig is built. Skin
     /// admission changes their visibility, but time/pose updates do not.
     private struct ProceduralVisualState: Component {
@@ -65,6 +94,10 @@ enum PitchSceneFactory {
 
     static func ballPlaybackMotionForTesting(in root: Entity) -> ReplayBallPlaybackMotion? {
         root.components[BallPlaybackCache.self]?.motion
+    }
+
+    static func nativeBallRecordingForTesting(in root: Entity) -> ReplayNativeBallPhysics.Recording? {
+        root.components[NativeBallCache.self]?.recording
     }
     #endif
 
@@ -582,12 +615,18 @@ enum PitchSceneFactory {
         return TriangleLockLayout.tolerance(for: mode)
     }
 
-    static func makeMatchRoot(for scenario: ReplayScenario) -> Entity {
+    static func makeMatchRoot(for scenario: ReplayScenario,
+                              nativeRecording: ReplayNativeBallPhysics.Recording? = nil) -> Entity {
         let root = Entity()
         root.name = "match-root-\(scenario.id)"
-        let ballPlayback = ReplayBallPlaybackMotion.prepared(track: scenario.ball, players: scenario.players)
-        root.components.set(BallPlaybackCache(motion: ballPlayback))
-        root.components.set(BallRollingCache(motion: ballPlayback.rolling))
+        if let native = nativeRecording ?? ReplayNativeBallPhysics.cached(track: scenario.ball, players: scenario.players,
+                                                       plannedTouches: FootballReferenceScenarios.touches(for: scenario)) {
+            root.components.set(NativeBallCache(recording: native))
+        } else {
+            let ballPlayback = ReplayBallPlaybackMotion.prepared(track: scenario.ball, players: scenario.players)
+            root.components.set(BallPlaybackCache(motion: ballPlayback))
+            root.components.set(BallRollingCache(motion: ballPlayback.rolling))
+        }
 
         let pitch = makePitch()
         pitch.name = "pitch"
@@ -809,13 +848,15 @@ enum PitchSceneFactory {
         } else {
             nil
         }
-        let ballPose = root.components[BallPlaybackCache.self]?.motion.pose(at: time)
+        let nativeBall = isTriangleView ? nil : root.components[NativeBallCache.self]
+        let ballPose = nativeBall?.recording.pose(at: time)
+            ?? root.components[BallPlaybackCache.self]?.motion.pose(at: time)
             ?? scenario.ball.pose(at: time)
         // Shape Lab can substitute ideal player and ball presentation positions.
         // Match views infer action TIMING from authoritative tracks. The ball's
         // prepared contact path and the player's gaze share the presented pose;
         // source events and saved telemetry remain untouched.
-        let athleteBallActionTrack: BallTrack? = isTriangleView ? nil : scenario.ball
+        let athleteBallActionTrack: BallTrack? = isTriangleView || nativeBall != nil ? nil : scenario.ball
         let shapeSourcePosition: PitchPoint? = if isTriangleView,
                                                   let source = scenario.player(id: scenario.defaultPerspectiveID) {
             showsIdealShape
@@ -1039,7 +1080,10 @@ enum PitchSceneFactory {
                 let ballAction = athleteBallActionTrack.flatMap {
                     ReplayAthleteMotion.ballActionPose(for: player, ballTrack: $0, at: time)
                 }
-                let hasBallAction = ballAction.map { $0.influence > 0 } ?? false
+                let interaction = activeRagdollCue == nil
+                    ? nativeBall?.interaction(for: player.id, at: time) : nil
+                let motionPresentation = nativeBall == nil ? nil : pose
+                let hasBallAction = interaction != nil || (ballAction.map { $0.influence > 0 } ?? false)
                 let impactSample = needsDetailedRig ? activeRagdollCue.flatMap {
                     PlayerRagdollPlayback.sample(for: $0, at: time)
                 } : nil
@@ -1067,7 +1111,8 @@ enum PitchSceneFactory {
                 if canUseAdmittedSkin, let skin = sceneState?.skinnedAthletes[player.id] {
                     usesNewSkin = skin.update(at: time, track: player, locomotion: locomotion,
                                              lookTarget: playerLookTarget, ballAction: ballAction,
-                                             impact: impactSample, stationaryPose: stationaryPose)
+                                             impact: impactSample, stationaryPose: stationaryPose,
+                                             interaction: interaction, presentationPose: motionPresentation)
                 } else {
                     usesNewSkin = false
                 }
@@ -1116,7 +1161,9 @@ enum PitchSceneFactory {
                         lookTargetWorldPosition: playerLookTarget,
                         ballAction: activeRagdollCue == nil ? ballAction : nil,
                         cache: sceneState,
-                        stationaryPose: stationaryPose
+                        stationaryPose: stationaryPose,
+                        interaction: interaction,
+                        presentationPose: motionPresentation
                     )
                     if let impactSample {
                         applyRagdollPose(
@@ -1135,7 +1182,9 @@ enum PitchSceneFactory {
                         lookTargetWorldPosition: playerLookTarget,
                         ballAction: ballAction,
                         cache: sceneState,
-                        stationaryPose: stationaryPose
+                        stationaryPose: stationaryPose,
+                        interaction: interaction,
+                        presentationPose: motionPresentation
                     )
                 }
             }
@@ -1186,7 +1235,8 @@ enum PitchSceneFactory {
                 presentationBallPosition.z
             ]
             ball.orientation = isTriangleView ? ReplayBallRollingMotion.identity
-                : root.components[BallRollingCache.self]?.motion.orientation(at: time)
+                : nativeBall?.recording.orientation(at: time)
+                    ?? root.components[BallRollingCache.self]?.motion.orientation(at: time)
                     ?? ReplayBallRollingMotion.identity
             ball.scale = SIMD3<Float>(repeating: ballScale)
             ball.isEnabled = showsBall
@@ -3898,7 +3948,9 @@ enum PitchSceneFactory {
         lookTargetWorldPosition: SIMD3<Float>?,
         ballAction: ReplayAthleteBallActionPose?,
         cache: AnnotationSceneCache?,
-        stationaryPose: PlayerPose?
+        stationaryPose: PlayerPose?,
+        interaction: ReplayAthleteInteractionCue?,
+        presentationPose: PlayerPose?
     ) {
         guard let marker = directChild(named: "table-marker", of: entity),
               marker.isEnabled else { return }
@@ -3916,7 +3968,9 @@ enum PitchSceneFactory {
                 lookTargetWorldPosition: lookTargetWorldPosition,
                 ballAction: ballAction,
                 cache: cache,
-                stationaryPose: stationaryPose
+                stationaryPose: stationaryPose,
+                interaction: interaction,
+                presentationPose: presentationPose
             )
             return
         }
@@ -3937,7 +3991,8 @@ enum PitchSceneFactory {
             at: time,
             locomotion: locomotion,
             targetWorldPosition: lookTargetWorldPosition,
-            stationaryPose: stationaryPose
+            stationaryPose: stationaryPose,
+            presentationPose: presentationPose
         )
         let gaitPhase = stationaryPose == nil
             ? track.gaitPhase(at: time)
@@ -3983,7 +4038,9 @@ enum PitchSceneFactory {
         lookTargetWorldPosition: SIMD3<Float>?,
         ballAction: ReplayAthleteBallActionPose?,
         cache: AnnotationSceneCache?,
-        stationaryPose: PlayerPose?
+        stationaryPose: PlayerPose?,
+        interaction: ReplayAthleteInteractionCue?,
+        presentationPose: PlayerPose?
     ) {
         guard let fullRig = directChild(named: "full-rig", of: entity),
               fullRig.isEnabled else { return }
@@ -3995,7 +4052,9 @@ enum PitchSceneFactory {
             lookTargetWorldPosition: lookTargetWorldPosition,
             ballAction: ballAction,
             cache: cache,
-            stationaryPose: stationaryPose
+            stationaryPose: stationaryPose,
+            interaction: interaction,
+            presentationPose: presentationPose
         )
     }
 
@@ -4070,7 +4129,9 @@ enum PitchSceneFactory {
         lookTargetWorldPosition: SIMD3<Float>?,
         ballAction: ReplayAthleteBallActionPose?,
         cache: AnnotationSceneCache?,
-        stationaryPose: PlayerPose?
+        stationaryPose: PlayerPose?,
+        interaction: ReplayAthleteInteractionCue?,
+        presentationPose: PlayerPose?
     ) {
         guard let binding = athleteBinding(for: fullRig, cache: cache) else { return }
         let pose = ReplayAthleteMotion.locomotionPose(
@@ -4082,7 +4143,9 @@ enum PitchSceneFactory {
                 : locomotion.motion.locomotionPhase,
             lookTargetWorldPosition: lookTargetWorldPosition,
             ballAction: ballAction,
-            stationaryPose: stationaryPose
+            stationaryPose: stationaryPose,
+            interaction: interaction,
+            presentationPose: presentationPose
         )
         ReplayAthleteMotion.apply(pose, to: binding)
     }

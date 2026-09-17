@@ -62,7 +62,10 @@ struct ReplayDashboardView: View {
                 "--replayxi-shape-lab": "triangle-lock",
                 "--replayxi-lane-lens": "lane-lens",
                 "--replayxi-four-minds": "four-minds",
-                "--replayxi-world-replay": "real-world-match-replay"
+                "--replayxi-world-replay": "real-world-match-replay",
+                "--replayxi-final-counter": "final-36-counter",
+                "--replayxi-final-volley": "final-81-volley",
+                "--replayxi-final-rebound": "final-108-rebound"
             ]
             if let scenarioID = scenarioArguments.first(where: { arguments.contains($0.key) })?.value {
                 store.selectScenario(id: scenarioID, broadcast: false)
@@ -193,6 +196,27 @@ struct ReplayDashboardView: View {
             }
             await Task.yield()
             guard store.roomPresentation.isOpeningRequest(requestID) else { return }
+            // Prepare only the selected study. The room has its own cancellable
+            // admission gate for later switches and restored reviews. Older
+            // demonstrations retain their original authored paths.
+            store.statusMessage = "Preparing ball physics…"
+            let toPrepare = FootballReferenceScenarios.contains(store.selectedScenario)
+                ? [store.selectedScenario] : []
+            do {
+                for scenario in toPrepare {
+                    guard store.roomPresentation.isOpeningRequest(requestID) else { return }
+                    let recording = try await ReplayNativeBallPhysics.prewarm(track: scenario.ball, players: scenario.players,
+                        plannedTouches: FootballReferenceScenarios.touches(for: scenario))
+                    guard recording.missedTouchCount == 0 else {
+                        throw ReplayNativeBallPhysics.Failure.invalidInput
+                    }
+                }
+            } catch {
+                guard store.completeImmersiveOpen(requestID, opened: false) else { return }
+                store.statusMessage = "Ball physics could not prepare. Please try again."
+                return
+            }
+            guard store.roomPresentation.isOpeningRequest(requestID) else { return }
             store.statusMessage = "Opening spatial replay…"
             let result = await openImmersiveSpace(id: "ReplayRoom", value: requestID)
             guard store.completeImmersiveOpen(requestID, opened: result == .opened) else { return }
@@ -212,7 +236,7 @@ private struct ScenarioRail: View {
     @State private var lastScenarioByMode: [ReplayAppMode: String] = [:]
 
     private var activeMode: ReplayAppMode { ReplayAppMode(scenario: store.selectedScenario) }
-    private var modeScenarios: [ReplayScenario] { activeMode.scenarios(in: store.scenarios) }
+    private var modeScenarios: [ReplayScenario] { activeMode.featuredScenarios(in: store.scenarios) }
     private var navigationIsDisabled: Bool {
         store.hasActiveTimelineScrub || store.hasActiveCoachMarkGeometryPreview
     }
@@ -282,6 +306,11 @@ private struct ScenarioRail: View {
                                     store.selectScenario(id: scenario.id)
                                 }
                                 .disabled(navigationIsDisabled)
+                            }
+                            if activeMode == .situationRoleplay,
+                               !modeScenarios.contains(where: { $0.id == store.selectedScenarioID }) {
+                                Text("Previous review").font(.caption).foregroundStyle(.secondary)
+                                ScenarioRailRow(scenario: store.selectedScenario, selected: true) {}
                             }
                         }
                     }
@@ -417,7 +446,9 @@ private struct ScenarioWorkspace: View {
             VStack(alignment: .leading, spacing: 20) {
                 HStack(alignment: .top, spacing: 20) {
                     VStack(alignment: .leading, spacing: 9) {
-                        Eyebrow(text: "DEMO \(scenario.kind.number)  /  \(scenario.matchContext)")
+                        Eyebrow(text: FootballReferenceScenarios.contains(scenario)
+                            ? "RECONSTRUCTION  /  \(scenario.matchContext)"
+                            : "DEMO \(scenario.kind.number)  /  \(scenario.matchContext)")
                         Text(scenario.title)
                             .font(.system(size: 38, weight: .black, design: .rounded))
                             .tracking(-1.0)
@@ -1017,7 +1048,7 @@ private struct PlaybackConsole: View {
                     Eyebrow(text: "Players")
                     Picker("Team", selection: $rosterTeam) {
                         ForEach(FootballTeam.allCases) { team in
-                            Text(team.shortTitle).tag(team)
+                            Text(FootballReferenceScenarios.teamTitle(team, in: store.selectedScenario)).tag(team)
                         }
                     }
                     .pickerStyle(.segmented)
@@ -1062,7 +1093,7 @@ private struct PlaybackConsole: View {
                             .buttonStyle(.bordered)
                             .tint(store.viewMode == .firstPerson && store.activePerspectiveID == player.id ? ReplayTheme.signal : .white.opacity(0.5))
                             .disabled(!store.canChangePlaybackView)
-                            .accessibilityLabel("\(player.team.shortTitle), number \(player.shirtNumber), \(player.role), \(player.displayName)")
+                            .accessibilityLabel("\(FootballReferenceScenarios.teamTitle(player.team, in: store.selectedScenario)), number \(player.shirtNumber), \(player.role), \(player.displayName)")
                             .accessibilityHint("Open this player's first-person view")
                             .accessibilityAddTraits(store.viewMode == .firstPerson && store.activePerspectiveID == player.id ? .isSelected : [])
                         }
@@ -1307,6 +1338,8 @@ private struct RoomRail: View {
 }
 
 private struct DashboardPlayerRow: View {
+    @Environment(ReplayStore.self) private var store
+
     let player: PlayerTrack
     let selected: Bool
     let isStation: Bool
@@ -1341,7 +1374,7 @@ private struct DashboardPlayerRow: View {
             .background(selected ? Color.white.opacity(0.06) : .clear, in: RoundedRectangle(cornerRadius: 10))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(player.team.shortTitle), number \(player.shirtNumber), \(player.role), \(player.displayName)")
+        .accessibilityLabel("\(FootballReferenceScenarios.teamTitle(player.team, in: store.selectedScenario)), number \(player.shirtNumber), \(player.role), \(player.displayName)")
         .accessibilityHint(isStation ? "Choose this role station" : "Open this player's first-person view")
         .accessibilityAddTraits(selected ? .isSelected : [])
     }

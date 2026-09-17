@@ -1634,7 +1634,8 @@ final class ReplayStore {
               bendDelta.isFinite, liftDelta.isFinite,
               let mark = marks.first(where: { $0.id == id }), mark.kind == .arc else { return false }
         let curve = CoachMarkCurve(bend: mark.resolvedCurve.bend + bendDelta,
-                                   lift: mark.resolvedCurve.lift + liftDelta).clamped()
+                                   lift: mark.resolvedCurve.lift + liftDelta,
+                                   rollDegrees: mark.resolvedCurve.rollDegrees).clamped()
         guard curve != mark.resolvedCurve else { return false }
         let resolved = presentedCoachMarkGeometry(mark, at: playhead)
         return updateCoachMarkGeometry(id: id, start: resolved.start, end: resolved.end, curve: curve)

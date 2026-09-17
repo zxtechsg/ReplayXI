@@ -72,8 +72,15 @@ final class PlaybackRosterTextMetricsTests: XCTestCase {
             ("private var annotationToolsButton:", "private var controlDeckPreset:", "drawLabelWidth", "")
         ] {
             let button = try slice(source, after: start, before: end)
-            XCTAssertTrue(button.contains("VStack(spacing: 1)"))
-            XCTAssertTrue(button.contains(".font(.caption.monospaced().weight(.black))"))
+            if width == "playerLabelWidth" {
+                XCTAssertTrue(button.contains("VStack(spacing: 1)"))
+                XCTAssertTrue(button.contains(".font(.caption.monospaced().weight(.black))"))
+            } else {
+                XCTAssertFalse(button.contains("Text("))
+                XCTAssertTrue(button.contains(".font(.title2.weight(.semibold))"))
+                XCTAssertTrue(button.contains(".help("))
+                XCTAssertTrue(button.contains(".accessibilityLabel("))
+            }
             XCTAssertTrue(button.contains(".frame(width: primaryControlLayout.\(width))"))
             XCTAssertTrue(button.contains(".frame(minHeight: primaryControlLayout.compactLabelMinimumHeight)"))
             if minimumScale.isEmpty {
@@ -171,19 +178,23 @@ final class PlaybackRosterTextMetricsTests: XCTestCase {
         let roleWidths = Set(players.map(\.positionCode)).map { width($0, font: role) }
 
         func compact(_ name: String, symbol: String, weight: UIFont.Weight,
-                     widthLimit: Double, minimumScale: Double) throws -> CompactBudget {
-            let font = UIFont.systemFont(ofSize: headlineSize, weight: weight)
+                     widthLimit: Double, minimumScale: Double, iconOnly: Bool = false) throws -> CompactBudget {
+            let iconSize = iconOnly
+                ? UIFont.preferredFont(forTextStyle: .title2, compatibleWith: traits).pointSize : headlineSize
+            let font = UIFont.systemFont(ofSize: iconSize, weight: weight)
             let image = try XCTUnwrap(UIImage(systemName: symbol,
                 withConfiguration: UIImage.SymbolConfiguration(font: font)))
-            let textWidth = width(name, font: caption)
+            let textWidth = iconOnly ? 0 : width(name, font: caption)
+            let textHeight = iconOnly ? 0 : Double(caption.lineHeight)
+            let gap: Double = iconOnly ? 0 : 1
             return CompactBudget(
                 name: name, widthLimit: widthLimit,
                 heightLimit: Double(layout.compactLabelMinimumHeight),
-                captionLineHeight: Double(caption.lineHeight),
+                captionLineHeight: textHeight,
                 symbolWidth: Double(image.size.width), symbolHeight: Double(image.size.height),
                 fullTextWidth: textWidth, minimumTextWidth: textWidth * minimumScale,
-                fullStackHeight: Double(image.size.height + caption.lineHeight) + 1,
-                minimumStackHeight: Double(image.size.height) + Double(caption.lineHeight) * minimumScale + 1
+                fullStackHeight: Double(image.size.height) + textHeight + gap,
+                minimumStackHeight: Double(image.size.height) + textHeight * minimumScale + gap
             )
         }
 
@@ -200,10 +211,10 @@ final class PlaybackRosterTextMetricsTests: XCTestCase {
             compactButtons: [
                 try compact("POV PLAYER", symbol: "person.crop.rectangle.stack.fill", weight: .bold,
                     widthLimit: Double(layout.playerLabelWidth), minimumScale: Double(layout.playerMinimumTextScale)),
-                try compact("TOOLS", symbol: "square.grid.2x2.fill", weight: .black,
-                    widthLimit: Double(layout.toolsLabelWidth), minimumScale: 1),
-                try compact("DRAW", symbol: "pencil.and.outline", weight: .bold,
-                    widthLimit: Double(layout.drawLabelWidth), minimumScale: 1)
+                try compact("TOOLS", symbol: "square.grid.2x2.fill", weight: .semibold,
+                    widthLimit: Double(layout.toolsLabelWidth), minimumScale: 1, iconOnly: true),
+                try compact("DRAW", symbol: "pencil.and.outline", weight: .semibold,
+                    widthLimit: Double(layout.drawLabelWidth), minimumScale: 1, iconOnly: true)
             ]
         )
     }

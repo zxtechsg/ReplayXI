@@ -7,6 +7,9 @@ import Foundation
 /// keeps shared-session playback deterministic on every participant's device.
 enum DemoScenarios {
     static let all: [ReplayScenario] = makeScenarios()
+    /// Keep the legacy IDs/data available for saved reviews and fixtures.
+    /// New installations lead with the three broadcast-inspired studies.
+    static let catalogue: [ReplayScenario] = FootballReferenceScenarios.all + all
 
     static func scenario(for kind: ExperienceKind) -> ReplayScenario? {
         all.first { $0.kind == kind }

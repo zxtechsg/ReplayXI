@@ -112,7 +112,9 @@ enum ReplayAthleteMotion {
         at time: TimeInterval,
         lookTargetWorldPosition: SIMD3<Float>? = nil,
         ballTrack: BallTrack? = nil,
-        ragdollCue: PlayerRagdollCue? = nil
+        ragdollCue: PlayerRagdollCue? = nil,
+        interaction: ReplayAthleteInteractionCue? = nil,
+        presentationPose: PlayerPose? = nil
     ) {
         let locomotion = track.locomotion(at: time)
         apply(
@@ -122,7 +124,9 @@ enum ReplayAthleteMotion {
                 locomotion: locomotion,
                 gaitPhase: track.gaitPhase(at: time),
                 lookTargetWorldPosition: lookTargetWorldPosition,
-                ballTrack: ballTrack
+                ballTrack: ballTrack,
+                interaction: interaction,
+                presentationPose: presentationPose
             ),
             to: instance.joints
         )
@@ -142,7 +146,9 @@ enum ReplayAthleteMotion {
         for track: PlayerTrack,
         at time: TimeInterval,
         lookTargetWorldPosition: SIMD3<Float>? = nil,
-        ballTrack: BallTrack? = nil
+        ballTrack: BallTrack? = nil,
+        interaction: ReplayAthleteInteractionCue? = nil,
+        presentationPose: PlayerPose? = nil
     ) -> ReplayAthleteLocomotionPose {
         locomotionPose(
             for: track,
@@ -150,7 +156,9 @@ enum ReplayAthleteMotion {
             locomotion: track.locomotion(at: time),
             gaitPhase: track.gaitPhase(at: time),
             lookTargetWorldPosition: lookTargetWorldPosition,
-            ballTrack: ballTrack
+            ballTrack: ballTrack,
+            interaction: interaction,
+            presentationPose: presentationPose
         )
     }
 
@@ -165,7 +173,10 @@ enum ReplayAthleteMotion {
         lookTargetWorldPosition: SIMD3<Float>? = nil,
         ballTrack: BallTrack? = nil,
         ballAction suppliedBallAction: ReplayAthleteBallActionPose? = nil,
-        stationaryPose: PlayerPose? = nil
+        stationaryPose: PlayerPose? = nil,
+        interaction: ReplayAthleteInteractionCue? = nil,
+        presentationPose: PlayerPose? = nil,
+        movementIntent: ReplayAthleteMovementIntent.Sample? = nil
     ) -> ReplayAthleteLocomotionPose {
         let locomotion = stationaryPose == nil ? suppliedLocomotion : track.stationaryLocomotion
         // `PlayerLocomotionState` is deliberately discrete because it is also
@@ -210,7 +221,8 @@ enum ReplayAthleteMotion {
             at: time,
             locomotion: locomotion,
             targetWorldPosition: lookTargetWorldPosition,
-            stationaryPose: stationaryPose
+            stationaryPose: stationaryPose,
+            presentationPose: presentationPose
         )
 
         let ballAction = suppliedBallAction ?? ballTrack.flatMap {
@@ -316,7 +328,7 @@ enum ReplayAthleteMotion {
             + (cutBank * 0.40)
             + (doubleCycle * tuning.headRoll * 0.18)
 
-        return ReplayAthleteLocomotionPose(
+        let base = ReplayAthleteLocomotionPose(
             // A planted boot owns vertical placement. During the flight phase,
             // the same absolute-phase solver restores a restrained clearance
             // and the authored COM bounce. Breathing no longer translates the
@@ -408,6 +420,13 @@ enum ReplayAthleteMotion {
                 axis: [0, 1, 0]
             )
         )
+        let movement = stationaryPose == nil
+            ? movementIntent ?? ReplayAthleteMovementIntent.sample(track: track, at: time,
+                presentationPose: presentationPose, lookTarget: lookTargetWorldPosition) : nil
+        let directed = ReplayAthleteMovementIntent.apply(to: base, sample: movement)
+        return ReplayAthleteInteractionPose.apply(to: directed, cue: interaction, at: time,
+                                                  track: track,
+                                                  presentationPose: stationaryPose ?? presentationPose)
     }
 
     /// Absolute-phase football footfall used by the procedural rig.  This is
@@ -471,13 +490,14 @@ enum ReplayAthleteMotion {
         at time: TimeInterval,
         locomotion: PlayerLocomotionSample? = nil,
         targetWorldPosition: SIMD3<Float>? = nil,
-        stationaryPose: PlayerPose? = nil
+        stationaryPose: PlayerPose? = nil,
+        presentationPose: PlayerPose? = nil
     ) -> ReplayAthleteLookPose {
         let sample = stationaryPose == nil
             ? locomotion ?? track.locomotion(at: time)
             : track.stationaryLocomotion
         let finiteTime = time.isFinite ? min(max(time, -1_000_000), 1_000_000) : 0
-        let current = stationaryPose ?? track.presentationPose(at: finiteTime)
+        let current = stationaryPose ?? presentationPose ?? track.presentationPose(at: finiteTime)
         let facing = current.facingDegrees.isFinite ? current.facingDegrees : 0
 
         let travelBearing: Float

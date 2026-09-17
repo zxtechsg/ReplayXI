@@ -20,7 +20,7 @@ final class PlaybackDrawToolTextMetricsTests: XCTestCase {
         let records = try categories.flatMap(metrics)
         XCTAssertEqual(records.count, 72)
         XCTAssertTrue(records.allSatisfy {
-            $0.textWidth > 0 && $0.symbolWidth > 0 && $0.stackHeight > 0
+            $0.symbolWidth > 0 && $0.stackHeight > 0
         })
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -32,7 +32,7 @@ final class PlaybackDrawToolTextMetricsTests: XCTestCase {
 
     func testDrawToolContentFitsItsLiveWidthAtEveryTextSize() throws {
         for metric in try categories.flatMap(metrics) {
-            XCTAssertLessThanOrEqual(max(metric.textWidth, metric.symbolWidth), metric.widthLimit,
+            XCTAssertLessThanOrEqual(metric.symbolWidth, metric.widthLimit,
                 "\(metric.category): \(metric.title)")
         }
     }
@@ -46,7 +46,7 @@ final class PlaybackDrawToolTextMetricsTests: XCTestCase {
 
     func testDefaultTextSizeFitsTheExistingDrawLabels() throws {
         for metric in try metrics(for: .large) {
-            XCTAssertLessThanOrEqual(max(metric.textWidth, metric.symbolWidth), 70)
+            XCTAssertLessThanOrEqual(metric.symbolWidth, 70)
             XCTAssertLessThanOrEqual(metric.stackHeight, 48)
         }
     }
@@ -131,9 +131,10 @@ final class PlaybackDrawToolTextMetricsTests: XCTestCase {
     func testProbeMatchesLiveSharedDrawToolLabelFontsAndFrames() throws {
         let source = try immersiveSource()
         let tool = try slice(source, after: "private func annotationToolButton(", before: "private var orderedMarks:")
-        XCTAssertTrue(tool.contains("VStack(spacing: 1)"))
-        XCTAssertTrue(tool.contains(".font(.headline.weight(.bold))"))
-        XCTAssertTrue(tool.contains(".font(.caption2.monospaced().weight(.black))"))
+        XCTAssertFalse(tool.contains("Text(label.uppercased())"))
+        XCTAssertTrue(tool.contains(".font(.title2.weight(.semibold))"))
+        XCTAssertTrue(tool.contains(".help(\"\\(label) annotation\")"))
+        XCTAssertTrue(tool.contains(".accessibilityLabel(\"\\(label) annotation\")"))
         XCTAssertTrue(tool.contains(".frame(width: drawToolLayout.labelWidth)"))
         XCTAssertTrue(tool.contains(".frame(minHeight: drawToolLayout.labelMinimumHeight)"))
         XCTAssertFalse(tool.contains("minimumScaleFactor"))
@@ -155,7 +156,6 @@ final class PlaybackDrawToolTextMetricsTests: XCTestCase {
     private struct Metric: Encodable {
         let category: String
         let title: String
-        let textWidth: Double
         let symbolWidth: Double
         let stackHeight: Double
         let widthLimit: Double
@@ -165,19 +165,14 @@ final class PlaybackDrawToolTextMetricsTests: XCTestCase {
     private func metrics(for category: UIContentSizeCategory) throws -> [Metric] {
         let layout = PlaybackDrawToolLayout.resolve(usesAccessibilityText: category.isAccessibilityCategory)
         let traits = UITraitCollection(preferredContentSizeCategory: category)
-        let caption = UIFont.monospacedSystemFont(ofSize: UIFont.preferredFont(
-            forTextStyle: .caption2, compatibleWith: traits).pointSize, weight: .black)
         let headline = UIFont.systemFont(ofSize: UIFont.preferredFont(
-            forTextStyle: .headline, compatibleWith: traits).pointSize, weight: .bold)
+            forTextStyle: .title2, compatibleWith: traits).pointSize, weight: .semibold)
         return try tools.map { kind, title in
             let image = try XCTUnwrap(UIImage(systemName: kind.systemImage,
                 withConfiguration: UIImage.SymbolConfiguration(font: headline)))
-            let line = CTLineCreateWithAttributedString(NSAttributedString(
-                string: title, attributes: [.font: caption]) as CFAttributedString)
             return Metric(category: category.rawValue, title: title,
-                textWidth: CTLineGetTypographicBounds(line, nil, nil, nil),
                 symbolWidth: Double(image.size.width),
-                stackHeight: Double(image.size.height + caption.lineHeight) + 1,
+                stackHeight: Double(image.size.height),
                 widthLimit: Double(layout.labelWidth), heightLimit: Double(layout.labelMinimumHeight))
         }
     }

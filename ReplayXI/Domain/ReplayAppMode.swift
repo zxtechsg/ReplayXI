@@ -36,6 +36,12 @@ enum ReplayAppMode: String, CaseIterable, Identifiable, Hashable, Sendable {
         catalogue.filter { ReplayAppMode(scenario: $0) == self }
     }
 
+    func featuredScenarios(in catalogue: [ReplayScenario]) -> [ReplayScenario] {
+        let available = scenarios(in: catalogue)
+        let studies = available.filter { FootballReferenceScenarios.contains($0) }
+        return self == .situationRoleplay && !studies.isEmpty ? studies : available
+    }
+
     func scenarioID(in catalogue: [ReplayScenario], preferredID: String?) -> String? {
         let available = scenarios(in: catalogue)
         if let preferredID, available.contains(where: { $0.id == preferredID }) {
@@ -45,7 +51,8 @@ enum ReplayAppMode: String, CaseIterable, Identifiable, Hashable, Sendable {
     }
 
     static func exerciseTitle(for scenario: ReplayScenario) -> String {
-        switch scenario.kind {
+        if FootballReferenceScenarios.contains(scenario) { return scenario.title }
+        return switch scenario.kind {
         case .squadReplay: "Team perspectives"
         case .coachFocus: "Coach demonstration"
         case .shapeLab: "Positioning"

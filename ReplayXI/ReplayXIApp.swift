@@ -13,7 +13,7 @@ struct ReplayXIApp: App {
             || ProcessInfo.processInfo.environment["XCTestBundlePath"] != nil
             || NSClassFromString("XCTestCase") != nil
         let hasDemoRoute = ProcessInfo.processInfo.arguments.contains { $0.hasPrefix("--replayxi-") }
-        let scenarios = DemoScenarios.all
+        let scenarios = DemoScenarios.catalogue
         let library = isTestHost || hasDemoRoute
             ? ReplayReviewLibrary(scenarios: scenarios)
             : ReplayReviewLibrary.persistent(scenarios: scenarios)

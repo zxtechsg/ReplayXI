@@ -1,4 +1,5 @@
 import RealityKit
+import simd
 import XCTest
 @testable import ReplayXI
 
@@ -78,12 +79,126 @@ final class CoachMarkArcTests: XCTestCase {
         """.utf8)
         XCTAssertNil(try JSONDecoder().decode(CoachMark.self, from: data).curve)
         let store = ReplayStore()
-        for curve in [CoachMarkCurve(bend: .nan, lift: 1), .init(bend: 13, lift: 0), .init(bend: 1, lift: -1)] {
+        for curve in [CoachMarkCurve(bend: .nan, lift: 1), .init(bend: 13, lift: 0), .init(bend: 1, lift: -1),
+                      .init(bend: 2, lift: 0, rollDegrees: .nan), .init(bend: 2, lift: 0, rollDegrees: 181)] {
             let invalid = CoachMark(kind: .arc, start: .zero, end: .init(x: 5, z: 5), curve: curve, label: "Bad")
             XCTAssertFalse(ReplayStore.isValidReviewMark(invalid, for: store.selectedScenario))
         }
         let nonArc = CoachMark(kind: .pass, start: .zero, end: .init(x: 5, z: 5), curve: .init(bend: 1, lift: 1), label: "Wrong")
         XCTAssertFalse(ReplayStore.isValidReviewMark(nonArc, for: store.selectedScenario))
+    }
+
+    func testOldBendLiftPayloadPreservesEveryCurveSampleExactly() throws {
+        let legacy = try JSONDecoder().decode(CoachMarkCurve.self, from: Data("{\"bend\":3,\"lift\":2}".utf8))
+        XCTAssertEqual(legacy.rollDegrees, 0)
+        let mark = CoachMark(kind: .arc, start: .init(x: -8, z: -10), end: .init(x: 4, z: 6),
+                            curve: legacy, label: "Legacy")
+        let start = SIMD3<Float>(-8, 0, -10)
+        let end = SIMD3<Float>(4, 0, 6)
+        // Independent original, unrotated formula, far from clipping bounds.
+        let control = SIMD3<Float>(-2 - 16.0 / 20 * 6, 4, -2 + 12.0 / 20 * 6)
+        XCTAssertEqual(legacy.controlPoint(for: mark), control)
+        for index in 0...32 {
+            let t = Float(index) / 32
+            let expected = (1 - t) * (1 - t) * start + 2 * (1 - t) * t * control + t * t * end
+            XCTAssertEqual(legacy.point(at: t, for: mark), expected)
+        }
+        let encoded = try JSONEncoder().encode(legacy)
+        XCTAssertFalse(String(decoding: encoded, as: UTF8.self).contains("rollDegrees"))
+    }
+
+    func testRightAngleRotatesTheArcUprightWithoutMovingEndpoints() {
+        let mark = CoachMark(kind: .arc, start: .init(x: -10, z: 0), end: .init(x: 10, z: 0),
+                            curve: .init(bend: 3, lift: 0, rollDegrees: 90), label: "Loft")
+        let midpoint = mark.resolvedCurve.point(at: 0.5, for: mark)
+        XCTAssertEqual(midpoint.x, 0, accuracy: 0.000_01)
+        XCTAssertEqual(midpoint.y, 3, accuracy: 0.000_01)
+        XCTAssertEqual(midpoint.z, 0, accuracy: 0.000_01)
+        XCTAssertEqual(mark.resolvedCurve.point(at: 0, for: mark), SIMD3<Float>(-10, 0, 0))
+        XCTAssertEqual(mark.resolvedCurve.point(at: 1, for: mark), SIMD3<Float>(10, 0, 0))
+    }
+
+    func testAngleUsesTheActualElevatedChordNotWorldUpOrTheViewer() {
+        let curve = CoachMarkCurve(bend: 1, lift: 0.2, rollDegrees: 35)
+        let mark = CoachMark(kind: .arc, start: .init(x: -4, z: -3), end: .init(x: 4, z: 3),
+                            startElevation: 1.2, endElevation: 2.2, curve: curve, label: "Raised")
+        let start = SIMD3<Float>(-4, 1.2, -3)
+        let end = SIMD3<Float>(4, 2.2, 3)
+        let axis = simd_normalize(end - start)
+        let offset = SIMD3<Float>(-1.2, 0.4, 1.6)
+        let angle: Float = -35 * .pi / 180
+        // Rodrigues is independent of the quaternion implementation.
+        let expectedOffset = offset * cos(angle) + simd_cross(axis, offset) * sin(angle)
+            + axis * simd_dot(axis, offset) * (1 - cos(angle))
+        let actual = curve.controlPoint(for: mark) - (start + end) * 0.5
+        XCTAssertLessThan(simd_distance(actual, expectedOffset), 0.000_01)
+        XCTAssertEqual(simd_length(actual), simd_length(offset), accuracy: 0.000_01)
+        XCTAssertEqual(simd_dot(actual, axis), simd_dot(offset, axis), accuracy: 0.000_01)
+        XCTAssertEqual(curve.point(at: 0, for: mark), start)
+        XCTAssertEqual(curve.point(at: 1, for: mark), end)
+    }
+
+    func testRotatedCurvesRemainFiniteAbovePitchAndWithinPitchEdges() {
+        for degrees in stride(from: Float(-180), through: 180, by: 15) {
+            let curve = CoachMarkCurve(bend: 12, lift: 4, rollDegrees: degrees)
+            let mark = CoachMark(kind: .arc, start: .init(x: 33, z: 48), end: .init(x: 34, z: 52),
+                                curve: curve, label: "Bounded")
+            for index in 0...32 {
+                let point = curve.point(at: Float(index) / 32, for: mark)
+                XCTAssertTrue(point.x.isFinite && point.y.isFinite && point.z.isFinite)
+                XCTAssertTrue((-34...34).contains(point.x))
+                XCTAssertTrue((-52.5...52.5).contains(point.z))
+                XCTAssertTrue((0...12).contains(point.y))
+            }
+        }
+        let raised = CoachMark(kind: .arc, start: .init(x: -3, z: 0), end: .init(x: 3, z: 0),
+                              startElevation: 4, endElevation: 4,
+                              curve: .init(bend: 1, lift: 0, rollDegrees: -90), label: "Dip")
+        XCTAssertEqual(raised.resolvedCurve.point(at: 0.5, for: raised).y, 3, accuracy: 0.000_01)
+    }
+
+    func testAmountScalesTheOriginalOffsetAndAngleRoundTripsInSavedMarks() throws {
+        let original = CoachMarkCurve(bend: 3, lift: 2, rollDegrees: 40)
+        let adjusted = original.adjusting(amountDelta: 1, angleDelta: 5)
+        XCTAssertEqual(adjusted.amount, original.amount + 1, accuracy: 0.000_01)
+        XCTAssertEqual(adjusted.bend / adjusted.lift, 1.5, accuracy: 0.000_01)
+        XCTAssertEqual(adjusted.rollDegrees, 45)
+        let store = ReplayStore()
+        let mark = try makeArc(store)
+        let token = UUID()
+        XCTAssertTrue(store.previewCoachMarkCurve(id: mark.id, gestureID: token, curve: adjusted))
+        XCTAssertTrue(store.commitCoachMarkCurvePreview(id: mark.id, gestureID: token))
+        let restored = try JSONDecoder().decode(SavedReplayState.self, from: JSONEncoder().encode(store.makeSavedReviewState()))
+        XCTAssertEqual(restored.marks.first(where: { $0.id == mark.id })?.resolvedCurve, adjusted)
+        XCTAssertTrue(store.undoAnnotationEdit())
+        XCTAssertEqual(store.marks.first(where: { $0.id == mark.id }), mark)
+    }
+
+    func testRotationInvalidatesNativeMeshAndUpdatesCurvedPicking() throws {
+        let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay))
+        let root = PitchSceneFactory.makeMatchRoot(for: scenario)
+        defer { for child in Array(root.children) { child.removeFromParent() } }
+        let id = UUID()
+        func update(angle: Float) {
+            let arc = CoachMark(id: id, kind: .arc, start: .init(x: -10, z: 0), end: .init(x: 10, z: 0),
+                                curve: .init(bend: 3, lift: 0, rollDegrees: angle), label: "Rotate")
+            PitchSceneFactory.update(root: root, scenario: scenario, time: 0,
+                viewMode: .tacticalTable, perspectiveID: scenario.defaultPerspectiveID,
+                marks: [arc], showsLaneLens: false, isDrawing: false, positionalOriginTransform: nil)
+        }
+        update(angle: 0)
+        let markRoot = try XCTUnwrap(root.findEntity(named: "mark-\(id.uuidString)"))
+        let path = try XCTUnwrap(markRoot.findEntity(named: "annotation-mark-segment-0") as? ModelEntity)
+        let flatMesh = try XCTUnwrap(path.model?.mesh)
+        let picker = try XCTUnwrap(markRoot.findEntity(named: AnnotationSceneAffordance.bodyTargetName))
+        let flatPickY = picker.children[8].position.y
+        update(angle: 90)
+        let uprightMesh = try XCTUnwrap(path.model?.mesh)
+        XCTAssertFalse(uprightMesh === flatMesh)
+        XCTAssertGreaterThan(uprightMesh.bounds.extents.y, 2.9)
+        XCTAssertGreaterThan(picker.children[8].position.y, flatPickY + 2.8)
+        update(angle: 90)
+        XCTAssertTrue(path.model?.mesh === uprightMesh, "No per-frame rebuild of the rotated mesh")
     }
 
     func testNativeArcUsesOneMeshAndCurvedPickingWithUnchangedMeshReuse() throws {
