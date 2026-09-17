@@ -143,7 +143,85 @@ attachment directory are `D35DC383-8BD1-4A4C-8637-72A7D36063E8.json`,
 
 The first full run had 1,039 total tests, one optional skip and one unrelated
 stale Move-control source assertion. All player motion/reach/visual cases
-passed. A clean full rerun is pending; this note does not label full-01 clean.
+passed. That receipt was not clean; later full-suite results are recorded in
+the final checkpoint below.
+
+### Separate actual-header audit
+
+The foot tests deliberately exclude headers. A follow-up actual-contact test
+caught a real remote header in the volley study: the ball was at 1.9244m and
+0.438m horizontally from the actor root. Native full-head triangles were still
+332.4mm (far), 208.2mm (near) and 208.3mm (low) from the ball's sphere surface.
+The bound is 30mm, unchanged. This uses every real head triangle, with actual
+read-back skin transforms and inverse binds—not a convenient invented marker.
+
+Before evidence:
+`/private/tmp/replayxi-native125-header-02.xcresult`, with JSON
+`/private/tmp/replayxi-native125-header-02-attachments/8F7A6D68-0BC6-48CE-A7E5-101152426A1F.json`.
+Near/far PNGs `A20302C4-E3E3-4C44-A6C1-843F449CFFB4.png` and
+`EADC4C98-E237-475C-B74A-96E11EB1A2FB.png` in that directory were inspected.
+They visibly show the ball above/away from the head. The first diagnostic
+build stopped at a test-only compiler expression timeout; the tuple-map was
+split into an explicit loop before this successful failing-test receipt.
+
+The bounded correction replaces the fixed backward header lean
+with a ball-directed torso rotation (maximum 0.45rad). The procedural path
+uses its spine/neck/head-root chain; each licensed skin uses its actual
+model-space chest/head pivots. No joint translations, bone lengths, actor root,
+mesh or normal run cadence are changed. A small preload/follow-through remains.
+Only an active skinned header adds one bounded 80-joint model-space rebuild;
+ordinary playback keeps its existing update path.
+Authored header route/height calibration is separate from animation, not an
+automatic root teleport. A distance pass alone does not prove exact forehead
+anatomy.
+
+`replayxi-native125-header-03.xcresult` passed the new direction/length/bend-cap
+control, all eleven existing interaction tests, both synthetic parry tests and
+the three admitted-foot-contact tests. It did not admit the revised header,
+so its early unwrap failure is not a mesh-contact pass or a measurement of the
+corrected head pose. Physics/path calibration continues separately. A new
+actual-save audit also exposed an unreachable authored keeper contact; the
+synthetic parry receipt alone does not validate that match event.
+
+### Final actual-contact correction
+
+`/private/tmp/replayxi-native125-contact-final-01.xcresult` passes all 24 selected
+physics, scenario, foot, header and save tests. Every study completes all planned
+actions and reaches the goal. The current foot maxima are 12.85 mm (counter),
+19.90 mm (volley) and 9.76 mm (rebound), against the unchanged 30 mm limit.
+
+The far rig's taller head needed a bounded contact stop. Its hash-verified
+head bounds define a skull sphere, excluding the neck. A fixed search of at
+most eight probes and ten refinements stops the torso lean before penetration.
+There are no mesh scans or asset loads in this operation. Native skins still
+use their own chest/head pivots. No actor root, joint translation or bone
+length is changed.
+
+Actual full-head triangle gaps are 17.30 mm (far), 6.17 mm (near) and 7.77 mm
+(low), with no measured penetration. The near/far contact frames were inspected;
+they show a restrained glancing/crown contact, not a recovered forehead header.
+The head/body native collision proxies are now separate, avoiding an oversized
+shoulder-width cap above the skull.
+
+The keeper now faces the incoming shot, not the future rebound receiver. The
+authored keeper route and rebound target were adjusted, and admission waits
+until the ball is within 0.50 m horizontally. Both near/low palm markers reach
+the actual native save within 2.72–3.67 mm of the sphere surface. The test also
+checks planted soles and exact pose restoration after seeking. Palm markers
+remain rig conventions, not measured hand-skin triangles. The complete rebound
+still finishes in goal without disabling any collision proxy.
+
+Final focused evidence directory:
+`/private/tmp/replayxi-native125-contact-final-01-attachments/`.
+
+- Header mesh contact: `88E72A72-B8F8-47E9-B789-4E0C3752764F.json`.
+- Actual save: `922936B6-E525-41CF-AE41-85ED7256A86D.json`.
+- Near/far frames: `0CD1A713-1C90-4EBF-BE66-748D2BBF2B70.png` and
+  `47E9A00F-99DF-4983-BD53-4864674A5551.png`.
+
+Earlier failure receipts above are retained as history, not current status.
+See the [final checkpoint](NATIVE125_CHECKPOINT.md) for full regression and
+Release build results.
 
 ## Limits
 

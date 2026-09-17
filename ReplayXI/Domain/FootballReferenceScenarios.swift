@@ -34,7 +34,7 @@ enum FootballReferenceScenarios {
     ]
     private static let volleyBeats = [
         Beat(0, "fra-20", -8, 5), Beat(1.1, "fra-14", -12, 13),
-        Beat(2.6, "fra-10", -16, 28, height: 1.78, kind: .header), Beat(3.55, "fra-26", -7, 32),
+        Beat(2.6, "fra-10", -16, 28, height: 1.63, kind: .header), Beat(3.55, "fra-26", -7, 32),
         Beat(4.5, "fra-10", -12, 37, height: 0.50, kind: .shot),
         Beat(5.4, "", 1.6, 54, height: 0.30)
     ]
@@ -43,7 +43,7 @@ enum FootballReferenceScenarios {
         Beat(1.8, "arg-24", 3, 33),
         Beat(2.8, "arg-22", 11, 40, kind: .shot),
         Beat(3.55, "fra-1", 1, 48, height: 0.65, kind: .save),
-        Beat(4.2, "arg-10", -1, 48, kind: .shot, leg: .left),
+        Beat(4.2, "arg-10", -1, 47, kind: .shot, leg: .left),
         Beat(4.55, "", -1.8, 54)
     ]
 
@@ -103,7 +103,7 @@ enum FootballReferenceScenarios {
              paths: [
                 "fra-20": [.init(0,-8,4.5),.init(2.6,-5,15),.init(5.4,0,26),.init(8.5,2,31)],
                 "fra-14": [.init(0,-12,9),.init(1.1,-12,12.5),.init(4.5,-7,25),.init(8.5,-2,32)],
-                "fra-10": [.init(0,-21,16),.init(2.6,-16,27.5),.init(3.55,-15,31),.init(4.5,-12,36.5),.init(8.5,-5,44)],
+                "fra-10": [.init(0,-21,16),.init(2.6,-15.96,27.7),.init(3.55,-15,31),.init(4.5,-12,36.5),.init(8.5,-5,44)],
                 "fra-26": [.init(0,-6,24),.init(2.6,-7,29),.init(3.55,-7,31.5),.init(5.4,-4,38),.init(8.5,2,44)],
                 "arg-23": [.init(0,0,50.5),.init(2.6,-2,50),.init(4.5,-4.5,49.5),.init(8.5,-2,50)]
              ])
@@ -117,11 +117,11 @@ enum FootballReferenceScenarios {
                     (2.8, "Attack the box", "The first shot is not the end of the move."),
                     (4.2, "Second ball", "Messi follows the shot; the defenders must recover towards goal.")],
              paths: [
-                "arg-10": [.init(0,6,24.5),.init(0.9,6,29.5),.init(1.8,6,36),.init(2.8,1,40),.init(4.2,-1,47.5),.init(7,-2,49.5)],
+                "arg-10": [.init(0,6,24.5),.init(0.9,6,29.5),.init(1.8,6,36),.init(2.8,1,40),.init(4.2,-1,46.5),.init(7,-2,49.5)],
                 "arg-24": [.init(0,3,24.5),.init(1.8,3,32.5),.init(2.8,2,35),.init(7,0,40)],
                 "arg-22": [.init(0,14,29),.init(1.8,12,34),.init(2.8,11,39.5),.init(4.2,6,46),.init(7,3,49)],
                 "fra-4": [.init(0,5,35),.init(2.8,4,40),.init(4.2,3,44),.init(7,1,49)],
-                "fra-1": [.init(0,0,50),.init(2.8,1,48.5),.init(3.55,1,48.5),.init(7,0,49)]
+                "fra-1": [.init(0,0,50),.init(2.8,1,48.5),.init(3.55,1.3,47.9),.init(7,0,49)]
              ])
     }
 
@@ -198,7 +198,10 @@ enum FootballReferenceScenarios {
                     if let beatIndex = beats.indices.first(where: {
                         beats[$0].playerID == playerID && abs(beats[$0].time-time)<0.6 && $0+1<beats.count
                     }) {
-                        let target = beats[beatIndex+1].point
+                        // A keeper meets the incoming shot; he must not turn
+                        // away to face the planned rebound receiver.
+                        let target = beats[beatIndex].kind == .save && beatIndex > 0
+                            ? beats[beatIndex-1].point : beats[beatIndex+1].point
                         desired = SIMD2(target.x-p.x,target.z-p.z)
                     }
                     if simd_length_squared(desired)>0.0001 {

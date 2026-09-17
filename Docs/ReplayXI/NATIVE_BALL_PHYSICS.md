@@ -7,7 +7,7 @@ simulation before opening the pitch. `RealityRenderer.update(_:)` is called
 with fixed 1/120 s intervals, and poses are recorded at those requested times.
 RealityKit owns the internal integration cadence; 120 Hz is not a claim about
 its solver's internal substeps. Its world contains a dynamic sphere, static pitch and kinematic
-player torso, shin and boot collision proxies, plus goal frames and net panels.
+player torso, head, shin and boot collision proxies, plus goal frames and net panels.
 It is **not** the old constrained
 path repair under a new name.
 
@@ -37,9 +37,11 @@ surface within 20 mm. This leaves padding beneath the 30 mm rendered-rig test
 limit. Body distance alone cannot authorise an air kick.
 
 Standing headers have a separate 1.55–1.95 m centre-height/reach gate; the
-horizontal limit is 0.65 m and the upright body proxy reaches 1.90 m. There is
-no invented jump. Save impulses require a goalkeeper, horizontal reach at most
-1.30 m and a ball centre 0.08–2.10 m high. They are not mislabelled foot
+horizontal limit is 0.65 m. The torso capsule ends at shoulder height (1.62 m),
+with a separate 0.11 m-radius head sphere following the articulated chain near
+the ball. This avoids a shoulder-width cap above the skull. There is no
+invented jump. Save impulses require a goalkeeper, horizontal reach at most
+0.50 m and a ball centre 0.08–2.10 m high. They are not mislabelled foot
 kicks. The original Blender goal has post centres at ±3.72 m, 0.06 m post radius,
 bar centre at 2.50 m and a rear net at ±54.7 m. Low-cost native frame boxes and
 three side/rear net panels plus a top panel use those dimensions. They prevent
@@ -67,7 +69,9 @@ or cross-OS bit-identical solver output is not claimed.
   players within 3 m of a low ball.
 - After initial placement, player proxies follow the pose using native
   kinematic velocities, not per-frame transform teleports. Linear speed is
-  bounded to 8 m/s for limbs and 12 m/s for torsos; angular speed to 720°/s.
+  bounded to 8 m/s for limbs and 12 m/s for torsos/heads; angular speed to 720°/s.
+  These are world-space limits, including root travel. The head shares the
+  torso budget so it cannot lag behind an otherwise accepted fast run.
   A dormant limb can be placed when reactivated outside ball-contact range.
 - `prewarm(track:players:plannedTouches:)` completes before a scene consumes
   `cached(track:players:plannedTouches:)`.
@@ -94,8 +98,9 @@ are the actual solver result after subsequent collisions.
 Deliberate touches are reach-gated game-action impulses, not impulses inferred
 from collision callbacks or a dynamically powered foot. Header/save gates do
 not measure exact forehead/palm contact. There are no separate hand colliders.
-The three-study foot-surface tests do not validate headers or saves; separate
-parry tests validate the hand animation against their fixture targets.
+Separate actual-study tests verify the visible full-head triangles and existing
+rig palm markers against the native ball. Those checks cover the authored
+header/save, not arbitrary imported trajectories or exact hand-skin collision.
 Launch planning clamps flight time to 0.18–3 s and launch speed to 28 m/s. It
 is a bounded planner, not a guarantee for arbitrary authored targets.
 
@@ -115,19 +120,20 @@ and Apple's documentation:
 
 ## Verification
 
-Latest audited receipt: `/private/tmp/replayxi-native125-full-01.xcresult`
-(17 September 2026, visionOS simulator). **12/12 native physics fixtures
+Latest focused receipt: `/private/tmp/replayxi-native125-contact-final-01.xcresult`
+(17 September 2026, visionOS simulator). **13/13 native physics fixtures
 passed**, including native inverse aim for 8 m and 20 m ground passes, a 15 m
-loft, independent-world isolation and head-height versus overhead collision.
+loft, independent-world isolation, head-height versus overhead collision and
+the open space beside the narrower head. All 24 selected tests passed.
 
 All three authored studies executed every planned action, recorded no misses
 and passed the goal-entry assertion:
 
 | Study | Admitted/planned | Samples | Debug cold bake | Max boot-surface error |
 | --- | ---: | ---: | ---: | ---: |
-| Counterattack, 10.5 s | 5/5 | 1,261 | 562 ms | 12.85 mm |
-| Volley, 8.5 s | 5/5 | 1,021 | 309 ms | 10.23 mm |
-| Rebound, 7 s | 6/6 | 841 | 367 ms | 9.76 mm |
+| Counterattack, 10.5 s | 5/5 | 1,261 | 554 ms | 12.85 mm |
+| Volley, 8.5 s | 5/5 | 1,021 | 353 ms | 19.90 mm |
+| Rebound, 7 s | 6/6 | 841 | 369 ms | 9.76 mm |
 
 Preparation times include the native aim previews. These are single Debug
 samples, not FPS or headset performance measurements. Foot errors are measured
@@ -135,12 +141,15 @@ against actual recorded sphere surfaces across procedural far and skinned
 near/low rigs. All 14 foot contacts passed the unchanged 30 mm limit after
 the native foot-admission gate was tightened to 20 mm.
 
-The volley header was admitted with the sphere centre at 1.924 m high and
-0.438 m horizontally from the actor root. This verifies the standing-height
-gate, not exact visible forehead contact. Both separate parry-reach tests
-passed. The complete XCTest run executed 1,039 tests with one skip and one
-unrelated Move source-assertion failure; the two Swift Testing asset tests
-also passed. This is not a claim that the full suite was green.
+The actual volley header now meets the real full-head triangles within
+17.30 mm (far), 6.17 mm (near) and 7.77 mm (low), inside the unchanged 30 mm
+bound, with no measured sphere penetration. This is crown/head contact, not a
+claim of recovered forehead anatomy. The actual rebound save reaches both
+near/low palm markers within 2.72–3.67 mm of the sphere surface, keeps the
+soles above the floor, and restores the same pose after seeking.
+Receipts are exported in `/private/tmp/replayxi-native125-contact-final-01-attachments/`.
+Full regression and release-build status are recorded in the
+[final checkpoint](NATIVE125_CHECKPOINT.md).
 
 Earlier integration receipts exposed real off-ball player blocks in authored
 passing lanes. Those routes were corrected without disabling collisions or

@@ -215,8 +215,8 @@ enum ReplayAthleteInteractionPose {
             supportFootOrientation: simd_normalize(heading.inverse * contactHeading),
             influence: influence,
             pelvisTurn: min(max(yaw, -0.35), 0.35),
-            upperBodyPitch: cue.kind == .header ? -0.12 - phase * 0.18 : (cue.kind == .save ? -0.08 : 0),
-            headPitch: cue.kind == .header ? -0.05 - phase * 0.12 : 0
+            upperBodyPitch: cue.kind == .header ? phase * 0.14 : (cue.kind == .save ? -0.08 : 0),
+            headPitch: cue.kind == .header ? phase * 0.10 : 0
         )
     }
 
@@ -266,10 +266,25 @@ enum ReplayAthleteInteractionPose {
         let left = leg(.left)
         let right = leg(.right)
         let counter = simd_quatf(angle: -sample.pelvisTurn * weight * 0.45, axis: [0, 1, 0])
-        let spineOrientation = simd_quatf(angle: sample.upperBodyPitch * weight, axis: [1, 0, 0])
+        var spineOrientation = simd_quatf(angle: sample.upperBodyPitch * weight, axis: [1, 0, 0])
             * counter * base.spineOrientation
         let spinePosition = hipsPosition + hipsRotation.act([0, 0.14, 0])
-        let torso = hipsRotation * spineOrientation
+        var torso = hipsRotation * spineOrientation
+        if sample.kind == .header {
+            // Use the generated rig's real spine/neck/head-root offsets. This
+            // rotates a fixed torso chain; it never translates a bone or root.
+            // Licensed skins solve from their own native chest/head joints.
+            let headRoot = spinePosition + torso.act([0, 0.585, 0])
+                + (torso * base.neckOrientation).act([0, 0.125, 0])
+            let aim = headerTorsoRotation(pivot: spinePosition, head: headRoot,
+                                          ball: sample.ballCentreTarget)
+            let headRotation = simd_quatf(angle: sample.headPitch * weight, axis: [1, 0, 0])
+                * base.headOrientation
+            torso = farHeaderTorso(start: torso, aim: aim, weight: weight,
+                pivot: spinePosition, neck: base.neckOrientation, head: headRotation,
+                ball: sample.ballCentreTarget)
+            spineOrientation = simd_normalize(hipsRotation.inverse * torso)
+        }
         func arm(_ side: ReplayAthleteLeg) -> (simd_quatf, simd_quatf, simd_quatf) {
             let oldShoulder = side == .left ? base.leftShoulderOrientation : base.rightShoulderOrientation
             let oldElbow = side == .left ? base.leftElbowOrientation : base.rightElbowOrientation
@@ -307,6 +322,79 @@ enum ReplayAthleteInteractionPose {
     nonisolated static func blend(_ a: simd_quatf, _ b: simd_quatf, _ weight: Float) -> simd_quatf {
         let target = simd_dot(a.vector, b.vector) < 0 ? simd_quatf(vector: -b.vector) : b
         return simd_normalize(simd_slerp(a, target, weight))
+    }
+
+    /// A torso aim targets direction, not contact. Stop the far rig's real
+    /// bounds-derived skull envelope at the ball surface instead of pushing its
+    /// taller skull through the sphere. The torso arc stays within 26 degrees;
+    /// roots, bone translations and lengths are untouched. Native skins use
+    /// their own head/chest aim and do not consume this envelope.
+    static func farHeaderTorso(start: simd_quatf, aim: simd_quatf, weight: Float,
+                               pivot: SIMD3<Float>, neck: simd_quatf, head: simd_quatf,
+                               ball: SIMD3<Float>) -> simd_quatf {
+        let desired = blend(start, aim * start, weight)
+        let minimum = ReplayFarAthleteHeadProvider.localBoundsMin * ReplayFarAthleteHeadProvider.displayScale
+        let maximum = ReplayFarAthleteHeadProvider.localBoundsMax * ReplayFarAthleteHeadProvider.displayScale
+        // Exclude the neck from the skull envelope. The front/back extent
+        // sets its radius and the admitted crown fixes its top. A full box
+        // incorrectly treats empty corners above the forehead as head tissue.
+        let skullRadius = (maximum.z - minimum.z) * 0.5
+        let skullCentre = SIMD3<Float>((minimum.x + maximum.x) * 0.5,
+            maximum.y - skullRadius, (minimum.z + maximum.z) * 0.5)
+        func clearance(_ torso: simd_quatf) -> Float {
+            let neckRotation = torso * neck
+            let centre = pivot + torso.act([0, 0.585, 0]) + neckRotation.act([0, 0.125, 0])
+            let rotation = neckRotation * head
+            return simd_distance(ball, centre + rotation.act(skullCentre)) - skullRadius - ballRadius
+        }
+        let separation: Float = 0.002
+        guard clearance(desired) < separation else { return desired }
+        let axis: SIMD3<Float> = abs(aim.angle) > 0.000_01 ? aim.axis : [1, 0, 0]
+        let retreat = blend(start, simd_quatf(angle: -0.45, axis: axis) * start, weight)
+        var previous: Float = 0
+        var best = desired
+        var bestClearance = clearance(desired)
+        // Fixed work: at most eight probes and ten binary refinements. No
+        // per-frame mesh reads, entity searches or unbounded convergence.
+        for index in 1...8 {
+            let fraction = Float(index) / 8
+            let candidate = blend(desired, retreat, fraction)
+            let gap = clearance(candidate)
+            if gap > bestClearance { best = candidate; bestClearance = gap }
+            if gap >= separation {
+                var inside = previous
+                var outside = fraction
+                for _ in 0..<10 {
+                    let middle = (inside + outside) * 0.5
+                    if clearance(blend(desired, retreat, middle)) >= separation { outside = middle }
+                    else { inside = middle }
+                }
+                return blend(desired, retreat, outside)
+            }
+            previous = fraction
+        }
+        return best
+    }
+
+    /// Header-only lean toward the actual incoming ball, not just the outgoing
+    /// pass direction. The two inputs are real rig joints; mesh contact is
+    /// verified independently. Reach remains limited to a 26-degree torso bend.
+    nonisolated static func headerTorsoRotation(pivot: SIMD3<Float>, head: SIMD3<Float>,
+                                               ball: SIMD3<Float>) -> simd_quatf {
+        let identity = simd_quatf(real: 1, imag: .zero)
+        let source = head - pivot
+        let target = ball - pivot
+        let sourceLength = simd_length(source)
+        let targetLength = simd_length(target)
+        guard sourceLength.isFinite, targetLength.isFinite,
+              sourceLength > 0.05, targetLength > 0.05 else { return identity }
+        let from = source / sourceLength
+        let to = target / targetLength
+        let angle = acos(min(max(simd_dot(from, to), -1), 1))
+        let cross = simd_cross(from, to)
+        let crossLength = simd_length(cross)
+        guard angle.isFinite, crossLength.isFinite, crossLength > 0.000_001 else { return identity }
+        return simd_quatf(angle: min(angle, 0.45), axis: cross / crossLength)
     }
 
     private static func smooth(_ value: Float) -> Float {

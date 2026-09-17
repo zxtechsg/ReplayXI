@@ -210,6 +210,8 @@ final class ReplayNativeBallPhysicsTests: XCTestCase {
                                                   target: [0, 0.11, 5], arrivalTime: 0.6, loft: 0.11,
                                                   kind: .save, kickingLeg: .right)
         XCTAssertEqual(try world.strike(intent: save, time: 0)?.kind, .save)
+        world.placeBall(position: [0, 0.82, 1.10])
+        XCTAssertNil(try world.strike(intent: save, time: 0), "A standing keeper cannot parry a ball beyond arm reach")
     }
 
     func testNativeAimHitsGroundAndLoftTargetsWithoutSteeringAfterLaunch() throws {
@@ -265,5 +267,57 @@ final class ReplayNativeBallPhysicsTests: XCTestCase {
             if height < 2 { XCTAssertLessThan(world.ball.position.x, 0) }
             else { XCTAssertGreaterThan(world.ball.position.x, 1) }
         }
+    }
+
+    func testNarrowHeadDoesNotBlockAShotOutsideItsSkullWidth() throws {
+        let player = PlayerTrack(id: "head-clearance", displayName: "Player", role: "CB", shirtNumber: 4,
+                                 team: .away, isGoalkeeper: false,
+                                 keyframes: [.init(time: 0, position: .zero, facingDegrees: 0),
+                                             .init(time: 1, position: .zero, facingDegrees: 0)])
+        let track = BallTrack(keyframes: [.init(time: 0, position: .init(x: -2, z: 0.26), height: 1.85),
+                                         .init(time: 1, position: .init(x: 2, z: 0.26), height: 1.85)])
+        let world = try ReplayNativeBallPhysicsWorld(gravity: .zero, includePitch: false)
+        world.placeBall(position: [-2, 1.85, 0.26], velocity: [8, 0, 0])
+        world.addPlayers([player], ball: track, at: 0)
+        try world.start()
+        XCTAssertNotNil(world.root.findEntity(named: "native-player-head-clearance-head"))
+        for index in 0..<60 {
+            world.movePlayers([player], ball: track, time: Double(index) * ReplayNativeBallPhysics.step,
+                              delta: ReplayNativeBallPhysics.step)
+            try world.advance(ReplayNativeBallPhysics.step)
+        }
+        XCTAssertGreaterThan(world.ball.position.x, 1,
+                             "A shoulder-width invisible head cap must not deflect this clear ball")
+        XCTAssertGreaterThan(world.sample(at: 0.5).velocity.x, 7)
+    }
+
+    func testHeadProxyKeepsUpWithTenMetrePerSecondRootTravel() throws {
+        let player = PlayerTrack(id: "fast-runner", displayName: "Runner", role: "RW", shirtNumber: 11,
+                                 team: .home, isGoalkeeper: false,
+                                 keyframes: [.init(time: 0, position: .zero, facingDegrees: 90),
+                                             .init(time: 2, position: .init(x: 20, z: 0), facingDegrees: 90)])
+        // Keep the ball remote: isolate whole-body travel from local header
+        // articulation and collision response. The native solver still moves
+        // both kinematic bodies; no proxy transforms are assigned in the loop.
+        let track = BallTrack(keyframes: [.init(time: 0, position: .init(x: -20, z: 0), height: 3),
+                                         .init(time: 2, position: .init(x: -20, z: 0), height: 3)])
+        let world = try ReplayNativeBallPhysicsWorld(gravity: .zero, includePitch: false)
+        world.placeBall(position: [-20, 3, 0])
+        world.addPlayers([player], ball: track, at: 0)
+        let torso = try XCTUnwrap(world.root.findEntity(named: "native-player-fast-runner-body"))
+        let head = try XCTUnwrap(world.root.findEntity(named: "native-player-fast-runner-head"))
+        try world.start()
+        var maximumHorizontalSeparation: Float = 0
+        for index in 0..<120 {
+            world.movePlayers([player], ball: track, time: Double(index) * ReplayNativeBallPhysics.step,
+                              delta: ReplayNativeBallPhysics.step)
+            try world.advance(ReplayNativeBallPhysics.step)
+            maximumHorizontalSeparation = max(maximumHorizontalSeparation,
+                simd_length(SIMD2(head.position.x - torso.position.x, head.position.z - torso.position.z)))
+        }
+        XCTAssertGreaterThan(torso.position.x, 9, "The native body must actually execute the fast run")
+        XCTAssertGreaterThan(head.position.x, 9, "An 8 m/s head cap must not trail a 10 m/s root")
+        XCTAssertLessThanOrEqual(maximumHorizontalSeparation, 0.02,
+                                 "The head must remain aligned with the torso throughout root travel")
     }
 }

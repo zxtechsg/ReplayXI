@@ -331,6 +331,26 @@ final class ReplaySkinnedAthleteInstance {
             impactPose?.apply(impact.pose, influence: impact.influence, motion: motion, to: &pose)
         }
         motion.rebuildModelSpaceTransforms(in: &pose)
+        if let action = interactionSample, action.kind == .header {
+            // Source Biped axes and torso lengths differ from the generated
+            // rig. Solve from the actual model-space chest/head pivots, then
+            // recover the chest's true parent-local rotation. No stretching,
+            // root correction or foot transform is introduced by a header.
+            let chestIndex = motion.numberAnchors.jointIndex
+            let chest = pose.modelSpaceTransforms[chestIndex]
+            let head = pose.modelSpaceTransforms[headIndex]
+            let pivot = SIMD3<Float>(chest.columns.3.x, chest.columns.3.y, chest.columns.3.z)
+            let headPosition = SIMD3<Float>(head.columns.3.x, head.columns.3.y, head.columns.3.z)
+            let ball = action.ballCentreTarget + SIMD3<Float>(0, motion.geometry.restMinY, 0)
+            let aim = ReplayAthleteInteractionPose.headerTorsoRotation(pivot: pivot, head: headPosition, ball: ball)
+            let parent = motion.joints[chestIndex].parentIndex
+            let parentRotation = parent < 0 ? simd_quatf(real: 1, imag: .zero)
+                : simd_quatf(pose.modelSpaceTransforms[parent])
+            let world = simd_quatf(chest)
+            let desired = ReplayAthleteInteractionPose.blend(world, aim * world, action.influence)
+            pose.rotations[chestIndex] = simd_normalize(parentRotation.inverse * desired)
+            motion.rebuildModelSpaceTransforms(in: &pose)
+        }
         contactSurface.raiseAboveFloor(motion.geometry.restMinY + contactSurface.paddingMetres, in: &pose)
         for index in transforms.indices {
             transforms[index] = Transform(scale: pose.scales[index], rotation: pose.rotations[index],

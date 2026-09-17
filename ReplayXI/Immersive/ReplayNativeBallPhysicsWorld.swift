@@ -13,6 +13,7 @@ final class ReplayNativeBallPhysicsWorld {
     let pitch = ModelEntity()
     private struct PlayerBodies {
         let torso: ModelEntity
+        let head: ModelEntity
         let leftBoot: ModelEntity
         let rightBoot: ModelEntity
         let leftShin: ModelEntity
@@ -24,6 +25,9 @@ final class ReplayNativeBallPhysicsWorld {
     private var isPlacingPlayers = false
     private static let ballGroup = CollisionGroup(rawValue: 1 << 22)
     private static let obstacleGroup = CollisionGroup(rawValue: 1 << 23)
+    // A world-space cap includes authored root travel. The head must share
+    // the torso's budget; 8 m/s is only the separate limb-proxy world cap.
+    private static let maximumBodyProxyWorldSpeed: Float = 12
     private let playerMaterial: PhysicsMaterialResource
     private let legacyBootShape: ShapeResource
     private let interactionBootShape: ShapeResource
@@ -89,11 +93,15 @@ final class ReplayNativeBallPhysicsWorld {
 
     func addPlayers(_ players: [PlayerTrack], ball track: BallTrack, at time: TimeInterval) {
         bodies.reserveCapacity(players.count)
+        let torsoShape = ShapeResource.generateCapsule(height: 1.16, radius: 0.23)
+        let headShape = ShapeResource.generateSphere(radius: 0.11)
         for player in players {
             // Torso starts above the boots: the sphere can travel through a
-            // genuine open stance, but not through the hips/chest/head.
-            let torso = proxy(shape: .generateCapsule(height: 1.44, radius: 0.23),
+            // genuine open stance, but not through the hips/chest. A separate
+            // narrow head avoids a shoulder-width cap above the real skull.
+            let torso = proxy(shape: torsoShape,
                               name: "native-player-\(player.id)-body")
+            let head = proxy(shape: headShape, name: "native-player-\(player.id)-head")
             let left = proxy(shape: legacyBootShape,
                              name: "native-player-\(player.id)-left-boot")
             let right = proxy(shape: legacyBootShape,
@@ -102,7 +110,7 @@ final class ReplayNativeBallPhysicsWorld {
                                  name: "native-player-\(player.id)-left-shin")
             let rightShin = proxy(shape: shinShape,
                                   name: "native-player-\(player.id)-right-shin")
-            bodies.append(PlayerBodies(torso: torso, leftBoot: left, rightBoot: right,
+            bodies.append(PlayerBodies(torso: torso, head: head, leftBoot: left, rightBoot: right,
                                        leftShin: leftShin, rightShin: rightShin))
         }
         isPlacingPlayers = true
@@ -129,11 +137,21 @@ final class ReplayNativeBallPhysicsWorld {
             let body = bodies[index]
             let current = player.presentationPose(at: time)
             let next = player.presentationPose(at: time + delta)
-            let p = SIMD3<Float>(current.position.x, 1.18, current.position.z)
-            let n = SIMD3<Float>(next.position.x, 1.18, next.position.z)
-            move(body.torso, from: p, to: n, delta: delta, maximumSpeed: 12, reset: isPlacingPlayers)
+            let p = SIMD3<Float>(current.position.x, 1.04, current.position.z)
+            let n = SIMD3<Float>(next.position.x, 1.04, next.position.z)
+            move(body.torso, from: p, to: n, delta: delta,
+                 maximumSpeed: Self.maximumBodyProxyWorldSpeed, reset: isPlacingPlayers)
             let horizontalDelta = SIMD2<Float>(current.position.x - ball.position.x,
                                                 current.position.z - ball.position.z)
+            let cue = interaction(for: player, at: time)
+            let headNearby = simd_length_squared(horizontalDelta) < 3.0 * 3.0
+                && (ball.position.y > 0.8 || cue?.kind == .header || cue?.kind == .save)
+            let headStart = headNearby ? headCentre(player: player, at: time, pose: current, cue: cue)
+                : SIMD3<Float>(current.position.x, 1.74, current.position.z)
+            let headEnd = headNearby ? headCentre(player: player, at: time + delta, pose: next, cue: cue)
+                : SIMD3<Float>(next.position.x, 1.74, next.position.z)
+            move(body.head, from: headStart, to: headEnd, delta: delta,
+                 maximumSpeed: Self.maximumBodyProxyWorldSpeed, reset: isPlacingPlayers)
             let needsLegs = simd_length_squared(horizontalDelta) < 3.0 * 3.0 && ball.position.y < 1.3
             let resetFeet = isPlacingPlayers || !body.leftBoot.isEnabled
             body.leftBoot.isEnabled = needsLegs
@@ -143,7 +161,6 @@ final class ReplayNativeBallPhysicsWorld {
             guard needsLegs else { continue }
             // Boot collision geometry follows the same articulated chain used
             // by the visible rig, including its kick preparation/follow-through.
-            let cue = interaction(for: player, at: time)
             let explicitBoot = cue.map { $0.kind != .header && $0.kind != .save } ?? false
             setBootShape(body.leftBoot, explicit: explicitBoot)
             setBootShape(body.rightBoot, explicit: explicitBoot)
@@ -156,6 +173,23 @@ final class ReplayNativeBallPhysicsWorld {
             moveBoot(body.leftShin, from: contact.leftShin, to: following.leftShin, delta: delta, reset: resetFeet)
             moveBoot(body.rightShin, from: contact.rightShin, to: following.rightShin, delta: delta, reset: resetFeet)
         }
+    }
+
+    private func headCentre(player: PlayerTrack, at time: TimeInterval, pose: PlayerPose,
+                            cue: ReplayAthleteInteractionCue?) -> SIMD3<Float> {
+        let articulated = ReplayAthleteMotion.locomotionPose(for: player, at: time,
+            lookTargetWorldPosition: ball.position, interaction: cue, presentationPose: pose)
+        let heading = simd_quatf(angle: pose.facingDegrees * .pi / 180, axis: [0, 1, 0])
+        let body = SIMD3<Float>(pose.position.x, 0, pose.position.z) + heading.act(articulated.bodyPosition)
+        let bodyRotation = heading * articulated.bodyOrientation
+        let hips = body + bodyRotation.act(articulated.hipsPosition)
+        let hipRotation = bodyRotation * articulated.hipsOrientation
+        let spine = hips + hipRotation.act([0, 0.14, 0])
+        let torsoRotation = hipRotation * articulated.spineOrientation
+        // Same fixed pivots as the textured procedural rig. The skull sphere
+        // is only an envelope; imported head skins are verified separately.
+        return spine + torsoRotation.act([0, 0.585, 0])
+            + (torsoRotation * articulated.neckOrientation).act([0, 0.125, 0])
     }
 
     private func setBootShape(_ boot: ModelEntity, explicit: Bool) {
@@ -242,7 +276,10 @@ final class ReplayNativeBallPhysicsWorld {
         case .header:
             guard distance <= 0.65, (1.55...1.95).contains(ball.position.y) else { return nil }
         case .save:
-            guard intent.player.isGoalkeeper, distance <= 1.30,
+            // Standing parries cannot fire while the ball is still over a
+            // metre away. Wait for the sphere to enter the two-hand envelope.
+            // Actual near/low palm contact is checked on every authored save.
+            guard intent.player.isGoalkeeper, distance <= 0.50,
                   (0.08...2.10).contains(ball.position.y) else { return nil }
         default:
             guard distance <= 1.05, ball.position.y <= 0.85 else { return nil }

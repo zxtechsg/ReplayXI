@@ -38,12 +38,12 @@ The app authors its own coordinates, durations, supporting runs, body/head anima
 
 `FootballReferenceStudyVisualTests` captures one actual Factory scene per study at its final recorded shooting contact. It uses the bundled player, pitch and ball assets and the native recording directly. The test verifies all planned contacts and goal entry, then renders a fixed attacking-third camera. Only the whole scene's room-placement transform is normalised; internal player/ball poses and labels remain unchanged. Colour, channel order and row direction use the existing native renderer calibration.
 
-The three captures passed in `replayxi-native125-full-02` and were inspected in `/private/tmp/replayxi-native125-full-02-attachments`:
+The three latest captures passed in `replayxi-native125-full-03` and were inspected in `/private/tmp/replayxi-native125-full-03-attachments`:
 
-- Counterattack: `30AFE5E4-6094-4B0D-AADF-CC6A65FF41D7.png`
-- Volley: `6C8D46C2-E0EC-4C8A-93C5-C98BE60B30D7.png`
-- Rebound: `18309A8D-0FD5-4B12-BC00-300B5B76D219.png`
+- Counterattack: `F2BC9998-4D2B-4670-BE90-9D4A6CE2281B.png`
+- Volley: `A02ED33E-0FF3-4718-A26C-81A16EDF564A.png`
+- Rebound: `864D869F-3425-416D-BB4F-BF5A72E9C824.png`
 
 Pitch, goals, both teams, selected shirt numbers and final-shot locations are visible. The 512 px output has no antialiasing, so distant numbers and goal nets are jagged. Fine boot–ball alignment cannot be judged reliably at this scale; it has separate contact tests. These stills do not validate animation continuity, UI interaction, headset comfort or FM/EA-level visual fidelity.
 
-The new visual test initially left optional player assets warm, changing later cold-fallback tests. Test-only cleanup now restores those resettable providers on success and failure. The subsequent full-suite rerun, not these passing captures alone, determines isolation success.
+The new visual test initially left optional player assets warm, changing later cold-fallback tests. Test-only cleanup now restores those resettable providers on success and failure. Full-03 confirmed isolation. The final full-04 run also passes: 1,046 XCTest cases, one optional skip, zero failures, plus both separate asset tests passing.

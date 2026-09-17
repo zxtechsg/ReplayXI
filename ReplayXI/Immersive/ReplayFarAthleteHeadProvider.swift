@@ -13,6 +13,11 @@ enum ReplayFarAthleteHeadProvider {
     static let expectedSHA256 = "30b5213f5967da5fa2574f39dfe942b989fe94629994cd10ad7a739c45e32b3f"
     static let expectedBytes = 21_563
     static let metrics = ReplayAthleteMeshMetrics(vertices: 486, triangles: 749)
+    // Hash-locked native geometry bounds, also used by the cold-path-free
+    // header contact envelope. They do not depend on asset admission state.
+    static let localBoundsMin = SIMD3<Float>(-0.09021137, -0.15823624, -0.10883906)
+    static let localBoundsMax = SIMD3<Float>(0.09007151, 0.15959060, 0.12460621)
+    static let displayScale = SIMD3<Float>(1.07, 1, 1)
 
     enum PreparationError: Error, Equatable {
         case materialsNotReady, resourceMissing, hashMismatch, invalidAsset, previousFailure, forcedFailure
@@ -68,8 +73,8 @@ enum ReplayFarAthleteHeadProvider {
               part.triangleIndices?.elements.allSatisfy({ $0 < UInt32(metrics.vertices) }) == true
         else { throw PreparationError.invalidAsset }
         let bounds = source.visualBounds(relativeTo: source)
-        guard simd_distance(bounds.min, [-0.09021137, -0.15823624, -0.10883906]) < 0.000_002,
-              simd_distance(bounds.max, [0.09007151, 0.15959060, 0.12460621]) < 0.000_002
+        guard simd_distance(bounds.min, localBoundsMin) < 0.000_002,
+              simd_distance(bounds.max, localBoundsMax) < 0.000_002
         else { throw PreparationError.invalidAsset }
         // Publish only after every admission check. No partially valid head
         // escapes a failed load, and the ellipsoid remains the fallback.
@@ -82,7 +87,7 @@ enum ReplayFarAthleteHeadProvider {
         guard let material = ReplayAthleteHeadProvider.material(at: index) else { return nil }
         let head = ModelEntity(mesh: mesh, materials: [material])
         head.name = "head"
-        head.scale = [1.07, 1, 1]
+        head.scale = displayScale
         return head
     }
 

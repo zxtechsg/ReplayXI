@@ -183,7 +183,7 @@ struct ReplaySkinnedAthleteFootballPose {
             if let parryRotation {
                 target.rotations[index] = simd_normalize(simd_quatf(parentMatrix).inverse * parryRotation)
             }
-            if index == chestIndex, let interaction {
+            if index == chestIndex, let interaction, interaction.kind != .header {
                 let delta = simd_quatf(angle: interaction.upperBodyPitch * interaction.influence,
                                       axis: motion.joints[index].localRightAxis)
                 target.rotations[index] = simd_normalize(target.rotations[index] * delta)
