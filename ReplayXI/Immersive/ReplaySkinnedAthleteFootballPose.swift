@@ -133,10 +133,13 @@ struct ReplaySkinnedAthleteFootballPose {
             }
         }
 
-        // Keep the source torso, clavicles, face and fingers. Walking/cutting
-        // arms must use the same opposite-foot clock as the authored legs,
-        // rather than the unrelated source run phase. Source joint translations
-        // stay intact: rotating these six joints cannot stretch an arm.
+        // The actual chest must carry the same lean/counter-bank as the legs.
+        // Retarget in model space: its Biped parent chain is not the generated
+        // rig's hips -> spine chain. Keep source translations, clavicles, face
+        // and fingers; arm rotations cannot stretch their existing segments.
+        // Headers retain the source chest here: their final aim is solved once
+        // from the skin's actual head/chest pivots by the instance provider.
+        let retargetsChest = interaction?.kind != .header
         var torso = body
         var leftParry: ReplayAthleteParryIK.Solution?
         var rightParry: ReplayAthleteParryIK.Solution?
@@ -183,10 +186,11 @@ struct ReplaySkinnedAthleteFootballPose {
             if let parryRotation {
                 target.rotations[index] = simd_normalize(simd_quatf(parentMatrix).inverse * parryRotation)
             }
-            if index == chestIndex, let interaction, interaction.kind != .header {
-                let delta = simd_quatf(angle: interaction.upperBodyPitch * interaction.influence,
-                                      axis: motion.joints[index].localRightAxis)
-                target.rotations[index] = simd_normalize(target.rotations[index] * delta)
+            if index == chestIndex, retargetsChest {
+                // `authored.spineOrientation` already includes explicit touch
+                // pitch and pelvis counter-turn. Do not add those a second time.
+                let chestModel = body * authored.spineOrientation * inverseRestChestRotation.inverse
+                target.rotations[index] = simd_normalize(simd_quatf(parentMatrix).inverse * chestModel)
             }
             if armWeight > 0, interaction?.kind != .save,
                let rotation = leftArm.rotation(for: index, authored: authored, torso: torso)
@@ -238,9 +242,9 @@ struct ReplaySkinnedAthleteFootballPose {
                 }
             }
         }
-        if let interaction {
+        if retargetsChest {
             pose.rotations[chestIndex] = ReplayAthleteInteractionPose.blend(
-                pose.rotations[chestIndex], target.rotations[chestIndex], weight * interaction.influence)
+                pose.rotations[chestIndex], target.rotations[chestIndex], weight)
         }
     }
 

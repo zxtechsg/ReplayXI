@@ -205,6 +205,9 @@ struct FootballImmersiveView: View {
                     showsPlaybackAnnotations: $showsPlaybackAnnotations,
                     controlDeckPresetRawValue: $controlDeckPresetRawValue,
                     deckWidth: controlDeckLayout.contentWidth,
+                    nativeActionSource: preparedNativeRecording.map {
+                        .init(scenarioID: store.selectedScenarioID, recording: $0)
+                    },
                     isPinchDrawing: annotationStroke != nil,
                     isPinchDrawingReady: annotationStroke?.isReadyToCommit == true,
                     recenterControls: recenterControls,
@@ -1950,6 +1953,7 @@ private struct ImmersiveControlDeck: View {
     @Binding var controlDeckPresetRawValue: String
 
     let deckWidth: CGFloat
+    let nativeActionSource: PlaybackBallActionNavigation.Source?
     let isPinchDrawing: Bool
     let isPinchDrawingReady: Bool
     let recenterControls: () -> Void
@@ -2065,18 +2069,7 @@ private struct ImmersiveControlDeck: View {
                 .buttonStyle(.bordered)
                 .accessibilityLabel("Exit spatial replay")
 
-                Button {
-                    if let previousCue { jump(to: previousCue) }
-                } label: {
-                    Image(systemName: "backward.end.fill")
-                        .frame(
-                            minWidth: PlaybackControlDeckPresentation.minimumSpatialHitTarget,
-                            minHeight: PlaybackControlDeckPresentation.minimumSpatialHitTarget
-                        )
-                }
-                .buttonStyle(.bordered)
-                .disabled(previousCue == nil || !store.canChangePlaybackView)
-                .accessibilityLabel("Previous cue")
+                playbackEventStepButton(.previous)
 
                 Button(action: handlePrimaryPlaybackAction) {
                     Image(systemName: primaryPlaybackSystemImage)
@@ -2089,18 +2082,7 @@ private struct ImmersiveControlDeck: View {
                 .disabled(primaryPlaybackControlIsDisabled)
                 .accessibilityLabel(primaryPlaybackLabel)
 
-                Button {
-                    if let nextCue { jump(to: nextCue) }
-                } label: {
-                    Image(systemName: "forward.end.fill")
-                        .frame(
-                            minWidth: PlaybackControlDeckPresentation.minimumSpatialHitTarget,
-                            minHeight: PlaybackControlDeckPresentation.minimumSpatialHitTarget
-                        )
-                }
-                .buttonStyle(.bordered)
-                .disabled(nextCue == nil || !store.canChangePlaybackView)
-                .accessibilityLabel("Next cue")
+                playbackEventStepButton(.next)
 
                 timelineScrubber
                     .layoutPriority(1)
@@ -4970,6 +4952,37 @@ private struct ImmersiveControlDeck: View {
     }
 
     private var directPlaybackRates: [Double] { ReplayStore.availablePlaybackRates }
+
+    private func playbackEventStepButton(_ direction: PlaybackBallActionNavigation.Direction) -> some View {
+        let isPrevious = direction == .previous
+        let isNativeStudy = FootballReferenceScenarios.contains(store.selectedScenario)
+        let target = PlaybackBallActionNavigation.destination(direction, source: nativeActionSource,
+            scenario: store.selectedScenario, at: store.playhead)
+        let cue = isPrevious ? previousCue : nextCue
+        let label = isNativeStudy
+            ? (isPrevious ? "Previous ball action" : "Next ball action")
+            : (isPrevious ? "Previous cue" : "Next cue")
+        let detail = isNativeStudy ? target?.summary(in: store.selectedScenario) : cue?.headline
+        return Button {
+            if isNativeStudy {
+                PlaybackBallActionNavigation.jump(direction, source: nativeActionSource, in: store)
+            } else if let cue {
+                jump(to: cue)
+            }
+        } label: {
+            Image(systemName: isPrevious ? "backward.end.fill" : "forward.end.fill")
+                .frame(minWidth: PlaybackControlDeckPresentation.minimumSpatialHitTarget,
+                       minHeight: PlaybackControlDeckPresentation.minimumSpatialHitTarget)
+        }
+        .buttonStyle(.bordered)
+        .disabled(!store.canChangePlaybackView || (isNativeStudy ? target == nil : cue == nil))
+        .help(detail.map { "\(label): \($0)" } ?? label)
+        .accessibilityLabel(label)
+        .accessibilityValue(detail ?? "No further action")
+        .accessibilityHint(isNativeStudy
+            ? "Pauses at the recorded contact. Keeps your current player view."
+            : "Pauses at the teaching cue")
+    }
 
     private var previousCue: CueMoment? {
         store.selectedScenario.moments.last { $0.time < store.playhead - 0.2 }

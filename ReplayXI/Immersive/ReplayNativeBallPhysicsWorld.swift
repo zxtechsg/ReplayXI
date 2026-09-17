@@ -25,9 +25,12 @@ final class ReplayNativeBallPhysicsWorld {
     private var isPlacingPlayers = false
     private static let ballGroup = CollisionGroup(rawValue: 1 << 22)
     private static let obstacleGroup = CollisionGroup(rawValue: 1 << 23)
-    // A world-space cap includes authored root travel. The head must share
-    // the torso's budget; 8 m/s is only the separate limb-proxy world cap.
+    // Root/head travel is world-space. At true sprint speed, limbs inherit
+    // native torso travel and separately bound relative articulation.
     private static let maximumBodyProxyWorldSpeed: Float = 12
+    // Applies to the full-sprint controller, not the blended transition's
+    // total velocity relative to the torso.
+    private static let maximumLimbRelativeSpeed: Float = 8
     private let playerMaterial: PhysicsMaterialResource
     private let legacyBootShape: ShapeResource
     private let interactionBootShape: ShapeResource
@@ -168,10 +171,21 @@ final class ReplayNativeBallPhysicsWorld {
                                                   interaction: cue, presentationPose: current)
             let following = ReplayBallPlayerContact(player: player, ball: track, time: time + delta,
                                                     interaction: cue, presentationPose: next)
-            moveBoot(body.leftBoot, from: contact.leftBoot, to: following.leftBoot, delta: delta, reset: resetFeet)
-            moveBoot(body.rightBoot, from: contact.rightBoot, to: following.rightBoot, delta: delta, reset: resetFeet)
-            moveBoot(body.leftShin, from: contact.leftShin, to: following.leftShin, delta: delta, reset: resetFeet)
-            moveBoot(body.rightShin, from: contact.rightShin, to: following.rightShin, delta: delta, reset: resetFeet)
+            let authoredRootVelocity = (n - p) / Float(delta)
+            let nativeRootVelocity = body.torso.components[PhysicsMotionComponent.self]?.linearVelocity ?? .zero
+            let nativeRootOffset = body.torso.position - p
+            moveBoot(body.leftBoot, from: contact.leftBoot, to: following.leftBoot, delta: delta,
+                     authoredRootVelocity: authoredRootVelocity, nativeRootVelocity: nativeRootVelocity,
+                     nativeRootOffset: nativeRootOffset, reset: resetFeet)
+            moveBoot(body.rightBoot, from: contact.rightBoot, to: following.rightBoot, delta: delta,
+                     authoredRootVelocity: authoredRootVelocity, nativeRootVelocity: nativeRootVelocity,
+                     nativeRootOffset: nativeRootOffset, reset: resetFeet)
+            moveBoot(body.leftShin, from: contact.leftShin, to: following.leftShin, delta: delta,
+                     authoredRootVelocity: authoredRootVelocity, nativeRootVelocity: nativeRootVelocity,
+                     nativeRootOffset: nativeRootOffset, reset: resetFeet)
+            moveBoot(body.rightShin, from: contact.rightShin, to: following.rightShin, delta: delta,
+                     authoredRootVelocity: authoredRootVelocity, nativeRootVelocity: nativeRootVelocity,
+                     nativeRootOffset: nativeRootOffset, reset: resetFeet)
         }
     }
 
@@ -247,9 +261,37 @@ final class ReplayNativeBallPhysicsWorld {
     }
 
     private func moveBoot(_ entity: ModelEntity, from start: ReplayBallPlayerContact.Capsule,
-                          to end: ReplayBallPlayerContact.Capsule, delta: TimeInterval, reset: Bool) {
-        move(entity, from: (start.start + start.end) * 0.5, to: (end.start + end.end) * 0.5,
-             delta: delta, maximumSpeed: 8, reset: reset)
+                          to end: ReplayBallPlayerContact.Capsule, delta: TimeInterval,
+                          authoredRootVelocity: SIMD3<Float>, nativeRootVelocity: SIMD3<Float>,
+                          nativeRootOffset: SIMD3<Float>, reset: Bool) {
+        let startCentre = (start.start + start.end) * 0.5
+        let endCentre = (end.start + end.end) * 0.5
+        let sprintWeight = Self.limbSprintWeight(forRootSpeed: simd_length(authoredRootVelocity))
+        if sprintWeight == 0 {
+            // Preserve the existing controlled approach at ordinary pace.
+            // Adding the full root budget here accelerated receiving boots
+            // into the ball before their deliberate contact window.
+            move(entity, from: startCentre, to: endCentre, delta: delta, maximumSpeed: 8, reset: reset)
+        } else {
+            let attachedStart = startCentre + nativeRootOffset
+            if reset { entity.position = startCentre + nativeRootOffset * sprintWeight }
+            // Only when root travel exceeds the old 8 m/s ceiling, smoothly
+            // inherit its movement (full weight at 9 m/s). Local articulation
+            // and root-error correction remain bounded. No collider or ball
+            // is teleported to repair an in-flight contact.
+            var relativeVelocity = (endCentre - startCentre) / Float(delta) - authoredRootVelocity
+                + (attachedStart - entity.position) * 20
+            let relativeSpeed = simd_length(relativeVelocity)
+            if relativeSpeed > Self.maximumLimbRelativeSpeed {
+                relativeVelocity *= Self.maximumLimbRelativeSpeed / relativeSpeed
+            }
+            var approachVelocity = (endCentre - startCentre) / Float(delta) + (startCentre - entity.position) * 20
+            let approachSpeed = simd_length(approachVelocity)
+            if approachSpeed > 8 { approachVelocity *= 8 / approachSpeed }
+            let sprintVelocity = nativeRootVelocity + relativeVelocity
+            let velocity = simd_mix(approachVelocity, sprintVelocity, SIMD3(repeating: sprintWeight))
+            entity.components.set(PhysicsMotionComponent(linearVelocity: velocity, angularVelocity: .zero))
+        }
         let direction = (reset ? start.end - start.start : end.end - end.start)
         if simd_length_squared(direction) > 0.0001 {
             let target = simd_quatf(from: [0, 1, 0], to: simd_normalize(direction))
@@ -264,6 +306,12 @@ final class ReplayNativeBallPhysicsWorld {
                 entity.components.set(motion)
             }
         }
+    }
+
+    nonisolated static func limbSprintWeight(forRootSpeed speed: Float) -> Float {
+        guard speed.isFinite else { return 0 }
+        let fraction = min(max(speed - 8, 0), 1)
+        return fraction * fraction * (3 - 2 * fraction)
     }
 
     func strike(intent: ReplayNativeBallPhysics.Intent, time: TimeInterval) throws -> ReplayNativeBallPhysics.Touch? {

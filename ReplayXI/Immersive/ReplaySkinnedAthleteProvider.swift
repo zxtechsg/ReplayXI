@@ -237,6 +237,8 @@ final class ReplaySkinnedAthleteInstance {
     private let backLocal: simd_float4x4
     private let neckIndex: Int
     private let headIndex: Int
+    private let inverseRestChestRotation: simd_quatf
+    private let restHeadRotation: simd_quatf
     private let neckCompensatedChildren: [Int]
     private var footballPose: ReplaySkinnedAthleteFootballPose?
     private var impactPose: ReplaySkinnedAthleteImpactPose?
@@ -267,6 +269,8 @@ final class ReplaySkinnedAthleteInstance {
         }
         let chest = motion.numberAnchors.jointIndex
         let restRotation = simd_quatf(motion.restPose.modelSpaceTransforms[chest])
+        inverseRestChestRotation = restRotation.inverse
+        restHeadRotation = simd_quatf(motion.restPose.modelSpaceTransforms[headIndex])
         frontLocal = Transform(scale: .init(repeating: 0.115), rotation: restRotation.inverse,
                                translation: motion.numberAnchors.front).matrix
         backLocal = Transform(scale: .init(repeating: 0.23),
@@ -351,6 +355,7 @@ final class ReplaySkinnedAthleteInstance {
             pose.rotations[chestIndex] = simd_normalize(parentRotation.inverse * desired)
             motion.rebuildModelSpaceTransforms(in: &pose)
         }
+        constrainHeadRelativeToChest()
         contactSurface.raiseAboveFloor(motion.geometry.restMinY + contactSurface.paddingMetres, in: &pose)
         for index in transforms.indices {
             transforms[index] = Transform(scale: pose.scales[index], rotation: pose.rotations[index],
@@ -362,6 +367,22 @@ final class ReplaySkinnedAthleteInstance {
         back.transform = Transform(matrix: chest * backLocal)
         skinRoot.position.y = -motion.geometry.restMinY
         return true
+    }
+
+    private func constrainHeadRelativeToChest() {
+        let chestIndex = motion.numberAnchors.jointIndex
+        let chestDelta = simd_quatf(pose.modelSpaceTransforms[chestIndex]) * inverseRestChestRotation
+        let relative = simd_normalize(chestDelta.inverse
+            * simd_quatf(pose.modelSpaceTransforms[headIndex]) * restHeadRotation.inverse)
+        let limited = ReplayCervicalConstraint.limited(relative)
+        guard simd_length_squared(limited.vector - relative.vector) > 0.000_000_000_1 else { return }
+        let parent = motion.joints[headIndex].parentIndex
+        let parentRotation = parent < 0 ? simd_quatf(real: 1, imag: .zero)
+            : simd_quatf(pose.modelSpaceTransforms[parent])
+        pose.rotations[headIndex] = simd_normalize(parentRotation.inverse * chestDelta * limited * restHeadRotation)
+        // Only a bounded cervical correction needs this extra fixed-joint
+        // rebuild. Roots, arms, legs, translations and bone lengths are intact.
+        motion.rebuildModelSpaceTransforms(in: &pose)
     }
 
     private func applyLook(_ look: ReplayAthleteLookPose) {

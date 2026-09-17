@@ -514,10 +514,14 @@ enum ReplayAthleteMotion {
                 ? atan2(travelX, travelZ) * 180 / .pi
                 : facing
         }
-        let travelDelta = clampAngleDelta(
-            shortestAngleDelta(from: facing, to: travelBearing),
-            limit: 100
-        )
+        let relativeTravelBearing = shortestAngleDelta(from: facing, to: travelBearing)
+        // Backpedalling crosses the same ±180° seam as a ball behind the
+        // player. A raw clamp flips +100° to -100° across that seam and can
+        // whip the rendered head between opposite limits in one frame.
+        // Fade this cue through the rear sector. The authored body heading
+        // still owns the turn; the neck must not try to look through the back.
+        let rearTravelAttention = 1 - smootherStep((abs(relativeTravelBearing) - 112) / 68)
+        let travelDelta = clampAngleDelta(relativeTravelBearing, limit: 100) * rearTravelAttention
 
         let scan = interpolatedScanTarget(for: track.id, at: finiteTime)
         let scanAmplitude = 27 - (15 * sample.effort)

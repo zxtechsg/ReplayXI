@@ -69,9 +69,12 @@ or cross-OS bit-identical solver output is not claimed.
   players within 3 m of a low ball.
 - After initial placement, player proxies follow the pose using native
   kinematic velocities, not per-frame transform teleports. Linear speed is
-  bounded to 8 m/s for limbs and 12 m/s for torsos/heads; angular speed to 720°/s.
-  These are world-space limits, including root travel. The head shares the
-  torso budget so it cannot lag behind an otherwise accepted fast run.
+  bounded to 12 m/s world travel for torsos/heads; angular speed to 720°/s.
+  The head shares the torso budget so it cannot lag behind an accepted fast run.
+  Limbs retain the original 8 m/s world-space approach at root speeds up to
+  8 m/s. Across 8–9 m/s they smoothly inherit root travel. Full sprint mode
+  separately caps local articulation/error correction at 8 m/s, bounding total
+  speed at 20 m/s. The blended transition does not claim an 8 m/s relative cap.
   A dormant limb can be placed when reactivated outside ball-contact range.
 - `prewarm(track:players:plannedTouches:)` completes before a scene consumes
   `cached(track:players:plannedTouches:)`.
@@ -150,6 +153,8 @@ soles above the floor, and restores the same pose after seeking.
 Receipts are exported in `/private/tmp/replayxi-native125-contact-final-01-attachments/`.
 Full regression and release-build status are recorded in the
 [final checkpoint](NATIVE125_CHECKPOINT.md).
+The later [motion refinement](MOTION126_CHECKPOINT.md) records the sprint
+controller, complete chest-relative head limits and current full-suite result.
 
 Earlier integration receipts exposed real off-ball player blocks in authored
 passing lanes. Those routes were corrected without disabling collisions or

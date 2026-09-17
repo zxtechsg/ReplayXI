@@ -34,6 +34,10 @@ At108′, **Tagliafico #3 is still on**; De Paul #7 left at102′. **Fofana #13 
 
 The app authors its own coordinates, durations, supporting runs, body/head animation, contacts and neutral kits. These are **broadcast-inspired strategy studies**, not video-to-3D extraction, recovered tracking or exact replicas. Goal order and relevant identities are source-backed; body poses, kicking feet and precise trajectories are not validated by these sampled frames. Football timing may be compressed for the lesson, but the app must keep this distinction visible.
 
+## Playback shortcuts
+
+The existing previous/next icons beside Play step through admitted passes, receives, shots, headers and saves. Routine dribble touches are skipped. Each jump pauses at the exact native contact time without switching POV or editing annotations. Hover/accessibility details identify the action, shirt number, player and time. The controls do not wrap, and cannot interrupt drawing, scrubbing or geometry edits. Legacy scenes retain their original teaching-cue navigation; unprepared native studies never substitute intended beat times.
+
 ## Native scene inspection
 
 `FootballReferenceStudyVisualTests` captures one actual Factory scene per study at its final recorded shooting contact. It uses the bundled player, pitch and ball assets and the native recording directly. The test verifies all planned contacts and goal entry, then renders a fixed attacking-third camera. Only the whole scene's room-placement transform is normalised; internal player/ball poses and labels remain unchanged. Colour, channel order and row direction use the existing native renderer calibration.

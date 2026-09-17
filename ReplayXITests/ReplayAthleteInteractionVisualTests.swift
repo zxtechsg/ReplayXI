@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import RealityKit
+import simd
 import UIKit
 import XCTest
 @testable import ReplayXI
@@ -112,6 +113,118 @@ final class ReplayAthleteInteractionVisualTests: XCTestCase {
         let receipt = XCTAttachment(data: try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]),
                                     uniformTypeIdentifier: "public.json")
         receipt.name = "ReplayXI-Interaction125-Native-Frames.json"
+        receipt.lifetime = .keepAlways; add(receipt)
+    }
+
+    func testCapturesRunningGlanceBrakingCutAndBackpedalNearAndLow() async throws {
+        reset()
+        defer { reset() }
+        try ReplaySkinnedAthleteProvider.prewarm()
+        try ReplaySkinnedAthleteProvider.prewarmLowDetail()
+        try ReplayStrategyBallProvider.prewarm()
+        let calibration = try await calibrate()
+        let cases: [(String, [MotionKeyframe], SIMD3<Float>)] = [
+            ("running-lateral-glance", [
+                .init(time: 0, position: .init(x: 0, z: -4), facingDegrees: 0),
+                .init(time: 1, position: .zero, facingDegrees: 0),
+                .init(time: 2, position: .init(x: 0, z: 4), facingDegrees: 0)
+            ], [0.85, 0.11, 0.35]),
+            ("braking-cut", [
+                .init(time: 0, position: .init(x: 0, z: -4), facingDegrees: 0),
+                .init(time: 0.8, position: .init(x: 0, z: -0.8), facingDegrees: 0),
+                .init(time: 1.2, position: .init(x: 0.4, z: 0.2), facingDegrees: 80),
+                .init(time: 2, position: .init(x: 0.9, z: 0.3), facingDegrees: 90)
+            ], [0.7, 0.11, 0.6]),
+            ("backpedal-rear-axis", [
+                .init(time: 0, position: .init(x: 0, z: 2), facingDegrees: -0.01),
+                .init(time: 1, position: .zero, facingDegrees: -0.01),
+                .init(time: 2, position: .init(x: 0, z: -2), facingDegrees: -0.01)
+            ], [0, 0.11, 0.85])
+        ]
+        var report: [[String: Any]] = []
+        for (detailName, detail) in [("near", ReplaySkinnedAthleteProvider.Detail.near), ("low", .lowDetail)] {
+            for (label, frames, ballOffset) in cases {
+                let player = PlayerTrack(id: "movement-render", displayName: "Movement", role: "CM", shirtNumber: 8,
+                    team: .away, isGoalkeeper: false, keyframes: frames)
+                let time = 1.0
+                let presentation = player.presentationPose(at: time)
+                let locomotion = player.locomotion(at: time)
+                let origin = SIMD3<Float>(presentation.position.x, 0, presentation.position.z)
+                let target = origin + ballOffset
+                let skin = try ReplaySkinnedAthleteProvider.make(for: player, detail: detail)
+                XCTAssertTrue(skin.update(at: time, track: player, locomotion: locomotion,
+                    lookTarget: target, ballAction: nil, presentationPose: presentation))
+                XCTAssertEqual(skin.model.jointTransforms.count, 80)
+                XCTAssertEqual(skin.root.scale, .one)
+                if label == "running-lateral-glance" {
+                    XCTAssertGreaterThan(locomotion.speedMetresPerSecond, 3.8)
+                } else if label == "braking-cut" {
+                    XCTAssertGreaterThan(abs(locomotion.turnRateDegreesPerSecond), 70)
+                    XCTAssertLessThan(locomotion.accelerationMetresPerSecondSquared, 0)
+                } else {
+                    XCTAssertGreaterThan(locomotion.speedMetresPerSecond, 1)
+                    XCTAssertLessThan(player.presentationPose(at: 1.08).position.z,
+                                      player.presentationPose(at: 0.92).position.z)
+                }
+                // Use the same authored root translation/heading as Factory;
+                // no isolated head rotation or artificial replacement pose.
+                let actor = Entity()
+                actor.position = origin
+                actor.orientation = simd_quatf(angle: presentation.facingDegrees * .pi / 180, axis: [0, 1, 0])
+                actor.addChild(skin.root)
+                let scene = Entity()
+                scene.addChild(actor)
+                let ball = try XCTUnwrap(ReplayStrategyBallProvider.makeInstance())
+                ball.position = target
+                scene.addChild(ball)
+                let floor = ModelEntity(mesh: .generateBox(size: [2.1, 0.008, 2.1]),
+                    materials: [SimpleMaterial(color: UIColor(red: 0.07, green: 0.12, blue: 0.09, alpha: 1),
+                                               roughness: 1, isMetallic: false)])
+                floor.position = origin + [0, -0.006, 0]
+                scene.addChild(floor)
+                let camera = PerspectiveCamera()
+                camera.camera = .init(near: 0.05, far: 20, fieldOfViewInDegrees: 40)
+                camera.look(at: origin + [0, 0.9, 0], from: origin + [2.7, 1.5, 4], relativeTo: nil)
+                let key = DirectionalLight()
+                key.light.intensity = 2_200
+                key.look(at: origin + [0, 0.9, 0], from: origin + [3, 4, 3], relativeTo: nil)
+                let fill = DirectionalLight()
+                fill.light.intensity = 500
+                fill.look(at: origin + [0, 0.9, 0], from: origin + [-3, 2, 2], relativeTo: nil)
+                let frame = try await render([scene, camera, key, fill], camera: camera, size: 512)
+                var count = 0, left = 512, top = 512, right = -1, bottom = -1
+                for y in 0..<512 { for x in 0..<512 {
+                    let pixel = frame.rgba(x: x, y: y, topFirst: calibration.rawRowsAreTopFirst)
+                    if pixel[0] > 8 || pixel[1] > 8 || pixel[2] > 8 {
+                        count += 1; left = min(left, x); right = max(right, x)
+                        top = min(top, y); bottom = max(bottom, y)
+                    }
+                } }
+                XCTAssertGreaterThan(count, 2_000)
+                XCTAssertLessThan(count, 512 * 512 / 2)
+                XCTAssertGreaterThan(left, 4); XCTAssertGreaterThan(top, 4)
+                XCTAssertLessThan(right, 507); XCTAssertLessThan(bottom, 507)
+                let name = "ReplayXI-Movement126-\(detailName)-\(label)"
+                let image = XCTAttachment(data: try ReplayRealityRendererAudit.png(frame, calibration: calibration),
+                                          uniformTypeIdentifier: "public.png")
+                image.name = name + ".png"; image.lifetime = .keepAlways; add(image)
+                report.append([
+                    "name": name, "time": time, "rootPosition": [origin.x, origin.y, origin.z],
+                    "rootFacingDegrees": presentation.facingDegrees,
+                    "speed": locomotion.speedMetresPerSecond,
+                    "acceleration": locomotion.accelerationMetresPerSecondSquared,
+                    "turnDegreesPerSecond": locomotion.turnRateDegreesPerSecond,
+                    "lookBallWorldPosition": [target.x, target.y, target.z],
+                    "nonBackgroundPixels": count, "bounds": [left, top, right, bottom],
+                    "cameraOffset": [2.7, 1.5, 4], "cameraTargetOffset": [0, 0.9, 0], "cameraFOV": 40,
+                    "scope": "Actual near/low skin update with authored track and presentation pose. Fixed camera relative to track origin. Static gaze-reference ball; not a contact, motion-video, UI or headset claim."
+                ])
+            }
+        }
+        XCTAssertEqual(report.count, 6)
+        let receipt = XCTAttachment(data: try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]),
+                                    uniformTypeIdentifier: "public.json")
+        receipt.name = "ReplayXI-Movement126-Native-Frames.json"
         receipt.lifetime = .keepAlways; add(receipt)
     }
 

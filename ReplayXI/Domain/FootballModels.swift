@@ -377,26 +377,52 @@ struct PlayerTrack: Identifiable, Codable, Hashable, Sendable {
     /// readable on a shared tactical board. The authored role remains the
     /// descriptive source of truth everywhere longer copy is appropriate.
     var positionCode: String {
-        switch role.lowercased() {
-        case "goalkeeper": "GK"
-        case "right back": "RB"
-        case "right centre-back": "RCB"
-        case "left centre-back": "LCB"
-        case "left back": "LB"
-        case "holding midfielder": "DM"
-        case "right holding midfielder": "RDM"
-        case "left holding midfielder": "LDM"
-        case "right midfielder": "RM"
-        case "left midfielder": "LM"
-        case "attacking midfielder": "AM"
-        case "right winger": "RW"
-        case "centre forward": "CF"
-        case "left winger": "LW"
+        let words = role.lowercased().split {
+            $0.isWhitespace || "-‐‑‒–—−".contains($0)
+        }
+        let normalized = words.joined(separator: " ")
+        switch normalized {
+        case "gk", "goalkeeper", "goal keeper": return "GK"
+        case "rb", "right back": return "RB"
+        case "rcb", "right centre back", "right center back": return "RCB"
+        case "cb", "centre back", "center back": return "CB"
+        case "lcb", "left centre back", "left center back": return "LCB"
+        case "lb", "left back": return "LB"
+        case "rwb", "right wing back", "right wingback": return "RWB"
+        case "wb", "wing back", "wingback": return "WB"
+        case "lwb", "left wing back", "left wingback": return "LWB"
+        case "dm", "holding midfield", "holding midfielder", "defensive midfield", "defensive midfielder": return "DM"
+        case "rdm", "right holding midfielder", "right holding midfield": return "RDM"
+        case "ldm", "left holding midfielder", "left holding midfield": return "LDM"
+        case "cdm", "central defensive midfielder": return "CDM"
+        case "cm", "central midfielder", "central midfield", "centre midfielder", "center midfielder": return "CM"
+        case "rcm", "right central midfielder", "right centre midfielder", "right center midfielder": return "RCM"
+        case "lcm", "left central midfielder", "left centre midfielder", "left center midfielder": return "LCM"
+        case "rm", "right midfielder", "right midfield": return "RM"
+        case "lm", "left midfielder", "left midfield": return "LM"
+        case "am", "attacking midfielder", "attacking midfield": return "AM"
+        case "cam", "central attacking midfielder": return "CAM"
+        case "ram", "right attacking midfielder": return "RAM"
+        case "lam", "left attacking midfielder": return "LAM"
+        case "rw", "right winger": return "RW"
+        case "lw", "left winger": return "LW"
+        case "cf", "centre forward", "center forward": return "CF"
+        case "st", "striker": return "ST"
+        case "ss", "second striker": return "SS"
+        case "rf", "right forward": return "RF"
+        case "lf", "left forward": return "LF"
+        // These are authored study slots, not a recovered playing position.
+        // Keep their neutral meaning rather than relabelling support as midfield.
+        case "rs", "right support": return "RS"
+        case "ls", "left support": return "LS"
+        case "ra", "right attack": return "RA"
+        case "la", "left attack": return "LA"
         default:
-            role.split(separator: " ")
-                .compactMap(\.first)
+            let initials = words
+                .compactMap { $0.first(where: { $0.isLetter || $0.isNumber }) }
                 .map { String($0).uppercased() }
                 .joined()
+            return initials.isEmpty ? "—" : String(initials.prefix(3))
         }
     }
 

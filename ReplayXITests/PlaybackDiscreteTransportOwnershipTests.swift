@@ -3,11 +3,19 @@ import XCTest
 
 @MainActor
 final class PlaybackDiscreteTransportOwnershipTests: XCTestCase {
-    func testPreviousAndNextCueButtonsUseTheDiscreteNavigationGate() throws {
+    func testPreviousAndNextEventButtonsUseTheDiscreteNavigationGate() throws {
         let source = try immersiveSource()
         let row = try slice(source, after: "private var matchPlaybackDeck: some View", before: "if isClearAnnotationsPending")
-        XCTAssertTrue(row.contains(".disabled(previousCue == nil || !store.canChangePlaybackView)"))
-        XCTAssertTrue(row.contains(".disabled(nextCue == nil || !store.canChangePlaybackView)"))
+        XCTAssertTrue(row.contains("playbackEventStepButton(.previous)"))
+        XCTAssertTrue(row.contains("playbackEventStepButton(.next)"))
+        let control = try slice(source, after: "private func playbackEventStepButton(", before: "private var previousCue:")
+        XCTAssertTrue(control.contains(".disabled(!store.canChangePlaybackView || (isNativeStudy ? target == nil : cue == nil))"))
+        XCTAssertTrue(control.contains("PlaybackBallActionNavigation.jump(direction, source: nativeActionSource, in: store)"))
+        XCTAssertTrue(control.contains("jump(to: cue)"), "Legacy scenarios retain their teaching cues")
+        XCTAssertTrue(control.contains("minWidth: PlaybackControlDeckPresentation.minimumSpatialHitTarget"))
+        XCTAssertTrue(control.contains("minHeight: PlaybackControlDeckPresentation.minimumSpatialHitTarget"))
+        XCTAssertTrue(control.contains(".help("))
+        XCTAssertTrue(control.contains(".accessibilityLabel(label)"))
     }
 
     func testEventChipCallbacksCheckOwnershipBeforeChangingSelectionOrVisibility() throws {
