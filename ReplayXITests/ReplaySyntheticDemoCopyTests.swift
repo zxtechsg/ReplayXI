@@ -13,7 +13,9 @@ final class ReplaySyntheticDemoCopyTests: XCTestCase {
         XCTAssertTrue(replay.objective.lowercased().contains("authored"))
         XCTAssertTrue(replay.objective.lowercased().contains("not recovered from video"))
         XCTAssertEqual(ReplayAppMode(scenario: replay), .matchReplay)
-        XCTAssertEqual(ReplayAppMode.matchReplay.subtitle, "Synthetic match demo")
+        // The mode now leads with sourced studies; this legacy scene still
+        // identifies itself as synthetic and must not inherit a source badge.
+        XCTAssertNil(ReplayReferenceLibrary.reference(for: replay.id))
     }
 
     func testDemoCuesDoNotClaimGeneratedFootageOrACompletedWorldHandoff() throws {

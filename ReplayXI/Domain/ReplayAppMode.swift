@@ -21,7 +21,7 @@ enum ReplayAppMode: String, CaseIterable, Identifiable, Hashable, Sendable {
     var subtitle: String {
         switch self {
         case .situationRoleplay: "3D plays, POVs and annotations"
-        case .matchReplay: "Synthetic match demo"
+        case .matchReplay: "Video-referenced match studies"
         }
     }
 
@@ -38,8 +38,8 @@ enum ReplayAppMode: String, CaseIterable, Identifiable, Hashable, Sendable {
 
     func featuredScenarios(in catalogue: [ReplayScenario]) -> [ReplayScenario] {
         let available = scenarios(in: catalogue)
-        let studies = available.filter { FootballReferenceScenarios.contains($0) }
-        return self == .situationRoleplay && !studies.isEmpty ? studies : available
+        let studies = available.filter { FootballReferenceScenarios.ids.contains($0.id) }
+        return !studies.isEmpty ? studies : available
     }
 
     func scenarioID(in catalogue: [ReplayScenario], preferredID: String?) -> String? {

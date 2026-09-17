@@ -19,6 +19,8 @@ final class ReplayReferenceContactReachTests: XCTestCase {
     func testCounterattackActualContactsReachAllThreePlayerLODs() async throws { try await check(0) }
     func testVolleyActualFootContactsReachAllThreePlayerLODs() async throws { try await check(1) }
     func testReboundActualFootContactsReachAllThreePlayerLODs() async throws { try await check(2) }
+    func testCityCrossActualFootContactsReachAllThreePlayerLODs() async throws { try await check(3) }
+    func testCityCutbackActualFootContactsReachAllThreePlayerLODs() async throws { try await check(4) }
 
     private func check(_ index: Int) async throws {
         let scenario = FootballReferenceScenarios.all[index]

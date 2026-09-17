@@ -35,7 +35,7 @@ final class PlayerPositionCodeTests: XCTestCase {
                         "Left centre-back": "LCB", "Left back": "LB", "Holding midfield": "DM",
                         "Right support": "RS", "Left support": "LS", "Right attack": "RA",
                         "Centre-forward": "CF", "Left attack": "LA"]
-        for scenario in FootballReferenceScenarios.all {
+        for scenario in FootballReferenceScenarios.all where FootballReferenceScenarios.worldCupIDs.contains(scenario.id) {
             for track in scenario.players {
                 XCTAssertEqual(track.positionCode, expected[track.role], "\(scenario.id): \(track.role)")
                 XCTAssertLessThanOrEqual(track.positionCode.count, 3)

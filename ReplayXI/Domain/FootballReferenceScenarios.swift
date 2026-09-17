@@ -6,10 +6,17 @@ import simd
 /// timing and neutral kits are deliberately approximate.
 enum FootballReferenceScenarios {
     static let sourceURL = URL(string: "https://www.youtube.com/watch?v=RgqKdplLIk4")!
-    static let ids = ["final-36-counter", "final-81-volley", "final-108-rebound"]
-    static let all: [ReplayScenario] = [counter, volley, rebound]
+    static let worldCupIDs = ["final-36-counter-v2", "final-81-volley", "final-108-rebound-v2"]
+    static let ids = worldCupIDs + CityLiverpoolReferenceScenarios.ids
+    static let all: [ReplayScenario] = [WorldCupCounterReference.scenario, volley, rebound] + CityLiverpoolReferenceScenarios.all
+    /// Revised routes and contact actors get new IDs. Old saved reviews retain
+    /// their original sequence instead of silently moving timed annotations.
+    private static let legacyIDs = ["final-36-counter", "final-108-rebound"]
+    static let legacy: [ReplayScenario] = [legacyCounter, legacyRebound]
 
-    static func contains(_ scenario: ReplayScenario) -> Bool { ids.contains(scenario.id) }
+    static func contains(_ scenario: ReplayScenario) -> Bool {
+        ids.contains(scenario.id) || legacyIDs.contains(scenario.id)
+    }
 
     struct Beat {
         let time: Double
@@ -39,6 +46,16 @@ enum FootballReferenceScenarios {
         Beat(5.4, "", 1.6, 54, height: 0.30)
     ]
     private static let reboundBeats = [
+        Beat(0, "arg-22", 14, 29), Beat(0.9, "arg-10", 6, 30, leg: .right),
+        Beat(1.8, "arg-24", 3, 33),
+        Beat(2.8, "arg-22", 11, 40, kind: .shot),
+        Beat(3.55, "fra-1", 1, 48, height: 0.65, kind: .save),
+        Beat(4.2, "arg-10", -1, 47, kind: .shot, leg: .right),
+        Beat(4.55, "", -1.8, 54)
+    ]
+    // Frozen pre-reference-correction contacts for existing saved annotations.
+    // Do not silently substitute the new Lautaro opening or right-foot finish.
+    private static let legacyReboundBeats = [
         Beat(0, "arg-24", 3, 25), Beat(0.9, "arg-10", 6, 30, leg: .left),
         Beat(1.8, "arg-24", 3, 33),
         Beat(2.8, "arg-22", 11, 40, kind: .shot),
@@ -50,10 +67,12 @@ enum FootballReferenceScenarios {
     static func touches(for scenario: ReplayScenario) -> [ReplayNativeBallPhysics.PlannedTouch]? {
         let beats: [Beat]
         switch scenario.id {
-        case ids[0]: beats = counterBeats
+        case ids[0]: return WorldCupCounterReference.touches
+        case "final-36-counter": beats = counterBeats
+        case "final-108-rebound": beats = legacyReboundBeats
         case ids[1]: beats = volleyBeats
         case ids[2]: beats = reboundBeats
-        default: return nil
+        default: return CityLiverpoolReferenceScenarios.touches(for: scenario)
         }
         return zip(beats, beats.dropFirst()).map { current, next in
             .init(time: current.time, playerID: current.playerID, kind: current.kind,
@@ -63,10 +82,16 @@ enum FootballReferenceScenarios {
     }
 
     static func teamTitle(_ team: FootballTeam, in scenario: ReplayScenario) -> String {
-        contains(scenario) ? (team == .home ? "Argentina" : "France") : team.shortTitle
+        if worldCupIDs.contains(scenario.id) || legacyIDs.contains(scenario.id) {
+            return team == .home ? "Argentina" : "France"
+        }
+        if CityLiverpoolReferenceScenarios.ids.contains(scenario.id) {
+            return team == .home ? "Manchester City" : "Liverpool"
+        }
+        return team.shortTitle
     }
 
-    private struct Waypoint {
+    struct Waypoint {
         let time: Double
         let point: PitchPoint
         init(_ time: Double, _ x: Float, _ z: Float) {
@@ -74,8 +99,8 @@ enum FootballReferenceScenarios {
         }
     }
 
-    private static var counter: ReplayScenario {
-        make(id: ids[0], title: "The counterattack", minute: "36′", duration: 10.5,
+    private static var legacyCounter: ReplayScenario {
+        make(id: "final-36-counter", title: "The counterattack", minute: "36′", duration: 10.5,
              beats: counterBeats, attacking: .home, perspective: "arg-11",
              objective: "Release early. Keep the far-side runner wide.",
              cues: [(0, "Release", "Break pressure with the first pass."),
@@ -119,13 +144,29 @@ enum FootballReferenceScenarios {
              paths: [
                 "arg-10": [.init(0,6,24.5),.init(0.9,6,29.5),.init(1.8,6,36),.init(2.8,1,40),.init(4.2,-1,46.5),.init(7,-2,49.5)],
                 "arg-24": [.init(0,3,24.5),.init(1.8,3,32.5),.init(2.8,2,35),.init(7,0,40)],
+                "arg-22": [.init(0,14,28.5),.init(1.8,12,34),.init(2.8,11,39.5),.init(4.2,6,46),.init(7,3,49)],
+                "fra-4": [.init(0,5,35),.init(2.8,4,40),.init(4.2,3,44),.init(7,1,49)],
+                "fra-1": [.init(0,0,50),.init(2.8,1,48.5),.init(3.55,1.3,47.9),.init(7,0,49)]
+             ])
+    }
+
+    private static var legacyRebound: ReplayScenario {
+        make(id: "final-108-rebound", title: "Follow the rebound", minute: "108′", duration: 7,
+             beats: legacyReboundBeats, attacking: .home, perspective: "arg-10",
+             objective: "Keep running after the pass. React to the second ball.",
+             cues: [(0, "Combine", "A short exchange opens the inside-right channel."),
+                    (2.8, "Attack the box", "The first shot is not the end of the move."),
+                    (4.2, "Second ball", "Messi follows the shot; the defenders must recover towards goal.")],
+             paths: [
+                "arg-10": [.init(0,6,24.5),.init(0.9,6,29.5),.init(1.8,6,36),.init(2.8,1,40),.init(4.2,-1,46.5),.init(7,-2,49.5)],
+                "arg-24": [.init(0,3,24.5),.init(1.8,3,32.5),.init(2.8,2,35),.init(7,0,40)],
                 "arg-22": [.init(0,14,29),.init(1.8,12,34),.init(2.8,11,39.5),.init(4.2,6,46),.init(7,3,49)],
                 "fra-4": [.init(0,5,35),.init(2.8,4,40),.init(4.2,3,44),.init(7,1,49)],
                 "fra-1": [.init(0,0,50),.init(2.8,1,48.5),.init(3.55,1.3,47.9),.init(7,0,49)]
              ])
     }
 
-    private static func make(id: String, title: String, minute: String, duration: Double,
+    static func make(id: String, title: String, minute: String, duration: Double,
                              beats: [Beat], attacking: FootballTeam, perspective: String,
                              objective: String, cues: [(Double,String,String)],
                              paths: [String:[Waypoint]]) -> ReplayScenario {
@@ -152,15 +193,20 @@ enum FootballReferenceScenarios {
 
     private static func players(duration: Double, beats: [Beat], ball: BallTrack,
                                 attacking: FootballTeam, paths: [String:[Waypoint]], id: String) -> [PlayerTrack] {
-        let homeNumbers = id == ids[2] ? [23,4,13,19,3,24,5,20,10,22,8]
+        let isRebound = id == ids[2] || id == "final-108-rebound"
+        let homeNumbers = isRebound ? [23,4,13,19,3,24,5,20,10,22,8]
             : id == ids[1] ? [23,26,13,19,3,24,7,20,10,9,8] : [23,26,13,19,3,24,7,20,10,9,11]
-        let awayNumbers = id == ids[0] ? [1,5,4,18,22,8,14,7,11,9,10]
-            : id == ids[2] ? [1,5,4,18,25,8,13,20,12,26,10]
+        let awayNumbers = id.hasPrefix("final-36-counter") ? [1,5,4,18,22,8,14,7,11,9,10]
+            : isRebound ? [1,5,4,18,25,8,13,20,12,26,10]
             : [1,5,4,18,25,8,14,20,12,26,10]
         let names: [String:String] = ["arg-23":"E. Martínez", "arg-26":"Molina", "arg-10":"Messi",
             "arg-9":"Álvarez", "arg-20":"Mac Allister", "arg-11":"Di María", "arg-24":"Enzo Fernández",
-            "arg-22":"Lautaro Martínez", "fra-1":"Lloris", "fra-10":"Mbappé", "fra-26":"Thuram",
-            "fra-20":"Coman", "fra-14":"Rabiot"]
+            "arg-22":"Lautaro Martínez", "arg-13":"Romero", "arg-19":"Otamendi", "arg-3":"Tagliafico",
+            "arg-7":"De Paul", "arg-8":"Acuña", "arg-4":"Montiel", "arg-5":"Paredes",
+            "fra-1":"Lloris", "fra-10":"Mbappé", "fra-26":"Thuram", "fra-20":"Coman", "fra-14":"Rabiot",
+            "fra-5":"Koundé", "fra-4":"Varane", "fra-18":"Upamecano", "fra-22":"T. Hernández",
+            "fra-8":"Tchouaméni", "fra-7":"Griezmann", "fra-11":"Dembélé", "fra-9":"Giroud",
+            "fra-25":"Camavinga", "fra-12":"Kolo Muani", "fra-13":"Fofana"]
         let roles = ["Goalkeeper","Right back","Right centre-back","Left centre-back","Left back",
                      "Holding midfield","Right support","Left support","Right attack","Centre-forward","Left attack"]
         let base: [PitchPoint] = [.init(x:0,z:-48),.init(x:25,z:-8),.init(x:9,z:-18),.init(x:-9,z:-18),

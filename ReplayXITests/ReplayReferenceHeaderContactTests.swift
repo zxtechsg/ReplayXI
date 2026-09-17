@@ -64,9 +64,17 @@ final class ReplayReferenceHeaderContactTests: XCTestCase {
     }
 
     func testActualVolleyHeaderMeetsNativeHeadSurfaceAcrossAllLODs() async throws {
+        try await checkHeader(scenarioIndex: 1)
+    }
+
+    func testActualCityHeaderMeetsNativeHeadSurfaceAcrossAllLODs() async throws {
+        try await checkHeader(scenarioIndex: 3)
+    }
+
+    private func checkHeader(scenarioIndex: Int) async throws {
         reset()
         defer { reset() }
-        let scenario = FootballReferenceScenarios.all[1]
+        let scenario = FootballReferenceScenarios.all[scenarioIndex]
         let plan = try XCTUnwrap(FootballReferenceScenarios.touches(for: scenario))
         let recording = try await ReplayNativeBallPhysics.bake(track: scenario.ball,
             players: scenario.players, plannedTouches: plan)
@@ -160,7 +168,7 @@ final class ReplayReferenceHeaderContactTests: XCTestCase {
             XCTAssertLessThan(right, 507); XCTAssertLessThan(bottom, 507)
             let image = XCTAttachment(data: try ReplayRealityRendererAudit.png(frame, calibration: calibration),
                                       uniformTypeIdentifier: "public.png")
-            image.name = "ReplayXI-ActualHeader125-\(detail).png"
+            image.name = "ReplayXI-ActualHeader-\(scenario.id)-\(detail).png"
             image.lifetime = .keepAlways; add(image)
             rows.append(["detail": detail, "headTriangles": triangles.count,
                          "nearestHeadPointWorld": vector(closest), "nearestHeadPointActorLocal": vector(headLocal),
@@ -180,7 +188,7 @@ final class ReplayReferenceHeaderContactTests: XCTestCase {
         ]
         let attachment = XCTAttachment(data: try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]),
                                        uniformTypeIdentifier: "public.json")
-        attachment.name = "ReplayXI-ActualHeader125-HeadSurface.json"
+        attachment.name = "ReplayXI-ActualHeader-\(scenario.id)-HeadSurface.json"
         attachment.lifetime = .keepAlways; add(attachment)
     }
 

@@ -198,7 +198,7 @@ struct TacticalPreview: View {
                     .padding(28)
                 } else {
                     HStack(spacing: 8) {
-                        StatusPill(text: "Tracked replay", systemImage: "dot.scope", color: ReplayTheme.cyan)
+                        StatusPill(text: "3D replay", systemImage: "dot.scope", color: ReplayTheme.cyan)
                         if showsSightCones {
                             StatusPill(text: "Authored facing", systemImage: "viewfinder", color: ReplayTheme.signal)
                         }

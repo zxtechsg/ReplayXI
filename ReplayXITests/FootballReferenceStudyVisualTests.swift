@@ -12,13 +12,13 @@ private final class ReferenceStudyRenderCompletion: @unchecked Sendable {
     var isComplete: Bool { lock.withLock { completed } }
 }
 
-/// Exactly three match captures, one actual Factory scene at each study's
+/// Five match captures, one actual Factory scene at each study's
 /// final native shooting contact. The calibration swatch is not a match frame.
 /// Only the table root's room placement is normalised for the fixed metre-space
 /// audit camera. Player, pitch, ball, animation, labels and physics stay native.
 @MainActor
 final class FootballReferenceStudyVisualTests: XCTestCase {
-    func testThreeStudiesAtTheirFinalNativeShootingContact() async throws {
+    func testFiveStudiesAtTheirFinalNativeShootingContact() async throws {
         resetOptionalProviders()
         defer {
             // Optional imported/skinned visuals change which Factory branch
@@ -50,7 +50,7 @@ final class FootballReferenceStudyVisualTests: XCTestCase {
                 players: scenario.players, plannedTouches: plan)
             XCTAssertEqual(recording.missedTouchCount, 0, scenario.id)
             XCTAssertEqual(recording.touches.count, plan.count, scenario.id)
-            let contact = try XCTUnwrap(recording.touches.last { $0.kind == .shot })
+            let contact = try XCTUnwrap(recording.touches.last { $0.kind == .shot || $0.kind == .header })
             XCTAssertTrue(recording.samples.contains {
                 $0.time > contact.time && $0.position.z > 52.61
                     && abs($0.position.x) < 3.55 && $0.position.y < 2.30
@@ -103,7 +103,7 @@ final class FootballReferenceStudyVisualTests: XCTestCase {
             } }
             XCTAssertGreaterThan(nonBackgroundPixels, 512 * 512 / 4,
                                  "The attacking third must occupy a useful part of the capture")
-            let name = "ReplayXI-Reference125-\(scenario.id)-final-contact"
+            let name = "ReplayXI-Reference127-\(scenario.id)-final-contact"
             let image = XCTAttachment(data: try ReplayRealityRendererAudit.png(frame, calibration: calibration),
                                       uniformTypeIdentifier: "public.png")
             image.name = name + ".png"
@@ -123,10 +123,10 @@ final class FootballReferenceStudyVisualTests: XCTestCase {
                 "scope": "Actual Factory table scene, fixed metre-space attacking-third camera; no UI, headset, motion-video or performance claim. Broadcast-inspired authored reconstruction, not recovered tracking."
             ])
         }
-        XCTAssertEqual(receipts.count, 3)
+        XCTAssertEqual(receipts.count, 5)
         let receipt = XCTAttachment(data: try JSONSerialization.data(withJSONObject: receipts,
             options: [.prettyPrinted, .sortedKeys]), uniformTypeIdentifier: "public.json")
-        receipt.name = "ReplayXI-Reference125-Three-Study-Frames.json"
+        receipt.name = "ReplayXI-Reference127-Five-Study-Frames.json"
         receipt.lifetime = .keepAlways
         add(receipt)
     }

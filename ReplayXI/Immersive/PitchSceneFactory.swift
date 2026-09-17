@@ -632,7 +632,7 @@ enum PitchSceneFactory {
         pitch.name = "pitch"
         root.addChild(pitch)
 
-        if scenario.kind == .realWorldReplay {
+        if scenario.kind == .realWorldReplay && !FootballReferenceScenarios.contains(scenario) {
             root.addChild(ReplayWorldPreviewFactory.make())
         }
 

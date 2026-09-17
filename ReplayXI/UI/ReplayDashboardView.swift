@@ -63,9 +63,11 @@ struct ReplayDashboardView: View {
                 "--replayxi-lane-lens": "lane-lens",
                 "--replayxi-four-minds": "four-minds",
                 "--replayxi-world-replay": "real-world-match-replay",
-                "--replayxi-final-counter": "final-36-counter",
+                "--replayxi-final-counter": "final-36-counter-v2",
                 "--replayxi-final-volley": "final-81-volley",
-                "--replayxi-final-rebound": "final-108-rebound"
+                "--replayxi-final-rebound": "final-108-rebound-v2",
+                "--replayxi-city-header": "city-45-overlap-header",
+                "--replayxi-city-cutback": "city-57-underlap-cutback"
             ]
             if let scenarioID = scenarioArguments.first(where: { arguments.contains($0.key) })?.value {
                 store.selectScenario(id: scenarioID, broadcast: false)
@@ -282,7 +284,7 @@ private struct ScenarioRail: View {
                         showsExercises.toggle()
                     } label: {
                         HStack {
-                            Text(activeMode == .situationRoleplay ? "Exercises" : "Replay demo")
+                            Text(activeMode == .situationRoleplay ? "Exercises" : "Match studies")
                                 .font(.subheadline.weight(.semibold))
                             Spacer(minLength: 8)
                             Text("\(modeScenarios.count)")
@@ -307,8 +309,7 @@ private struct ScenarioRail: View {
                                 }
                                 .disabled(navigationIsDisabled)
                             }
-                            if activeMode == .situationRoleplay,
-                               !modeScenarios.contains(where: { $0.id == store.selectedScenarioID }) {
+                            if !modeScenarios.contains(where: { $0.id == store.selectedScenarioID }) {
                                 Text("Previous review").font(.caption).foregroundStyle(.secondary)
                                 ScenarioRailRow(scenario: store.selectedScenario, selected: true) {}
                             }
@@ -408,10 +409,19 @@ private struct ScenarioRailRow: View {
                     .font(.subheadline)
                     .frame(width: 24)
                     .foregroundStyle(selected ? ReplayTheme.signal : .secondary)
-                Text(ReplayAppMode.exerciseTitle(for: scenario))
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(ReplayAppMode.exerciseTitle(for: scenario))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let reference = ReplayReferenceLibrary.reference(for: scenario.id) {
+                        Label(reference.shortLabel, systemImage: "play.rectangle")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                }
                 Spacer(minLength: 0)
                 if selected {
                     Image(systemName: "checkmark")
@@ -430,6 +440,7 @@ private struct ScenarioRailRow: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(ReplayAppMode.exerciseTitle(for: scenario))
+        .accessibilityValue(ReplayReferenceLibrary.reference(for: scenario.id)?.shortLabel ?? "")
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
@@ -452,6 +463,9 @@ private struct ScenarioWorkspace: View {
                         Text(scenario.title)
                             .font(.system(size: 38, weight: .black, design: .rounded))
                             .tracking(-1.0)
+                        if let reference = ReplayReferenceLibrary.reference(for: scenario.id) {
+                            ReplayVideoReferenceButton(reference: reference)
+                        }
                         Text(scenario.objective)
                             .font(.headline)
                             .foregroundStyle(.secondary)
@@ -470,7 +484,7 @@ private struct ScenarioWorkspace: View {
                     }
                 }
 
-                if scenario.kind == .realWorldReplay {
+                if scenario.kind == .realWorldReplay && ReplayReferenceLibrary.reference(for: scenario.id) == nil {
                     HStack(alignment: .top, spacing: 12) {
                         Image(systemName: "cube.transparent")
                             .font(.title2).foregroundStyle(ReplayTheme.cyan)

@@ -15,7 +15,7 @@ final class ReplayReferenceSaveContactTests: XCTestCase {
     }
 
     func testActualReboundSaveTouchesBothPalmsAcrossNearAndLowRigs() async throws {
-        let scenario = try XCTUnwrap(FootballReferenceScenarios.all.first { $0.id == "final-108-rebound" })
+        let scenario = try XCTUnwrap(FootballReferenceScenarios.all.first { $0.id == "final-108-rebound-v2" })
         let plan = try XCTUnwrap(FootballReferenceScenarios.touches(for: scenario))
         let recording = try await ReplayNativeBallPhysics.bake(track: scenario.ball,
             players: scenario.players, plannedTouches: plan)

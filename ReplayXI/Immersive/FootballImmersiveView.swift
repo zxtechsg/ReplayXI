@@ -2052,7 +2052,9 @@ private struct ImmersiveControlDeck: View {
 
     private var matchPlaybackDeck: some View {
         VStack(alignment: .leading, spacing: 11) {
-            if store.selectedScenario.kind == .realWorldReplay {
+            if let reference = ReplayReferenceLibrary.reference(for: store.selectedScenario.id) {
+                ReplayVideoReferenceButton(reference: reference)
+            } else if store.selectedScenario.kind == .realWorldReplay {
                 Label("Demo match · no video loaded", systemImage: "info.circle")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(ReplayTheme.orange)

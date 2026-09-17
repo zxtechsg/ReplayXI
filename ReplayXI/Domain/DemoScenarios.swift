@@ -8,8 +8,9 @@ import Foundation
 enum DemoScenarios {
     static let all: [ReplayScenario] = makeScenarios()
     /// Keep the legacy IDs/data available for saved reviews and fixtures.
-    /// New installations lead with the three broadcast-inspired studies.
-    static let catalogue: [ReplayScenario] = FootballReferenceScenarios.all + all
+    /// New installations lead with five video-referenced studies. Legacy
+    /// synthetic scenes remain resolvable, but are not featured beside them.
+    static let catalogue: [ReplayScenario] = FootballReferenceScenarios.all + FootballReferenceScenarios.legacy + all
 
     static func scenario(for kind: ExperienceKind) -> ReplayScenario? {
         all.first { $0.kind == kind }

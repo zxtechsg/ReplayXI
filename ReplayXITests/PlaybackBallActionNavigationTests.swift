@@ -4,13 +4,16 @@ import XCTest
 
 @MainActor
 final class PlaybackBallActionNavigationTests: XCTestCase {
-    func testAllThreeStudiesNavigateRecordedTimesRatherThanAuthoredBeatTimes() throws {
+    func testAllFiveStudiesNavigateRecordedActionsAndSkipRoutineDribbles() throws {
         for scenario in FootballReferenceScenarios.all {
             let plan = try XCTUnwrap(FootballReferenceScenarios.touches(for: scenario))
             let touches = plan.map { touch($0.time + 0.037, $0.playerID, $0.kind) }
             let source = makeSource(scenario, touches: touches)
+            // The City carries add genuine native dribble contacts. Previous/
+            // next action deliberately skips these, as the UI promises.
+            let actions = zip(plan, touches).filter { $0.1.kind != .dribbleTouch }
             var time = 0.0
-            for (planned, actual) in zip(plan, touches) {
+            for (planned, actual) in actions {
                 let next = try XCTUnwrap(PlaybackBallActionNavigation.destination(.next,
                     source: source, scenario: scenario, at: time))
                 XCTAssertEqual(next.time, actual.time)
@@ -21,7 +24,7 @@ final class PlaybackBallActionNavigationTests: XCTestCase {
             }
             XCTAssertNil(PlaybackBallActionNavigation.destination(.next,
                 source: source, scenario: scenario, at: time))
-            for actual in touches.dropLast().reversed() {
+            for (_, actual) in actions.dropLast().reversed() {
                 let previous = try XCTUnwrap(PlaybackBallActionNavigation.destination(.previous,
                     source: source, scenario: scenario, at: time))
                 XCTAssertEqual(previous.time, actual.time)
