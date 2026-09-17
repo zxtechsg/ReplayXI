@@ -18,6 +18,8 @@ import re
 COORDINATES = "pitch-metres-x-width-z-length"
 KINDS = {"receive", "pass", "shot", "dribbleTouch", "header", "save"}
 REPO = Path(__file__).resolve().parents[2]
+MAX_EXPORT_BYTES = 40 * 1024 * 1024
+RIG_FIELDS = (("translations", 3), ("rotations", 4), ("scales", 3))
 
 
 class ContractError(ValueError):
@@ -69,6 +71,66 @@ def validate_frames(frames, duration, ball=False):
                 raise ContractError("ball quaternion must be normalized")
     if abs(frames[0]["time"]) > 0.00001 or abs(frames[-1]["time"] - duration) > 0.02:
         raise ContractError("tracks must cover the full study")
+
+
+def float32_vector(encoded):
+    """Decode Swift Float bit patterns exactly using bounded arithmetic."""
+    if not isinstance(encoded, str) or len(encoded) not in (24, 32) or not re.fullmatch('[0-9a-f]+', encoded):
+        raise ContractError("Float32 vector needs 3 or 4 lowercase hex words")
+    values = []
+    for start in range(0, len(encoded), 8):
+        bits = int(encoded[start:start + 8], 16)
+        exponent, mantissa = (bits >> 23) & 255, bits & 0x7fffff
+        if exponent == 255:
+            raise ContractError("Float32 vector must be finite")
+        value = math.ldexp(mantissa, -149) if exponent == 0 else math.ldexp(1 + mantissa / 8388608, exponent - 127)
+        values.append(-value if bits >> 31 else value)
+    return values
+
+
+def native_pose_frames(rig):
+    """Expand exact numeric row references, never executable data or quantization.
+
+    Expansion is per frame so a valid compact file cannot materialize a second
+    full, much larger 22-player pose document merely for contract validation.
+    """
+    if "_decodedVectors" in rig:
+        raise ContractError("native payload cannot supply a runtime decoder cache")
+    encoding = rig.get("transformEncoding")
+    if encoding is None:
+        if "vectorTable" in rig:
+            raise ContractError("vector table needs its explicit encoding")
+        yield from rig["frames"]
+        return
+    if encoding not in {"vector-table-v1", "float32-vector-table-v1"}:
+        raise ContractError("unsupported native pose encoding")
+    table = rig.get("vectorTable")
+    if not isinstance(table, list) or not 1 <= len(table) <= 120000:
+        raise ContractError("native vector table must be bounded")
+    if encoding == "float32-vector-table-v1":
+        table = [float32_vector(row) for row in table]
+    for row in table:
+        if not isinstance(row, list) or len(row) not in (3, 4):
+            raise ContractError("native vector table rows need 3 or 4 values")
+        for value in row:
+            finite(value, "native vector", -10, 10)
+    for frame in rig["frames"]:
+        if not isinstance(frame, dict):
+            raise ContractError("rig sample must be an object")
+        expanded = {"time": frame.get("time")}
+        for field, width in RIG_FIELDS:
+            indices = frame.get(field)
+            if not isinstance(indices, list) or len(indices) != 80:
+                raise ContractError("native vector indices must match 80 joints")
+            rows = []
+            for index in indices:
+                if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < len(table):
+                    raise ContractError("native vector index is out of range or not an integer")
+                if len(table[index]) != width:
+                    raise ContractError("native vector index has the wrong transform width")
+                rows.append(table[index])
+            expanded[field] = rows
+        yield expanded
 
 
 def validate_document(doc):
@@ -136,6 +198,9 @@ def validate_document(doc):
             position = contact.get("position", {})
             for axis, bound in (("x", 45), ("y", 20), ("z", 70)):
                 finite(position.get(axis), f"contact.position.{axis}", -bound, bound)
+            if "headerSupportLeg" in contact and (contact["kind"] != "header"
+                                                    or contact["headerSupportLeg"] not in {"left", "right"}):
+                raise ContractError("only a header may name a support leg")
         posed_players = set()
         rigs = study.get("rigPoses", [])
         if not isinstance(rigs, list) or len(rigs) > 22:
@@ -149,19 +214,23 @@ def validate_document(doc):
             if rig.get("source") != "native-rig-pose-samples":
                 raise ContractError("rig pose source must be explicit")
             names = rig.get("jointNames")
-            if not isinstance(names, list) or len(names) != 80 or len(set(names)) != 80:
+            if (not isinstance(names, list) or len(names) != 80
+                    or not all(isinstance(name, str) and 1 <= len(name) <= 256 for name in names)
+                    or len(set(names)) != 80):
                 raise ContractError("native rig must have 80 unique joints")
             finite(rig.get("groundOffset"), "rig.groundOffset", -0.5, 0.5)
             frames = rig.get("frames")
             if not isinstance(frames, list) or not 2 <= len(frames) <= 2000:
                 raise ContractError("rig pose samples must be bounded")
             previous = -1
-            for frame in frames:
+            for frame in native_pose_frames(rig):
+                if not isinstance(frame, dict):
+                    raise ContractError("rig sample must be an object")
                 time = finite(frame.get("time"), "rig.time", 0, duration)
                 if time <= previous:
                     raise ContractError("rig timestamps must strictly increase")
                 previous = time
-                for field, width in (("translations", 3), ("rotations", 4), ("scales", 3)):
+                for field, width in RIG_FIELDS:
                     rows = frame.get(field)
                     if not isinstance(rows, list) or len(rows) != 80:
                         raise ContractError("rig pose does not match joint count")
@@ -174,12 +243,31 @@ def validate_document(doc):
                     raise ContractError("rig quaternions must be normalized")
             if abs(frames[0]["time"]) > 0.00001 or abs(frames[-1]["time"] - duration) > 0.02:
                 raise ContractError("rig samples must cover the full study")
+        sampling = study.get("rigSampling")
+        if sampling is not None:
+            if not isinstance(sampling, dict) or sampling.get("scope") not in {"all-players", "contact-players"}:
+                raise ContractError("rig sampling scope must be explicit")
+            finite(sampling.get("frequencyHz"), "rig sample frequency", 1, 30)
+            if sampling.get("includesExactContacts") is not True or not isinstance(sampling.get("tacticalAttention"), bool):
+                raise ContractError("rig sampling needs contact and attention declarations")
+            if sampling["scope"] == "all-players":
+                if posed_players != player_ids or sampling["tacticalAttention"] is not True:
+                    raise ContractError("all-player native export requires every rig and tactical attention")
+                for rig in rigs:
+                    player = next(p for p in players if p["id"] == rig["playerID"])
+                    root_times = {frame["time"] for frame in player["keyframes"]}
+                    rig_times = {frame["time"] for frame in rig["frames"]}
+                    if not rig_times <= root_times:
+                        raise ContractError("every native rig instant must have its exact root pose")
+                    contact_times = {c["time"] for c in contacts if c["playerID"] == rig["playerID"]}
+                    if not contact_times <= rig_times:
+                        raise ContractError("native rig export must include exact contact instants")
     return doc
 
 
 def read_document(path):
     path = Path(path)
-    if path.stat().st_size > 40 * 1024 * 1024:
+    if path.stat().st_size > MAX_EXPORT_BYTES:
         raise ContractError("export exceeds 40 MB")
     raw = path.read_bytes()
     return validate_document(json.loads(raw)), hashlib.sha256(raw).hexdigest()
@@ -248,6 +336,43 @@ def rx_linear(data):
 def rx_matrix(translation, rotation, scale):
     q = Quaternion((rotation[3], rotation[0], rotation[1], rotation[2]))
     return Matrix.LocRotScale(Vector(translation), q, Vector(scale))
+
+def rx_pose_frame(payload, frame):
+    encoding=payload.get('transformEncoding')
+    if encoding is None:
+        if 'vectorTable' in payload:raise ValueError('Vector table needs explicit encoding')
+        return frame
+    if encoding not in ('vector-table-v1','float32-vector-table-v1'):raise ValueError('Unknown native pose encoding')
+    table=payload.get('_decodedVectors',payload.get('vectorTable'))
+    if not isinstance(table,list) or not 1<=len(table)<=120000:raise ValueError('Invalid native vector table')
+    if encoding=='float32-vector-table-v1' and '_decodedVectors' not in payload:
+        decoded=[]
+        for encoded in table:
+            if not isinstance(encoded,str) or len(encoded) not in (24,32) or any(c not in '0123456789abcdef' for c in encoded):
+                raise ValueError('Invalid Float32 vector')
+            row=[]
+            for start in range(0,len(encoded),8):
+                bits=int(encoded[start:start+8],16)
+                exponent,mantissa=(bits>>23)&255,bits&0x7fffff
+                if exponent==255:raise ValueError('Non-finite Float32 vector')
+                value=math.ldexp(mantissa,-149) if exponent==0 else math.ldexp(1+mantissa/8388608,exponent-127)
+                row.append(-value if bits>>31 else value)
+            decoded.append(row)
+        table=decoded
+        payload['_decodedVectors']=decoded
+    expanded={'time':frame['time']}
+    for field,width in (('translations',3),('rotations',4),('scales',3)):
+        indices=frame.get(field)
+        if not isinstance(indices,list) or len(indices)!=80:raise ValueError('Invalid native vector indices')
+        rows=[]
+        for index in indices:
+            if isinstance(index,bool) or not isinstance(index,int) or not 0<=index<len(table):
+                raise ValueError('Invalid native vector index')
+            row=table[index]
+            if not isinstance(row,list) or len(row)!=width:raise ValueError('Invalid native vector width')
+            rows.append(row)
+        expanded[field]=rows
+    return expanded
 
 def rx_text(scene, name, body, location, size=0.3, parent=None):
     curve = bpy.data.curves.new(name, 'FONT')
@@ -372,7 +497,8 @@ def rx_gait(rig, player, duration, fps):
 def rx_native_pose(rig, payload, fps):
     rig.animation_data_clear()
     previous={}
-    for frame in payload['frames']:
+    for encoded_frame in payload['frames']:
+        frame=rx_pose_frame(payload,encoded_frame)
         for index,name in enumerate(payload['jointNames']):
             bone=rig.pose.bones.get(name.split('/')[-1])
             if bone is None:raise ValueError('Imported rig is missing joint '+name)
@@ -406,6 +532,7 @@ def rx_build(study, fps, manifest_hash):
     scene['manifestSHA256']=manifest_hash
     scene['provenanceJSON']=json.dumps(study.get('provenance',{}))
     scene['sourceJSON']=json.dumps(study['source'])
+    scene['rigSamplingJSON']=json.dumps(study.get('rigSampling',{}))
     scene['evidence']='Authored reconstruction, NOT recovered tracking; unknown off-camera positions'
     scene['coordinateMapping']='native (x,y,z) -> Blender (-x,z,y); right handed'
     assets=bpy.data.scenes['ReplayXI_Reference127_Assets']
@@ -415,6 +542,9 @@ def rx_build(study, fps, manifest_hash):
     rx_clone(scene,pitch,sid+'_pitch')
     motion=json.loads(bpy.data.scenes['ReplayXI_Reference127_Assets']['RX127_Motion'])
     poses={p['playerID']:p for p in study.get('rigPoses',[])}
+    if study.get('rigSampling',{}).get('scope')=='all-players' and len(poses)!=22:
+        raise ValueError('All-player study cannot fall back to illustrative gait')
+    scene['nativePosePlayerCount']=len(poses)
     rest_models=[]
     for joint in motion['joints']:
         local=rx_matrix(joint['translation'],joint['rotation'],joint['scale'])
@@ -606,14 +736,24 @@ def rx_verify(study,fps):
         target=Vector((-frame['position']['x'],frame['position']['z'],frame['height']))
         ball_worst=max(ball_worst,(ball.location-target).length)
     worst=0.0;checked=0
+    pose_samples={};rigs={};facings={}
     for payload in study.get('rigPoses',[]):
         root=root_map[payload['playerID']]
-        rig=next(o for o in root.children_recursive if o.type=='ARMATURE')
-        facing=next(o for o in root.children if o.name.endswith('_Facing'))
+        rigs[payload['playerID']]=next(o for o in root.children_recursive if o.type=='ARMATURE')
+        facings[payload['playerID']]=next(o for o in root.children if o.name.endswith('_Facing'))
         for frame in payload['frames']:
-            stamp=1+frame['time']*fps
-            scene.frame_set(math.floor(stamp),subframe=stamp-math.floor(stamp))
-            bpy.context.view_layer.update()
+            pose_samples.setdefault(frame['time'],[]).append((payload,frame))
+    # All-player exports share most timestamps. Evaluate Blender once per
+    # instant, not once per player at that instant (22 repeated scene updates).
+    for time,entries in pose_samples.items():
+        stamp=1+time*fps
+        scene.frame_set(math.floor(stamp),subframe=stamp-math.floor(stamp))
+        bpy.context.view_layer.update()
+        for payload,encoded_frame in entries:
+            frame=rx_pose_frame(payload,encoded_frame)
+            root=root_map[payload['playerID']]
+            rig=rigs[payload['playerID']]
+            facing=facings[payload['playerID']]
             native_heading=facing.rotation_euler.z-math.pi
             world=Matrix.Translation(root.location+Vector((0,0,payload['groundOffset'])))@C@Matrix.Rotation(native_heading,4,'Y')
             models=[]
@@ -649,6 +789,7 @@ def rx_verify(study,fps):
                          'sphereSurfaceClearanceMetres':min(distances)-0.11 if distances else None,
                          'note':'Whole head/body nearest triangle; save palm marker is a different contract'})
     report={'study':study['id'],'players':len(root_map),'nativeBoneMatricesChecked':checked,
+            'nativePosePlayersChecked':len(rigs),'nativePoseInstantsEvaluated':len(pose_samples),
             'rootPathSamplesChecked':root_checked,'maximumRootPositionErrorMetres':root_worst,
             'maximumRootHeadingErrorRadians':heading_worst,'ballSamplesChecked':len(study['ball']['keyframes']),
             'maximumBallPositionErrorMetres':ball_worst,'maximumMatrixElementError':worst,
@@ -679,9 +820,11 @@ def emit_steps(document, digest, output_dir, blend_output, fps=30, repository=RE
     if not document['studies']:
         raise ContractError('selection contains no studies')
     for study in document["studies"]:
+        posed_ids = {rig['playerID'] for rig in study.get('rigPoses', [])}
         for player in study["players"]:
             player['_headingAngles'] = heading_angles(player['keyframes'])
-            player['_gaitKeys'] = gait_keys(player['keyframes'], fps)
+            if player['id'] not in posed_ids:
+                player['_gaitKeys'] = gait_keys(player['keyframes'], fps)
     motion_path = repository / "ReplayXI/Resources/Players/ReplayXIRocketboxMotion.json"
     motion = json.loads(motion_path.read_text())
     expected_names = [joint['name'] for joint in motion['joints']]
@@ -735,6 +878,7 @@ def emit_steps(document, digest, output_dir, blend_output, fps=30, repository=RE
                                                ('LICENSE-ROCKETBOX-MIT.txt', licence)]
     payloads += [('RX127_Study_' + study['id'], json.dumps(study, separators=(',', ':')))
                  for study in document['studies']]
+    payload_bytes = sum(len(content.encode('utf-8')) for _, content in payloads)
     for name, content in payloads:
         for start in range(0, len(content), 90000):
             chunk = content[start:start + 90000]
@@ -756,9 +900,12 @@ def emit_steps(document, digest, output_dir, blend_output, fps=30, repository=RE
          "bpy.ops.wm.save_as_mainfile(filepath=output,copy=True,compress=True,check_existing=True)\n"
          "print(json.dumps({'savedCopy':output,'studies':expected,'originalFileStill':bpy.data.filepath}))")
     report = {"schemaVersion": 1, "manifestSHA256": digest, "steps": steps,
+              "stepCount": len(steps), "metadataBytes": payload_bytes,
+              "nativePoseFrames": sum(len(rig['frames']) for study in document['studies']
+                                      for rig in study.get('rigPoses', [])),
               "blendOutput": str(blend_output), "studies": [s['id'] for s in document['studies']],
               "safety": "MCP safe mode stays enabled. No .blend loading, exec/eval, drivers, handlers or timers.",
-              "limitations": "Authored trajectories; source idle/run is illustrative, not recovered motion capture. Off-camera positions remain unknown."}
+              "limitations": "Authored trajectories and native rig samples are not captured match motion. Any player without native samples uses an illustrative gait. Off-camera positions remain inferred."}
     (output_dir / "steps.json").write_text(json.dumps(report, indent=2) + "\n")
     return report
 

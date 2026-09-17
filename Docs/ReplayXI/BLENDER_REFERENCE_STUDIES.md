@@ -10,8 +10,9 @@ from broadcast video.
 - All 22 named/shirt-numbered players per study with exact app root paths/facing.
 - Actual recorded RealityKit ball samples and admitted contact times.
 - Explicit evidence: authored/inferred/observed/measured, visibility, nullable confidence.
-- Optional native actor rig samples: 80 local USD Y-up joints, 10 Hz plus exact
-  contacts. These retain app posing for key actors; they are not match mocap.
+- Optional native actor rig samples: 80 local USD Y-up joints. The normal export
+  uses 10 Hz plus exact contacts for contact actors; the opt-in single-study
+  export below uses 20 Hz for all 22. Neither is match mocap.
 - Existing Microsoft Rocketbox MIT skin and original Replay XI pitch/ball USDZs.
 
 Never fill unknown confidence with a guessed number. Unknown/off-camera paths
@@ -38,6 +39,65 @@ reuses them without reimporting. Each study gets separate embedded data, so a
 later verified study can be appended without overwriting another scene. The
 scene retains the SHA-256 of its exact original native export.
 
+## Optional all-player native export — Reference 129
+
+This export path is implemented, but **no new native export, Blender build or
+visual verification is recorded here yet**. The verified Reference 127 artifact
+below is a different receipt and retains the original `final-81-volley` scene.
+
+Run the XCTest
+`ReplayXITests/ReplayReferenceBlenderExportTests/testExportFivePlayableReferenceStudies`
+with these variables in the **XCTest host's environment** (the scheme's test
+environment or a separate `.xctestrun` configuration):
+
+| Variable | Example |
+|---|---|
+| `REPLAYXI_EXPORT_STUDY` | `final-81-volley-v2` |
+| `REPLAYXI_EXPORT_ALL_RIGS` | `1` |
+
+Setting only the build command's shell environment is not proof those variables
+reach the test host. Check that the resulting attachment contains one selected
+study and `rigSampling.scope` is `all-players`. All-rig export requires a selected
+current study; unknown IDs fail. With neither variable, the normal five-study,
+10 Hz contact-actor export remains the default.
+
+The opt-in attachment is named
+`ReplayXI-final-81-volley-v2-All-Native-Rigs.json`. It includes:
+
+- All 22 players' native **near-rig** poses at 20 Hz plus exact recorded contacts.
+- The native tactical-attention calculation, nearest-contact selection and its
+  shared preparation margins, not a separate illustrative background gait.
+- Root/facing samples at every exported rig instant as well as the 30 Hz root
+  grid, so a 20 Hz bone pose cannot be paired with an interpolated, different root.
+- Header support-leg metadata where authored. Source visibility/confidence remain
+  unknown unless actually established; these poses are not recovered from video.
+- `float32-vector-table-v1`: repeated transform vectors share table entries;
+  each float is stored as its original eight-digit IEEE Float32 hex word. The
+  decoder uses bounded numeric operations. No rounding, executable payload,
+  quaternion sign change or pose quantization is introduced. Times/root tracks
+  retain their existing numeric representation. Legacy numeric pose arrays still
+  work, and the manifest reader's **40 MB cap remains unchanged**.
+
+Use a new steps folder and `.blend` filename. The new `final-81-volley-v2` ID can
+coexist with the previously built original scene; the workflow refuses to
+overwrite an existing same-ID scene or embedded data. With templates already
+loaded, `--shared-assets-loaded` retains the existing asset checks.
+
+`steps.json` now reports metadata bytes, step count and native pose-frame count.
+The verifier evaluates shared pose timestamps once for the whole squad, then
+checks each rig's matrices. Verify the actual artifact size and mapping receipt
+after export; an estimate is not a completed build.
+
+Current offline parser/decoder tests: **27 passed**, including exact Float32
+round-trip, signed zero/subnormals, malformed indices/hex, contact/root coverage
+and the original size cap. These Python tests do not execute Blender or prove
+that the new Swift export has run.
+
+All-22 near-rig posing is an **offline authoring option**. It does not change the
+app's runtime LOD limits, establish headset frame rate, prove natural animation,
+or demonstrate match-specific mocap accuracy. Native app integration and visual
+review remain separate checks.
+
 ## Scene controls
 
 - One scene per study; source/evidence in scene custom properties and embedded JSON.
@@ -47,8 +107,9 @@ scene retains the SHA-256 of its exact original native export.
 - Optional route collection, hidden by default, includes evidence on each route.
 - Optional contact rings are hidden by default; actual ball/skin contact stays
   visible without a diagnostic ring covering the boot or head.
-- Key actors use native rig samples when provided. Others share distance-timed
-  idle/run source actions. These background gaits are illustrative.
+- Players use native rig samples when provided. In the normal export, remaining
+  players share illustrative distance-timed idle/run actions. An all-player
+  export requires all 22 native rigs and cannot silently use that fallback.
 - Ball translation and rotation are imported from the native physics recording, not resimulated
   or steered toward feet in Blender.
 
@@ -56,7 +117,10 @@ Native `(x,y,z)` maps to Blender `(-x,z,y)`. This is a right-handed rotation, no
 reflection, so body heading and local rig poses remain consistent. Scene units
 are metres; player roots and ball path are not artist-scaled.
 
-## Checked so far
+## Verified Reference 127 history
+
+The following counts and renders belong to the earlier five-study receipt, not
+the optional all-player Reference 129 export above.
 
 - 16 parser/math/safety tests pass, including generated-step syntax, native joint
   and quaternion validation, unknown-confidence preservation and overwrite checks.
@@ -89,7 +153,7 @@ are metres; player roots and ball path are not artist-scaled.
   Native tests provide the separate foot/head/palm contract. Neither this metric
   nor a still image proves natural motion throughout the whole clip.
 
-## Final artifact receipts
+## Reference 127 artifact receipts
 
 All large outputs are ignored artifacts under `.codex-derived/Reference127/`:
 
