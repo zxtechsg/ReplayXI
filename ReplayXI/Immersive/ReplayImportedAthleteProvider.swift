@@ -104,12 +104,21 @@ enum ReplayImportedAthleteFeatureGate {
     static let userDefaultsKey = "ReplayXI.ImportedPlayerPilotEnabled"
 
     static var isEnabled: Bool {
-        resolvedValue(
+        #if DEBUG
+        readDiagnostics.record()
+        #endif
+        return resolvedValue(
             environmentValue: ProcessInfo.processInfo.environment[environmentKey],
             userDefaultsValue: UserDefaults.standard.object(forKey: userDefaultsKey) as? Bool,
             debugDefault: false
         )
     }
+
+    #if DEBUG
+    private static let readDiagnostics = ReplayImportedPilotReadDiagnostics()
+    static var readCountForTesting: Int { readDiagnostics.count }
+    static func resetReadCountForTesting() { readDiagnostics.reset() }
+    #endif
 
     /// Kept pure so precedence and accepted spellings remain unit-testable.
     /// An environment override wins over the persisted developer setting.
@@ -128,6 +137,19 @@ enum ReplayImportedAthleteFeatureGate {
         return userDefaultsValue ?? debugDefault
     }
 }
+
+#if DEBUG
+/// This counter never stores the setting itself. Lock every access so counting
+/// remains safe even if a diagnostic reads the gate outside the scene actor.
+private final class ReplayImportedPilotReadDiagnostics: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+
+    var count: Int { lock.withLock { value } }
+    func record() { lock.withLock { value += 1 } }
+    func reset() { lock.withLock { value = 0 } }
+}
+#endif
 
 struct ReplayImportedAthleteAssetFacts: Equatable, Sendable {
     let sha256: String

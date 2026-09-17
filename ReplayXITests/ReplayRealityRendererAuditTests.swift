@@ -18,6 +18,248 @@ private final class ReplayRenderCompletion: @unchecked Sendable {
 /// physical-headset validation. The calibration must pass before PNG export.
 @MainActor
 final class ReplayRealityRendererAuditTests: XCTestCase {
+    func testCapturesWholeTouchlineReplayWithTimedAnnotationsAndBundledAssets() async throws {
+        // A fixed audit camera, not a UI screenshot or headset capture. Keep
+        // the actual Touchline root transform and its existing label observer.
+        try XCTSkipIf(ReplayImportedAthleteFeatureGate.isEnabled,
+                      "This capture covers default admission, not the legacy pilot")
+        ReplayFarAthleteHeadProvider.resetForTesting()
+        ReplaySkinnedAthleteProvider.resetForTesting()
+        ReplayImportedAthleteProvider.resetPrewarmForTesting()
+        ReplayAthleteHeadProvider.resetForTesting()
+        ReplayFarAthletePaletteProvider.resetForTesting()
+        ReplayStrategyBallProvider.resetForTesting()
+        defer {
+            ReplayFarAthleteHeadProvider.resetForTesting()
+            ReplaySkinnedAthleteProvider.resetForTesting()
+            ReplayImportedAthleteProvider.resetPrewarmForTesting()
+            ReplayAthleteHeadProvider.resetForTesting()
+            ReplayFarAthletePaletteProvider.resetForTesting()
+            ReplayStrategyBallProvider.resetForTesting()
+        }
+        let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay))
+        let time = 13.6
+        try ReplayAthleteFactory.prewarm(for: scenario.players, lods: [.near, .far])
+        try ReplaySkinnedAthleteProvider.prewarm()
+        try ReplaySkinnedAthleteProvider.prewarmLowDetail()
+        try ReplayFarAthleteHeadProvider.prewarm()
+        try ReplayStrategyBallProvider.prewarm()
+        try ReplayStrategyPitchProvider.prewarm()
+        let match = PitchSceneFactory.makeMatchRoot(for: scenario)
+        defer { for child in Array(match.children) { child.removeFromParent() } }
+        PitchSceneFactory.update(root: match, scenario: scenario, time: time,
+            viewMode: .touchline, perspectiveID: scenario.defaultPerspectiveID,
+            marks: scenario.coachMarks, showsLaneLens: false, isDrawing: false,
+            positionalOriginTransform: nil)
+        XCTAssertEqual(match.scale, SIMD3<Float>(repeating: 0.060))
+        XCTAssertEqual(match.position, [0, 0.02, -4.1])
+        let pitch = try XCTUnwrap(match.findEntity(named: "pitch"))
+        XCTAssertNotNil(pitch.components[ReplayStrategyPitchProvider.Admission.self])
+        let fieldSurface = try XCTUnwrap(pitch.findEntity(named: "field-surface"))
+        XCTAssertFalse(fieldSurface.isEnabledInHierarchy,
+                       "Touchline intentionally keeps the room floor visible; only Table/POV show turf")
+        XCTAssertTrue(try XCTUnwrap(pitch.findEntity(named: "pitch-markings-and-goals")).isEnabledInHierarchy)
+        let ball = try XCTUnwrap(match.findEntity(named: "ball"))
+        XCTAssertTrue(ball.isEnabledInHierarchy)
+        XCTAssertTrue(try XCTUnwrap(ball.findEntity(named: ReplayStrategyBallProvider.visualRootName)).isEnabledInHierarchy)
+        let ballPose = scenario.ball.pose(at: time)
+        XCTAssertEqual(ball.position.x, ballPose.position.x)
+        XCTAssertEqual(ball.position.z, ballPose.position.z)
+
+        let players = try XCTUnwrap(match.findEntity(named: "players-root"))
+        XCTAssertEqual(players.children.count, 22)
+        let skins = PitchSceneFactory.skinnedAthletesForTesting(in: match)
+        XCTAssertEqual(skins.count, 4)
+        let nearSkinCount = skins.values.filter { $0.detail == .near && $0.root.isEnabledInHierarchy }.count
+        let lowSkinCount = skins.values.filter { $0.detail == .lowDetail && $0.root.isEnabledInHierarchy }.count
+        XCTAssertEqual(nearSkinCount, 1)
+        XCTAssertEqual(lowSkinCount, 3)
+        let farRigs = players.children.compactMap { player in
+            player.children.first { $0.name == "table-marker" && $0.isEnabledInHierarchy }
+        }
+        XCTAssertEqual(farRigs.count, 18)
+        for rig in farRigs {
+            let head = try XCTUnwrap(rig.findEntity(named: "head") as? ModelEntity)
+            XCTAssertTrue(try XCTUnwrap(head.model).materials.first is PhysicallyBasedMaterial)
+            XCTAssertTrue(head.isEnabledInHierarchy)
+        }
+        let labels = try XCTUnwrap(match.findEntity(named: "player-labels-root"))
+        XCTAssertEqual(labels.children.filter(\.isEnabledInHierarchy).count, 22)
+
+        let camera = PerspectiveCamera()
+        let fieldOfView: Float = 50
+        camera.camera = PerspectiveCameraComponent(near: 0.03, far: 30, fieldOfViewInDegrees: fieldOfView)
+        let observer = match.convert(position: [-70, 0, 0], to: nil)
+        var cameraPosition = SIMD3<Float>(observer.x, 1.6, observer.z)
+        var cameraTarget = ball.position(relativeTo: nil)
+        camera.look(at: cameraTarget, from: cameraPosition, relativeTo: nil)
+        var cameraInverse = camera.transformMatrix(relativeTo: nil).inverse
+        func vector(_ point: SIMD3<Float>) -> [Float] { [point.x, point.y, point.z] }
+        func matrix(_ value: simd_float4x4) -> [Float] { (0..<4).flatMap { column in (0..<4).map { value[column][$0] } } }
+        func projected(_ position: SIMD3<Float>) -> [Float] {
+            let p = cameraInverse * SIMD4<Float>(position, 1)
+            let extent = -p.z * tan(fieldOfView * .pi / 360)
+            return [256 * (1 + p.x / extent), 256 * (1 - p.y / extent), -p.z]
+        }
+        struct MarkReport: Encodable {
+            let id: String, kind: String, label: String
+            let revealTime: Double
+            let enabled: Bool, labelEnabled: Bool, arrowEnabled: Bool
+            let labelRoomPosition: [Float]
+            let arrowRoomPosition: [Float]?
+            let arrowProjectedPixelAndDepth: [Float]?
+        }
+        func markReports() throws -> [MarkReport] {
+            var result: [MarkReport] = []
+            for mark in scenario.coachMarks {
+                let entity = try XCTUnwrap(match.findEntity(named: "mark-\(mark.id.uuidString)"))
+                let label = try XCTUnwrap(entity.findEntity(named: "annotation-label"))
+                let arrow = entity.findEntity(named: "annotation-mark-arrow")
+                XCTAssertEqual(entity.isEnabledInHierarchy, mark.isVisible(at: time))
+                XCTAssertEqual(label.isEnabledInHierarchy, mark.isVisible(at: time))
+                if mark.isVisible(at: time) {
+                    XCTAssertTrue(try XCTUnwrap(arrow).isEnabledInHierarchy)
+                    let point = projected(try XCTUnwrap(arrow).position(relativeTo: nil))
+                    XCTAssertTrue(point.allSatisfy(\.isFinite))
+                    XCTAssertTrue(point[0] >= 0 && point[0] < 512 && point[1] >= 0 && point[1] < 512 && point[2] > 0,
+                                  "Active annotation arrow must be inside the fixed audit view")
+                }
+                result.append(MarkReport(id: mark.id.uuidString, kind: mark.kind.rawValue, label: mark.label,
+                    revealTime: mark.revealTime, enabled: entity.isEnabledInHierarchy,
+                    labelEnabled: label.isEnabledInHierarchy, arrowEnabled: arrow?.isEnabledInHierarchy ?? false,
+                    labelRoomPosition: vector(label.position(relativeTo: nil)),
+                    arrowRoomPosition: arrow.map { vector($0.position(relativeTo: nil)) },
+                    arrowProjectedPixelAndDepth: arrow.map { projected($0.position(relativeTo: nil)) }))
+            }
+            return result
+        }
+        let marks = try markReports()
+        XCTAssertEqual(marks.filter(\.enabled).count, 2)
+        let key = DirectionalLight()
+        key.light.intensity = 2_200
+        key.look(at: cameraTarget, from: cameraTarget + SIMD3<Float>(3, 4, 3), relativeTo: nil)
+        let fill = DirectionalLight()
+        fill.light.intensity = 500
+        fill.look(at: cameraTarget, from: cameraTarget + SIMD3<Float>(-3, 2, 2), relativeTo: nil)
+        let calibrationFrame = try await renderCalibration()
+        let probe = try ReplayRealityRendererAudit.probe(calibrationFrame)
+        let matching = probe.candidates.filter { $0.maximumChannelError <= 4 }
+        guard matching.count == 1, let calibration = matching.first else {
+            throw ReplayRealityRendererAudit.Failure.unsupported("Whole-scene119 capture requires unique native calibration")
+        }
+        let frame = try await render(entities: [match, key, fill, camera], camera: camera, size: 512).frame
+        func pixelCounts(_ image: ReplayRealityRendererAudit.Frame) -> (foreground: Int, colours: Int) {
+            var foreground = 0
+            var colours = Set<UInt32>()
+            for y in 0..<512 {
+                for x in 0..<512 {
+                    let rgba = image.rgba(x: x, y: y, topFirst: calibration.rawRowsAreTopFirst)
+                    if rgba[0] > 8 || rgba[1] > 8 || rgba[2] > 8 { foreground += 1 }
+                    if x.isMultiple(of: 4), y.isMultiple(of: 4) {
+                        colours.insert((UInt32(rgba[0] / 4) << 12) | (UInt32(rgba[1] / 4) << 6) | UInt32(rgba[2] / 4))
+                    }
+                }
+            }
+            return (foreground, colours.count)
+        }
+        let touchlinePixels = pixelCounts(frame)
+        // A transparent line-only pitch has no justified turf-area threshold.
+        // Prove instead that the actual timed marks change rendered pixels,
+        // while preserving every flag and the camera for the positive capture.
+        let marksRoot = try XCTUnwrap(match.findEntity(named: "marks-root"))
+        let originalMarksEnabled = marksRoot.isEnabled
+        let withoutMarks: ReplayRealityRendererAudit.Frame
+        do {
+            defer { marksRoot.isEnabled = originalMarksEnabled }
+            marksRoot.isEnabled = false
+            withoutMarks = try await render(entities: [match, key, fill, camera], camera: camera, size: 512).frame
+        }
+        XCTAssertEqual(marksRoot.isEnabled, originalMarksEnabled)
+        var marksDifferencePixels = 0
+        for offset in stride(from: 0, to: frame.bgra.count, by: 4) {
+            if frame.bgra[offset] != withoutMarks.bgra[offset]
+                || frame.bgra[offset + 1] != withoutMarks.bgra[offset + 1]
+                || frame.bgra[offset + 2] != withoutMarks.bgra[offset + 2] { marksDifferencePixels += 1 }
+        }
+        XCTAssertGreaterThan(marksDifferencePixels, 0, "Timed marks must visibly contribute, not merely exist in the graph")
+        XCTAssertGreaterThan(touchlinePixels.foreground, marksDifferencePixels,
+                             "Players/pitch context must remain beyond the annotation difference")
+        XCTAssertGreaterThan(touchlinePixels.colours, 16, "An empty or single clear-colour frame is not scene evidence")
+        struct SceneReport: Encodable {
+            let scope = "Actual factory replay scene with default timed marks. Fixed audit camera/lights, not SwiftUI, compositor, frustum-count or headset readability evidence."
+            let viewMode: String
+            let pitchSurfaceEnabled: Bool
+            let scenarioID: String, perspectiveID: String
+            let time: Double
+            let width = 512, height = 512
+            let cameraRoomPosition: [Float], cameraRoomTarget: [Float], cameraMatrixColumnMajor: [Float]
+            let verticalFieldOfViewDegrees: Float
+            let matchRootMatrixColumnMajor: [Float]
+            let ballPitchPosition: [Float], ballRoomPosition: [Float], ballProjectedPixelAndDepth: [Float]
+            let hierarchyEnabledCounts: [String: Int]
+            let admittedSkinDetailsByPlayer: [String: String]
+            let assetHashes: [String: String]
+            let marks: [MarkReport]
+            let calibration: ReplayRealityRendererAudit.Calibration
+            let nonBackgroundPixels: Int, sampledQuantizedColourCount: Int
+            let marksVisibleDifferencePixels: Int?
+        }
+        func report(mode: ReplayViewMode, image: ReplayRealityRendererAudit.Frame, markDifference: Int?) throws -> SceneReport {
+            let enabledModels = ReplayStrategyPitchProvider.models(in: match).filter(\.isEnabledInHierarchy)
+            let currentSkins = PitchSceneFactory.skinnedAthletesForTesting(in: match)
+            let currentFar = players.children.compactMap { player in
+                player.children.first { $0.name == "table-marker" && $0.isEnabledInHierarchy }
+            }
+            let currentMarks = try markReports()
+            let pixels = pixelCounts(image)
+            return SceneReport(viewMode: mode.rawValue, pitchSurfaceEnabled: fieldSurface.isEnabledInHierarchy,
+                scenarioID: scenario.id, perspectiveID: scenario.defaultPerspectiveID, time: time,
+                cameraRoomPosition: vector(cameraPosition), cameraRoomTarget: vector(cameraTarget),
+                cameraMatrixColumnMajor: matrix(camera.transformMatrix(relativeTo: nil)), verticalFieldOfViewDegrees: fieldOfView,
+                matchRootMatrixColumnMajor: matrix(match.transform.matrix),
+                ballPitchPosition: vector(ball.position), ballRoomPosition: vector(ball.position(relativeTo: nil)),
+                ballProjectedPixelAndDepth: projected(ball.position(relativeTo: nil)),
+                hierarchyEnabledCounts: ["players": players.children.filter(\.isEnabledInHierarchy).count,
+                    "nearSkins": currentSkins.values.filter { $0.detail == .near && $0.root.isEnabledInHierarchy }.count,
+                    "lowSkins": currentSkins.values.filter { $0.detail == .lowDetail && $0.root.isEnabledInHierarchy }.count,
+                    "farStaticFaces": currentFar.count, "playerLabels": labels.children.filter(\.isEnabledInHierarchy).count,
+                    "coachMarks": currentMarks.filter(\.enabled).count, "modelEntities": enabledModels.count],
+                admittedSkinDetailsByPlayer: currentSkins.mapValues { String(describing: $0.detail) },
+                assetHashes: ["pitch": ReplayStrategyPitchProvider.assetSHA256, "ball": ReplayStrategyBallProvider.assetSHA256,
+                    "nearSkin": ReplaySkinnedAthleteProvider.assetSHA256, "lowSkin": ReplaySkinnedAthleteProvider.lowAssetSHA256,
+                    "staticFarHead": ReplayFarAthleteHeadProvider.expectedSHA256],
+                marks: currentMarks, calibration: calibration, nonBackgroundPixels: pixels.foreground,
+                sampledQuantizedColourCount: pixels.colours, marksVisibleDifferencePixels: markDifference)
+        }
+        let touchlineReport = try report(mode: .touchline, image: frame, markDifference: marksDifferencePixels)
+        try attachJSON(touchlineReport, named: "ReplayXI-RealityRenderer119-TouchlineScene.json")
+        try attachPNG(frame, calibration: calibration, named: "ReplayXI-RealityRenderer119-TouchlineScene.png")
+
+        // Separate actual Table presentation proves the admitted turf material.
+        // Do not force a field into Touchline or move its camera for this proof.
+        PitchSceneFactory.update(root: match, scenario: scenario, time: time,
+            viewMode: .tacticalTable, perspectiveID: scenario.defaultPerspectiveID,
+            marks: scenario.coachMarks, showsLaneLens: false, isDrawing: false,
+            positionalOriginTransform: nil)
+        XCTAssertEqual(match.scale, SIMD3<Float>(repeating: 0.0255))
+        XCTAssertTrue(fieldSurface.isEnabledInHierarchy)
+        cameraPosition = [0, 1.6, 0]
+        cameraTarget = match.position
+        camera.look(at: cameraTarget, from: cameraPosition, relativeTo: nil)
+        cameraInverse = camera.transformMatrix(relativeTo: nil).inverse
+        let tacticalFrame = try await render(entities: [match, key, fill, camera], camera: camera, size: 512).frame
+        let tacticalReport = try report(mode: .tacticalTable, image: tacticalFrame, markDifference: nil)
+        XCTAssertGreaterThan(tacticalReport.nonBackgroundPixels, 5_000)
+        XCTAssertGreaterThan(tacticalReport.sampledQuantizedColourCount, 16)
+        XCTAssertEqual(tacticalReport.hierarchyEnabledCounts["coachMarks"], 2)
+        XCTAssertEqual(tacticalReport.hierarchyEnabledCounts["players"], 22)
+        XCTAssertEqual(tacticalReport.hierarchyEnabledCounts["nearSkins"], 1)
+        XCTAssertEqual(tacticalReport.hierarchyEnabledCounts["lowSkins"], 3)
+        XCTAssertEqual(tacticalReport.hierarchyEnabledCounts["farStaticFaces"], 18)
+        try attachJSON(tacticalReport, named: "ReplayXI-RealityRenderer119-TacticalScene.json")
+        try attachPNG(tacticalFrame, calibration: calibration, named: "ReplayXI-RealityRenderer119-TacticalScene.png")
+    }
+
     func testCapturesRuntimeLowPlayerWithFootballPoseAndJerseyNumbers() async throws {
         ReplaySkinnedAthleteProvider.resetForTesting()
         ReplayAthleteHeadProvider.resetForTesting()

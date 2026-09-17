@@ -468,9 +468,15 @@ enum ReplayAthleteFactory {
         // the torso while the head rotates independently.  The two-joint chain
         // lets the motion solver distribute a footballer's gaze naturally and
         // keeps the head/neck silhouette connected through wide scans.
-        let texturedHead = lod == .near
-            ? ReplayAthleteHeadProvider.make(appearance: configuration.appearance)
-            : nil
+        let texturedHead: ModelEntity?
+        switch lod {
+        case .near:
+            texturedHead = ReplayAthleteHeadProvider.make(appearance: configuration.appearance)
+        case .far:
+            texturedHead = ReplayFarAthleteHeadProvider.make(appearance: configuration.appearance)
+        case .mid:
+            texturedHead = nil
+        }
         let neck = Entity()
         neck.name = ReplayAthleteJoint.neck.rawValue
         neck.position = [0, 0.585, 0]
@@ -495,8 +501,9 @@ enum ReplayAthleteFactory {
         if let texturedHead {
             headRoot.addChild(texturedHead)
             metrics.modelEntities += 1
-            metrics.verticesPerInstance += ReplayAthleteHeadProvider.metrics.vertices
-            metrics.trianglesPerInstance += ReplayAthleteHeadProvider.metrics.triangles
+            let headMetrics = lod == .far ? ReplayFarAthleteHeadProvider.metrics : ReplayAthleteHeadProvider.metrics
+            metrics.verticesPerInstance += headMetrics.vertices
+            metrics.trianglesPerInstance += headMetrics.triangles
         } else {
             try addCustomModel(.head, named: "head", to: headRoot, material: skinMaterial)
             if lod != .far {

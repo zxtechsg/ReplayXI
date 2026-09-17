@@ -140,6 +140,15 @@ struct ReplayDashboardView: View {
                     print("Replay XI low-detail players unavailable; keeping existing player visuals: \(error)")
                     #endif
                 }
+                // Distant players share one static face and the existing skin
+                // palettes. No extra skeleton or per-frame resource load.
+                do {
+                    try ReplayFarAthleteHeadProvider.prewarm()
+                } catch {
+                    #if DEBUG
+                    print("Replay XI distant-player faces unavailable; keeping standard heads: \(error)")
+                    #endif
+                }
                 // Optional visual admission; a missing/corrupt asset retains the
                 // procedural ball without blocking playback or loading per frame.
                 do {

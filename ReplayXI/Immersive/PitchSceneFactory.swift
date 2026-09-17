@@ -828,6 +828,10 @@ enum PitchSceneFactory {
         )
 
         if let playersRoot = directChild(named: "players-root", of: root) {
+            // Resolve the developer preference once for this update, not once
+            // per already-cached skin. Keep unprepared fallback reads at zero.
+            let importedPlayerPilotIsEnabled = ReplaySkinnedAthleteProvider.isPrewarmed
+                && ReplayImportedAthleteFeatureGate.isEnabled
             sceneState?.preparePlayerEntityIndex(
                 playersRoot: playersRoot,
                 scenario: scenario
@@ -861,7 +865,7 @@ enum PitchSceneFactory {
                 nearPlayerIDs: nearSkinIDs,
                 maximumTotal: ReplaySkinnedAthleteProvider.maximumConcurrentInstances,
                 lowDetailIsReady: ReplaySkinnedAthleteProvider.isLowDetailPrewarmed
-                    && !ReplayImportedAthleteFeatureGate.isEnabled
+                    && !importedPlayerPilotIsEnabled
             )
             var admittedSkinDetails = Dictionary(
                 uniqueKeysWithValues: nearSkinIDs.map { ($0, ReplaySkinnedAthleteProvider.Detail.near) }
@@ -1032,7 +1036,7 @@ enum PitchSceneFactory {
                 let usesLegacySkin = hasImportedAthlete && importedMotionIsSupported && !hasBallAction
                 if canUseAdmittedSkin, let admittedSkinDetail,
                    ReplaySkinnedAthleteProvider.isPrewarmed,
-                   !ReplayImportedAthleteFeatureGate.isEnabled,
+                   !importedPlayerPilotIsEnabled,
                    let sceneState, sceneState.skinnedAthletes[player.id] == nil,
                    sceneState.skinnedAthletes.count < ReplaySkinnedAthleteProvider.maximumConcurrentInstances,
                    !sceneState.skinnedAthleteFailedVariants.contains(

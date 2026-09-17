@@ -17,6 +17,41 @@ the user explicitly requests multiplayer again.
 - Local positioning markers and headset-relative feedback after clear-area consent.
 - Licensed rigged player assets and rendering budgets.
 
+## Quick demo
+
+1. Choose **Match Replay** or **Strategy Analysis**, then enter the spatial room.
+2. Use Play, Speed and the timeline. Pinch-drag horizontally to seek; raise the
+   held pinch for finer control. The rail supports frame-sized steps.
+3. Pinch a player or shirt tag to pause at that moment and enter their POV.
+   The player moves along the authored run; your head controls where you look.
+   The player menu also offers all 22 roles across both teams.
+4. Open **Draw**, choose a run/pass/zone, and pinch-drag on the pitch. Release
+   to save. Two taps are the alternative. Label uses a player tap.
+5. Select a mark to adjust its endpoints, height, timing, label or player
+   binding. Undo, Erase and confirmed Clear affect your marks, not lesson marks.
+6. Open **Tools → Reviews** to save or load a local review. The unfinished
+   gesture is not a saved edit. Normal app launches restore the local autosave.
+
+Controls stay fixed in the room. **Place controls here** moves them once; it
+does not restore head-following. Views and Tools keep secondary options folded
+away. Touchline intentionally uses a transparent pitch surface; Tactical and
+Player POV show the turf. Stay seated or stationary in a clear area.
+
+## Current visual limits
+
+The pitch and panelled ball are original Blender assets. Player bodies derive
+from the bundled MIT-licensed Rocketbox source, not EA/FIFA assets. Up to four
+skinned players are admitted in Tactical/Touchline; POV remains capped at two.
+Spare tactical slots use the lighter skin, and remaining players use articulated
+far rigs with a shared static face. Missing optional assets keep the fallback.
+This is still visibly simplified game art, not FIFA-level fidelity.
+
+Every bundled match is synthetic. The app does not contain a reconstructed
+60-second real match, recovered player gaze, live camera capture or a Gaussian
+world. See [the reference workflow](BLENDER_MATCH_WORKFLOW.md) for the unfinished
+video-reference path. Native offscreen renders and CPU tests are not a headset
+comfort, gesture or frame-rate validation.
+
 ## Removed
 
 - Group Activities entitlement, imports, activity registration and scene associations.
@@ -52,7 +87,11 @@ and physical-headset performance/gesture validation are still unfinished.
 - Full existing app suite continues to cover saved reviews, gestures, geometry,
   imported rigs and deterministic playback.
 
-Verified 10 September 2026: simulator suite — 378 passed, 1 skipped (optional
+Latest verified 17 September 2026: simulator suite — 913 passed, one optional
+skip, zero failures; unsigned device Release passed. See
+[loops 115–120](VERIFIED_BATCH_115_120_2026-09-17.md) for exact receipts and limits.
+
+Earlier baseline, 10 September 2026: simulator suite — 378 passed, 1 skipped (optional
 transient asset fixture absent); capability guards — 4 passed. Simulator and
 unsigned visionOS device builds passed. The simulator app has empty entitlements
 and no Group Activities framework link. Physical-device signing and placement

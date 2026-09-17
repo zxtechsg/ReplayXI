@@ -20,6 +20,7 @@ final class ReplaySceneWorkDiagnosticsTests: XCTestCase {
 
     private func resetPreparedTestState() {
         ReplaySkinnedAthleteProvider.resetForTesting()
+        ReplayFarAthleteHeadProvider.resetForTesting()
         ReplayImportedAthleteProvider.resetPrewarmForTesting()
         ReplayAthleteHeadProvider.resetForTesting()
         ReplayFarAthletePaletteProvider.resetForTesting()
@@ -37,7 +38,11 @@ final class ReplaySceneWorkDiagnosticsTests: XCTestCase {
         try recordFullSquad(lowDetail: true)
     }
 
-    private func recordFullSquad(lowDetail: Bool) throws {
+    func testRecordsRoomReadyMixedSkinsAndStaticFacesWithoutHotPathLoads() throws {
+        try recordFullSquad(lowDetail: true, farFaces: true)
+    }
+
+    private func recordFullSquad(lowDetail: Bool, farFaces: Bool = false) throws {
         try XCTSkipIf(ReplayImportedAthleteFeatureGate.isEnabled,
                       "This baseline measures default admission, not the opt-in imported pilot")
         let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay))
@@ -51,12 +56,16 @@ final class ReplaySceneWorkDiagnosticsTests: XCTestCase {
         try ReplayAthleteFactory.prewarm(for: scenario.players, lods: [.near, .far])
         try ReplaySkinnedAthleteProvider.prewarm()
         if lowDetail { try ReplaySkinnedAthleteProvider.prewarmLowDetail() }
+        if farFaces { try ReplayFarAthleteHeadProvider.prewarm() }
         try ReplayStrategyBallProvider.prewarm()
         try ReplayStrategyPitchProvider.prewarm()
         XCTAssertTrue(ReplaySkinnedAthleteProvider.isPrewarmed)
         let preparedPaletteCount = ReplayFarAthletePaletteProvider.preparedPaletteCount
         let preparedTextureCount = ReplayFarAthletePaletteProvider.cachedTextureCount
         let palettePreparationAttempts = ReplayFarAthletePaletteProvider.preparationAttemptCount
+        let facePreparationAttempts = ReplayFarAthleteHeadProvider.preparationAttemptCount
+        let faceMeshLoads = ReplayFarAthleteHeadProvider.meshLoadCount
+        XCTAssertEqual(faceMeshLoads, farFaces ? 1 : 0)
 
         // Half-second samples span the complete authored move. Exact cue times
         // also cover receive/overlap/cut-back boundaries, then the same path is
@@ -73,6 +82,9 @@ final class ReplaySceneWorkDiagnosticsTests: XCTestCase {
         XCTAssertEqual(ReplayFarAthletePaletteProvider.cachedTextureCount, preparedTextureCount)
         XCTAssertEqual(ReplayFarAthletePaletteProvider.preparationAttemptCount, palettePreparationAttempts,
                        "Steady scene updates must not prepare new far textures")
+        XCTAssertEqual(ReplayFarAthleteHeadProvider.preparationAttemptCount, facePreparationAttempts)
+        XCTAssertEqual(ReplayFarAthleteHeadProvider.meshLoadCount, faceMeshLoads,
+                       "Static faces must not load an asset during playback or view transitions")
         XCTAssertEqual(ReplaySkinnedAthleteProvider.maximumConcurrentInstances, 4)
         XCTAssertEqual(PitchSceneFactory.firstPersonDetailedRigLimit, 2)
         let report: [String: Any] = [
@@ -90,6 +102,7 @@ final class ReplaySceneWorkDiagnosticsTests: XCTestCase {
             "laneLens": false,
             "skinCap": ReplaySkinnedAthleteProvider.maximumConcurrentInstances,
             "lowDetailAdmission": lowDetail,
+            "staticFarFaces": farFaces,
             "firstPersonSkinCap": PitchSceneFactory.firstPersonDetailedRigLimit,
             "preparedFarPalettes": preparedPaletteCount,
             "preparedFarTextures": preparedTextureCount,
@@ -99,7 +112,8 @@ final class ReplaySceneWorkDiagnosticsTests: XCTestCase {
         ]
         let data = try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys])
         let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
-        attachment.name = lowDetail ? "ReplayXI-Scene113-MixedCPUWork.json" : "ReplayXI-Scene107-CPUWork.json"
+        attachment.name = farFaces ? "ReplayXI-Scene116-FacesCPUWork.json"
+            : (lowDetail ? "ReplayXI-Scene113-MixedCPUWork.json" : "ReplayXI-Scene107-CPUWork.json")
         attachment.lifetime = .keepAlways
         add(attachment)
     }

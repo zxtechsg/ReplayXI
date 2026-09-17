@@ -2738,8 +2738,8 @@ private struct ImmersiveControlDeck: View {
                 inlineChoiceDivider
 
                 AnnotationAdjustmentJoystick(
-                    title: "START",
-                    accessibilityTarget: "start point",
+                    title: annotationStartPointTitle(for: mark.kind),
+                    accessibilityTarget: annotationStartPointAccessibilityTarget(for: mark.kind),
                     color: annotationColor(for: mark.kind),
                     isEnabled: annotationJoystickIsEnabled(markID: mark.id, endpoint: .start),
                     onPreview: { gestureID, x, z in
@@ -2936,7 +2936,7 @@ private struct ImmersiveControlDeck: View {
     ) -> String {
         switch target {
         case .start: "annotation start"
-        case .end: kind == .space ? "opposite corner" : "arrow point"
+        case .end: kind == .space ? "zone edge" : "arrow point"
         case .both: kind == .space ? "zone" : "whole annotation"
         }
     }
@@ -2959,9 +2959,17 @@ private struct ImmersiveControlDeck: View {
         elevation.formatted(.number.precision(.fractionLength(2))) + " M"
     }
 
+    private func annotationStartPointTitle(for kind: CoachMarkKind) -> String {
+        kind == .space ? "CENTRE" : "START"
+    }
+
+    private func annotationStartPointAccessibilityTarget(for kind: CoachMarkKind) -> String {
+        kind == .space ? "zone centre" : "start point"
+    }
+
     private func annotationEndPointTitle(for kind: CoachMarkKind) -> String {
         switch kind {
-        case .space: "CORNER"
+        case .space: "EDGE"
         case .run, .pass, .danger: "ARROW TIP"
         case .playerLabel: "PLAYER"
         }
@@ -2972,12 +2980,25 @@ private struct ImmersiveControlDeck: View {
         endpoint: CoachMarkEndpoint
     ) -> Bool {
         guard !store.hasActiveTimelineScrub else { return false }
-        guard let owner = store.activeCoachMarkEndpointPreviewOwner else { return true }
+        guard let owner = store.activeCoachMarkEndpointPreviewOwner else {
+            // A world handle owns geometry without creating a joystick owner.
+            return !store.hasActiveCoachMarkGeometryPreview
+        }
         return owner == CoachMarkEndpointPreviewOwner(markID: markID, endpoint: endpoint)
     }
 
     private func annotationEndPointAccessibilityTarget(for kind: CoachMarkKind) -> String {
-        kind == .space ? "opposite corner" : "arrow point"
+        kind == .space ? "zone edge" : "arrow point"
+    }
+
+    private func annotationMovementTargetName(
+        _ endpoint: CoachMarkEndpoint,
+        kind: CoachMarkKind
+    ) -> String {
+        switch endpoint {
+        case .start: kind == .space ? "zone centre" : "start"
+        case .end: kind == .space ? "zone edge" : "arrow point"
+        }
     }
 
     /// A selected coach mark can follow any shirt in either XI without opening
@@ -3027,9 +3048,11 @@ private struct ImmersiveControlDeck: View {
                     .buttonStyle(.borderedProminent)
                     .tint(isFixedToPitch ? color : .white.opacity(0.10))
                     .foregroundStyle(isFixedToPitch ? Color.black : Color.white)
-                    .disabled(isFixedToPitch)
+                    .disabled(isFixedToPitch || !store.canChangePlaybackView)
                     .accessibilityLabel("Fix annotation to pitch")
-                    .accessibilityHint("Stops both annotation points following a player")
+                    .accessibilityHint(store.canChangePlaybackView
+                        ? "Stops both annotation points following a player"
+                        : "Finish or cancel the current gesture first")
                     .accessibilityAddTraits(isFixedToPitch ? .isSelected : [])
                 }
 
@@ -3104,11 +3127,14 @@ private struct ImmersiveControlDeck: View {
         }
         .buttonStyle(.plain)
         .hoverEffect(.highlight)
+        .disabled(!store.canChangePlaybackView)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
             "Follow \(player.team.shortTitle) number \(player.shirtNumber), \(player.role)"
         )
-        .accessibilityHint("Keeps both annotation points at their current offsets from this player")
+        .accessibilityHint(store.canChangePlaybackView
+            ? "Keeps both annotation points at their current offsets from this player"
+            : "Finish or cancel the current gesture first")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
@@ -3129,6 +3155,7 @@ private struct ImmersiveControlDeck: View {
     }
 
     private func setAnnotationTracking(_ mark: CoachMark, playerID: String?) {
+        guard store.canChangePlaybackView else { return }
         guard store.setCoachMarkTracking(id: mark.id, playerID: playerID) else { return }
         if let playerID,
            let player = store.selectedScenario.player(id: playerID) {
@@ -3165,6 +3192,7 @@ private struct ImmersiveControlDeck: View {
                     ForEach(mark.kind.suggestedLabels, id: \.self) { label in
                         let isSelected = label == mark.label
                         Button {
+                            guard store.canChangePlaybackView else { return }
                             if store.updateCoachMarkLabel(id: mark.id, label: label) {
                                 annotationConfirmation = "LABEL · \(label.uppercased())"
                                 inlinePanel = nil
@@ -3179,8 +3207,11 @@ private struct ImmersiveControlDeck: View {
                         .buttonStyle(.borderedProminent)
                         .tint(isSelected ? annotationColor(for: mark.kind) : .white.opacity(0.10))
                         .foregroundStyle(isSelected ? Color.black : Color.white)
-                        .disabled(isSelected)
+                        .disabled(isSelected || !store.canChangePlaybackView)
                         .accessibilityLabel(label)
+                        .accessibilityHint(store.canChangePlaybackView
+                            ? "Updates this annotation's label"
+                            : "Finish or cancel the current gesture first")
                         .accessibilityAddTraits(isSelected ? .isSelected : [])
                     }
                 }
@@ -3507,6 +3538,7 @@ private struct ImmersiveControlDeck: View {
         }
         .buttonStyle(.plain)
         .hoverEffect(.highlight)
+        .disabled(playerControlIsDisabled)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
             "\(player.team.shortTitle), number \(player.shirtNumber), \(player.role)"
@@ -3521,7 +3553,11 @@ private struct ImmersiveControlDeck: View {
         "22 PLAYER POV"
     }
 
-    private var playerPOVAccessibilityHint: String { "Opens this player's free-look point of view" }
+    private var playerPOVAccessibilityHint: String {
+        playerControlIsDisabled
+            ? "Finish or cancel the current gesture first"
+            : "Opens this player's free-look point of view"
+    }
 
     private func teamAccent(_ team: FootballTeam) -> Color {
         team == .home ? ReplayTheme.cyan : ReplayTheme.orange
@@ -4383,28 +4419,28 @@ private struct ImmersiveControlDeck: View {
         .accessibilityAddTraits(
             inlinePanel == .annotationGeometry(mark.id) ? .isSelected : []
         )
-        .accessibilityAction(named: "Move start left") {
+        .accessibilityAction(named: "Move \(annotationMovementTargetName(.start, kind: mark.kind)) left") {
             nudgeAnnotation(mark, endpoint: .start, x: -0.25, z: 0)
         }
-        .accessibilityAction(named: "Move start right") {
+        .accessibilityAction(named: "Move \(annotationMovementTargetName(.start, kind: mark.kind)) right") {
             nudgeAnnotation(mark, endpoint: .start, x: 0.25, z: 0)
         }
-        .accessibilityAction(named: "Move start upfield") {
+        .accessibilityAction(named: "Move \(annotationMovementTargetName(.start, kind: mark.kind)) upfield") {
             nudgeAnnotation(mark, endpoint: .start, x: 0, z: 0.25)
         }
-        .accessibilityAction(named: "Move start back") {
+        .accessibilityAction(named: "Move \(annotationMovementTargetName(.start, kind: mark.kind)) back") {
             nudgeAnnotation(mark, endpoint: .start, x: 0, z: -0.25)
         }
-        .accessibilityAction(named: "Move arrow point left") {
+        .accessibilityAction(named: "Move \(annotationMovementTargetName(.end, kind: mark.kind)) left") {
             nudgeAnnotation(mark, endpoint: .end, x: -0.25, z: 0)
         }
-        .accessibilityAction(named: "Move arrow point right") {
+        .accessibilityAction(named: "Move \(annotationMovementTargetName(.end, kind: mark.kind)) right") {
             nudgeAnnotation(mark, endpoint: .end, x: 0.25, z: 0)
         }
-        .accessibilityAction(named: "Move arrow point upfield") {
+        .accessibilityAction(named: "Move \(annotationMovementTargetName(.end, kind: mark.kind)) upfield") {
             nudgeAnnotation(mark, endpoint: .end, x: 0, z: 0.25)
         }
-        .accessibilityAction(named: "Move arrow point back") {
+        .accessibilityAction(named: "Move \(annotationMovementTargetName(.end, kind: mark.kind)) back") {
             nudgeAnnotation(mark, endpoint: .end, x: 0, z: -0.25)
         }
     }
@@ -4466,12 +4502,8 @@ private struct ImmersiveControlDeck: View {
         let distanceLabel = distance.formatted(
             .number.precision(.fractionLength(distance < 1 ? 2 : 1))
         )
-        switch endpoint {
-        case .start:
-            annotationConfirmation = "START MOVED · \(distanceLabel) M"
-        case .end:
-            annotationConfirmation = "ARROW POINT MOVED · \(distanceLabel) M"
-        }
+        let targetName = annotationMovementTargetName(endpoint, kind: mark.kind).uppercased()
+        annotationConfirmation = "\(targetName) MOVED · \(distanceLabel) M"
         return appliedDelta
     }
 
@@ -4525,12 +4557,8 @@ private struct ImmersiveControlDeck: View {
         let distanceLabel = distance.formatted(
             .number.precision(.fractionLength(distance < 1 ? 2 : 1))
         )
-        switch endpoint {
-        case .start:
-            annotationConfirmation = "START MOVED · \(distanceLabel) M"
-        case .end:
-            annotationConfirmation = "ARROW POINT MOVED · \(distanceLabel) M"
-        }
+        let targetName = annotationMovementTargetName(endpoint, kind: mark.kind).uppercased()
+        annotationConfirmation = "\(targetName) MOVED · \(distanceLabel) M"
         return appliedDelta
     }
 

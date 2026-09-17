@@ -28,6 +28,13 @@ These native controls supersede Loop 99's offline UV-origin/band-placement concl
 - After sample data: `/private/tmp/replayxi-palette110-after-02/3C992D97-5B4A-4A03-8C6A-036CDC355549.json`.
 - After strips: `/private/tmp/replayxi-palette110-after-02/DAB1A3E7-C456-4F7E-9966-5100AEA4562E.png`.
 - Actual native far avatar after: `/private/tmp/replayxi-native110-avatar-01/79FBDFA8-E7CC-4B2D-9182-9A59BE32A97C.png`. Inspection confirms shirt at upper arm, exposed lower arm/thighs and socks below the knees. Both after images embed Display P3.
-- Full native/Release checks remain pending with root.
+- Full native after: `/private/tmp/replayxi-parallel102-114-full-02.xcresult`,
+  883 total,882 passed, one optional skip, zero failures. Release remains pending.
+- Fresh actual-mesh export from full01:
+  `/private/tmp/replayxi-palette110-native-meshes-01/613EBAF8-5959-432F-8CD7-7A0C49EF333F.json`.
+  The corrected offline conversion completed in
+  `.codex-derived/ReplayXI-Far110-CorrectedNativeUV-01/`; both home/away corrected
+  images were inspected. Sleeve/thigh/sock placement agrees with native output.
+  Blender's different lighting is illustrative, not a pixel match or headset check.
 
 Tests use the public calibrated RealityRenderer path, async GPU completion and a ten-second deadline. No app logic was edited by the audit agent. No new player asset, near/mid rig, pose, camera mode, annotation, save format or network capability is introduced. No headset validation or FPS claim.
