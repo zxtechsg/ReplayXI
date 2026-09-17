@@ -174,6 +174,22 @@ No app USDZ, motion JSON or other app asset was replaced.
 
 ## Safety and limits
 
+### Reference 129 follow-up receipt
+
+The optional all-player route is now exercised for `final-81-volley-v2`:
+22 native rigs at 20 Hz plus exact contacts, 4,708 poses, 376,640 verified bone
+matrices, 9,328 root samples and 1,261 ball samples. Source JSON SHA-256 is
+`685267b1c47d17fb260374d57c8b328e39fcf34af914cf50e0bd545cbbfe2b98`.
+Root/ball timestamp errors are zero and the maximum matrix-element error is
+`3.82e-6`. These are mapping checks, not motion-capture or visual-realism scores.
+
+The new copy is `.codex-derived/Reference129/ReplayXI-Volley-Native22-01.blend`.
+It preserves all earlier scenes and the user's original untitled file path.
+A 30 fps, 4.83-second native-pose review render accompanies it. See
+`REFERENCE129_CHECKPOINT.md` for tests, visual limits and saved-work receipts.
+The addon enforces a 200,000-byte safe-script limit; retain the generated small
+data steps or keep ordered, length-guarded batches below that limit.
+
 Blender MCP connected to Blender 5.2.1 LTS, addon 1.6/protocol 5. Telemetry is off.
 Safe mode stays enabled. `.blend` library loading was rejected, so the workflow
 uses permitted USD imports; it does not bypass that restriction with another tool.
