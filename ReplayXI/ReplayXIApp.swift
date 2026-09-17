@@ -5,6 +5,7 @@ struct ReplayXIApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @State private var store: ReplayStore
     @State private var sharedSpace: LocalPitchAnchorCoordinator
+    @State private var comparisonSession = ReplayConversionPreviewSession()
 
     init() {
         // Test hosts and scripted demos never touch production saves. A normal
@@ -36,11 +37,20 @@ struct ReplayXIApp: App {
             ReplayDashboardView()
                 .environment(store)
                 .environment(sharedSpace)
+                .environment(comparisonSession)
         }
         .defaultSize(width: 1_380, height: 820)
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { store.flushReviewAutosave() }
         }
+
+        WindowGroup(id: "ReplayVideoComparison", for: String.self) { _ in
+            ReplayReferenceVideoWindow()
+                .environment(store)
+                .environment(comparisonSession)
+        }
+        .defaultSize(width: 1_280, height: 760)
+        .windowResizability(.contentMinSize)
 
         ImmersiveSpace(id: "ReplayRoom", for: UUID.self) { $requestID in
             if let requestID {

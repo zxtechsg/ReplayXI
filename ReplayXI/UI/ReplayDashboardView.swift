@@ -3,8 +3,10 @@ import SwiftUI
 struct ReplayDashboardView: View {
     @Environment(ReplayStore.self) private var store
     @Environment(LocalPitchAnchorCoordinator.self) private var sharedSpace
+    @Environment(ReplayConversionPreviewSession.self) private var comparisonSession
     @Environment(\.openImmersiveSpace) private var openImmersiveSpace
     @Environment(\.dismissWindow) private var dismissWindow
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         HStack(spacing: 0) {
@@ -13,7 +15,7 @@ struct ReplayDashboardView: View {
 
             Divider().opacity(0.5)
 
-            ScenarioWorkspace(openRoom: openRoom)
+            ScenarioWorkspace(openRoom: openRoom, openComparison: openComparison)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             Divider().opacity(0.5)
@@ -110,6 +112,9 @@ struct ReplayDashboardView: View {
                                                        curve: .init(bend: 4, lift: 1))
                 }
             }
+            if arguments.contains("--replayxi-comparison") {
+                openComparison()
+            }
             if arguments.contains("--replayxi-autostart") {
                 try? await Task.sleep(for: .milliseconds(750))
                 openRoom()
@@ -119,115 +124,19 @@ struct ReplayDashboardView: View {
     }
 
     private func openRoom() {
-        guard let requestID = store.beginImmersiveOpen() else { return }
-        Task {
-            do {
-                // Meshes and geometric shirt digits are finite and shared.
-                // Warm them before RealityView starts its frame loop so the
-                // first close player or impact cue cannot hitch playback.
-                try ReplayAthleteFactory.prewarm(
-                    for: store.scenarios.flatMap(\.players),
-                    lods: [.near, .far]
-                )
-                // An explicit developer opt-in may admit one hash-locked CC0
-                // skinned athlete for profiling. The pilot is fail-soft and
-                // never blocks the room. It remains separate from the licensed
-                // Rocketbox body and the procedural football-action fallback.
-                _ = try? ReplayImportedAthleteProvider.prewarm()
-                // The licensed single-skeleton body is prepared once before
-                // presentation. Failed admission keeps the working fallback.
-                do {
-                    try ReplaySkinnedAthleteProvider.prewarm()
-                } catch {
-                    #if DEBUG
-                    print("Replay XI skinned-player preparation failed; using standard rig: \(error)")
-                    #endif
-                }
-                // Neighbours use the cheaper canonical skin only inside the
-                // existing four-player budget. Its complete contact profile
-                // and shared kit materials are prepared once, not per frame.
-                do {
-                    try ReplaySkinnedAthleteProvider.prewarmLowDetail()
-                } catch {
-                    #if DEBUG
-                    print("Replay XI low-detail players unavailable; keeping existing player visuals: \(error)")
-                    #endif
-                }
-                // Distant players share one static face and the existing skin
-                // palettes. No extra skeleton or per-frame resource load.
-                do {
-                    try ReplayFarAthleteHeadProvider.prewarm()
-                } catch {
-                    #if DEBUG
-                    print("Replay XI distant-player faces unavailable; keeping standard heads: \(error)")
-                    #endif
-                }
-                // Original Blender anatomy bends at knees/elbows while
-                // retaining the far family's seven-model budget. Preparation
-                // is explicit; a failed asset keeps the established fallback.
-                do {
-                    try ReplayArticulatedFarProvider.prewarm()
-                } catch {
-                    #if DEBUG
-                    print("Replay XI articulated players unavailable; keeping standard bodies: \(error)")
-                    #endif
-                }
-                // Optional original kit maps share six tiny textures across
-                // the whole squad. Missing maps retain the solid team colours.
-                _ = try? ReplayArticulatedFarKitProvider.prewarm()
-                // Optional visual admission; a missing/corrupt asset retains the
-                // procedural ball without blocking playback or loading per frame.
-                do {
-                    try ReplayStrategyBallProvider.prewarm()
-                } catch {
-                    #if DEBUG
-                    print("Replay XI Blender ball unavailable; using standard ball: \(error)")
-                    #endif
-                }
-                do {
-                    try ReplayStrategyPitchProvider.prewarm()
-                } catch {
-                    #if DEBUG
-                    print("Replay XI Blender pitch unavailable; using standard pitch: \(error)")
-                    #endif
-                }
-            } catch {
-                guard store.completeImmersiveOpen(requestID, opened: false) else { return }
-                store.statusMessage = "Player renderer could not prepare. Try opening the room again."
-                return
-            }
-            await Task.yield()
-            guard store.roomPresentation.isOpeningRequest(requestID) else { return }
-            // Prepare only the selected study. The room has its own cancellable
-            // admission gate for later switches and restored reviews. Older
-            // demonstrations retain their original authored paths.
-            store.statusMessage = "Preparing ball physics…"
-            let toPrepare = FootballReferenceScenarios.contains(store.selectedScenario)
-                ? [store.selectedScenario] : []
-            do {
-                for scenario in toPrepare {
-                    guard store.roomPresentation.isOpeningRequest(requestID) else { return }
-                    let recording = try await ReplayNativeBallPhysics.prewarm(track: scenario.ball, players: scenario.players,
-                        plannedTouches: FootballReferenceScenarios.touches(for: scenario))
-                    guard recording.missedTouchCount == 0 else {
-                        throw ReplayNativeBallPhysics.Failure.invalidInput
-                    }
-                }
-            } catch {
-                guard store.completeImmersiveOpen(requestID, opened: false) else { return }
-                store.statusMessage = "Ball physics could not prepare. Please try again."
-                return
-            }
-            guard store.roomPresentation.isOpeningRequest(requestID) else { return }
-            store.statusMessage = "Opening spatial replay…"
-            let result = await openImmersiveSpace(id: "ReplayRoom", value: requestID)
-            guard store.completeImmersiveOpen(requestID, opened: result == .opened) else { return }
-            if result == .opened {
-                dismissWindow(id: "ReplayDashboard")
-            } else {
-                store.statusMessage = "The immersive room did not open. Try again."
-            }
-        }
+        ReplayRoomLauncher.open(store: store, openImmersiveSpace: openImmersiveSpace,
+                                dismissWindow: dismissWindow)
+    }
+
+    private func openComparison() {
+        guard FootballReferenceScenarios.contains(store.selectedScenario),
+              !store.hasActiveTimelineScrub, !store.hasActiveCoachMarkGeometryPreview,
+              !store.isRoomPresentationBusy else { return }
+        comparisonSession.capture(scenario: store.selectedScenario, marks: store.marks,
+                                  playhead: store.playhead, perspectiveID: store.activePerspectiveID)
+        // A fixed typed window identity reuses the comparison instead of
+        // starting another renderer and playback clock on repeated taps.
+        openWindow(id: "ReplayVideoComparison", value: "reference-comparison")
     }
 }
 
@@ -449,6 +358,7 @@ private struct ScenarioWorkspace: View {
     @Environment(ReplayStore.self) private var store
 
     let openRoom: () -> Void
+    let openComparison: () -> Void
 
     var scenario: ReplayScenario { store.selectedScenario }
 
@@ -473,6 +383,27 @@ private struct ScenarioWorkspace: View {
                     }
                     Spacer(minLength: 20)
                     StatusPill(text: store.viewMode.title, systemImage: store.viewMode.systemImage)
+                }
+
+                if FootballReferenceScenarios.contains(scenario) {
+                    Button(action: openComparison) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "rectangle.split.2x1")
+                                .font(.title2)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Video → Replay").font(.headline)
+                                Text("Concept demo · compare video with 3D")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 8)
+                            Image(systemName: "arrow.up.forward")
+                        }
+                        .frame(minHeight: 48)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(store.hasActiveTimelineScrub || store.hasActiveCoachMarkGeometryPreview
+                              || store.isRoomPresentationBusy)
+                    .accessibilityHint("Opens source video beside an authored 3D replay, not automatic conversion")
                 }
 
                 if scenario.kind == .shapeLab {
