@@ -4028,6 +4028,27 @@ private struct ImmersiveControlDeck: View {
     }
 
     private var annotationEventStrip: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            annotationEventRow
+            if store.selectedScenario.kind == .realWorldReplay,
+               orderedReviewMarks.count > 1 {
+                Text("Marks may be hidden. Select one here to show it.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity)
+        .background(ReplayTheme.cyan.opacity(0.07), in: RoundedRectangle(cornerRadius: 17))
+        .overlay {
+            RoundedRectangle(cornerRadius: 17)
+                .stroke(ReplayTheme.cyan.opacity(0.24), lineWidth: 1)
+        }
+    }
+
+    private var annotationEventRow: some View {
         HStack(spacing: PlaybackEventRailLayout.horizontalSpacing) {
             Button {
                 guard store.canChangePlaybackView else { return }
@@ -4095,13 +4116,6 @@ private struct ImmersiveControlDeck: View {
                 .accessibilityLabel("Draw annotation")
                 .accessibilityHint("Returns to the annotation tools")
             }
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity)
-        .background(ReplayTheme.cyan.opacity(0.07), in: RoundedRectangle(cornerRadius: 17))
-        .overlay {
-            RoundedRectangle(cornerRadius: 17)
-                .stroke(ReplayTheme.cyan.opacity(0.24), lineWidth: 1)
         }
     }
 

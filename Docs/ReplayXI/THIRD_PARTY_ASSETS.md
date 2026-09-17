@@ -5,21 +5,30 @@
 `ReplayXIFarAthleteHead.usdz` is a reduced copy of the existing MIT Rocketbox
 static head below. No additional third-party source or download was used.
 
-- 540,760 bytes; SHA-256
-  `0e8f602695ca0cca505a462db1e8f6a318b8aa72dcd914e0fcce2986bff3d1ce`.
+- Current package: 21,563 bytes; SHA-256
+  `30b5213f5967da5fa2574f39dfe942b989fe94629994cd10ad7a739c45e32b3f`.
+  Loop122 removes the discarded embedded textures from the original Loop116
+  package (540,760 bytes, hash
+  `0e8f602695ca0cca505a462db1e8f6a318b8aa72dcd914e0fcce2986bff3d1ce`).
 - 486 vertices /749 triangles /one mesh /one material /zero bones.
   The complete far player remains seven model entities, now820 vertices and
   1,225 triangles, inside its existing geometry budget.
-- Reproduction: `Scripts/blender/build_static_far_head_candidate.py`, preserving
-  neck/extrema/scalp UV seams, original material metadata and colour/normal maps.
+- Reproduction: `Scripts/blender/build_static_far_head_candidate.py`, then
+  `Scripts/build_replayxi_far_head_mesh_only_candidate.py`. The second step
+  preserves exact geometry, UVs, normals, transforms and material binding while
+  replacing only the unused imported material with a neutral PBR placeholder.
   The existing bundled MIT notice applies. Original source files are unchanged.
 - Explicit cold preparation, strict hash/native-instance checks and cached mesh.
   Runtime heads share existing five skin palettes and normal map; make/update
-  do not load files. Importer prewarm may transiently load embedded textures.
+  do not load files. This package contains no embedded images; the shared palette
+  provider still prepares its normal textures. No peak-memory/load-time saving
+  is inferred from the smaller package alone.
 - Head-local Y0.125m, mesh X1.07, existing head/neck motion. Near/mid unchanged;
   failure keeps the original ellipsoid. No extra skeleton or facial animation.
 - Native full-body collar/running checks and source/candidate crops are recorded
-  in Loop114/116. This is a simplified far-distance face, not detailed near
+  in Loop114/116. Loop122 additionally verifies exact imported tangent/bitangent
+  equality and six paired native images with zero changed channels. This is a
+  simplified far-distance face, not detailed near
   facial fidelity or a claim of measured headset performance.
 
 ## Bundled lower-detail Rocketbox derivative — 2026-09-17

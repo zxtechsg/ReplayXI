@@ -5,12 +5,13 @@ import simd
 
 /// Static MIT face for the seven-model far rig. Only the mesh is cached here;
 /// colour/normal textures remain owned by the existing five-palette provider.
+/// The package has a neutral placeholder material and no embedded images.
 /// Explicit prewarm is required. Neither make nor animation loads resources.
 @MainActor
 enum ReplayFarAthleteHeadProvider {
     static let resourceName = "ReplayXIFarAthleteHead"
-    static let expectedSHA256 = "0e8f602695ca0cca505a462db1e8f6a318b8aa72dcd914e0fcce2986bff3d1ce"
-    static let expectedBytes = 540_760
+    static let expectedSHA256 = "30b5213f5967da5fa2574f39dfe942b989fe94629994cd10ad7a739c45e32b3f"
+    static let expectedBytes = 21_563
     static let metrics = ReplayAthleteMeshMetrics(vertices: 486, triangles: 749)
 
     enum PreparationError: Error, Equatable {
@@ -45,8 +46,10 @@ enum ReplayFarAthleteHeadProvider {
         let loaded = try Entity.load(contentsOf: url)
         let models = allModels(in: loaded)
         guard models.count == 1, let source = models.first, let component = source.model,
+              let placeholder = component.materials.first as? PhysicallyBasedMaterial,
               isIdentity(loaded.transform.matrix), isIdentity(source.transformMatrix(relativeTo: loaded)),
-              component.materials.count == 1, component.materials.first is PhysicallyBasedMaterial,
+              component.materials.count == 1,
+              placeholder.baseColor.texture == nil, placeholder.normal.texture == nil,
               source.jointNames.isEmpty, source.jointTransforms.isEmpty, source.availableAnimations.isEmpty
         else { throw PreparationError.invalidAsset }
         let contents = component.mesh.contents

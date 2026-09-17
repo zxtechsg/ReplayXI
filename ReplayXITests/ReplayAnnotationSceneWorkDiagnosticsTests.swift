@@ -16,6 +16,11 @@ final class ReplayAnnotationSceneWorkDiagnosticsTests: XCTestCase {
         try diagnose(markCount: 64)
     }
 
+    func testMaximumSavedMarksRejectOverflowAndKeepEndpointWorkBounded() throws {
+        XCTAssertEqual(ReplayStore.maximumSharedCoachMarks, 128)
+        try diagnose(markCount: ReplayStore.maximumSharedCoachMarks)
+    }
+
     private struct ResourceCounts: Codable {
         let markRoots: Int
         let enabledMarkRoots: Int
@@ -72,6 +77,15 @@ final class ReplayAnnotationSceneWorkDiagnosticsTests: XCTestCase {
         }
         XCTAssertEqual(store.marks.count, markCount)
         XCTAssertTrue(store.marks.allSatisfy { !$0.followsPlayerTracks })
+        if markCount == ReplayStore.maximumSharedCoachMarks {
+            let fullHistory = store.marks
+            store.beginDrawing(.run)
+            XCTAssertFalse(store.isDrawing)
+            XCTAssertNil(store.pendingDrawStart)
+            XCTAssertNil(store.registerPitchTap(PitchPoint(x: -30, z: -44)))
+            XCTAssertEqual(store.marks, fullHistory,
+                           "Refusing a new mark must preserve the entire saved history")
+        }
         store.seek(to: 0, broadcast: false)
         let savedMarks = store.marks
         XCTAssertTrue(store.saveReview(named: "Loop 93 \(markCount) marks"))
@@ -86,6 +100,7 @@ final class ReplayAnnotationSceneWorkDiagnosticsTests: XCTestCase {
         // Match-root construction installs only its bundled authored marks.
         // Reset afterwards so cold-load work measures applying the saved marks.
         let root = PitchSceneFactory.makeMatchRoot(for: store.selectedScenario)
+        defer { for child in Array(root.children) { child.removeFromParent() } }
         let marksRoot = try XCTUnwrap(root.findEntity(named: "marks-root"))
         PitchSceneFactory.resetAnnotationSceneWorkForTesting()
         var startedAt = DispatchTime.now().uptimeNanoseconds
@@ -142,6 +157,8 @@ final class ReplayAnnotationSceneWorkDiagnosticsTests: XCTestCase {
         let selectedRoot = try XCTUnwrap(root.findEntity(named: "mark-\(selectedID.uuidString)"))
         XCTAssertTrue(selectedRoot.isEnabled)
         XCTAssertLessThan(resources(in: marksRoot).enabledMarkRoots, markCount)
+        XCTAssertLessThanOrEqual(resources(in: marksRoot).enabledModels,
+                                 PlaybackSceneRenderBudget.normalAnnotationDrawLimit)
 
         let gestureID = UUID()
         PitchSceneFactory.resetAnnotationSceneWorkForTesting()
@@ -165,6 +182,8 @@ final class ReplayAnnotationSceneWorkDiagnosticsTests: XCTestCase {
         // bindings. Resource/tracking correctness is checked independently.
         XCTAssertEqual(previewWork.revisionGeometryUpdates, 60)
         XCTAssertEqual(previewWork.unchangedRevisionGeometryUpdates, 0)
+        XCTAssertLessThanOrEqual(resources(in: marksRoot).enabledModels,
+                                 PlaybackSceneRenderBudget.normalAnnotationDrawLimit)
         phases.append(Phase(
             name: "60_single_endpoint_preview_samples_at_24s",
             updateCount: 60,
@@ -232,7 +251,10 @@ final class ReplayAnnotationSceneWorkDiagnosticsTests: XCTestCase {
         var entityCount = 0
         var modelCount = 0
         var enabledModelCount = 0
-        var glyphResources = Set<ObjectIdentifier>()
+        // Keep Swift resource wrappers alive throughout the walk. Beyond the
+        // shared text-cache capacity, a getter may return a short-lived wrapper
+        // whose address is then reused; bare IDs undercount distinct glyphs.
+        var glyphResources: [ObjectIdentifier: MeshResource] = [:]
         func visit(_ entity: Entity, ancestorsEnabled: Bool) {
             entityCount += 1
             let enabled = ancestorsEnabled && entity.isEnabled
@@ -240,7 +262,8 @@ final class ReplayAnnotationSceneWorkDiagnosticsTests: XCTestCase {
                 modelCount += 1
                 if enabled { enabledModelCount += 1 }
                 if entity.name == "annotation-tag-glyph" {
-                    glyphResources.insert(ObjectIdentifier(model.mesh))
+                    let glyphMesh = model.mesh
+                    glyphResources[ObjectIdentifier(glyphMesh)] = glyphMesh
                 }
             }
             for child in entity.children {

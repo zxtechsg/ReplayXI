@@ -80,6 +80,9 @@ and physical-headset performance/gesture validation are still unfinished.
 
 ## Regression checks
 
+For the remaining manual pass, use the [local-only smoke checklist](LOCAL_DEVICE_SMOKE_CHECK.md).
+It is explicitly unexecuted while the Mac is locked.
+
 - `LocalExperienceTests`: local authority, 22 POVs, annotation editing, scrubbing,
   save/load and local positioning.
 - `Scripts/tests/test_replayxi_local_capabilities.py`: no group entitlement,
@@ -87,9 +90,11 @@ and physical-headset performance/gesture validation are still unfinished.
 - Full existing app suite continues to cover saved reviews, gestures, geometry,
   imported rigs and deterministic playback.
 
-Latest verified 17 September 2026: simulator suite — 913 passed, one optional
+Latest verified 17 September 2026: simulator suite — 920 passed, one optional
 skip, zero failures; unsigned device Release passed. See
-[loops 115–120](VERIFIED_BATCH_115_120_2026-09-17.md) for exact receipts and limits.
+[loops 122–124](VERIFIED_BATCH_122_124_2026-09-17.md) for exact receipts and limits.
+The prior [loops 115–120](VERIFIED_BATCH_115_120_2026-09-17.md) cover annotation
+interaction fixes, clearer controls and the measured CPU update change.
 
 Earlier baseline, 10 September 2026: simulator suite — 378 passed, 1 skipped (optional
 transient asset fixture absent); capability guards — 4 passed. Simulator and
