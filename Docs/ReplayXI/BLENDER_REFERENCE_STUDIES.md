@@ -39,6 +39,61 @@ reuses them without reimporting. Each study gets separate embedded data, so a
 later verified study can be appended without overwriting another scene. The
 scene retains the SHA-256 of its exact original native export.
 
+## Authoring revisions — Reference 130
+
+Use `--scene-suffix motion130` when the same app scenario already exists in
+Blender but a new native animation export needs a separate comparison scene.
+This suffix is **Blender-only**. It does not change the app scenario ID, saved
+review identity, player IDs, contact times or exported motion values.
+
+```sh
+python3 Scripts/blender/build_reference_studies.py \
+  --manifest /path/to/new-native-export.json \
+  --steps-output .codex-derived/Reference130/volley-motion130-steps \
+  --blend-output .codex-derived/Reference130/ReplayXI-Volley-Motion130.blend \
+  --shared-assets-loaded \
+  --scene-suffix motion130
+```
+
+Replace the manifest placeholder with the fresh XCTest export. As before, choose
+new output paths and send the generated steps in order through Blender MCP.
+
+| Identity | Value for this revision |
+|---|---|
+| App scenario / scene `scenarioID` | `final-81-volley-v2` |
+| Authoring-only study ID | `final-81-volley-v2--motion130` |
+| Blender scene | `ReplayXI_Study_final-81-volley-v2--motion130` |
+| Embedded data key | `RX127_Study_final-81-volley-v2--motion130` |
+| Scene / verification `authoringRevision` | `motion130` |
+
+The original `ReplayXI_Study_final-81-volley-v2` scene stays intact. The new
+caption includes the revision label. Scene/verification metadata and `steps.json`
+keep the app scenario ID separate from the authoring ID. `manifestSHA256` still
+identifies the exact **original native file**, not the derived embedded JSON.
+The caller's source document is deep-cloned, never edited in place.
+
+Suffixes must start with a lowercase ASCII letter and contain 1–16 lowercase
+letters, digits, underscores or hyphens. The combined authoring ID is limited to
+35 ASCII characters so the longest study collection name fits the 63-byte
+compatibility budget. IDs are never silently truncated. A revision cannot reuse
+another source study's ID, even if that other study was excluded.
+
+The first generated step checks for existing scene, embedded-data and
+object/datablock names **before any writes**. The build checks again after data
+staging. A collision stops the workflow; choose a new revision instead of
+deleting, overwriting or auto-renaming an earlier scene. Feed the original native
+export into each revision, not already-suffixed embedded data.
+
+`--validate-only --scene-suffix motion130` checks this naming contract without
+creating files or connecting to Blender. `--exclude-study` always uses original
+source IDs. Without a suffix, existing names, data and report fields stay as
+before.
+
+**35 offline tests pass**, including eight revision-specific tests for unchanged
+source bytes/digest, exact numeric payloads, length/identity checks, default
+behaviour and read-only collision checks. The collision test uses a host-side
+mock; it is not a Blender execution or a visual-quality receipt.
+
 ## Optional all-player native export — Reference 129
 
 This export path is implemented, but **no new native export, Blender build or
@@ -88,7 +143,7 @@ The verifier evaluates shared pose timestamps once for the whole squad, then
 checks each rig's matrices. Verify the actual artifact size and mapping receipt
 after export; an estimate is not a completed build.
 
-Current offline parser/decoder tests: **27 passed**, including exact Float32
+Reference 129 offline parser/decoder tests: **27 passed**, including exact Float32
 round-trip, signed zero/subnormals, malformed indices/hex, contact/root coverage
 and the original size cap. These Python tests do not execute Blender or prove
 that the new Swift export has run.

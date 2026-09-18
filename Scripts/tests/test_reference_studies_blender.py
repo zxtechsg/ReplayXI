@@ -1,5 +1,7 @@
 import copy
 import ast
+import contextlib
+import io
 import json
 import math
 import struct
@@ -7,9 +9,13 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'blender'))
 from build_reference_studies import (ContractError, COORDINATES, MAX_EXPORT_BYTES, REPO, RUNTIME,
+                                     MAX_REVISION_STUDY_ID_LENGTH, MAX_SCENE_SUFFIX_LENGTH,
+                                     authoring_document, main,
                                      emit_steps, gait_keys, heading_angles, native_pose_frames,
                                      float32_vector, read_document, validate_document, world_point)
 
@@ -313,6 +319,155 @@ class ReferenceStudiesTests(unittest.TestCase):
             self.assertIn('vector-table-v1',code)
             self.assertNotIn('"_gaitKeys"',code)
             for name in report['steps']:compile((root/'steps'/name).read_text(),name,'exec')
+
+    def test_revision_is_a_deep_authoring_clone_not_a_scenario_or_sample_change(self):
+        doc=fixture();study=doc['studies'][0]
+        study['rigPoses']=[indexed_rig(rig_fixture(),float32=True)]
+        before=copy.deepcopy(doc)
+        revised=authoring_document(doc,scene_suffix='motion130')
+        result=revised['studies'][0]
+        self.assertEqual(result['id'],'qa-only--motion130')
+        self.assertEqual(result['scenarioID'],'qa-only')
+        self.assertEqual(result['authoringRevision'],'motion130')
+        for key in ('title','duration','players','ball','contacts','source','rigPoses'):
+            self.assertEqual(result[key],before['studies'][0][key])
+        self.assertEqual(doc,before)
+        result['players'][0]['keyframes'][0]['position']['x']=12
+        self.assertEqual(doc,before,'The caller/native export must not share mutable revision data')
+
+    def test_default_authoring_names_payload_and_reports_stay_unsuffixed(self):
+        doc=fixture()
+        self.assertEqual(authoring_document(doc),doc)
+        with tempfile.TemporaryDirectory(prefix='replayxi-reference-default-') as temporary:
+            root=Path(temporary)
+            report=emit_steps(doc,'c'*64,root/'steps',root/'new.blend',shared_assets_loaded=True)
+            self.assertEqual(report['studies'],['qa-only'])
+            self.assertNotIn('sceneSuffix',report)
+            self.assertNotIn('scenarioIDs',report)
+            self.assertEqual(report['steps'][0],'000-check-shared-assets.py')
+            self.assertFalse(any('check-revision-namespace' in name for name in report['steps']))
+
+    def test_unsafe_suffixes_are_rejected_before_output_is_created(self):
+        with tempfile.TemporaryDirectory(prefix='replayxi-reference-suffix-') as temporary:
+            root=Path(temporary)
+            for suffix in ('','Motion130','130','_motion','-motion','../../motion','motion/130',
+                           'motion.130','motion 130','motion\n130','møtion','motion;print(1)',
+                           'm'*(MAX_SCENE_SUFFIX_LENGTH+1),True,3,[],{}):
+                with self.subTest(suffix=suffix),self.assertRaises(ContractError):
+                    emit_steps(fixture(),'d'*64,root/'steps',root/'new.blend',scene_suffix=suffix)
+                self.assertFalse((root/'steps').exists())
+                self.assertFalse((root/'new.blend').exists())
+            self.assertEqual(authoring_document(fixture(),'m'*MAX_SCENE_SUFFIX_LENGTH)
+                             ['studies'][0]['authoringRevision'],'m'*MAX_SCENE_SUFFIX_LENGTH)
+
+    def test_revision_length_keeps_blender_names_intact_without_truncation(self):
+        doc=fixture()
+        doc['studies'][0]['id']='s'*(MAX_REVISION_STUDY_ID_LENGTH-len('--motion130'))
+        revised=authoring_document(doc,'motion130')['studies'][0]
+        self.assertEqual(len(revised['id']+'_ContactDiagnostics_optional'),63)
+        doc['studies'][0]['id']+='s'
+        with self.assertRaisesRegex(ContractError,'exceeds'):
+            authoring_document(doc,'motion130')
+
+    def test_revision_cannot_mask_an_existing_source_identity_or_be_suffixed_twice(self):
+        doc=fixture()
+        collision=copy.deepcopy(doc['studies'][0]);collision['id']='qa-only--motion130'
+        doc['studies'].append(collision)
+        for excluded in ((),['qa-only--motion130']):
+            with self.assertRaisesRegex(ContractError,'collides'):
+                authoring_document(doc,'motion130',exclude_studies=excluded)
+        revision=authoring_document(fixture(),'motion130')
+        for suffix in (None,'motion131'):
+            with self.assertRaisesRegex(ContractError,'original native export'):
+                authoring_document(revision,suffix)
+        for key in ('scenarioID','authoringRevision'):
+            doc=fixture();doc['studies'][0][key]='foreign'
+            with self.assertRaisesRegex(ContractError,'original native export'):
+                authoring_document(doc)
+
+    def test_revision_runtime_preflight_is_read_only_and_rejects_every_owned_namespace(self):
+        # Host-only mock: execute one read-only guard, never bpy or scene code.
+        node=next(node for node in ast.parse(RUNTIME).body
+                  if isinstance(node,ast.FunctionDef) and node.name=='rx_assert_revision_namespace_available')
+        kinds=('objects','collections','meshes','armatures','curves','cameras','lights','worlds','actions')
+        sid='qa-only--motion130'
+        assets={}
+        data=SimpleNamespace(scenes={'ReplayXI_Reference127_Assets':assets,
+                                   'ReplayXI_Study_qa-only':object()},
+                             **{kind:[SimpleNamespace(name='qa-only_OldData')] for kind in kinds})
+        namespace={'bpy':SimpleNamespace(data=data)}
+        exec(compile(ast.Module(body=[node],type_ignores=[]),'<revision-guard-test>','exec'),namespace)
+        check=namespace['rx_assert_revision_namespace_available']
+        check([sid])
+        self.assertEqual(assets,{})
+        self.assertEqual(len(data.scenes),2)
+        for kind in kinds:
+            original=list(getattr(data,kind))
+            getattr(data,kind).append(SimpleNamespace(name=sid+'_Existing'))
+            with self.subTest(kind=kind),self.assertRaisesRegex(ValueError,'namespace already exists'):
+                check([sid])
+            self.assertEqual(len(getattr(data,kind)),2)
+            setattr(data,kind,original)
+        assets['RX127_Study_'+sid]='already staged'
+        with self.assertRaisesRegex(ValueError,'Reference data already exists'):check([sid])
+        check([sid],allow_staged_data=True)
+        self.assertEqual(assets['RX127_Study_'+sid],'already staged')
+        data.scenes['ReplayXI_Study_'+sid]=object()
+        with self.assertRaisesRegex(ValueError,'Study scene already exists'):
+            check([sid],allow_staged_data=True)
+
+    def test_revision_steps_keep_original_digest_explicit_identity_and_numeric_payload(self):
+        doc=fixture();before=copy.deepcopy(doc)
+        with tempfile.TemporaryDirectory(prefix='replayxi-reference-revision-') as temporary:
+            root=Path(temporary)
+            report=emit_steps(doc,'e'*64,root/'steps',root/'new.blend',
+                              shared_assets_loaded=True,scene_suffix='motion130')
+            self.assertEqual(report['studies'],['qa-only--motion130'])
+            self.assertEqual(report['scenarioIDs'],['qa-only'])
+            self.assertEqual(report['sceneSuffix'],'motion130')
+            self.assertEqual(report['manifestSHA256'],'e'*64)
+            self.assertEqual(report['steps'][0],'000-check-revision-namespace.py')
+            payload=[]
+            for name in report['steps']:
+                code=(root/'steps'/name).read_text()
+                compile(code,name,'exec')
+                if name.endswith('-data.py'):
+                    assignment=ast.parse(code).body[-1]
+                    self.assertIsInstance(assignment,ast.Assign)
+                    self.assertEqual(assignment.targets[0].slice.value,'RX127_Study_qa-only--motion130')
+                    payload.append(assignment.value.right.value)
+            study=json.loads(''.join(payload))
+            self.assertEqual(study['scenarioID'],'qa-only')
+            self.assertEqual(study['authoringRevision'],'motion130')
+            self.assertEqual(study['id'],'qa-only--motion130')
+            self.assertEqual(study['ball'],before['studies'][0]['ball'])
+            self.assertEqual(study['contacts'],before['studies'][0]['contacts'])
+            for actual,original in zip(study['players'],before['studies'][0]['players']):
+                self.assertEqual(actual['id'],original['id'])
+                self.assertEqual(actual['keyframes'],original['keyframes'])
+                self.assertEqual(actual['evidence'],original['evidence'])
+            self.assertEqual(doc,before)
+            self.assertIn("scene['scenarioID']=study['scenarioID']",RUNTIME)
+            self.assertIn("report['authoringRevision']=study['authoringRevision']",RUNTIME)
+
+    def test_validate_only_checks_revision_names_without_changing_source_bytes(self):
+        with tempfile.TemporaryDirectory(prefix='replayxi-reference-revision-cli-') as temporary:
+            root=Path(temporary);path=root/'source.json'
+            path.write_text(json.dumps(fixture(),indent=2)+'\n')
+            raw=path.read_bytes();_,digest=read_document(path)
+            for suffix in (None,'motion130'):
+                arguments=['build_reference_studies.py','--manifest',str(path),'--validate-only']
+                if suffix:arguments+=['--scene-suffix',suffix]
+                output=io.StringIO()
+                with mock.patch.object(sys,'argv',arguments),contextlib.redirect_stdout(output):main()
+                report=json.loads(output.getvalue())
+                if suffix:
+                    self.assertEqual(report['scenarioIDs'],['qa-only'])
+                    self.assertEqual(report['authoringStudyIDs'],['qa-only--motion130'])
+                else:self.assertEqual(report,{'valid':True,'studies':1,'sha256':digest})
+                self.assertEqual(report['sha256'],digest)
+                self.assertEqual(path.read_bytes(),raw)
+                self.assertEqual(list(root.iterdir()),[path])
 
 
 if __name__=='__main__':unittest.main()

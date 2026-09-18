@@ -20,6 +20,10 @@ KINDS = {"receive", "pass", "shot", "dribbleTouch", "header", "save"}
 REPO = Path(__file__).resolve().parents[2]
 MAX_EXPORT_BYTES = 40 * 1024 * 1024
 RIG_FIELDS = (("translations", 3), ("rotations", 4), ("scales", 3))
+MAX_SCENE_SUFFIX_LENGTH = 16
+# Blender ID names have a 63-byte compatibility budget. Keep even the longest
+# study-scoped collection name intact; never truncate an identity into another.
+MAX_REVISION_STUDY_ID_LENGTH = 63 - len('_ContactDiagnostics_optional')
 
 
 class ContractError(ValueError):
@@ -273,6 +277,45 @@ def read_document(path):
     return validate_document(json.loads(raw)), hashlib.sha256(raw).hexdigest()
 
 
+def authoring_document(document, scene_suffix=None, exclude_studies=()):
+    """Clone validated source data; a revision never changes app/save identity.
+
+    The returned ``id`` is an authoring namespace only. Source JSON bytes, their
+    digest, player IDs, numerical samples and evidence are untouched.
+    """
+    if scene_suffix is not None and (not isinstance(scene_suffix, str)
+            or not 1 <= len(scene_suffix) <= MAX_SCENE_SUFFIX_LENGTH
+            or not re.fullmatch(r'[a-z][a-z0-9_-]*', scene_suffix)):
+        raise ContractError('scene suffix must be 1–16 lowercase ASCII letters, digits, _ or -; start with a letter')
+    source = validate_document(document)
+    available = {study['id'] for study in source['studies']}
+    excluded = set(exclude_studies)
+    if excluded - available:
+        raise ContractError('excluded study does not exist')
+    selected = [study for study in source['studies'] if study['id'] not in excluded]
+    if not selected:
+        raise ContractError('selection contains no studies')
+    if any('scenarioID' in study or 'authoringRevision' in study for study in selected):
+        raise ContractError('source study already has authoring revision metadata; use the original native export')
+    if scene_suffix is not None:
+        revised = set()
+        for study in selected:
+            sid = study['id'] + '--' + scene_suffix
+            if len(sid) > MAX_REVISION_STUDY_ID_LENGTH:
+                raise ContractError(f'revised study ID exceeds {MAX_REVISION_STUDY_ID_LENGTH} ASCII characters')
+            if sid in revised or sid in available:
+                raise ContractError('authoring revision collides with a source study ID')
+            revised.add(sid)
+    result = json.loads(json.dumps(source))
+    result['studies'] = [study for study in result['studies'] if study['id'] not in excluded]
+    if scene_suffix is not None:
+        for study in result['studies']:
+            study['scenarioID'] = study['id']
+            study['authoringRevision'] = scene_suffix
+            study['id'] += '--' + scene_suffix
+    return result
+
+
 def world_point(x, y, z):
     """Right-handed native Y-up -> Blender Z-up; preserves every rotation."""
     return -x, z, y
@@ -312,6 +355,20 @@ def gait_keys(frames, fps):
 RUNTIME = r'''
 import bpy, json, math
 from mathutils import Matrix, Quaternion, Vector
+
+def rx_assert_revision_namespace_available(study_ids, allow_staged_data=False):
+    assets=bpy.data.scenes.get('ReplayXI_Reference127_Assets')
+    for sid in study_ids:
+        if bpy.data.scenes.get('ReplayXI_Study_'+sid):
+            raise ValueError('Study scene already exists; never overwrite: '+sid)
+        if not allow_staged_data and assets is not None and 'RX127_Study_'+sid in assets:
+            raise ValueError('Reference data already exists: '+sid)
+        for kind,items in (('objects',bpy.data.objects),('collections',bpy.data.collections),
+                           ('meshes',bpy.data.meshes),('armatures',bpy.data.armatures),
+                           ('curves',bpy.data.curves),('cameras',bpy.data.cameras),
+                           ('lights',bpy.data.lights),('worlds',bpy.data.worlds),('actions',bpy.data.actions)):
+            if any(item.name==sid or item.name.startswith(sid+'_') for item in items):
+                raise ValueError('Authoring namespace already exists in '+kind+': '+sid)
 
 def rx_link(scene, name, data=None, parent=None):
     obj = bpy.data.objects.new(name, data)
@@ -518,6 +575,8 @@ def rx_native_pose(rig, payload, fps):
 
 def rx_build(study, fps, manifest_hash):
     sid=study['id']
+    if study.get('authoringRevision'):
+        rx_assert_revision_namespace_available([sid],allow_staged_data=True)
     scene_name='ReplayXI_Study_'+sid
     if bpy.data.scenes.get(scene_name):
         raise ValueError('Study scene already exists; never overwrite: '+sid)
@@ -529,6 +588,9 @@ def rx_build(study, fps, manifest_hash):
     scene.render.resolution_x,scene.render.resolution_y=1280,720
     scene.render.resolution_percentage=100
     scene['studyID'],scene['title']=sid,study['title']
+    if study.get('authoringRevision'):
+        scene['scenarioID']=study['scenarioID']
+        scene['authoringRevision']=study['authoringRevision']
     scene['manifestSHA256']=manifest_hash
     scene['provenanceJSON']=json.dumps(study.get('provenance',{}))
     scene['sourceJSON']=json.dumps(study['source'])
@@ -677,7 +739,8 @@ def rx_build(study, fps, manifest_hash):
     scene.camera=camera
     for label in identity_labels.objects:
         billboard=label.constraints.new('COPY_ROTATION');billboard.target=camera
-    hud=rx_text(scene,sid+'_EvidenceHUD',study['title']+'\nAUTHORED REPLAY | OFF-CAMERA PATHS UNKNOWN',
+    caption_title=study['title']+(' | '+study['authoringRevision'] if study.get('authoringRevision') else '')
+    hud=rx_text(scene,sid+'_EvidenceHUD',caption_title+'\nAUTHORED REPLAY | OFF-CAMERA PATHS UNKNOWN',
                 (0,-0.39,-2),0.025,camera)
     hud.data.align_y='CENTER'
     hud_material=bpy.data.materials.get('RX127_EvidenceText')
@@ -689,7 +752,7 @@ def rx_build(study, fps, manifest_hash):
         output=nodes.new('ShaderNodeOutputMaterial')
         hud_material.node_tree.links.new(emission.outputs[0],output.inputs[0])
     hud.data.materials.append(hud_material)
-    rx_caption_backing(scene,camera,sid+'_EvidenceBacking',study['title'])
+    rx_caption_backing(scene,camera,sid+'_EvidenceBacking',caption_title)
     rx_camera(scene,sid+'_Tactical',(0,-70,105),(0,0,0)).data.lens=35
     rx_text(scene,sid+'_SourceLabel',study['title']+' | AUTHORED RECONSTRUCTION',(-0, -58,0.04),0.85)
     world=bpy.data.worlds.new(sid+'_Daylight');world.use_nodes=True
@@ -796,6 +859,9 @@ def rx_verify(study,fps):
             'transformMappingPassed':len(root_map)==22 and max(worst,root_worst,heading_worst,ball_worst)<0.0001,
             'scope':'Transform mapping only. Contact mesh distances are diagnostics, not a passed contact/animation test.'}
     report['contactSurfaces']=surfaces
+    if study.get('authoringRevision'):
+        report['scenarioID']=study['scenarioID']
+        report['authoringRevision']=study['authoringRevision']
     scene['verificationJSON']=json.dumps(report)
     print(json.dumps(report))
     return report
@@ -803,7 +869,7 @@ def rx_verify(study,fps):
 
 
 def emit_steps(document, digest, output_dir, blend_output, fps=30, repository=REPO,
-               shared_assets_loaded=False, exclude_studies=()):
+               shared_assets_loaded=False, exclude_studies=(), scene_suffix=None):
     output_dir, blend_output = Path(output_dir).resolve(), Path(blend_output).resolve()
     if output_dir.exists() or blend_output.exists() or blend_output.suffix != ".blend":
         raise ContractError("choose a new steps folder and a new .blend filename")
@@ -811,14 +877,7 @@ def emit_steps(document, digest, output_dir, blend_output, fps=30, repository=RE
         raise ContractError("large artifacts belong outside source control or under .codex-derived")
     if fps not in (24, 30, 60):
         raise ContractError("fps must be 24,30,60")
-    document = json.loads(json.dumps(validate_document(document)))
-    excluded = set(exclude_studies)
-    available = {study['id'] for study in document['studies']}
-    if excluded - available:
-        raise ContractError('excluded study does not exist')
-    document['studies'] = [study for study in document['studies'] if study['id'] not in excluded]
-    if not document['studies']:
-        raise ContractError('selection contains no studies')
+    document = authoring_document(document, scene_suffix, exclude_studies)
     for study in document["studies"]:
         posed_ids = {rig['playerID'] for rig in study.get('rigPoses', [])}
         for player in study["players"]:
@@ -841,6 +900,14 @@ def emit_steps(document, digest, output_dir, blend_output, fps=30, repository=RE
         name = f"{len(steps):03d}-{label}.py"
         (output_dir / name).write_text(code + "\n")
         steps.append(name)
+
+    if scene_suffix is not None:
+        # Run before any asset import, embedded data write or scene creation.
+        # rx_build repeats the namespace check after staging data, so stale
+        # object/data names cannot silently acquire Blender's .001 suffix.
+        step('check-revision-namespace', RUNTIME +
+             f"\nrx_assert_revision_namespace_available({[study['id'] for study in document['studies']]!r})\n"
+             "print('Revision namespaces available; prior studies preserved')")
 
     base = str(repository.resolve())
     prepare_assets = "import bpy,json\n" + (
@@ -906,6 +973,9 @@ def emit_steps(document, digest, output_dir, blend_output, fps=30, repository=RE
               "blendOutput": str(blend_output), "studies": [s['id'] for s in document['studies']],
               "safety": "MCP safe mode stays enabled. No .blend loading, exec/eval, drivers, handlers or timers.",
               "limitations": "Authored trajectories and native rig samples are not captured match motion. Any player without native samples uses an illustrative gait. Off-camera positions remain inferred."}
+    if scene_suffix is not None:
+        report['sceneSuffix'] = scene_suffix
+        report['scenarioIDs'] = [study['scenarioID'] for study in document['studies']]
     (output_dir / "steps.json").write_text(json.dumps(report, indent=2) + "\n")
     return report
 
@@ -920,15 +990,23 @@ def main():
     parser.add_argument('--shared-assets-loaded', action='store_true',
                         help='Verify and reuse assets already staged in this Blender session')
     parser.add_argument('--exclude-study', action='append', default=[])
+    parser.add_argument('--scene-suffix', help='Optional authoring-only revision, e.g. motion130; app scenario IDs stay unchanged')
     args = parser.parse_args()
     document, digest = read_document(args.manifest)
     if args.validate_only:
-        print(json.dumps({'valid':True,'studies':len(document['studies']),'sha256':digest}))
+        selected = authoring_document(document, args.scene_suffix, args.exclude_study)
+        report = {'valid':True,'studies':len(selected['studies']),'sha256':digest}
+        if args.scene_suffix is not None:
+            report.update(sceneSuffix=args.scene_suffix,
+                          scenarioIDs=[study['scenarioID'] for study in selected['studies']],
+                          authoringStudyIDs=[study['id'] for study in selected['studies']])
+        print(json.dumps(report))
         return
     if not args.steps_output or not args.blend_output:
         parser.error('--steps-output and --blend-output required')
     print(json.dumps(emit_steps(document,digest,args.steps_output,args.blend_output,args.fps,
-                               shared_assets_loaded=args.shared_assets_loaded,exclude_studies=args.exclude_study)))
+                               shared_assets_loaded=args.shared_assets_loaded,exclude_studies=args.exclude_study,
+                               scene_suffix=args.scene_suffix)))
 
 
 if __name__ == '__main__':
