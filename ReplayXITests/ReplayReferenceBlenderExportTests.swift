@@ -116,6 +116,7 @@ final class ReplayReferenceBlenderExportTests: XCTestCase {
         let skin = try ReplaySkinnedAthleteProvider.make(for: player)
         let actor = Entity()
         actor.addChild(skin.root)
+        let shots = ReplayFootballShotTimeline(touches: recording.touches, players: scenario.players)
         let cues = recording.touches.filter { $0.playerID == player.id }.compactMap { touch -> ReplayAthleteInteractionCue? in
             guard let kind = ReplayAthleteInteractionCue.Kind(rawValue: touch.kind.rawValue) else { return nil }
             return .init(playerID: player.id, kind: kind, contactTime: touch.time,
@@ -153,9 +154,16 @@ final class ReplayReferenceBlenderExportTests: XCTestCase {
             let lookTarget = exportsAllRigs ? ReplayAthleteTacticalAttention.target(
                 for: player, at: time, pose: presented, ball: ball,
                 players: scenario.players, poses: rosterPoses[time] ?? [:], contacts: cues) : ball
+            let keeper = ReplayGoalkeeperReadiness.sample(track: player, at: time,
+                presentationPose: presented, ballPosition: ball,
+                shot: shots.latestOpposingShot(for: player, at: time),
+                actionInfluence: ReplayAthleteInteractionPose.sample(cue: cue, at: time,
+                    track: player, presentationPose: presented)?.influence ?? 0,
+                enabled: player.isGoalkeeper)
             XCTAssertTrue(skin.update(at: time, track: player, locomotion: player.locomotion(at: time),
                                      lookTarget: lookTarget, ballAction: nil,
-                                     interaction: cue, presentationPose: presented))
+                                     interaction: cue, presentationPose: presented,
+                                     goalkeeperReadiness: keeper))
             frames.append(["time": time, "translations": encoded(skin.pose.translations.map { [$0.x, $0.y, $0.z] }),
                 "rotations": encoded(skin.pose.rotations.map { [$0.vector.x, $0.vector.y, $0.vector.z, $0.vector.w] }),
                 "scales": encoded(skin.pose.scales.map { [$0.x, $0.y, $0.z] })])

@@ -56,6 +56,7 @@ struct ReplayAthleteInteractionSample: Sendable {
     let upperBodyPitch: Float
     let headPitch: Float
     var headerSupportLeg: ReplayAthleteLeg? = nil
+    var elevatedShotStyle: ReplayAthleteElevatedShotStyle = .none
 
     /// A +Z-facing athlete's anatomical right is the negative-X gait lane.
     /// Only the new explicit header technique uses anatomical metadata; old
@@ -73,6 +74,69 @@ struct ReplayAthleteInteractionSample: Sendable {
         }
         guard side == kickingLeg else { return supportSoleTarget }
         return supportSoleTarget + supportFootOrientation.act([side == .left ? -0.274 : 0.274, 0, 0])
+    }
+}
+
+/// A small, authored raised-ball finishing style, not recovered motion capture.
+/// FIFA's Mbappé volley reference motivates the side-lean, counterbalance and
+/// follow-through. Height alone cannot prove that an incoming ball was a volley:
+/// this layer therefore applies only as a continuous style on elevated shots.
+/// It changes no root, pelvis, foot target, cue interval or anatomical side map.
+struct ReplayAthleteElevatedShotStyle: Equatable, Sendable {
+    let intensity: Float
+    let phase: Float
+    private let kickingSign: Float
+
+    static let none = Self(intensity: 0, phase: 0, kickingSign: 1)
+
+    private var preparation: Float { max(-phase, 0) }
+    private var followThrough: Float { max(phase, 0) }
+
+    var trunkPitchRadians: Float {
+        intensity * (0.035 - 0.11 * preparation + 0.10 * followThrough)
+    }
+
+    var trunkRollRadians: Float {
+        // Lean away from the striking lane. The support/strike convention is
+        // the existing geometric lane convention, not anatomical header data.
+        kickingSign * intensity * (0.28 - 0.14 * preparation - 0.10 * followThrough)
+    }
+
+    var trunkYawRadians: Float {
+        kickingSign * intensity * (-0.14 * preparation + 0.17 * followThrough)
+    }
+
+    struct Arm: Sendable {
+        let outward: Float
+        let pitch: Float
+        let yaw: Float
+        let elbowFlexion: Float
+    }
+
+    func arm(striking: Bool) -> Arm {
+        if striking {
+            return Arm(outward: intensity * (0.35 + 0.16 * preparation - 0.17 * followThrough),
+                pitch: intensity * (0.20 * preparation - 0.24 * followThrough),
+                yaw: kickingSign * intensity * (-0.10 * preparation + 0.14 * followThrough),
+                elbowFlexion: intensity * (0.15 + 0.13 * preparation - 0.08 * followThrough))
+        }
+        return Arm(outward: intensity * (0.30 + 0.13 * preparation - 0.12 * followThrough),
+            pitch: intensity * (-0.28 * preparation + 0.28 * followThrough),
+            yaw: kickingSign * intensity * (0.08 * preparation - 0.12 * followThrough),
+            elbowFlexion: intensity * (0.12 + 0.08 * preparation + 0.12 * followThrough))
+    }
+
+    static func sample(kind: ReplayAthleteInteractionCue.Kind, contactHeight: Float,
+                       phase: Float, kickingLeg: ReplayAthleteLeg) -> Self {
+        guard kind == .shot, contactHeight.isFinite, phase.isFinite else { return .none }
+        // A chip struck from the turf is still a ground contact. Only the
+        // recorded contact height activates this pose; launch elevation does
+        // not. Quintic thresholds avoid a pop as the contact height changes.
+        let x = min(max((contactHeight - 0.28) / 0.27, 0), 1)
+        let intensity = min(max(x * x * x * (x * (x * 6 - 15) + 10), 0), 1)
+        guard intensity > 0 else { return .none }
+        return Self(intensity: intensity, phase: min(max(phase, -1), 1),
+                    kickingSign: kickingLeg == .right ? 1 : -1)
     }
 }
 
@@ -238,7 +302,9 @@ enum ReplayAthleteInteractionPose {
             pelvisTurn: min(max(yaw, -0.35), 0.35),
             upperBodyPitch: cue.kind == .header ? phase * 0.14 : (cue.kind == .save ? -0.08 : 0),
             headPitch: cue.kind == .header ? phase * 0.10 : 0,
-            headerSupportLeg: cue.headerSupportLeg
+            headerSupportLeg: cue.headerSupportLeg,
+            elevatedShotStyle: .sample(kind: cue.kind, contactHeight: cue.contactBallWorldPosition.y,
+                                       phase: phase, kickingLeg: cue.kickingLeg)
         )
     }
 
@@ -292,6 +358,17 @@ enum ReplayAthleteInteractionPose {
         let counter = simd_quatf(angle: -sample.pelvisTurn * weight * 0.45, axis: [0, 1, 0])
         var spineOrientation = simd_quatf(angle: sample.upperBodyPitch * weight, axis: [1, 0, 0])
             * counter * base.spineOrientation
+        let raisedShot = sample.elevatedShotStyle
+        if raisedShot.intensity > 0 {
+            // Upper-body counterbalance only: hips and the already solved legs
+            // stay identical, so style cannot displace a plant or boot strike.
+            // The native skin retargeter copies the chest in model space and
+            // re-solves its real parented legs against these same targets.
+            let balance = simd_quatf(angle: raisedShot.trunkRollRadians * weight, axis: [0, 0, 1])
+                * simd_quatf(angle: raisedShot.trunkPitchRadians * weight, axis: [1, 0, 0])
+                * simd_quatf(angle: raisedShot.trunkYawRadians * weight, axis: [0, 1, 0])
+            spineOrientation = simd_normalize(balance * spineOrientation)
+        }
         let spinePosition = hipsPosition + hipsRotation.act([0, 0.14, 0])
         var torso = hipsRotation * spineOrientation
         if sample.kind == .header {
@@ -321,6 +398,15 @@ enum ReplayAthleteInteractionPose {
                             blend(oldElbow, solved.upperRotation.inverse * solved.lowerRotation, weight),
                             blend(oldWrist, solved.lowerRotation.inverse * solved.handRotation, weight))
                 }
+            }
+            if raisedShot.intensity > 0 {
+                let balance = raisedShot.arm(striking: side == sample.kickingLeg)
+                let outward: Float = (side == .left ? -1 : 1) * (0.28 + balance.outward)
+                let shoulder = simd_quatf(angle: outward, axis: [0, 0, 1])
+                    * simd_quatf(angle: balance.yaw, axis: [0, 1, 0])
+                    * simd_quatf(angle: -0.18 + balance.pitch, axis: [1, 0, 0])
+                let elbow = simd_quatf(angle: -0.55 - balance.elbowFlexion, axis: [1, 0, 0])
+                return (blend(oldShoulder, shoulder, weight), blend(oldElbow, elbow, weight), oldWrist)
             }
             return (blend(oldShoulder, simd_quatf(angle: side == .left ? -0.28 : 0.28, axis: [0, 0, 1])
                 * simd_quatf(angle: -0.18, axis: [1, 0, 0]), weight),

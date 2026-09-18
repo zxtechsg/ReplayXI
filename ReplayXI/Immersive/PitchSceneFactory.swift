@@ -31,9 +31,11 @@ enum PitchSceneFactory {
     private struct NativeBallCache: Component {
         let recording: ReplayNativeBallPhysics.Recording
         let interactions: [String: [ReplayAthleteInteractionCue]]
+        let shots: ReplayFootballShotTimeline
 
-        init(recording: ReplayNativeBallPhysics.Recording) {
+        init(recording: ReplayNativeBallPhysics.Recording, players: [PlayerTrack]) {
             self.recording = recording
+            shots = ReplayFootballShotTimeline(touches: recording.touches, players: players)
             interactions = Dictionary(grouping: recording.touches.compactMap { touch in
                 guard let kind = ReplayAthleteInteractionCue.Kind(rawValue: touch.kind.rawValue) else { return nil }
                 return ReplayAthleteInteractionCue(playerID: touch.playerID, kind: kind,
@@ -622,7 +624,7 @@ enum PitchSceneFactory {
         root.name = "match-root-\(scenario.id)"
         if let native = nativeRecording ?? ReplayNativeBallPhysics.cached(track: scenario.ball, players: scenario.players,
                                                        plannedTouches: FootballReferenceScenarios.touches(for: scenario)) {
-            root.components.set(NativeBallCache(recording: native))
+            root.components.set(NativeBallCache(recording: native, players: scenario.players))
         } else {
             let ballPlayback = ReplayBallPlaybackMotion.prepared(track: scenario.ball, players: scenario.players)
             root.components.set(BallPlaybackCache(motion: ballPlayback))
@@ -1094,6 +1096,20 @@ enum PitchSceneFactory {
                 } else {
                     playerLookTarget = ballLookTarget
                 }
+                // Use the actual ball position, not a teammate/runner glance.
+                // Preparation can read the ball; directional reaction cannot
+                // see a shot until that native contact has actually occurred.
+                let keeperReadiness: ReplayGoalkeeperReadiness.Sample?
+                if player.isGoalkeeper, let nativeBall, stationaryPose == nil,
+                   activeRagdollCue == nil, !isTriangleView {
+                    keeperReadiness = ReplayGoalkeeperReadiness.sample(track: player, at: time,
+                        presentationPose: pose, ballPosition: ballLookTarget,
+                        shot: nativeBall.shots.latestOpposingShot(for: player, at: time),
+                        actionInfluence: max(ballAction?.influence ?? 0,
+                            ReplayAthleteInteractionPose.sample(cue: interaction, at: time,
+                                track: player, presentationPose: pose)?.influence ?? 0), enabled: true,
+                        locomotion: locomotion)
+                } else { keeperReadiness = nil }
                 let hasBallAction = interaction != nil || (ballAction.map { $0.influence > 0 } ?? false)
                 let impactSample = needsDetailedRig ? activeRagdollCue.flatMap {
                     PlayerRagdollPlayback.sample(for: $0, at: time)
@@ -1123,7 +1139,8 @@ enum PitchSceneFactory {
                     usesNewSkin = skin.update(at: time, track: player, locomotion: locomotion,
                                              lookTarget: playerLookTarget, ballAction: ballAction,
                                              impact: impactSample, stationaryPose: stationaryPose,
-                                             interaction: interaction, presentationPose: motionPresentation)
+                                             interaction: interaction, presentationPose: motionPresentation,
+                                             goalkeeperReadiness: keeperReadiness)
                 } else {
                     usesNewSkin = false
                 }
@@ -1175,7 +1192,8 @@ enum PitchSceneFactory {
                         stationaryPose: stationaryPose,
                         interaction: interaction,
                         presentationPose: motionPresentation,
-                        allowsOffBallPose: activeRagdollCue == nil
+                        allowsOffBallPose: activeRagdollCue == nil,
+                        goalkeeperReadiness: keeperReadiness
                     )
                     if let impactSample {
                         applyRagdollPose(
@@ -1197,7 +1215,8 @@ enum PitchSceneFactory {
                         stationaryPose: stationaryPose,
                         interaction: interaction,
                         presentationPose: motionPresentation,
-                        allowsOffBallPose: activeRagdollCue == nil
+                        allowsOffBallPose: activeRagdollCue == nil,
+                        goalkeeperReadiness: keeperReadiness
                     )
                 }
             }
@@ -3964,7 +3983,8 @@ enum PitchSceneFactory {
         stationaryPose: PlayerPose?,
         interaction: ReplayAthleteInteractionCue?,
         presentationPose: PlayerPose?,
-        allowsOffBallPose: Bool
+        allowsOffBallPose: Bool,
+        goalkeeperReadiness: ReplayGoalkeeperReadiness.Sample?
     ) {
         guard let marker = directChild(named: "table-marker", of: entity),
               marker.isEnabled else { return }
@@ -3985,7 +4005,8 @@ enum PitchSceneFactory {
                 stationaryPose: stationaryPose,
                 interaction: interaction,
                 presentationPose: presentationPose,
-                allowsOffBallPose: allowsOffBallPose
+                allowsOffBallPose: allowsOffBallPose,
+                goalkeeperReadiness: goalkeeperReadiness
             )
             return
         }
@@ -4056,7 +4077,8 @@ enum PitchSceneFactory {
         stationaryPose: PlayerPose?,
         interaction: ReplayAthleteInteractionCue?,
         presentationPose: PlayerPose?,
-        allowsOffBallPose: Bool
+        allowsOffBallPose: Bool,
+        goalkeeperReadiness: ReplayGoalkeeperReadiness.Sample?
     ) {
         guard let fullRig = directChild(named: "full-rig", of: entity),
               fullRig.isEnabled else { return }
@@ -4071,7 +4093,8 @@ enum PitchSceneFactory {
             stationaryPose: stationaryPose,
             interaction: interaction,
             presentationPose: presentationPose,
-            allowsOffBallPose: allowsOffBallPose
+            allowsOffBallPose: allowsOffBallPose,
+            goalkeeperReadiness: goalkeeperReadiness
         )
     }
 
@@ -4149,7 +4172,8 @@ enum PitchSceneFactory {
         stationaryPose: PlayerPose?,
         interaction: ReplayAthleteInteractionCue?,
         presentationPose: PlayerPose?,
-        allowsOffBallPose: Bool
+        allowsOffBallPose: Bool,
+        goalkeeperReadiness: ReplayGoalkeeperReadiness.Sample?
     ) {
         guard let binding = athleteBinding(for: fullRig, cache: cache) else { return }
         let pose = ReplayAthleteMotion.locomotionPose(
@@ -4164,7 +4188,8 @@ enum PitchSceneFactory {
             stationaryPose: stationaryPose,
             interaction: interaction,
             presentationPose: presentationPose,
-            allowsOffBallPose: allowsOffBallPose
+            allowsOffBallPose: allowsOffBallPose,
+            goalkeeperReadiness: goalkeeperReadiness
         )
         ReplayAthleteMotion.apply(pose, to: binding)
     }

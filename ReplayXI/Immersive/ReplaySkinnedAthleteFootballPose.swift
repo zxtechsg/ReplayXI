@@ -103,7 +103,8 @@ struct ReplaySkinnedAthleteFootballPose {
         armInfluence: Float,
         motion: ReplaySkinnedAthleteMotion,
         to pose: inout ReplaySkinnedAthleteMotion.Pose,
-        interaction: ReplayAthleteInteractionSample? = nil
+        interaction: ReplayAthleteInteractionSample? = nil,
+        goalkeeperReadiness: ReplayGoalkeeperReadiness.Sample? = nil
     ) {
         let weight = influence.isFinite ? min(max(influence, 0), 1) : 0
         let armWeight = armInfluence.isFinite ? min(max(armInfluence, 0), 1) : 0
@@ -120,10 +121,12 @@ struct ReplaySkinnedAthleteFootballPose {
         target.rotations[rootIndex] = simd_normalize(body * motion.restPose.rotations[rootIndex])
         let leftTarget = Self.target(for: left, authored: authored, body: body, root: rootPosition,
                                      interaction: interaction, marker: bootMarkers?.marker(for: left.ankle),
-                                     groundOffset: motion.geometry.restMinY)
+                                     groundOffset: motion.geometry.restMinY,
+                                     goalkeeperReadiness: goalkeeperReadiness)
         let rightTarget = Self.target(for: right, authored: authored, body: body, root: rootPosition,
                                       interaction: interaction, marker: bootMarkers?.marker(for: right.ankle),
-                                      groundOffset: motion.geometry.restMinY)
+                                      groundOffset: motion.geometry.restMinY,
+                                      goalkeeperReadiness: goalkeeperReadiness)
         if let interaction, interaction.plantsFeet, let bootMarkers {
             for marker in bootMarkers.markers {
                 for index in marker.toeDescendants {
@@ -306,7 +309,8 @@ struct ReplaySkinnedAthleteFootballPose {
         body: simd_quatf, root: SIMD3<Float>,
         interaction: ReplayAthleteInteractionSample? = nil,
         marker: ReplaySkinnedAthleteBootMarkers.Marker? = nil,
-        groundOffset: Float = 0
+        groundOffset: Float = 0,
+        goalkeeperReadiness: ReplayGoalkeeperReadiness.Sample? = nil
     ) -> LegTarget {
         let hip = leg.side == .left ? authored.leftHipOrientation : authored.rightHipOrientation
         let knee = leg.side == .left ? authored.leftKneeOrientation : authored.rightKneeOrientation
@@ -316,6 +320,13 @@ struct ReplaySkinnedAthleteFootballPose {
         let ankleDelta = kneeDelta * ankle
         let hipPosition = root + body.act(leg.hipOffset)
         let kneePosition = hipPosition + hipDelta.act(SIMD3(0, -leg.upperLength, 0))
+        let anklePosition = kneePosition + kneeDelta.act(SIMD3(0, -leg.lowerLength, 0))
+        var keeperTarget: LegTarget?
+        if let keeper = goalkeeperReadiness, (interaction?.influence ?? 0) < 0.05 {
+            keeperTarget = keeperSetTarget(for: leg, keeper: keeper, body: body, root: root,
+                hip: hipPosition, knee: kneePosition, ankle: anklePosition,
+                upper: hipDelta, lower: kneeDelta, foot: ankleDelta)
+        }
         if let interaction, interaction.plantsFeet, let marker {
             let striking = interaction.kind.usesFeet && leg.side == interaction.kickingLeg
             let foot = simd_normalize((striking ? interaction.footOrientation : interaction.supportFootOrientation)
@@ -330,26 +341,92 @@ struct ReplaySkinnedAthleteFootballPose {
                                                          pole: (interaction.headerSupportLeg == nil
                                                             ? interaction.footOrientation : interaction.supportFootOrientation).act([0, 0, 1])) {
                 let blend = interaction.influence
-                let oldAnkle = kneePosition + kneeDelta.act(SIMD3(0, -leg.lowerLength, 0))
+                // Readiness fades before the contact core. Its corrected foot
+                // remains the initial target at the cue's near-zero edge, so
+                // admitting a cue does not suddenly collapse the set stance.
+                let oldKnee = keeperTarget?.kneePosition ?? kneePosition
+                let oldAnkle = keeperTarget?.anklePosition ?? anklePosition
                 return LegTarget(
                     hipPosition: hipPosition,
-                    kneePosition: kneePosition + (solved.knee - kneePosition) * blend,
+                    kneePosition: oldKnee + (solved.knee - oldKnee) * blend,
                     anklePosition: oldAnkle + (solved.ankle - oldAnkle) * blend,
-                    hipRotation: ReplayAthleteInteractionPose.blend(hipDelta * leg.hipNeutralRotation,
+                    hipRotation: ReplayAthleteInteractionPose.blend(keeperTarget?.hipRotation ?? hipDelta * leg.hipNeutralRotation,
                         solved.upperRotation * leg.hipNeutralRotation, blend),
-                    kneeRotation: ReplayAthleteInteractionPose.blend(kneeDelta * leg.kneeNeutralRotation,
+                    kneeRotation: ReplayAthleteInteractionPose.blend(keeperTarget?.kneeRotation ?? kneeDelta * leg.kneeNeutralRotation,
                         solved.lowerRotation * leg.kneeNeutralRotation, blend),
-                    ankleRotation: ReplayAthleteInteractionPose.blend(ankleDelta * leg.ankleNeutralRotation, foot, blend)
+                    ankleRotation: ReplayAthleteInteractionPose.blend(keeperTarget?.ankleRotation ?? ankleDelta * leg.ankleNeutralRotation,
+                        foot, blend)
                 )
             }
         }
+        if let keeperTarget { return keeperTarget }
         return LegTarget(
             hipPosition: hipPosition, kneePosition: kneePosition,
-            anklePosition: kneePosition + kneeDelta.act(SIMD3(0, -leg.lowerLength, 0)),
+            anklePosition: anklePosition,
             hipRotation: simd_normalize(hipDelta * leg.hipNeutralRotation),
             kneeRotation: simd_normalize(kneeDelta * leg.kneeNeutralRotation),
             ankleRotation: simd_normalize(ankleDelta * leg.ankleNeutralRotation)
         )
+    }
+
+    /// The shorter procedural rig's 7 cm shuffle lanes are not safe native
+    /// sole lanes: its hips sit about 5 cm farther apart on each side. Copying
+    /// those rotations onto this skin collapsed moving keepers' boots together.
+    /// Bound the actual sole in its own body-local lane, retaining Y/Z, foot
+    /// rotation and both real bone lengths. No actor/root or ball path changes.
+    private static func keeperSetTarget(
+        for leg: Leg, keeper: ReplayGoalkeeperReadiness.Sample,
+        body: simd_quatf, root: SIMD3<Float>, hip: SIMD3<Float>,
+        knee: SIMD3<Float>, ankle: SIMD3<Float>,
+        upper: simd_quatf, lower: simd_quatf, foot: simd_quatf
+    ) -> LegTarget? {
+        guard keeper.readiness.isFinite, keeper.reaction.isFinite, keeper.stanceWeight.isFinite,
+              (0...1).contains(keeper.readiness), (0...1).contains(keeper.reaction),
+              (0...1).contains(keeper.stanceWeight) else { return nil }
+        let set = max(keeper.readiness, keeper.reaction * keeper.stanceWeight)
+        let weight = min(max(smooth(set / 0.50), 0), 1)
+        guard weight > 0 else { return nil }
+        let boot = simd_normalize(foot * leg.ankleNeutralRotation)
+        let sole = ankle + boot.act(leg.solePoint)
+        let lane = body.inverse.act(sole - root)
+        let sign: Float = leg.side == .left ? -1 : 1
+        let oldLane = lane.x * sign
+        // 22 cm is a stable set, below shoulder width and far from an X-block.
+        // Ease into the floor instead of adding a velocity kink at its border.
+        let minimum: Float = 0.11
+        let transition: Float = 0.045
+        let targetLane: Float
+        if oldLane <= minimum { targetLane = minimum }
+        else if oldLane >= minimum + transition { return nil }
+        else {
+            let fraction = (oldLane - minimum) / transition
+            targetLane = minimum + transition * fraction * fraction * (2 - fraction)
+        }
+        let laneChange = sign * (targetLane - oldLane) * weight
+        guard abs(laneChange) > 0 else { return nil }
+        let modelXInBody = body.inverse.act([1, 0, 0]).x
+        guard abs(modelXInBody) > 0.25 else { return nil }
+        let goal = sole + SIMD3<Float>(laneChange / modelXInBody, 0, 0) - boot.act(leg.solePoint)
+        let axis = simd_normalize(ankle - hip)
+        let sourceBend = knee - hip - axis * simd_dot(knee - hip, axis)
+        let forward = simd_normalize(foot.act([sign * 0.08, 0, 1]))
+        let sourcePole = simd_length_squared(sourceBend) > 0.000001
+            ? simd_normalize(sourceBend) : forward
+        // Also vanish at the lane boundary; a tiny positional correction must
+        // not choose a completely different knee plane.
+        let poleWeight = min(max(smooth(abs(laneChange) / 0.06), 0), 1)
+        let pole = sourcePole + (forward - sourcePole) * poleWeight
+        guard let solved = ReplayAthleteTwoBoneIK.solve(hip: hip, ankle: goal,
+            upperLength: leg.upperLength, lowerLength: leg.lowerLength, pole: pole) else { return nil }
+        // Preserve the source axial twist as the endpoint moves. Very small
+        // readiness cannot suddenly replace the limb's rotation frame.
+        let solvedUpper = simd_normalize(simd_quatf(from: upper.act([0, -1, 0]),
+            to: simd_normalize(solved.knee - hip)) * upper)
+        let solvedLower = simd_normalize(simd_quatf(from: lower.act([0, -1, 0]),
+            to: simd_normalize(solved.ankle - solved.knee)) * lower)
+        return LegTarget(hipPosition: hip, kneePosition: solved.knee, anklePosition: solved.ankle,
+            hipRotation: simd_normalize(solvedUpper * leg.hipNeutralRotation),
+            kneeRotation: simd_normalize(solvedLower * leg.kneeNeutralRotation), ankleRotation: boot)
     }
 
     private static func smooth(_ value: Float) -> Float {

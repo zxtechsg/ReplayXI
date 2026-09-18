@@ -178,7 +178,8 @@ enum ReplayAthleteMotion {
         interaction: ReplayAthleteInteractionCue? = nil,
         presentationPose: PlayerPose? = nil,
         movementIntent: ReplayAthleteMovementIntent.Sample? = nil,
-        allowsOffBallPose: Bool = true
+        allowsOffBallPose: Bool = true,
+        goalkeeperReadiness: ReplayGoalkeeperReadiness.Sample? = nil
     ) -> ReplayAthleteLocomotionPose {
         let locomotion = stationaryPose == nil ? suppliedLocomotion : track.stationaryLocomotion
         // `PlayerLocomotionState` is deliberately discrete because it is also
@@ -230,7 +231,9 @@ enum ReplayAthleteMotion {
         let ballAction = suppliedBallAction ?? ballTrack.flatMap {
             ballActionPose(for: track, ballTrack: $0, at: time)
         }
-        var leftHipLateral: Float = track.isGoalkeeper ? 0.10 : tuning.lateralStance
+        // The legacy left lane is -X. A negative Z rotation abducts its
+        // downward leg; the opposite sign collapsed keeper boots inward.
+        var leftHipLateral: Float = track.isGoalkeeper ? -0.10 : tuning.lateralStance
         var rightHipLateral: Float = -leftHipLateral
         let cutPlant = abs(turn) * 0.12 * cutInfluence
         var leftHipSwing = (leftFootfall.stride * tuning.strideAmplitude)
@@ -336,7 +339,9 @@ enum ReplayAthleteMotion {
                                                   presentationPose: presentationPose)?.influence ?? 0 : 0
         let offBall = ReplayAthleteOffBallPose.sample(
             playerID: track.id, at: time, locomotion: locomotion, look: look,
-            actionInfluence: max(interactionInfluence, ballAction?.influence ?? 0), enabled: offBallEnabled)
+            actionInfluence: max(interactionInfluence, ballAction?.influence ?? 0,
+                track.isGoalkeeper && stationaryPose == nil ? goalkeeperReadiness?.influence ?? 0 : 0),
+            enabled: offBallEnabled)
         let sharedLook = offBall.adjusting(look)
 
         let base = ReplayAthleteLocomotionPose(
@@ -436,7 +441,9 @@ enum ReplayAthleteMotion {
                 presentationPose: presentationPose, lookTarget: lookTargetWorldPosition,
                 interaction: interaction) : nil
         let directed = ReplayAthleteMovementIntent.apply(to: base, sample: movement)
-        return ReplayAthleteInteractionPose.apply(to: directed, cue: interaction, at: time,
+        let prepared = ReplayGoalkeeperReadiness.apply(to: directed,
+            sample: track.isGoalkeeper && stationaryPose == nil ? goalkeeperReadiness : nil)
+        return ReplayAthleteInteractionPose.apply(to: prepared, cue: interaction, at: time,
                                                   track: track,
                                                   presentationPose: stationaryPose ?? presentationPose)
     }

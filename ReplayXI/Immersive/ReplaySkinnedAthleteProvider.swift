@@ -289,7 +289,8 @@ final class ReplaySkinnedAthleteInstance {
                 stationaryPose: PlayerPose? = nil,
                 interaction: ReplayAthleteInteractionCue? = nil,
                 presentationPose: PlayerPose? = nil,
-                allowsOffBallPose: Bool = true) -> Bool {
+                allowsOffBallPose: Bool = true,
+                goalkeeperReadiness: ReplayGoalkeeperReadiness.Sample? = nil) -> Bool {
         let locomotion = stationaryPose == nil ? suppliedLocomotion : track.stationaryLocomotion
         // Never apply a stale or different player's collision sample. Unsupported
         // assets still fail soft to the procedural body rather than disappear.
@@ -309,22 +310,29 @@ final class ReplaySkinnedAthleteInstance {
                       gaitPhase: gaitPhase, rebuildingModelSpace: false, into: &pose)
         let interactionSample = ReplayAthleteInteractionPose.sample(
             cue: interaction, at: time, track: track, presentationPose: stationaryPose ?? presentationPose)
+        // Callers already ease readiness out around a touch. Defend the actual
+        // contact core here too, so a stale supplied sample cannot deform a save.
+        let keeper = track.isGoalkeeper && stationaryPose == nil && impact == nil
+            ? ReplayGoalkeeperReadiness.limited(goalkeeperReadiness,
+                actionInfluence: max(interactionSample?.influence ?? 0, ballAction?.influence ?? 0)) : nil
         let movement = stationaryPose == nil
             ? ReplayAthleteMovementIntent.sample(track: track, at: time, presentationPose: presentationPose,
                                                lookTarget: lookTarget, interaction: interaction) : nil
         let influence = max(ReplaySkinnedAthleteFootballPose.influence(locomotion: locomotion, ballAction: ballAction),
-                            interactionSample?.influence ?? 0, movement?.influence ?? 0)
+                            interactionSample?.influence ?? 0, movement?.influence ?? 0, keeper?.influence ?? 0)
         if influence > 0, footballPose != nil {
             let authored = ReplayAthleteMotion.locomotionPose(
                 for: track, at: time, locomotion: locomotion, gaitPhase: gaitPhase,
                 lookTargetWorldPosition: lookTarget, ballAction: ballAction,
                 stationaryPose: stationaryPose, interaction: interaction, presentationPose: presentationPose,
-                movementIntent: movement, allowsOffBallPose: false
+                movementIntent: movement, allowsOffBallPose: false, goalkeeperReadiness: keeper
             )
             footballPose?.apply(authored, influence: influence,
                                 armInfluence: max(ReplaySkinnedAthleteFootballPose.influence(locomotion: locomotion, ballAction: nil),
-                                                  interactionSample?.influence ?? 0, movement?.readiness ?? 0),
-                                motion: motion, to: &pose, interaction: interactionSample)
+                                                  interactionSample?.influence ?? 0, movement?.readiness ?? 0,
+                                                  keeper?.armInfluence ?? 0),
+                                motion: motion, to: &pose, interaction: interactionSample,
+                                goalkeeperReadiness: keeper)
         }
         let baseLook = ReplayAthleteMotion.lookPose(for: track, at: time, locomotion: locomotion,
                                                targetWorldPosition: lookTarget,
@@ -332,7 +340,8 @@ final class ReplaySkinnedAthleteInstance {
                                                presentationPose: presentationPose)
         let offBall = ReplayAthleteOffBallPose.sample(
             playerID: track.id, at: time, locomotion: locomotion, look: baseLook,
-            actionInfluence: max(interactionSample?.influence ?? 0, ballAction?.influence ?? 0),
+            actionInfluence: max(interactionSample?.influence ?? 0, ballAction?.influence ?? 0,
+                                 keeper?.influence ?? 0),
             sourceFraction: 1 - influence,
             enabled: allowsOffBallPose && presentationPose != nil && stationaryPose == nil
                 && impact == nil && lookTarget != nil)
