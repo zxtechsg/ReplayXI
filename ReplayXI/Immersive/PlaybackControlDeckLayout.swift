@@ -36,6 +36,12 @@ struct PlaybackControlDeckLayout: Equatable, Sendable {
         max(attachmentWidth - 40, 1)
     }
 
+    func resized(by factor: Double) -> Self {
+        let safe = factor.isFinite ? min(max(factor, 0.8), 1.5) : 1
+        return Self(attachmentWidth: attachmentWidth, uniformScale: uniformScale * Float(safe),
+                    verticalOffset: verticalOffset, forwardOffset: forwardOffset)
+    }
+
     static func resolve(
         preset: PlaybackControlDeckPreset,
         usesAccessibilityText: Bool

@@ -51,7 +51,8 @@ final class AnnotationCurveAdjustmentController {
     }
 
     @discardableResult
-    func preview(in store: ReplayStore, markID: UUID, translation: CGSize, mode: Mode = .offset) -> Bool {
+    func preview(in store: ReplayStore, markID: UUID, translation: CGSize, mode: Mode = .offset,
+                 fine: Bool = false) -> Bool {
         guard !rejectsCurrentGesture else { return false }
         guard translation.width.isFinite, translation.height.isFinite,
               isEnabled(in: store, markID: markID),
@@ -61,9 +62,10 @@ final class AnnotationCurveAdjustmentController {
             return false
         }
         sample = AnnotationJoystickMath.sample(for: translation)
-        let baseline = transaction?.baseline ?? mark.resolvedCurve
-        let curve = mode.adjusted(baseline, horizontal: Float(sample.steps.x) * Self.step,
-                                  vertical: -Float(sample.steps.y) * mode.verticalStep)
+        let baseline = transaction?.baseline ?? mark.sampled(at: store.playhead).resolvedCurve
+        let precision: Float = fine ? 0.2 : 1
+        let curve = mode.adjusted(baseline, horizontal: Float(sample.steps.x) * Self.step * precision,
+                                  vertical: -Float(sample.steps.y) * mode.verticalStep * precision)
         if transaction == nil, curve == baseline { return true }
         if transaction != nil, curve == lastRequestedCurve { return true }
         let proposed = transaction ?? Transaction(markID: markID, gestureID: UUID(), baseline: baseline, mode: mode)
@@ -78,7 +80,8 @@ final class AnnotationCurveAdjustmentController {
     }
 
     @discardableResult
-    func finish(in store: ReplayStore, markID: UUID, translation: CGSize, mode: Mode = .offset) -> Bool {
+    func finish(in store: ReplayStore, markID: UUID, translation: CGSize, mode: Mode = .offset,
+                fine: Bool = false) -> Bool {
         // An end callback may arrive after interruption or disappearance.
         // It can finish its live token, never acquire a new edit by itself.
         guard let activeTransaction = transaction, activeTransaction.markID == markID,
@@ -86,7 +89,7 @@ final class AnnotationCurveAdjustmentController {
             cancel(in: store)
             return false
         }
-        guard preview(in: store, markID: markID, translation: translation, mode: mode),
+        guard preview(in: store, markID: markID, translation: translation, mode: mode, fine: fine),
               let transaction, transaction.markID == markID,
               store.isCoachMarkCurvePreviewOwner(id: markID, gestureID: transaction.gestureID) else {
             cancel(in: store)
@@ -113,7 +116,7 @@ final class AnnotationCurveAdjustmentController {
     func canNudge(in store: ReplayStore, markID: UUID, bend: Float, lift: Float) -> Bool {
         guard !isActive, store.canChangePlaybackView,
               let mark = store.marks.first(where: { $0.id == markID }), mark.kind == .arc else { return false }
-        let curve = mark.resolvedCurve
+        let curve = mark.sampled(at: store.playhead).resolvedCurve
         return Mode.offset.adjusted(curve, horizontal: bend, vertical: lift) != curve
     }
 
@@ -129,7 +132,7 @@ final class AnnotationCurveAdjustmentController {
                    horizontal: Float, vertical: Float) -> Bool {
         guard horizontal.isFinite, vertical.isFinite, !isActive, store.canChangePlaybackView,
               let mark = store.marks.first(where: { $0.id == markID }), mark.kind == .arc else { return false }
-        return mode.adjusted(mark.resolvedCurve, horizontal: horizontal, vertical: vertical) != mark.resolvedCurve
+        return mode.adjusted(mark.sampled(at: store.playhead).resolvedCurve, horizontal: horizontal, vertical: vertical) != mark.sampled(at: store.playhead).resolvedCurve
     }
 
     /// Atomic buttons and accessibility actions use the same owned Store path
@@ -140,7 +143,7 @@ final class AnnotationCurveAdjustmentController {
         guard canAdjust(in: store, markID: markID, mode: mode, horizontal: horizontal, vertical: vertical),
               let mark = store.marks.first(where: { $0.id == markID }) else { return false }
         let token = UUID()
-        let curve = mode.adjusted(mark.resolvedCurve, horizontal: horizontal, vertical: vertical)
+        let curve = mode.adjusted(mark.sampled(at: store.playhead).resolvedCurve, horizontal: horizontal, vertical: vertical)
         guard store.previewCoachMarkCurve(id: markID, gestureID: token, curve: curve) else { return false }
         guard store.commitCoachMarkCurvePreview(id: markID, gestureID: token) else {
             _ = store.cancelCoachMarkCurvePreview(id: markID, gestureID: token)

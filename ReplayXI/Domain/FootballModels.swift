@@ -1082,6 +1082,8 @@ enum CoachMarkGeometryPolicy {
 }
 
 struct CoachMark: Identifiable, Codable, Hashable, Sendable {
+    /// Optional for compatibility with older reviews. Absolute replay times.
+    var keyframes: [CoachMarkKeyframe]?
     let id: UUID
     let kind: CoachMarkKind
     let start: PitchPoint
@@ -1124,7 +1126,8 @@ struct CoachMark: Identifiable, Codable, Hashable, Sendable {
         author: String = "Coach",
         playerID: String? = nil,
         startTrackAnchor: CoachMarkTrackAnchor? = nil,
-        endTrackAnchor: CoachMarkTrackAnchor? = nil
+        endTrackAnchor: CoachMarkTrackAnchor? = nil,
+        keyframes: [CoachMarkKeyframe]? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -1140,6 +1143,7 @@ struct CoachMark: Identifiable, Codable, Hashable, Sendable {
         self.playerID = playerID
         self.startTrackAnchor = startTrackAnchor
         self.endTrackAnchor = endTrackAnchor
+        self.keyframes = keyframes
     }
 
     func isVisible(at time: TimeInterval) -> Bool {
@@ -1364,6 +1368,10 @@ extension CoachMark {
         at time: TimeInterval,
         presentedPlayerPoses: [String: PlayerPose]? = nil
     ) -> ResolvedCoachMarkGeometry {
+        if hasKeyframes {
+            let pose = sampled(at: time)
+            return ResolvedCoachMarkGeometry(start: pose.start, end: pose.end)
+        }
         let sampleTime = time.isFinite
             ? min(max(time, 0), max(scenario.duration, 0))
             : min(max(revealTime, 0), max(scenario.duration, 0))
@@ -1422,6 +1430,7 @@ extension CoachMark {
         at time: TimeInterval,
         presentedPlayerPoses: [String: PlayerPose]? = nil
     ) -> CoachMark {
+        if hasKeyframes { return sampled(at: time) }
         let geometry = resolvedGeometry(
             in: scenario, at: time, presentedPlayerPoses: presentedPlayerPoses
         )

@@ -44,31 +44,14 @@ final class PlaybackAnnotationTimingTextTests: XCTestCase {
         XCTAssertEqual(layout.minimumTextScale, 0.78)
     }
 
-    func testFontProbeUsesTheLiveDurationChoiceConstraints() throws {
+    func testTimingEditorUsesExactFieldsAndSharedWindowValidation() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-        let source = try String(
-            contentsOf: root.appendingPathComponent("ReplayXI/Immersive/FootballImmersiveView.swift"),
-            encoding: .utf8
-        )
-        let start = try XCTUnwrap(source.range(of: "private func annotationDurationChoice(")?.lowerBound)
-        let end = try XCTUnwrap(source.range(of: "private func annotationGeometryShelf(")?.lowerBound)
-        let choice = source[start..<end]
-        XCTAssertTrue(choice.contains(".font(.subheadline.monospacedDigit().weight(.black))"))
-        XCTAssertTrue(choice.contains(".minimumScaleFactor(annotationTimingLayout.minimumTextScale)"))
-        XCTAssertTrue(choice.contains("annotationTimingLayout.labelWidth(throughEnd: duration == nil)"))
-        XCTAssertTrue(choice.contains("annotationTimingLayout.labelMinimumHeight"))
-        XCTAssertTrue(choice.contains(".frame(minHeight: annotationTimingLayout.labelMinimumHeight)"))
-        XCTAssertTrue(choice.contains("if store.setCoachMarkDuration(id: mark.id, duration: duration)"))
-        XCTAssertTrue(choice.contains(".disabled(isSelected || !fits || !store.canChangePlaybackView)"))
-
-        let shelfStart = try XCTUnwrap(source.range(of: "private func annotationDurationShelf(")?.lowerBound)
-        let shelfEnd = try XCTUnwrap(source.range(of: "private func annotationDurationHeader(")?.lowerBound)
-        let shelf = source[shelfStart..<shelfEnd]
-        XCTAssertTrue(shelf.contains("if annotationTimingLayout.usesAdaptiveChoices"))
-        XCTAssertTrue(shelf.contains("VStack(alignment: .leading, spacing: 10)"))
-        XCTAssertTrue(shelf.contains("LazyVGrid("))
-        XCTAssertTrue(shelf.contains(".adaptive(minimum: annotationTimingLayout.gridMinimumCellWidth)"))
-        XCTAssertEqual(shelf.components(separatedBy: "annotationDurationChoices(mark)").count - 1, 2)
+        let source = try String(contentsOf: root.appendingPathComponent(
+            "ReplayXI/Immersive/AnnotationTimingEditor.swift"), encoding: .utf8)
+        XCTAssertTrue(source.contains("CoachMarkTimingPolicy.windowFits"))
+        XCTAssertTrue(source.contains("TextField(\"Seconds\""))
+        XCTAssertTrue(source.contains(".disabled(!valid || !store.canChangePlaybackView)"))
+        XCTAssertTrue(source.contains("store.setCoachMarkWindow"))
     }
 
     private func checkText(_ categories: [UIContentSizeCategory], usesAccessibilityText: Bool) throws {

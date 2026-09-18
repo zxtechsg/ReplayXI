@@ -162,7 +162,7 @@ final class AnnotationCurveAdjustmentControllerTests: XCTestCase {
         XCTAssertTrue(source.contains("AnnotationCurveAdjustmentPad(markID: mark.id"))
         let pad = try String(contentsOf: root.appendingPathComponent(
             "ReplayXI/Immersive/AnnotationCurveAdjustmentPad.swift"), encoding: .utf8)
-        XCTAssertTrue(pad.contains("controller.finish(in: store, markID: markID, translation: value.translation, mode: mode)"))
+        XCTAssertTrue(pad.contains("controller.finish(in: store, markID: markID, translation: value.translation, mode: mode, fine: fine)"))
         XCTAssertTrue(pad.contains(".onDisappear { controller.cancel(in: store) }"))
         XCTAssertTrue(pad.contains(".onChange(of: markID)"))
         XCTAssertTrue(pad.contains(".onChange(of: dragIsActive)"))

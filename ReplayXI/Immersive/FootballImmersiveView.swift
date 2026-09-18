@@ -9,6 +9,7 @@ struct FootballImmersiveView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @AppStorage("ReplayXI.PlaybackControlDeckPreset") private var controlDeckPresetRawValue =
         PlaybackControlDeckPreset.standard.rawValue
+    @AppStorage("ReplayXI.PlaybackControlDeckSize") private var controlDeckSize = 1.0
     @State private var selectedAnnotationID: UUID?
     @State private var draggedAnnotationTarget: AnnotationSceneTarget?
     @State private var annotationStroke: PlaybackAnnotationStroke?
@@ -60,7 +61,7 @@ struct FootballImmersiveView: View {
         PlaybackControlDeckLayout.resolve(
             preset: controlDeckPreset,
             usesAccessibilityText: dynamicTypeSize.isAccessibilitySize
-        )
+        ).resized(by: controlDeckSize)
     }
 
     private var viewHUDLayout: PlaybackViewHUDLayout {
@@ -204,6 +205,7 @@ struct FootballImmersiveView: View {
                     showsDecisionStrip: $showsDecisionStrip,
                     showsPlaybackAnnotations: $showsPlaybackAnnotations,
                     controlDeckPresetRawValue: $controlDeckPresetRawValue,
+                    controlDeckSize: $controlDeckSize,
                     deckWidth: controlDeckLayout.contentWidth,
                     nativeActionSource: preparedNativeRecording.map {
                         .init(scenarioID: store.selectedScenarioID, recording: $0)
@@ -1951,6 +1953,7 @@ private struct ImmersiveControlDeck: View {
     @Binding var showsDecisionStrip: Bool
     @Binding var showsPlaybackAnnotations: Bool
     @Binding var controlDeckPresetRawValue: String
+    var controlDeckSize: Binding<Double> = .constant(1)
 
     let deckWidth: CGFloat
     let nativeActionSource: PlaybackBallActionNavigation.Source?
@@ -2707,6 +2710,11 @@ private struct ImmersiveControlDeck: View {
                 HStack(spacing: 16) {
                     VStack(alignment: .leading, spacing: 3) {
                         Eyebrow(text: "Workspace", color: ReplayTheme.orange)
+                        Slider(value: controlDeckSize, in: 0.8...1.5, step: 0.05)
+                            .frame(minWidth: 160)
+                            .accessibilityLabel("Control bar size")
+                            .disabled(!store.canChangePlaybackView)
+                        Text("Bar size").font(.caption)
                         Text("Fixed in the room")
                             .font(.caption).foregroundStyle(.secondary)
                     }
@@ -2898,102 +2906,16 @@ private struct ImmersiveControlDeck: View {
 
     private func annotationDurationShelf(_ mark: CoachMark) -> some View {
         inlineShelf(color: annotationColor(for: mark.kind)) {
-            if annotationTimingLayout.usesAdaptiveChoices {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 12) {
-                        annotationDurationHeader(mark)
-                        Spacer(minLength: 8)
-                        annotationDurationStatus(mark)
-                    }
-                    LazyVGrid(
-                        columns: [GridItem(
-                            .adaptive(minimum: annotationTimingLayout.gridMinimumCellWidth),
-                            spacing: PlaybackAnnotationTimingLayout.gridSpacing
-                        )],
-                        spacing: PlaybackAnnotationTimingLayout.gridSpacing
-                    ) {
-                        annotationDurationChoices(mark)
-                    }
-                }
-            } else {
-                HStack(spacing: 12) {
-                    annotationDurationHeader(mark)
-                    inlineChoiceDivider
-                    annotationDurationChoices(mark)
-                    Spacer(minLength: 8)
-                    annotationDurationStatus(mark)
-                }
-            }
+            AnnotationTimingEditor(markID: mark.id, color: annotationColor(for: mark.kind),
+                adjustPose: { inlinePanel = .annotationGeometry(mark.id) })
+                .id(mark.id)
         }
     }
 
-    private func annotationDurationHeader(_ mark: CoachMark) -> some View {
-        inlinePanelHeader(
-            title: "Duration",
-            detail: "FROM \(formatTime(mark.revealTime))",
-            systemImage: "timer",
-            color: annotationColor(for: mark.kind)
-        )
-    }
-
-    private func annotationDurationStatus(_ mark: CoachMark) -> some View {
-        StatusPill(
-            text: "LENGTH · \(annotationDurationLabel(mark).uppercased())",
-            systemImage: "clock.fill",
-            color: annotationColor(for: mark.kind)
-        )
-    }
-
-    private func annotationDurationChoices(_ mark: CoachMark) -> some View {
-        Group {
-            ForEach([3.0, 5.0, 8.0, 12.0], id: \.self) { duration in
-                annotationDurationChoice(mark, duration: duration, title: "\(Int(duration))s")
-            }
-            annotationDurationChoice(mark, duration: nil, title: "TO END")
-        }
-    }
-
-    private var annotationTimingLayout: PlaybackAnnotationTimingLayout {
-        PlaybackAnnotationTimingLayout.resolve(
-            usesAccessibilityText: dynamicTypeSize.isAccessibilitySize
-        )
-    }
-
-    private func annotationDurationChoice(
-        _ mark: CoachMark,
-        duration: TimeInterval?,
-        title: String
-    ) -> some View {
-        let isSelected = isAnnotationDuration(duration, selectedFor: mark)
-        let fits = CoachMarkTimingPolicy.windowFits(
-            revealTime: mark.revealTime, displayDuration: duration,
-            replayDuration: store.selectedScenario.duration
-        )
-        return Button {
-            if store.setCoachMarkDuration(id: mark.id, duration: duration) {
-                annotationConfirmation = "DURATION · \(title)"
-                inlinePanel = nil
-            }
-        } label: {
-            Text(title)
-                .font(.subheadline.monospacedDigit().weight(.black))
-                .lineLimit(1)
-                .minimumScaleFactor(annotationTimingLayout.minimumTextScale)
-                .frame(width: annotationTimingLayout.labelWidth(throughEnd: duration == nil))
-                .frame(minHeight: annotationTimingLayout.labelMinimumHeight)
-        }
-        .buttonStyle(.borderedProminent)
-        .tint(isSelected ? annotationColor(for: mark.kind) : .white.opacity(0.10))
-        .foregroundStyle(isSelected ? Color.black : Color.white)
-        .disabled(isSelected || !fits || !store.canChangePlaybackView)
-        .accessibilityLabel(duration == nil ? "Show until replay ends" : "Show for \(title)")
-        .accessibilityHint(fits ? "Sets how long this annotation is shown"
-            : "Not enough replay time remains. Choose To end")
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
-    }
 
     private func annotationGeometryShelf(_ mark: CoachMark) -> some View {
-        inlineShelf(color: annotationColor(for: mark.kind)) {
+        let mark = mark.sampled(at: store.playhead)
+        return inlineShelf(color: annotationColor(for: mark.kind)) {
             VStack(alignment: .leading, spacing: 12) {
                 annotationEndpointGeometryRow(mark)
                 if mark.kind == .arc {
@@ -4581,15 +4503,15 @@ private struct ImmersiveControlDeck: View {
                     Button {
                         toggleInlinePanel(.annotationDuration(mark.id))
                     } label: {
-                        Label(annotationDurationLabel(mark), systemImage: "timer")
+                        Label("Timing", systemImage: "timer")
                             .frame(
                                 minHeight: PlaybackControlDeckPresentation.minimumSpatialHitTarget
                             )
                     }
                     .buttonStyle(.bordered)
-                    .accessibilityLabel("Annotation duration")
+                    .accessibilityLabel("Annotation timing and position keys")
                     .accessibilityValue(annotationDurationLabel(mark))
-                    .accessibilityHint("Opens duration choices in the control deck")
+                    .accessibilityHint("Set In and Out times and animate positions between timestamps")
                     .accessibilityAddTraits(
                         inlinePanel == .annotationDuration(mark.id) ? .isSelected : []
                     )

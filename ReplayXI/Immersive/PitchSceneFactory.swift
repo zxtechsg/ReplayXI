@@ -2990,7 +2990,7 @@ enum PitchSceneFactory {
     ) {
         guard let cache, cache.marksRoot?.isEnabled == true else { return }
         for binding in cache.bindings
-        where binding.mark.kind != .playerLabel && binding.mark.followsPlayerTracks {
+        where binding.mark.kind != .playerLabel && binding.mark.hasAnimatedGeometry {
             guard let entity = binding.entity.value, entity.isEnabled else { continue }
             let presentation = binding.mark.resolvingTrackGeometry(
                 in: scenario,

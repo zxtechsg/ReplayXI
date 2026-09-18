@@ -8,15 +8,16 @@ struct AnnotationCurveAdjustmentPad: View {
     let onCommit: () -> Void
     @State private var controller = AnnotationCurveAdjustmentController()
     @State private var mode: AnnotationCurveAdjustmentController.Mode = .shape
+    @State private var fine = false
     @GestureState private var dragIsActive = false
 
     private var isEnabled: Bool { controller.isEnabled(in: store, markID: markID) }
     private var curve: CoachMarkCurve {
-        store.marks.first(where: { $0.id == markID })?.resolvedCurve ?? CoachMarkCurve(bend: 0, lift: 0)
+        store.marks.first(where: { $0.id == markID })?.sampled(at: store.playhead).resolvedCurve ?? CoachMarkCurve(bend: 0, lift: 0)
     }
     private var isLimitedByPitch: Bool {
         guard let mark = store.marks.first(where: { $0.id == markID }) else { return false }
-        return curve.isLimitedByPitch(for: mark)
+        return curve.isLimitedByPitch(for: mark.sampled(at: store.playhead))
     }
 
     var body: some View {
@@ -55,17 +56,19 @@ struct AnnotationCurveAdjustmentPad: View {
             HStack(spacing: 6) {
                 ForEach(AnnotationCurveAdjustmentController.Mode.allCases) { choice in
                     Button { mode = choice } label: {
-                        Image(systemName: choice.symbol).font(.title3.weight(.semibold))
+                        Label(choice.rawValue, systemImage: choice.symbol).font(.title3.weight(.semibold))
                             .frame(minWidth: 52, minHeight: 52)
                     }
                     .buttonStyle(.bordered)
-                    .tint(mode == choice ? color : .white.opacity(0.12))
+                    .tint(mode == choice ? color : .white.opacity(0.65))
                     .disabled(controller.isActive)
                     .help(choice == .shape ? "Curve amount and angle" : "Bend and lift offsets")
                     .accessibilityLabel(choice == .shape ? "Curve amount and angle" : "Bend and lift offsets")
                     .accessibilityAddTraits(mode == choice ? .isSelected : [])
                 }
             }
+            Toggle("Fine · 5 cm / 1°", isOn: $fine)
+                .toggleStyle(.button).disabled(controller.isActive)
             Text("\(mode.horizontalTitle) ↔\u{FE0E}  \(mode.verticalTitle) ↕\u{FE0E}")
                 .font(.caption.weight(.semibold))
                 .fixedSize(horizontal: false, vertical: true)
@@ -99,10 +102,10 @@ struct AnnotationCurveAdjustmentPad: View {
         .gesture(DragGesture(minimumDistance: 0)
             .updating($dragIsActive) { _, active, _ in active = true }
             .onChanged { value in
-                _ = controller.preview(in: store, markID: markID, translation: value.translation, mode: mode)
+                _ = controller.preview(in: store, markID: markID, translation: value.translation, mode: mode, fine: fine)
             }
             .onEnded { value in
-                if controller.finish(in: store, markID: markID, translation: value.translation, mode: mode) { onCommit() }
+                if controller.finish(in: store, markID: markID, translation: value.translation, mode: mode, fine: fine) { onCommit() }
             })
         .opacity(isEnabled ? 1 : 0.4)
         .allowsHitTesting(isEnabled)
@@ -130,10 +133,10 @@ struct AnnotationCurveAdjustmentPad: View {
     private var nudgeControls: some View {
         VStack(alignment: .leading, spacing: 8) {
             nudgeRow(title: mode.horizontalTitle,
-                value: metres(mode == .shape ? curve.amount : curve.bend), horizontal: 0.25, vertical: 0)
+                value: metres(mode == .shape ? curve.amount : curve.bend), horizontal: fine ? 0.05 : 0.25, vertical: 0)
             nudgeRow(title: mode.verticalTitle,
                 value: mode == .shape ? degrees(curve.rollDegrees) : metres(curve.lift),
-                horizontal: 0, vertical: mode.verticalStep)
+                horizontal: 0, vertical: mode.verticalStep * (fine ? 0.2 : 1))
         }
     }
 
@@ -159,7 +162,7 @@ struct AnnotationCurveAdjustmentPad: View {
         .disabled(!controller.canAdjust(in: store, markID: markID, mode: mode,
                                        horizontal: horizontal, vertical: vertical))
         .accessibilityLabel("\(symbol == "minus" ? "Decrease" : "Increase") arc \(title.lowercased())")
-        .accessibilityHint(mode == .shape && vertical != 0 ? "Five-degree step" : "Quarter-metre step")
+        .accessibilityHint(fine ? "Fine adjustment" : (mode == .shape && vertical != 0 ? "Five-degree step" : "Quarter-metre step"))
         .help("\(symbol == "minus" ? "Decrease" : "Increase") \(title.lowercased())")
     }
 

@@ -231,11 +231,12 @@ final class PlaybackControlDeckClarityTests: XCTestCase {
 
     func testAnnotationDurationChoicesUseTheSameBoundsAsTheStore() throws {
         let source = try immersiveSource()
-        let choice = try sourceSlice(source,
-            after: "private func annotationDurationChoice(", before: "private func annotationGeometryShelf")
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let choice = try String(contentsOf: root.appendingPathComponent(
+            "ReplayXI/Immersive/AnnotationTimingEditor.swift"), encoding: .utf8)
         XCTAssertTrue(choice.contains("CoachMarkTimingPolicy.windowFits"))
-        XCTAssertTrue(choice.contains(".disabled(isSelected || !fits || !store.canChangePlaybackView)"))
-        XCTAssertTrue(choice.contains("Not enough replay time remains. Choose To end"))
+        XCTAssertTrue(choice.contains(".disabled(!valid || !store.canChangePlaybackView)"))
+        XCTAssertTrue(choice.contains("store.setCoachMarkWindow"))
         let move = try sourceSlice(source,
             after: "private func canMoveAnnotation(", before: "private var directPlaybackRates")
         XCTAssertTrue(move.contains("PlaybackAnnotationMovePolicy.canMove(mark, to: time, in: store)"))
