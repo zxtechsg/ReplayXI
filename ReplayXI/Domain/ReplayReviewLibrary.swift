@@ -1,5 +1,8 @@
 import Foundation
 import Observation
+#if DEBUG
+import Dispatch
+#endif
 
 /// Local replay data only. Room identities, anchors, consent, in-progress
 /// gestures and playback-running flags have no representation in this format.
@@ -40,12 +43,52 @@ final class ReplayReviewLibrary {
     @ObservationIgnored private let fileURL: URL?
     @ObservationIgnored private let scenarios: [ReplayScenario]
     @ObservationIgnored private var lastGoodData: Data?
+    @ObservationIgnored private var namedReviewEncodingCache: NamedReviewEncodingCache?
     var usesDisk: Bool { fileURL != nil }
+
+    #if DEBUG
+    /// Instrumented synchronous stage time, not CPU time or a frame-rate
+    /// guarantee. Byte counts include only successfully encoded/written data.
+    struct StageWork: Codable, Equatable {
+        var calls = 0
+        var succeeded = 0
+        var bytes = 0
+        var elapsedNanoseconds: UInt64 = 0
+    }
+
+    struct PersistenceWork: Codable, Equatable {
+        var stateValidation = StageWork()
+        var documentEncoding = StageWork()
+        var backupWrite = StageWork()
+        var primaryWrite = StageWork()
+        var unchangedAutosaveSkips = 0
+        var namedReviewEncoding = StageWork()
+        var namedReviewFragmentReuses = 0
+        var reusedNamedReviewBytes = 0
+    }
+
+    @ObservationIgnored private(set) var persistenceWork = PersistenceWork()
+
+    func resetPersistenceWorkForTesting() { persistenceWork = PersistenceWork() }
+    #endif
 
     private struct Document: Codable {
         let version: Int
         let savedReviews: [SavedReplayReview]
         let autosavedReview: SavedReplayReview?
+    }
+
+    /// The fragment lives inside lastGoodData, already retained for recovery.
+    /// Keeping a byte range avoids another near-8-MiB resident JSON buffer.
+    /// It is installed only after the corresponding primary write succeeds.
+    private struct NamedReviewEncodingCache {
+        let reviews: [SavedReplayReview]
+        let range: Range<Int>
+    }
+
+    private struct EncodedDocument {
+        let data: Data
+        let namedReviewRange: Range<Int>
     }
 
     private enum LibraryError: Error {
@@ -72,6 +115,21 @@ final class ReplayReviewLibrary {
     }
 
     func accepts(_ state: SavedReplayState) -> Bool {
+        #if DEBUG
+        let started = DispatchTime.now().uptimeNanoseconds
+        persistenceWork.stateValidation.calls &+= 1
+        defer {
+            persistenceWork.stateValidation.elapsedNanoseconds &+= DispatchTime.now().uptimeNanoseconds &- started
+        }
+        #endif
+        let accepted = validateState(state)
+        #if DEBUG
+        if accepted { persistenceWork.stateValidation.succeeded &+= 1 }
+        #endif
+        return accepted
+    }
+
+    private func validateState(_ state: SavedReplayState) -> Bool {
         guard let scenario = scenarios.first(where: { $0.id == state.scenarioID }),
               state.playhead.isFinite,
               (0...scenario.duration).contains(state.playhead),
@@ -104,11 +162,22 @@ final class ReplayReviewLibrary {
 
     @discardableResult
     func autosave(_ state: SavedReplayState, now: Date = .now) -> Bool {
-        guard accepts(state), now.timeIntervalSince1970.isFinite else {
+        guard now.timeIntervalSince1970.isFinite else {
             status = "Autosave could not be completed"
             return false
         }
-        guard autosavedReview?.state != state else { return true }
+        // Equality with the private, previously accepted state cannot admit a
+        // new malformed value. Keep the date guard before this no-op path.
+        guard autosavedReview?.state != state else {
+            #if DEBUG
+            persistenceWork.unchangedAutosaveSkips &+= 1
+            #endif
+            return true
+        }
+        guard accepts(state) else {
+            status = "Autosave could not be completed"
+            return false
+        }
         let review = SavedReplayReview(
             id: autosavedReview?.id ?? UUID(), name: "Last session", savedAt: now, state: state
         )
@@ -240,15 +309,15 @@ final class ReplayReviewLibrary {
         savedReviews = document.savedReviews.sorted { $0.savedAt > $1.savedAt }
         autosavedReview = document.autosavedReview
         lastGoodData = data
+        namedReviewEncodingCache = nil
     }
 
     private func persist(reviews: [SavedReplayReview], autosave: SavedReplayReview?, message: String) -> Bool {
         guard !isReadOnly else { return false }
         let document = Document(version: 1, savedReviews: reviews, autosavedReview: autosave)
         do {
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.sortedKeys]
-            let data = try encoder.encode(document)
+            let encoded = try encode(document)
+            let data = encoded.data
             guard data.count <= Self.maximumFileBytes else {
                 // This is the app's bounded library, not proof that the device
                 // is out of disk space. Never replace the last valid document.
@@ -260,16 +329,106 @@ final class ReplayReviewLibrary {
                     at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true
                 )
                 if let lastGoodData {
-                    try lastGoodData.write(to: fileURL.appendingPathExtension("backup"), options: .atomic)
+                    try writePersistedData(lastGoodData, to: fileURL.appendingPathExtension("backup"), isBackup: true)
                 }
-                try data.write(to: fileURL, options: .atomic)
+                try writePersistedData(data, to: fileURL, isBackup: false)
             }
             adopt(document, data: data)
+            namedReviewEncodingCache = NamedReviewEncodingCache(
+                reviews: document.savedReviews, range: encoded.namedReviewRange
+            )
             status = message
             return true
         } catch {
             status = "Save failed. Check device storage."
             return false
         }
+    }
+
+    private func encode(_ document: Document) throws -> EncodedDocument {
+        #if DEBUG
+        let started = DispatchTime.now().uptimeNanoseconds
+        persistenceWork.documentEncoding.calls &+= 1
+        defer {
+            persistenceWork.documentEncoding.elapsedNanoseconds &+= DispatchTime.now().uptimeNanoseconds &- started
+        }
+        #endif
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let namedReviews: Data
+        if let cache = namedReviewEncodingCache, let lastGoodData,
+           cache.reviews == document.savedReviews,
+           cache.range.lowerBound >= 0, cache.range.upperBound <= lastGoodData.count {
+            namedReviews = lastGoodData[cache.range]
+            #if DEBUG
+            persistenceWork.namedReviewFragmentReuses &+= 1
+            persistenceWork.reusedNamedReviewBytes &+= namedReviews.count
+            #endif
+        } else {
+            namedReviews = try encodeNamedReviews(document.savedReviews, using: encoder)
+        }
+        let autosave = try document.autosavedReview.map { try encoder.encode($0) }
+        var data = Data()
+        data.reserveCapacity(namedReviews.count + (autosave?.count ?? 0) + 64)
+        // Fixed schema-v1 field names in JSONEncoder.sortedKeys order. Every
+        // dynamic value is an independently encoded JSON fragment; strings,
+        // escaping, Float/Date formats and nested key ordering stay native.
+        data.append(contentsOf: "{".utf8)
+        if let autosave {
+            data.append(contentsOf: "\"autosavedReview\":".utf8)
+            data.append(autosave)
+            data.append(contentsOf: ",".utf8)
+        }
+        data.append(contentsOf: "\"savedReviews\":".utf8)
+        let start = data.count
+        data.append(namedReviews)
+        let end = data.count
+        data.append(contentsOf: ",\"version\":".utf8)
+        data.append(contentsOf: String(document.version).utf8)
+        data.append(contentsOf: "}".utf8)
+        #if DEBUG
+        persistenceWork.documentEncoding.succeeded &+= 1
+        persistenceWork.documentEncoding.bytes &+= data.count
+        #endif
+        return EncodedDocument(data: data, namedReviewRange: start..<end)
+    }
+
+    private func encodeNamedReviews(_ reviews: [SavedReplayReview], using encoder: JSONEncoder) throws -> Data {
+        #if DEBUG
+        let started = DispatchTime.now().uptimeNanoseconds
+        persistenceWork.namedReviewEncoding.calls &+= 1
+        defer {
+            persistenceWork.namedReviewEncoding.elapsedNanoseconds &+= DispatchTime.now().uptimeNanoseconds &- started
+        }
+        #endif
+        let data = try encoder.encode(reviews)
+        #if DEBUG
+        persistenceWork.namedReviewEncoding.succeeded &+= 1
+        persistenceWork.namedReviewEncoding.bytes &+= data.count
+        #endif
+        return data
+    }
+
+    private func writePersistedData(_ data: Data, to url: URL, isBackup: Bool) throws {
+        #if DEBUG
+        let started = DispatchTime.now().uptimeNanoseconds
+        if isBackup { persistenceWork.backupWrite.calls &+= 1 }
+        else { persistenceWork.primaryWrite.calls &+= 1 }
+        defer {
+            let elapsed = DispatchTime.now().uptimeNanoseconds &- started
+            if isBackup { persistenceWork.backupWrite.elapsedNanoseconds &+= elapsed }
+            else { persistenceWork.primaryWrite.elapsedNanoseconds &+= elapsed }
+        }
+        #endif
+        try data.write(to: url, options: .atomic)
+        #if DEBUG
+        if isBackup {
+            persistenceWork.backupWrite.succeeded &+= 1
+            persistenceWork.backupWrite.bytes &+= data.count
+        } else {
+            persistenceWork.primaryWrite.succeeded &+= 1
+            persistenceWork.primaryWrite.bytes &+= data.count
+        }
+        #endif
     }
 }
