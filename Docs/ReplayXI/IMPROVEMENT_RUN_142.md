@@ -77,7 +77,23 @@ guards, event navigation, ownership, timing and accessibility routes. The City
 checks now require the measured continuity and reduction against a legacy
 negative control, without freezing compiler-specific optimised hashes.
 
-Full native Debug regression and device Release verification are in progress.
+The first full Debug run is not green: result summary reports 1,431 passing
+tests, two intentional skips and one SIGSEGV. It attributes the crash to the
+new header-stage test, immediately before the next native capture test starts.
+The log reports an unknown Objective-C weak-variable unregister; the test
+runner restarts, and the retried capture plus remaining assertions pass. Crash
+stack/lifetime investigation is required; this is not treated as a harmless
+warning or hidden by removing coverage.
+
+- `/private/tmp/replayxi-cycle142-full.xcresult` and `.log`
+
+Cross-review also found the physical tap/recovered-tap path could change
+selection before validating a retained annotation target. That routing guard
+is being unified with the accessibility path before final validation.
+
+Saved production reviews still match SHA-256
+`952e501de62f36e391a5b471175c883d0deb9e981a5c6cfc04f607c6dc5ded65`.
+Device Release verification remains pending.
 
 The Mac remains locked. No hands-on gaze, pinch or headset comfort validation
 is claimed.

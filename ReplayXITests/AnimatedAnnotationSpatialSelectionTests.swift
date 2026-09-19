@@ -219,6 +219,123 @@ final class AnimatedAnnotationSpatialSelectionTests: XCTestCase {
         XCTAssertEqual(fixture.store.playhead, 6)
     }
 
+    func testPhysicalAndAXRetainedTargetsCannotSelectAfterDrawingStartsOrMarkIsErased() throws {
+        let fixture = try Fixture()
+        let retained = try fixture.body()
+        fixture.selectedAnnotationID = fixture.store.selectedScenario.coachMarks.first?.id
+        fixture.playheadWhenSelected = 3
+        fixture.store.beginDrawing(.pass)
+        XCTAssertNil(fixture.store.registerPitchTap(.init(x: -20, z: -30)))
+        // Deliberately do not render: queued physical input can retain the
+        // still-enabled body from before drawing/erasing changed Store state.
+        XCTAssertTrue(retained.isEnabledInHierarchy)
+        fixture.assertBothReject(retained)
+        XCTAssertEqual(fixture.store.pendingDrawStart, .init(x: -20, z: -30))
+        fixture.store.cancelDrawing()
+        fixture.assertBothReject(retained, hasActiveDrawingStroke: true)
+
+        XCTAssertTrue(fixture.store.removeCoachMark(id: fixture.markID))
+        fixture.store.setPlaying(true, broadcast: false)
+        XCTAssertTrue(retained.isEnabledInHierarchy)
+        fixture.assertBothReject(retained)
+    }
+
+    func testPhysicalAndAXRejectHiddenBodyAndDisabledTargetOrAncestorBeforeSelecting() throws {
+        let fixture = try Fixture()
+        let target = try fixture.body()
+        for time in [1.99, 10.0] {
+            fixture.store.seek(to: time, broadcast: false)
+            fixture.render()
+            XCTAssertFalse(target.isEnabledInHierarchy)
+            fixture.assertBothReject(target)
+        }
+        fixture.store.seek(to: 6, broadcast: false)
+        fixture.render()
+        XCTAssertTrue(target.isEnabledInHierarchy)
+        target.isEnabled = false
+        fixture.assertBothReject(target)
+        target.isEnabled = true
+        fixture.root.isEnabled = false
+        fixture.assertBothReject(target)
+        fixture.root.isEnabled = true
+        XCTAssertTrue(fixture.activateSpatial(target), "A fresh enabled target is still usable")
+        XCTAssertEqual(fixture.store.playhead, 6)
+    }
+
+    func testPhysicalAndAXRejectClosingRetiredRoomsAndOldSceneTargetsBeforeSelecting() throws {
+        let fixture = try Fixture()
+        let target = try fixture.body()
+        XCTAssertTrue(fixture.store.beginImmersiveClose(fixture.roomPresentationID))
+        fixture.assertBothReject(target)
+        XCTAssertTrue(fixture.store.immersiveRoomDidDisappear(fixture.roomPresentationID))
+        fixture.store.completeImmersiveClose(fixture.roomPresentationID)
+        let currentRoom = try XCTUnwrap(fixture.store.beginImmersiveOpen())
+        XCTAssertTrue(fixture.store.completeImmersiveOpen(currentRoom, opened: true))
+        XCTAssertEqual(fixture.store.immersiveRoomDidAppear(currentRoom), currentRoom)
+        fixture.assertBothReject(target, roomPresentationID: fixture.roomPresentationID)
+
+        let next = try XCTUnwrap(fixture.store.scenarios.first { $0.id != fixture.store.selectedScenarioID })
+        fixture.store.selectScenario(id: next.id, broadcast: false)
+        XCTAssertTrue(target.isEnabledInHierarchy)
+        XCTAssertNotEqual(fixture.root.name, "match-root-\(fixture.store.selectedScenarioID)")
+        fixture.assertBothReject(target, roomPresentationID: currentRoom)
+    }
+
+    func testPhysicalAndAXRejectRetainedTargetsDuringTimelineAndGeometryOwnership() throws {
+        let fixture = try Fixture()
+        let target = try fixture.body()
+        XCTAssertTrue(fixture.store.beginTimelineScrub())
+        XCTAssertTrue(fixture.store.previewTimelineScrub(to: 7))
+        let timeline = fixture.store.activeTimelineScrubID
+        fixture.assertBothReject(target)
+        XCTAssertEqual(fixture.store.activeTimelineScrubID, timeline)
+        fixture.store.cancelTimelineScrub()
+
+        let gesture = UUID()
+        XCTAssertTrue(fixture.store.previewCoachMarkHandle(id: fixture.markID, endpoint: .end,
+            gestureID: gesture, point: .init(x: -6, z: -9)))
+        fixture.assertBothReject(target)
+        XCTAssertTrue(fixture.store.hasActiveCoachMarkGeometryPreview)
+        XCTAssertTrue(fixture.store.cancelCoachMarkHandlePreview(id: fixture.markID, gestureID: gesture))
+        XCTAssertTrue(fixture.activateSpatial(target))
+        XCTAssertEqual(fixture.store.playhead, 6)
+    }
+
+    func testAdmittedPhysicalSelectionPreservesAnimatedStaticAndPlayerComfortSemantics() throws {
+        for keyed in [false, true] {
+            for role in [SquadRole.coach, .player] {
+                let fixture = try Fixture(keyed: keyed)
+                fixture.store.localRole = role
+                fixture.store.setCollaborationActive(role == .player)
+                fixture.store.seek(to: 6, broadcast: false)
+                fixture.store.setPlaying(true, broadcast: false)
+                fixture.render()
+                let marks = fixture.store.marks
+
+                XCTAssertTrue(fixture.activateSpatial(try fixture.body()))
+
+                XCTAssertEqual(fixture.selectedAnnotationID, fixture.markID)
+                XCTAssertEqual(fixture.playheadWhenSelected, 6, "Selection precedes admitted review")
+                XCTAssertEqual(fixture.store.playhead, keyed ? 6 : 2)
+                XCTAssertFalse(fixture.store.isPlaying)
+                XCTAssertEqual(fixture.store.marks, marks)
+                if role == .player {
+                    XCTAssertFalse(fixture.store.followsCoach)
+                    XCTAssertTrue(fixture.store.isLocallyPaused)
+                }
+            }
+        }
+        let fixture = try Fixture()
+        let authored = try XCTUnwrap(fixture.store.selectedScenario.coachMarks.first { $0.kind == .run })
+        fixture.store.seek(to: 12.25, broadcast: false)
+        fixture.render()
+        let markRoot = try XCTUnwrap(fixture.root.findEntity(named: "mark-\(authored.id.uuidString)"))
+        let body = try XCTUnwrap(markRoot.findEntity(named: AnnotationSceneAffordance.bodyTargetName))
+        XCTAssertTrue(fixture.activateSpatial(body))
+        XCTAssertEqual(fixture.playheadWhenSelected, 12.25)
+        XCTAssertEqual(fixture.store.playhead, authored.revealTime)
+    }
+
     func testSpatialTapRecoveredTapAndAccessibilityShareSelectionNotEventReview() throws {
         let project = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent()
@@ -226,14 +343,33 @@ final class AnimatedAnnotationSpatialSelectionTests: XCTestCase {
             "ReplayXI/Immersive/FootballImmersiveView.swift"), encoding: .utf8)
         let router = try String(contentsOf: project.appendingPathComponent(
             "ReplayXI/Immersive/PlaybackAccessibilityActivationRouter.swift"), encoding: .utf8)
-        let spatial = try XCTUnwrap(scene.components(separatedBy: "private func handleSpatialTap(").last)
-        XCTAssertTrue(spatial.components(separatedBy: "private func ").first?.contains(
-            "reviewSpatialAnnotation(mark)") == true)
-        let recovery = try XCTUnwrap(scene.components(separatedBy: "private func recoverTapIntentFromShortDrag(").last)
-        XCTAssertTrue(recovery.components(separatedBy: "private func ").first?.contains(
-            "reviewSpatialAnnotation(mark)") == true)
-        XCTAssertTrue(scene.contains("PlaybackAccessibilityActivationRouter.selectSpatialAnnotation(mark, in: store)"))
-        XCTAssertTrue(router.contains("selectAnnotation(annotationTarget.markID)\n            selectSpatialAnnotation(mark, in: store)"))
+        for name in ["handleSpatialTap", "recoverTapIntentFromShortDrag"] {
+            let callback = try XCTUnwrap(scene.components(separatedBy: "private func \(name)(").last?
+                .components(separatedBy: "private func ").first)
+            XCTAssertTrue(callback.contains("reviewSpatialAnnotation(value.entity)"))
+            XCTAssertFalse(callback.contains("selectedAnnotationID ="),
+                           "Neither physical callback may select before shared target admission")
+        }
+        let wrapper = try XCTUnwrap(scene.components(separatedBy: "private func reviewSpatialAnnotation(").last?
+            .components(separatedBy: "private func ").first)
+        XCTAssertTrue(wrapper.contains("PlaybackAccessibilityActivationRouter.selectAnnotationTarget("))
+        XCTAssertTrue(wrapper.contains("hasActiveDrawingStroke: annotationStroke != nil"))
+        XCTAssertLessThan(try XCTUnwrap(wrapper.range(of: "selectAnnotationTarget(")?.lowerBound),
+                          try XCTUnwrap(wrapper.range(of: "selectedAnnotationID = annotationID")?.lowerBound))
+        let ax = try XCTUnwrap(router.components(separatedBy: "static func handle(").last?
+            .components(separatedBy: "static func ").first)
+        XCTAssertTrue(ax.contains("selectAnnotationTarget(entity, store: store"))
+        XCTAssertFalse(ax.contains("selectAnnotation(annotationTarget.markID)"))
+        XCTAssertTrue(router.contains("selectAnnotation(mark.id)\n        selectSpatialAnnotation(mark, in: store)"))
+        let admission = try XCTUnwrap(router.components(separatedBy: "static func selectAnnotationTarget(").last?
+            .components(separatedBy: "private static func ").first)
+        let selection = try XCTUnwrap(admission.range(of: "selectAnnotation(mark.id)")?.lowerBound)
+        for guardText in ["store.roomPresentation.acceptsInteraction", "store.canChangePlaybackView",
+                          "!hasActiveDrawingStroke", "entity.isEnabledInHierarchy", "belongsToCurrentMatch",
+                          "store.marks.first(where: { $0.id == target.markID })"] {
+            XCTAssertLessThan(try XCTUnwrap(admission.range(of: guardText)?.lowerBound), selection,
+                              "Every admission check must run before selection")
+        }
         let jump = try XCTUnwrap(scene.components(separatedBy: "private func jump(to mark: CoachMark)").last)
         XCTAssertTrue(jump.components(separatedBy: "private func ").first?.contains(
             "PlaybackAnnotationEventNavigation.jump(to: mark.id, in: store)") == true)
@@ -334,14 +470,51 @@ final class AnimatedAnnotationSpatialSelectionTests: XCTestCase {
             }
         }
 
-        func activate(_ entity: Entity) {
+        func activate(_ entity: Entity, hasActiveDrawingStroke: Bool = false,
+                      roomPresentationID: UUID? = nil) {
             PlaybackAccessibilityActivationRouter.handle(
                 AccessibilityEvents.Activate(entity: entity), store: store,
-                roomPresentationID: roomPresentationID, hasActiveDrawingStroke: false
+                roomPresentationID: roomPresentationID ?? self.roomPresentationID,
+                hasActiveDrawingStroke: hasActiveDrawingStroke
             ) { id in
                 selectedAnnotationID = id
                 playheadWhenSelected = store.playhead
             }
+        }
+
+        func activateSpatial(_ entity: Entity, hasActiveDrawingStroke: Bool = false,
+                             roomPresentationID: UUID? = nil) -> Bool {
+            PlaybackAccessibilityActivationRouter.selectAnnotationTarget(
+                entity, store: store, roomPresentationID: roomPresentationID ?? self.roomPresentationID,
+                hasActiveDrawingStroke: hasActiveDrawingStroke
+            ) { id in
+                selectedAnnotationID = id
+                playheadWhenSelected = store.playhead
+            }
+        }
+
+        func assertBothReject(_ entity: Entity, hasActiveDrawingStroke: Bool = false,
+                              roomPresentationID: UUID? = nil,
+                              file: StaticString = #filePath, line: UInt = #line) {
+            let selected = selectedAnnotationID
+            let selectedTime = playheadWhenSelected
+            let saved = store.makeSavedReviewState()
+            let marks = store.marks
+            let playhead = store.playhead
+            let playing = store.isPlaying
+            let pendingPoint = store.pendingDrawStart
+            XCTAssertFalse(activateSpatial(entity, hasActiveDrawingStroke: hasActiveDrawingStroke,
+                roomPresentationID: roomPresentationID), file: file, line: line)
+            XCTAssertEqual(selectedAnnotationID, selected, file: file, line: line)
+            XCTAssertEqual(playheadWhenSelected, selectedTime, file: file, line: line)
+            activate(entity, hasActiveDrawingStroke: hasActiveDrawingStroke, roomPresentationID: roomPresentationID)
+            XCTAssertEqual(selectedAnnotationID, selected, file: file, line: line)
+            XCTAssertEqual(playheadWhenSelected, selectedTime, file: file, line: line)
+            XCTAssertEqual(store.makeSavedReviewState(), saved, file: file, line: line)
+            XCTAssertEqual(store.marks, marks, file: file, line: line)
+            XCTAssertEqual(store.playhead, playhead, file: file, line: line)
+            XCTAssertEqual(store.isPlaying, playing, file: file, line: line)
+            XCTAssertEqual(store.pendingDrawStart, pendingPoint, file: file, line: line)
         }
 
         func render() {

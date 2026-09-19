@@ -25,12 +25,9 @@ enum PlaybackAccessibilityActivationRouter {
               entity.isEnabledInHierarchy,
               belongsToCurrentMatch(entity, scenarioID: store.selectedScenarioID)
         else { return }
-        if let annotationTarget = AnnotationSceneAffordance.targetAncestor(of: entity) {
-            guard !store.isDrawing,
-                  let mark = store.marks.first(where: { $0.id == annotationTarget.markID })
-            else { return }
-            selectAnnotation(annotationTarget.markID)
-            selectSpatialAnnotation(mark, in: store)
+        if AnnotationSceneAffordance.targetAncestor(of: entity) != nil {
+            selectAnnotationTarget(entity, store: store, roomPresentationID: roomPresentationID,
+                hasActiveDrawingStroke: hasActiveDrawingStroke, selectAnnotation: selectAnnotation)
             return
         }
 
@@ -44,6 +41,32 @@ enum PlaybackAccessibilityActivationRouter {
             return
         }
         store.openLocalPlayerPOV(playerID)
+    }
+
+    /// Physical taps, recovered short drags and AX activation share admission.
+    /// A retained target must not change selection (and dismiss its inspector)
+    /// before discovering that its annotation, scene or gesture owner changed.
+    @discardableResult
+    static func selectAnnotationTarget(
+        _ entity: Entity,
+        store: ReplayStore,
+        roomPresentationID: UUID,
+        hasActiveDrawingStroke: Bool,
+        selectAnnotation: (UUID) -> Void
+    ) -> Bool {
+        guard store.roomPresentation.acceptsInteraction(for: roomPresentationID),
+              store.canChangePlaybackView,
+              !hasActiveDrawingStroke,
+              entity.isEnabledInHierarchy,
+              belongsToCurrentMatch(entity, scenarioID: store.selectedScenarioID),
+              let target = AnnotationSceneAffordance.targetAncestor(of: entity),
+              let mark = store.marks.first(where: { $0.id == target.markID })
+        else { return false }
+        // Preserve the admitted selection-before-review order. Transport then
+        // keeps animated coach marks at this time, or reviews static overlays.
+        selectAnnotation(mark.id)
+        selectSpatialAnnotation(mark, in: store)
+        return true
     }
 
     private static func belongsToCurrentMatch(_ entity: Entity, scenarioID: String) -> Bool {

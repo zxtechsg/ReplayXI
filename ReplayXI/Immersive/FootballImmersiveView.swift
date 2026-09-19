@@ -650,13 +650,8 @@ struct FootballImmersiveView: View {
             hasActiveTimelineScrub: store.hasActiveTimelineScrub
         ) else { return }
 
-        if let annotationTarget = AnnotationSceneAffordance.targetAncestor(
-            of: value.entity
-        ) {
-            selectedAnnotationID = annotationTarget.markID
-            if let mark = store.marks.first(where: { $0.id == annotationTarget.markID }) {
-                reviewSpatialAnnotation(mark)
-            }
+        if AnnotationSceneAffordance.targetAncestor(of: value.entity) != nil {
+            reviewSpatialAnnotation(value.entity)
             return
         }
 
@@ -899,10 +894,8 @@ struct FootballImmersiveView: View {
               SpatialPlaybackIntentRouter.shouldRecoverTapIntent(from: start, to: end)
         else { return }
 
-        if let annotationTarget = AnnotationSceneAffordance.targetAncestor(of: value.entity),
-           let mark = store.marks.first(where: { $0.id == annotationTarget.markID }) {
-            selectedAnnotationID = annotationTarget.markID
-            reviewSpatialAnnotation(mark)
+        if AnnotationSceneAffordance.targetAncestor(of: value.entity) != nil {
+            reviewSpatialAnnotation(value.entity)
             return
         }
 
@@ -974,8 +967,13 @@ struct FootballImmersiveView: View {
         store.openLocalPlayerPOV(playerID)
     }
 
-    private func reviewSpatialAnnotation(_ mark: CoachMark) {
-        PlaybackAccessibilityActivationRouter.selectSpatialAnnotation(mark, in: store)
+    private func reviewSpatialAnnotation(_ entity: Entity) {
+        PlaybackAccessibilityActivationRouter.selectAnnotationTarget(
+            entity, store: store, roomPresentationID: roomPresentationID,
+            hasActiveDrawingStroke: annotationStroke != nil
+        ) { annotationID in
+            selectedAnnotationID = annotationID
+        }
     }
 
     private func exitRoom() {
