@@ -7,6 +7,16 @@ import simd
 /// This object lives only during a bake; retained recordings contain numbers.
 @MainActor
 final class ReplayNativeBallPhysicsWorld {
+    #if DEBUG
+    struct ConstructionForTesting {
+        let includesPitch: Bool
+        let includesGoals: Bool
+    }
+    /// Synchronous observation only. Tests must keep weak references so this
+    /// hook cannot extend the world or renderer's lifetime.
+    static var creationObserverForTesting: ((ReplayNativeBallPhysicsWorld, ConstructionForTesting) -> Void)?
+    #endif
+
     let renderer: RealityRenderer
     let root = Entity()
     let ball = ModelEntity()
@@ -79,6 +89,9 @@ final class ReplayNativeBallPhysicsWorld {
             }
         }
         renderer.entities.append(root)
+        #if DEBUG
+        Self.creationObserverForTesting?(self, .init(includesPitch: includePitch, includesGoals: includeGoals))
+        #endif
     }
 
     func placeBall(position: SIMD3<Float>, velocity: SIMD3<Float> = .zero,

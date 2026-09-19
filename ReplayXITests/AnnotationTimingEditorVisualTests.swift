@@ -30,9 +30,21 @@ final class AnnotationTimingEditorVisualTests: XCTestCase {
                          name: "annotation-timestamp-editor-close-keys", extraKeyTimes: [2.01, 2.04])
     }
 
+    func testSelectedKeyNudgesFitLargestTextAndExplainCollision() throws {
+        try renderEditor(width: 900, height: 1500, typeSize: .accessibility5,
+                         name: "annotation-position-nudges-largest-text", extraKeyTimes: [3],
+                         selectedKeyTime: 2, positionText: "3", revealSelectedKey: true)
+    }
+
+    func testSelectedKeyNudgesFitRegularTextWithPendingDraft() throws {
+        try renderEditor(width: 1136, height: 900, typeSize: .large,
+                         name: "annotation-position-nudges-pending", selectedKeyTime: 2, positionText: "2.1")
+    }
+
     private func renderEditor(width: CGFloat, height: CGFloat, typeSize: DynamicTypeSize, name: String,
                               previewTime: TimeInterval? = nil, extraKeyTimes: [TimeInterval] = [],
-                              pendingDrafts: Bool = false) throws {
+                              pendingDrafts: Bool = false, selectedKeyTime: TimeInterval? = nil,
+                              positionText: String? = nil, revealSelectedKey: Bool = false) throws {
         let store = ReplayStore()
         store.seek(to: 2)
         store.beginDrawing(.arc)
@@ -48,19 +60,19 @@ final class AnnotationTimingEditorVisualTests: XCTestCase {
             XCTAssertFalse(mark.isVisible(at: store.playhead))
         }
         let session = AnnotationTimingDraftSession()
-        if pendingDrafts {
+        if pendingDrafts || selectedKeyTime != nil {
             let current = try XCTUnwrap(store.marks.first { $0.id == mark.id })
             XCTAssertTrue(session.begin(mark: current, scenarioID: store.selectedScenarioID,
                                         duration: store.selectedScenario.duration, store: store))
-            session.window.startText = "1"
-            XCTAssertTrue(session.position.select(2))
-            session.position.text = "3"
+            if pendingDrafts { session.window.startText = "1" }
+            XCTAssertTrue(session.position.select(selectedKeyTime ?? 2))
+            session.position.text = positionText ?? "3"
             XCTAssertTrue(session.hasUnsavedChanges)
             XCTAssertTrue(store.canChangePlaybackView, "Close stays available with unsaved drafts")
         }
         defer { session.releaseOwnership() }
         let view = AnnotationTimingEditor(markID: mark.id, color: ReplayTheme.cyan,
-                                          draftSession: pendingDrafts ? session : nil)
+                                          draftSession: pendingDrafts || selectedKeyTime != nil ? session : nil)
             .environment(store).environment(\.colorScheme, .dark)
             .dynamicTypeSize(typeSize)
             .padding(24).frame(width: width)
@@ -79,6 +91,16 @@ final class AnnotationTimingEditorVisualTests: XCTestCase {
         RunLoop.main.run(until: Date().addingTimeInterval(0.05))
         host.view.setNeedsLayout()
         host.view.layoutIfNeeded()
+        if revealSelectedKey {
+            func verticalScroll(in view: UIView) -> UIScrollView? {
+                if let scroll = view as? UIScrollView,
+                   scroll.contentSize.height > scroll.bounds.height + 1 { return scroll }
+                return view.subviews.lazy.compactMap { verticalScroll(in: $0) }.first
+            }
+            let scroll = try XCTUnwrap(verticalScroll(in: host.view))
+            scroll.setContentOffset(CGPoint(x: 0, y: max(0, scroll.contentSize.height - scroll.bounds.height)), animated: false)
+            host.view.layoutIfNeeded()
+        }
         let image = UIGraphicsImageRenderer(size: window.bounds.size).image { _ in
             host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true)
         }

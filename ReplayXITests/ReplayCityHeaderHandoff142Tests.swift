@@ -232,6 +232,286 @@ final class ReplayCityHeaderHandoff142Tests: XCTestCase {
         try attach(rows, name: "PositiveAndPhysicalCore")
     }
 
+    /// Diagnostic only: a large display-frame delta is not itself a jump.
+    /// Subdivide the two measured intervals, then approach their enclosing
+    /// source-frame boundaries and nearby track/cue boundaries independently.
+    func testCityToeSourceSpansAndBootMotion144() async throws {
+        let context = try await context()
+        let url = try XCTUnwrap(Bundle.main.url(forResource: "ReplayXIRocketboxMotion", withExtension: "json",
+                                               subdirectory: "Resources/Players")
+            ?? Bundle.main.url(forResource: "ReplayXIRocketboxMotion", withExtension: "json"))
+        let timeline = try JSONDecoder().decode(ToeTimeline144.self, from: Data(contentsOf: url))
+        let run = try XCTUnwrap(timeline.clips.first { $0.id == "run" })
+        var rows: [[String: Any]] = []
+        for detail in [ReplaySkinnedAthleteProvider.Detail.near, .lowDetail] {
+            let candidate = try ReplaySkinnedAthleteProvider.make(for: context.player, detail: detail)
+            let legacy = try ReplaySkinnedAthleteProvider.make(for: context.player, detail: detail)
+            legacy.disablesHeaderHandoffForTesting = true
+            let current = Capture(), control = Capture()
+            candidate.poseStageObserverForTesting = { stage, pose in current.stages[stage] = pose }
+            legacy.poseStageObserverForTesting = { stage, pose in control.stages[stage] = pose }
+            defer { candidate.poseStageObserverForTesting = nil; legacy.poseStageObserverForTesting = nil }
+            let boots = try ToeBootSurface144(skin: candidate)
+            let toe = try XCTUnwrap(candidate.motion.semanticJointIndices["rightToe"])
+            let ankle = try XCTUnwrap(candidate.motion.semanticJointIndices["rightAnkle"])
+
+            func snapshot(_ time: Double) throws -> ToeSnapshot144 {
+                let ballBefore = context.recording.sample(at: time)
+                update(candidate, context: context, time: time)
+                update(legacy, context: context, time: time)
+                try assertSourceAndGeometry(candidate, legacy, current: current, control: control)
+                let locomotion = context.player.locomotion(at: time)
+                var direct = candidate.motion.makePoseBuffer()
+                candidate.motion.sample(time: time,
+                    locomotionEffort: locomotion.effort * min(max(locomotion.speedMetresPerSecond / 2.4, 0), 1),
+                    gaitPhase: context.player.gaitPhase(at: time), into: &direct)
+                let source = try XCTUnwrap(current.stages[.source])
+                XCTAssertEqual(source.rotations, direct.rotations)
+                XCTAssertEqual(source.translations, direct.translations)
+                let action = ReplayAthleteInteractionPose.sample(cue: context.cue(at: time), at: time,
+                    track: context.player, presentationPose: context.player.presentationPose(at: time))
+                if let action, action.influence > 0 {
+                    XCTAssertEqual(candidate.model.jointTransforms, legacy.model.jointTransforms)
+                }
+                let ballAfter = context.recording.sample(at: time)
+                XCTAssertEqual(ballAfter.position, ballBefore.position)
+                XCTAssertEqual(ballAfter.orientation, ballBefore.orientation)
+                XCTAssertEqual(ballAfter.velocity, ballBefore.velocity)
+                XCTAssertEqual(ballAfter.angularVelocity, ballBefore.angularVelocity)
+                let placement = context.player.presentationPose(at: time)
+                let world = Transform(rotation: simd_quatf(angle: placement.facingDegrees * .pi / 180,
+                    axis: [0, 1, 0]), translation: [placement.position.x, 0, placement.position.z]).matrix
+                let modelToWorld = world * candidate.model.transformMatrix(relativeTo: nil)
+                let vertices = boots.positions(in: candidate.pose, modelToWorld: modelToWorld)
+                XCTAssertTrue(vertices.allSatisfy { $0.x.isFinite && $0.y.isFinite && $0.z.isFinite })
+                XCTAssertGreaterThanOrEqual(try XCTUnwrap(vertices.map(\.y).min()), -0.001,
+                    "Real imported boot vertices must clear the pitch")
+                func point(_ index: Int) -> SIMD3<Float> {
+                    let value = modelToWorld * candidate.pose.modelSpaceTransforms[index].columns.3
+                    return [value.x, value.y, value.z]
+                }
+                return ToeSnapshot144(time: time, stages: current.stages, legacyStages: control.stages,
+                    vertices: vertices, ankle: point(ankle), toe: point(toe),
+                    transforms: candidate.model.jointTransforms)
+            }
+
+            func append(_ a: ToeSnapshot144, _ b: ToeSnapshot144, fields: [String: Any]) throws {
+                let vertexSteps = zip(a.vertices, b.vertices).map { simd_distance($0, $1) }
+                var row = fields
+                row["detail"] = String(describing: detail)
+                row["previousTime"] = a.time; row["time"] = b.time
+                row["before"] = metadata(context, time: a.time); row["after"] = metadata(context, time: b.time)
+                row["beforeGaitPhase"] = context.player.gaitPhase(at: a.time)
+                row["afterGaitPhase"] = context.player.gaitPhase(at: b.time)
+                row["bootVertexCountsLeftRight"] = boots.counts
+                row["toeWeightedVertexCountsLeftRight"] = boots.toeCounts
+                row["maximumBootVertexStepMetres"] = vertexSteps.max()!
+                row["rightBootVertexStepMetres"] = vertexSteps[boots.counts[0]...].max()!
+                row["minimumBootClearanceMetres"] = min(a.vertices.map(\.y).min()!, b.vertices.map(\.y).min()!)
+                row["rightAnkleWorldStepMetres"] = simd_distance(a.ankle, b.ankle)
+                row["rightToePivotWorldStepMetres"] = simd_distance(a.toe, b.toe)
+                row["stages"] = try Stage.allCases.map { stage -> [String: Any] in
+                    let before = try XCTUnwrap(a.stages[stage]), after = try XCTUnwrap(b.stages[stage])
+                    let oldBefore = try XCTUnwrap(a.legacyStages[stage]), oldAfter = try XCTUnwrap(b.legacyStages[stage])
+                    XCTAssertEqual(after.rotations[toe], try XCTUnwrap(b.stages[.source]).rotations[toe],
+                        "This unplanted header must leave source toe flexion unchanged at every stage")
+                    return ["stage": stage.rawValue,
+                        "rightToeStepDegrees": toeAngle144(before.rotations[toe], after.rotations[toe]),
+                        "rightAnkleStepDegrees": toeAngle144(before.rotations[ankle], after.rotations[ankle]),
+                        "legacyRightToeStepDegrees": toeAngle144(oldBefore.rotations[toe], oldAfter.rotations[toe]),
+                        "rightToeSourceDifferenceDegrees": toeAngle144(after.rotations[toe],
+                            try XCTUnwrap(b.stages[.source]).rotations[toe])]
+                }
+                rows.append(row)
+            }
+
+            let intervals: [(String, Double, Double, Double)] = [
+                ("entry", 466.0 / 120, 467.0 / 120, context.header.startTime),
+                ("exit", 567.0 / 120, 568.0 / 120, context.header.endTime)
+            ]
+            for (edge, first, last, cueBoundary) in intervals {
+                var coarseToe: Float = 0, coarseBoot: Float = 0
+                for divisions in [1, 8, 64] {
+                    var previous = try snapshot(first)
+                    var maximumToe: Float = 0, maximumBoot: Float = 0
+                    for index in 1...divisions {
+                        let next = try snapshot(first + (last - first) * Double(index) / Double(divisions))
+                        let before = try XCTUnwrap(previous.stages[.finalFloor])
+                        let after = try XCTUnwrap(next.stages[.finalFloor])
+                        maximumToe = max(maximumToe, toeAngle144(before.rotations[toe], after.rotations[toe]))
+                        maximumBoot = max(maximumBoot,
+                            zip(previous.vertices, next.vertices).map { simd_distance($0, $1) }.max()!)
+                        try append(previous, next, fields: ["kind": "peakSubdivision", "edge": edge,
+                            "divisions": divisions, "subdivisionIndex": index])
+                        previous = next
+                    }
+                    if divisions == 1 {
+                        coarseToe = maximumToe; coarseBoot = maximumBoot
+                        XCTAssertGreaterThan(coarseToe, 7, "Reproduce the originally measured source peak")
+                    } else {
+                        // A retained jump would stay large as dt shrinks.
+                        // Allow twice linear scaling, plus Float roundoff.
+                        XCTAssertLessThan(maximumToe, coarseToe * 2 / Float(divisions) + 0.001)
+                        XCTAssertLessThan(maximumBoot, coarseBoot * 2 / Float(divisions) + 0.000_01)
+                    }
+                }
+                let middle = (first + last) / 2
+                let cycle = floor(Double(context.player.gaitPhase(at: middle)) / (2 * .pi))
+                let sourceTime = (Double(context.player.gaitPhase(at: middle)) / (2 * .pi) - cycle)
+                    * run.durationSeconds
+                let upper = try XCTUnwrap(run.frames.firstIndex { $0.time > sourceTime })
+                XCTAssertGreaterThan(upper, 0)
+                var boundaries: [(String, Double)] = [("peakMidpoint", middle), ("cueBoundary", cueBoundary)]
+                for index in [upper - 1, upper] {
+                    let targetPhase = (cycle + run.frames[index].time / run.durationSeconds) * (2 * .pi)
+                    var lowerTime = first - 0.1, upperTime = last + 0.1
+                    XCTAssertLessThan(Double(context.player.gaitPhase(at: lowerTime)), targetPhase)
+                    XCTAssertGreaterThan(Double(context.player.gaitPhase(at: upperTime)), targetPhase)
+                    // Locate the exact Float gait-phase crossing used by the
+                    // source sampler, rather than round to a display frame.
+                    for _ in 0..<48 {
+                        let time = (lowerTime + upperTime) / 2
+                        if Double(context.player.gaitPhase(at: time)) < targetPhase { lowerTime = time }
+                        else { upperTime = time }
+                    }
+                    boundaries.append(("runFrame\(index)", (lowerTime + upperTime) / 2))
+                }
+                boundaries += context.player.keyframes.filter { abs($0.time - middle) < 0.05 }
+                    .map { ("trackKeyframe", $0.time) }
+                for (kind, boundary) in boundaries {
+                    var referenceToe: Float = 0, referenceBoot: Float = 0
+                    for epsilon in [1.0 / 120, 0.001, 0.0001, 0.00001] {
+                        let before = try snapshot(boundary - epsilon), after = try snapshot(boundary + epsilon)
+                        let a = try XCTUnwrap(before.stages[.finalFloor]), b = try XCTUnwrap(after.stages[.finalFloor])
+                        let toeDelta = toeAngle144(a.rotations[toe], b.rotations[toe])
+                        let bootDelta = zip(before.vertices, after.vertices).map { simd_distance($0, $1) }.max()!
+                        if epsilon == 0.001 { referenceToe = toeDelta; referenceBoot = bootDelta }
+                        if epsilon == 0.00001 {
+                            XCTAssertLessThan(toeDelta, referenceToe * 0.05 + 0.001,
+                                "Toe motion must shrink when approaching \(kind), not retain a finite jump")
+                            XCTAssertLessThan(bootDelta, referenceBoot * 0.05 + 0.000_01,
+                                "Actual boot motion must also converge at \(kind)")
+                        }
+                        try append(before, after, fields: ["kind": "boundaryLimit", "edge": edge,
+                            "boundaryKind": kind, "boundaryTime": boundary, "epsilonSeconds": epsilon,
+                            "sourceSpanLowerFrame": upper - 1, "sourceSpanUpperFrame": upper,
+                            "sourceClipTimeAtPeakMidpoint": sourceTime])
+                        let rewind = try snapshot(boundary - epsilon)
+                        XCTAssertEqual(rewind.transforms, before.transforms)
+                        XCTAssertEqual(rewind.vertices, before.vertices)
+                    }
+                }
+            }
+        }
+        rows.append(["scope": "Two measured City native toe intervals, source/track/cue convergence, and CPU linear-blend deformation of actual imported near/low boot vertices; no GPU readback or comfort claim. Relative convergence assertions distinguish fast continuous motion from a retained jump; no production motion change."])
+        try attach(rows, name: "ToeSourceAndBootMotion144")
+    }
+
+    private struct ToeTimeline144: Decodable {
+        struct Clip: Decodable {
+            struct Frame: Decodable { let time: Double }
+            let id: String
+            let durationSeconds: Double
+            let frames: [Frame]
+        }
+        let clips: [Clip]
+    }
+
+    private struct ToeSnapshot144 {
+        let time: Double
+        let stages: [Stage: ReplaySkinnedAthleteMotion.Pose]
+        let legacyStages: [Stage: ReplaySkinnedAthleteMotion.Pose]
+        let vertices: [SIMD3<Float>]
+        let ankle: SIMD3<Float>
+        let toe: SIMD3<Float>
+        let transforms: [Transform]
+    }
+
+    /// Test-owned LBS uses the imported mesh's actual inverse binds and weights.
+    /// Only vertices wholly owned by an ankle/toe chain below the rest ankle
+    /// enter the boot set; each side must include nonzero toe-weighted vertices.
+    private struct ToeBootSurface144 {
+        private struct Influence {
+            let joint: Int
+            let point: SIMD4<Float>
+            let weight: Float
+        }
+        private let vertices: [[Influence]]
+        let counts: [Int]
+        let toeCounts: [Int]
+
+        init(skin: ReplaySkinnedAthleteInstance) throws {
+            let contents = try XCTUnwrap(skin.model.model).mesh.contents
+            let skeleton = try XCTUnwrap(contents.skeletons.first)
+            XCTAssertEqual(skeleton.joints.map(\.name), skin.motion.jointNames)
+            var result: [[Influence]] = [], counts: [Int] = [], toeCounts: [Int] = []
+            for side in ["left", "right"] {
+                let ankle = try XCTUnwrap(skin.motion.semanticJointIndices[side + "Ankle"])
+                let toe = try XCTUnwrap(skin.motion.semanticJointIndices[side + "Toe"])
+                let allowed = Set(skin.motion.joints.indices.filter { index in
+                    var cursor = index
+                    while cursor >= 0 {
+                        if cursor == ankle { return true }
+                        cursor = skin.motion.joints[cursor].parentIndex
+                    }
+                    return false
+                })
+                let initialCount = result.count
+                var toeCount = 0
+                for part in contents.models.flatMap({ Array($0.parts) }) {
+                    let weights = try XCTUnwrap(part.jointInfluences).influences.elements
+                    guard !part.positions.elements.isEmpty,
+                          weights.count.isMultiple(of: part.positions.count) else {
+                        throw CocoaError(.fileReadCorruptFile)
+                    }
+                    let count = weights.count / part.positions.count
+                    guard (1...8).contains(count) else { throw CocoaError(.fileReadCorruptFile) }
+                    for (index, position) in part.positions.elements.enumerated() {
+                        let slice = weights[(index * count)..<((index + 1) * count)].filter { $0.weight > 0 }
+                        guard !slice.isEmpty, slice.allSatisfy({ allowed.contains($0.jointIndex) }) else { continue }
+                        let influences = slice.map { influence in
+                            Influence(joint: influence.jointIndex,
+                                point: skeleton.joints[influence.jointIndex].inverseBindPoseMatrix * SIMD4(position, 1),
+                                weight: influence.weight)
+                        }
+                        let rest = influences.reduce(SIMD4<Float>.zero) {
+                            $0 + skin.motion.restPose.modelSpaceTransforms[$1.joint] * $1.point * $1.weight
+                        }
+                        guard rest.y < skin.motion.restPose.modelSpaceTransforms[ankle].columns.3.y + 0.04 else { continue }
+                        XCTAssertEqual(rest.w, 1, accuracy: 0.000_01)
+                        result.append(influences)
+                        if slice.contains(where: { $0.jointIndex == toe && $0.weight > 0.001 }) { toeCount += 1 }
+                    }
+                }
+                counts.append(result.count - initialCount); toeCounts.append(toeCount)
+                XCTAssertGreaterThan(result.count - initialCount, 10)
+                XCTAssertGreaterThan(toeCount, 0)
+                guard result.count > initialCount else { throw CocoaError(.fileReadCorruptFile) }
+            }
+            vertices = result; self.counts = counts; self.toeCounts = toeCounts
+        }
+
+        func positions(in pose: ReplaySkinnedAthleteMotion.Pose, modelToWorld: simd_float4x4) -> [SIMD3<Float>] {
+            vertices.map { influences in
+                let local = influences.reduce(SIMD4<Float>.zero) {
+                    $0 + pose.modelSpaceTransforms[$1.joint] * $1.point * $1.weight
+                }
+                let world = modelToWorld * local
+                return [world.x, world.y, world.z]
+            }
+        }
+    }
+
+    /// Double relative-quaternion atan2 stays useful below the Float acos floor.
+    private func toeAngle144(_ a: simd_quatf, _ b: simd_quatf) -> Float {
+        func precise(_ q: simd_quatf) -> simd_quatd {
+            simd_normalize(simd_quatd(ix: Double(q.imag.x), iy: Double(q.imag.y),
+                                      iz: Double(q.imag.z), r: Double(q.real)))
+        }
+        let delta = precise(a).inverse * precise(b)
+        return Float(2 * atan2(simd_length(delta.imag), abs(delta.real)) * 180 / .pi)
+    }
+
     private func assertSourceAndGeometry(_ candidate: ReplaySkinnedAthleteInstance, _ legacy: ReplaySkinnedAthleteInstance,
                                          current: Capture, control: Capture) throws {
         let source = try XCTUnwrap(current.stages[.source]), oldSource = try XCTUnwrap(control.stages[.source])

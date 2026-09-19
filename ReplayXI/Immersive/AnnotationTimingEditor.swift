@@ -216,6 +216,11 @@ struct AnnotationTimingEditor: View {
                     .focused($focusedField, equals: .positionTime)
                     .submitLabel(.done)
                     .onSubmit { submitPositionTime(mark, from: time) }
+                HStack(spacing: 8) {
+                    positionTimeNudge(-0.1, symbol: "minus", label: "Move position time draft 0.1 seconds earlier")
+                    Text("0.1s").font(.caption).monospacedDigit()
+                    positionTimeNudge(0.1, symbol: "plus", label: "Move position time draft 0.1 seconds later")
+                }
                 Button("Reset") { resetPositionTime() }
                     .disabled(!positionDraft.isDirty)
                     .accessibilityLabel("Reset selected position time only")
@@ -230,13 +235,32 @@ struct AnnotationTimingEditor: View {
                     .accessibilityLabel("Delete position key at \(keyTimeLabels.label(at: time))")
                     .disabled(positionDraft.isDirty)
             }.disabled(!canEdit)
-            if let destination = AnnotationTimestamp.parse(positionDraft.text), abs(destination - time) < CoachMark.keyframeTimeTolerance {
+            if let error = positionDraft.validationMessage(for: mark, duration: duration) {
+                Label(error, systemImage: "exclamationmark.circle")
+                    .font(.caption).foregroundStyle(.orange)
+            } else if !positionDraft.isDirty {
                 Text("Move changes the time. Adjust shape edits the current position.")
                     .font(.caption).foregroundStyle(.secondary)
-            } else if !canMoveKey(mark, from: time, to: AnnotationTimestamp.parse(positionDraft.text)) {
-                Text("Choose an unused time inside this replay.").font(.caption).foregroundStyle(.orange)
+            } else {
+                Text("Position time not saved. Choose Move or Reset.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
+    }
+
+    private func positionTimeNudge(_ delta: TimeInterval, symbol: String, label: String) -> some View {
+        Button {
+            guard canEdit, positionDraft.nudge(by: delta, duration: duration) else { return }
+            if focusedField == .positionTime { focusedField = nil }
+        } label: {
+            Image(systemName: symbol)
+                .frame(minWidth: PlaybackControlDeckPresentation.minimumSpatialHitTarget,
+                       minHeight: PlaybackControlDeckPresentation.minimumSpatialHitTarget)
+        }
+        .buttonStyle(.bordered)
+        .disabled(!canEdit || positionDraft.nudgedTime(by: delta, duration: duration) == nil)
+        .accessibilityLabel(label)
+        .accessibilityHint("Changes only the draft. Choose Move to save, or Reset to discard.")
     }
 
     private func adaptiveRow<Content: View>(@ViewBuilder content: () -> Content) -> some View {
