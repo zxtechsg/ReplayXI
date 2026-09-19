@@ -29,4 +29,16 @@ MOVE now uses one block-reason policy for enablement, help and accessibility. It
 
 - Corrected focused run: `/private/tmp/replayxi-cycle146-candidate-02.xcresult`: **14 passed**. The annotation test now unlinks player tracking through the real command before recording keys and stops early if setup fails. It verifies that shortening the window does not unblock an out-of-bounds key, retiming that key does, and Undo restores the exact pre-move mark.
 
-Mixed stress, full suite, device Release and demo relaunch pending. This is explicit ownership cleanup, not proof of a framework crash fix, a frame-rate gain or headset comfort verification.
+- Matched three-repeat mixed workload: `/private/tmp/replayxi-cycle146-mixed-stress.xcresult`: **36 test invocations passed** (12 unique tests), without a process restart. The equivalent pre-change workload crashed. One successful bounded repeat is evidence of improvement, not proof that the intermittent failure is eliminated.
+
+- Full suite: `/private/tmp/replayxi-cycle146-full-02.xcresult`: **1,470 passed, two skipped, zero failed**, 335.8 s. No process restart or unknown-weak-reference warning. The first full-run command had a mistyped simulator ID and was terminated before testing; its unused output remains at `cycle146-full`.
+- Unsigned device Release: `/private/tmp/replayxi-cycle146-release.log`: **build passed**.
+- Normal simulator app relaunched as PID 70510 and remained alive after 51 s. Dashboard screenshot `/private/tmp/replayxi-cycle146-demo.png` was inspected: the selected volley study, local-only status and replay controls are visible. This is not a hands-on immersive/headset check.
+- Saved-review SHA-256 remains `952e501de62f36e391a5b471175c883d0deb9e981a5c6cfc04f607c6dc5ded65`, unchanged from before testing. User project/signing changes and unrelated files remain untouched and uncommitted.
+- Implementation backup: `e66d75e`, pushed to `origin/main` before the full run.
+
+This is explicit ownership cleanup with successful bounded stress and full-suite evidence, not proof of a permanent framework crash fix, a frame-rate gain or headset comfort verification. The earlier failing runs remain recorded.
+
+## Next bounded motion probe
+
+Existing run-145 receipt `/private/tmp/replayxi-cycle145-offball-candidate/2C4965C8-B010-4E40-8665-6692C24F737C.json`, zero-based rows 11–14, reports roughly 66° native/far elbow differences for rebound `arg-13` and `arg-19` at 0.3 s. This does not prove either pose is wrong. Before changing the rig, inspect matched near/low/far images and actual LOD switching across 0.25–0.8 s, matching anatomical lanes through `nativeIsLeft`. Separate source phase from bend amplitude and preserve contact, source-leg, root, ball and rewind controls.
