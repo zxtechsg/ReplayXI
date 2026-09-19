@@ -244,6 +244,7 @@ final class ReplaySkinnedAthleteInstance {
     private let offBallRightArm: ReplayAthleteOffBallPose.NativeArmBinding?
     private var footballPose: ReplaySkinnedAthleteFootballPose?
     private var impactPose: ReplaySkinnedAthleteImpactPose?
+    private let turnInPlace: ReplaySkinnedAthleteTurnInPlace?
 
     init(root: Entity, skinRoot: Entity, model: ModelEntity, front: ModelEntity, back: ModelEntity,
          playerID: String, motion: ReplaySkinnedAthleteMotion, contactSurface: ReplaySkinnedAthleteContactSurface,
@@ -262,6 +263,7 @@ final class ReplaySkinnedAthleteInstance {
         pose = motion.makePoseBuffer()
         footballPose = ReplaySkinnedAthleteFootballPose(motion: motion, bootMarkers: bootMarkers)
         impactPose = ReplaySkinnedAthleteImpactPose(motion: motion, contactSurface: contactSurface)
+        turnInPlace = ReplaySkinnedAthleteTurnInPlace(motion: motion)
         offBallLeftArm = .init(side: "left", motion: motion)
         offBallRightArm = .init(side: "right", motion: motion)
         transforms = model.jointTransforms
@@ -357,6 +359,12 @@ final class ReplaySkinnedAthleteInstance {
             impactPose?.apply(impact.pose, influence: impact.influence, motion: motion, to: &pose)
         }
         motion.rebuildModelSpaceTransforms(in: &pose)
+        if let turn = ReplaySkinnedAthleteTurnInPlace.sample(track: track, at: time,
+            presentationPose: presentationPose, locomotion: locomotion, interaction: interaction,
+            actionInfluence: max(interactionSample?.influence ?? 0, ballAction?.influence ?? 0),
+            enabled: allowsOffBallPose && stationaryPose == nil && impact == nil) {
+            turnInPlace?.apply(turn, motion: motion, to: &pose)
+        }
         if let action = interactionSample, action.kind == .header {
             // Source Biped axes and torso lengths differ from the generated
             // rig. Solve from the actual model-space chest/head pivots, then
