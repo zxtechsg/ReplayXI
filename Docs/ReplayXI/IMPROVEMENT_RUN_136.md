@@ -88,7 +88,22 @@ ball physics, procedural fallback or match-data interpretation changes.
 Evidence: /private/tmp/replayxi-cycle136-baseline-v2.xcresult,
 /private/tmp/replayxi-cycle136-timing.xcresult, /private/tmp/replayxi-cycle136-perf-motion.xcresult
 (includes the documented first-attempt motion failure), /private/tmp/replayxi-cycle136-arc.xcresult,
-and /private/tmp/replayxi-cycle136-turn-v3.xcresult. Full-suite/device validation follows integration.
+and /private/tmp/replayxi-cycle136-turn-v3.xcresult.
+
+## Integrated validation
+
+- Full simulator suite: 1,285 XCTest tests, two intentional skips, zero failures; both Swift Testing
+  imported-asset tests passed. /private/tmp/replayxi-cycle136-full.xcresult.
+- Device Release succeeded. A main-actor function-reference warning in position-time Reset was
+  then removed by an explicit optional branch; the Release rebuild has no Swift warnings.
+  The remaining AppIntents metadata-extraction warning reflects the absent framework, not a
+  compile failure. /private/tmp/replayxi-cycle136-release-v2.log.
+- The final Reset change passed 26 focused draft/session/native-editor tests:
+  /private/tmp/replayxi-cycle136-reset-isolation.xcresult.
+- Production review hash is unchanged after all tests. Normal simulator app launched successfully.
+  User-owned project/Info changes remain excluded from every commit.
+
+These tests do not establish headset frame rate, comfort, mocap accuracy or FIFA-level fidelity.
 
 Further persistence work should start with Release/device profiling: separate active-review
 encoding from assembly, and measure playback during cold/warm saves. A background writer must

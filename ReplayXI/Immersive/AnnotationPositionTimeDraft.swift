@@ -20,7 +20,11 @@ struct AnnotationPositionTimeDraft: Equatable {
     }
 
     mutating func reset() {
-        text = selectedTime.map(AnnotationTimestamp.editable) ?? ""
+        if let selectedTime {
+            text = AnnotationTimestamp.editable(selectedTime)
+        } else {
+            text = ""
+        }
     }
 
     mutating func acceptCommittedTime(_ time: TimeInterval) {
