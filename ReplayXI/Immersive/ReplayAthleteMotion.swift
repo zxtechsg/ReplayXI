@@ -458,6 +458,15 @@ enum ReplayAthleteMotion {
         footfall(at: phase, tuning: tuning(for: state).footfall)
     }
 
+    /// The continuous timing actually used by locomotionPose, including cut
+    /// admission/release. A discrete state's timing cannot audit that blend.
+    static func footfall(
+        for locomotion: PlayerLocomotionSample,
+        phase: Float
+    ) -> ReplayAthleteFootfall {
+        footfall(at: phase, tuning: motionTuning(for: locomotion).tuning.footfall)
+    }
+
     /// Infers a visual touch from authored ball kinematics and player proximity.
     /// No event IDs, player IDs or hand-authored timestamps participate, so the
     /// same input tracks always return the same pose after seek or reverse play.

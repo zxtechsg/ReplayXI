@@ -84,6 +84,69 @@ combined budget/motion candidate batch pass. Evidence:
 Cycle137's 10.61 m/s near-floor peak is not proven planted skating. At fra-22's
 6.875-second right-boot sample, the source run clip is in forward swing while the
 authored procedural gait treats that foot as loaded. The cut overlay is fading.
-Floor proximity alone mixes incompatible support/swing phases. Exact continuous
-footfall and blend metadata are being collected before changing the phase policy;
-no blanket world-space foot lock or new tracking-data claim is intended.
+Floor proximity alone mixes incompatible support/swing phases.
+
+The imported-asset-gated fix aligns the entire authored cut pose by 120 degrees
+of gait phase, including opposite arms and torso. Smooth speed admission blends
+complete fixed-phase poses; it does not change the source animation or integrated
+gait clock. Existing contact preparation fades it out, and protected contact cores
+stay exact. Goalkeepers, teaching/impact/stationary overrides and unmatched assets
+are excluded. There is no world-space foot lock or new tracking-data claim.
+
+Native same-frame A/B results, near and low-detail models, 120 Hz windows:
+
+| Player/window | Peak joint step, degrees | Peak horizontal sole speed, m/s |
+| --- | --- | --- |
+| fra-22, 6.80–7.15 | 7.896 → 7.462 | 12.785 → 11.423 |
+| arg-10, 1.20–1.65 | 19.307 → 19.058 | 22.116 → 14.014 |
+| fra-5, 11.192–11.342 | 7.996 → 9.249 | 11.327 → 11.084 |
+| arg-13, 6.825–6.975 | 12.307 → 10.194 | 8.694 → 8.694 |
+| city-11, 4.125–4.275 | 5.803 → 5.501 | 8.813 → 8.302 |
+
+The fra-5 joint-step regression is retained as an explicit trade-off, not hidden
+by a global mean. Near-floor subsets also change sample membership: fra-22 peak
+10.612 → 8.059 m/s but sample count 24 → 20; other windows' near-floor means can
+increase. Authored source-support markers are not measured foot force, and this
+is not a universal skating fix. Calibrated native captures show a less crossed
+stance at fra-22 6.875; screenshots alone cannot establish motion quality.
+
+Bone lengths, floor clearance and reverse evaluation pass. The arg-10 protected
+core has 12 byte-exact samples per LOD; its independent unaligned full-window
+hashes still match the earlier baseline. Phase-wrap, zero/partial/full admission
+and opposite-arm pairing tests also pass. Evidence:
+/private/tmp/replayxi-cycle138-phase-candidate-captures and
+/private/tmp/replayxi-cycle138-budget-motion-candidate.xcresult.
+
+The 30 Hz policy scan covers 33,770 player samples: 1,230 admit alignment and
+1,086 request a second authored pose. This is a policy-work estimate assuming
+active locomotion, not observed provider calls, CPU cost or FPS. Zero/full
+admission evaluates only one authored pose. Production override/LOD/cache paths
+can change actual work.
+
+All five fresh native ball records retain 27 contacts, zero misses and 6,125
+samples. Their full position/velocity trajectories and touch records are JSON-
+exact against the cycle137 baseline. Evidence:
+/private/tmp/replayxi-cycle138-ball-candidate-captures.
+
+## Final validation and remaining work
+
+- Full native suite: 1,359 XCTest tests, two intentional skips, zero failures;
+  both Swift Testing imported-asset checks also pass. Skips are the unstaged
+  transient Rocketbox fixture and opt-in network YouTube embed check.
+  /private/tmp/replayxi-cycle138-full.xcresult and .log.
+- Unsigned visionOS device Release build passes. The only build warning is the
+  unused AppIntents metadata-extraction notice; no Swift build errors/warnings.
+  /private/tmp/replayxi-cycle138-release.log.
+- Final native phase receipts, including the provider-wiring gain assertion and
+  qualified work estimate: /private/tmp/replayxi-cycle138-phase-final-captures.
+- Latest normal simulator app relaunched; saved reviews remain SHA256
+  952e501de62f36e391a5b471175c883d0deb9e981a5c6cfc04f607c6dc5ded65.
+- Hands-on UI/gesture validation is still pending because the Mac is locked.
+
+Next bounded motion investigation: attribute the remaining arg-10/fra-5 peak to
+an exact joint and time, with native snapshots before/after retarget, contact/look
+and floor stages. Existing receipts contain only final-window maxima; they do
+not identify the peak joint. Raw source steps alone do not explain those maxima.
+Do not relax protected-contact checks merely to reduce a summary metric.
+
+Goal remains active. Unrelated user project/Info.plist edits are preserved.

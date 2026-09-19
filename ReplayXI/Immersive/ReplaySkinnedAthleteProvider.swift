@@ -222,6 +222,10 @@ enum ReplaySkinnedAthleteProvider {
 @MainActor
 final class ReplaySkinnedAthleteInstance {
     let detail: ReplaySkinnedAthleteProvider.Detail
+    #if DEBUG
+    /// Native same-frame A/B audit; not exposed in the shipped app.
+    var disablesCutPhaseAlignmentForTesting = false
+    #endif
     let root: Entity
     let playerID: String
     let model: ModelEntity
@@ -323,12 +327,20 @@ final class ReplaySkinnedAthleteInstance {
         let influence = max(ReplaySkinnedAthleteFootballPose.influence(locomotion: locomotion, ballAction: ballAction),
                             interactionSample?.influence ?? 0, movement?.influence ?? 0, keeper?.influence ?? 0)
         if influence > 0, footballPose != nil {
-            let authored = ReplayAthleteMotion.locomotionPose(
-                for: track, at: time, locomotion: locomotion, gaitPhase: gaitPhase,
-                lookTargetWorldPosition: lookTarget, ballAction: ballAction,
-                stationaryPose: stationaryPose, interaction: interaction, presentationPose: presentationPose,
-                movementIntent: movement, allowsOffBallPose: false, goalkeeperReadiness: keeper
-            )
+            var phaseEnabled = allowsOffBallPose && stationaryPose == nil && impact == nil && ballAction == nil
+            #if DEBUG
+            phaseEnabled = phaseEnabled && !disablesCutPhaseAlignmentForTesting
+            #endif
+            let phaseWeight = ReplaySkinnedAthleteCutPhase.weight(source: motion.sourceCommit,
+                track: track, at: time, locomotion: locomotion, interaction: interaction,
+                retargetInfluence: influence, enabled: phaseEnabled)
+            let authored = ReplaySkinnedAthleteCutPhase.authoredPose(phase: gaitPhase, weight: phaseWeight) { phase in
+                ReplayAthleteMotion.locomotionPose(
+                    for: track, at: time, locomotion: locomotion, gaitPhase: phase,
+                    lookTargetWorldPosition: lookTarget, ballAction: ballAction,
+                    stationaryPose: stationaryPose, interaction: interaction, presentationPose: presentationPose,
+                    movementIntent: movement, allowsOffBallPose: false, goalkeeperReadiness: keeper)
+            }
             footballPose?.apply(authored, influence: influence,
                                 armInfluence: max(ReplaySkinnedAthleteFootballPose.influence(locomotion: locomotion, ballAction: nil),
                                                   interactionSample?.influence ?? 0, movement?.readiness ?? 0,
