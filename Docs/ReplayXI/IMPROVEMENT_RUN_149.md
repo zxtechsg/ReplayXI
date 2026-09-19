@@ -1,6 +1,6 @@
 # Run 149 — native cleanup provenance and off-ball support
 
-Status: diagnostics in progress. No production animation or physics change.
+Status: diagnostic checkpoint; unresolved cleanup crash and cross-runtime test issues continue in run 150. No production animation or physics change.
 
 Run 148 shipped the optional local Full squad detail setting in `dd04e95`, with focused checks and Release build passing, but retained two full-suite RealityKit cleanup crashes. Six-method mixed cohorts, three repeats each, passed on both installed runtimes (26.5 and 27). That does not distinguish the cause.
 
@@ -26,4 +26,7 @@ An agent is preparing a test-only off-ball foot-support probe for rebound Argent
 - France 26 has a partial source blend (minimum run weight 0.809), with the measured patch above 44 mm; it is not a planted-foot control in this window.
 - Source-stage backward motion precedes retargeting; retargeting reduces it and floor correction leaves horizontal positions unchanged. Current cadence is not calibrated to the imported in-place run's stride. Exact original root-motion calibration and native moving views remain required before a correction.
 - Epic's [pose-warping documentation](https://dev.epicgames.com/documentation/en-us/unreal-engine/pose-warping-in-unreal-engine) describes speed-ratio stride scaling with leg/pelvis adjustments. That is a reference for a possible bounded native IK approach, not code already implemented here.
-- A full suite on the installed visionOS 26.5 runtime is now running from this prebuilt candidate. All Swift sources remain frozen until it ends.
+- Full suite on installed visionOS 26.5: `/private/tmp/replayxi-cycle149-full-runtime265.xcresult`, **1,489 passed, five failed, two skipped**, 355.2 s. No unknown-weak warning, native crash or process restart. This single run does not prove the intermittent issue is exclusive to visionOS 27.
+- All five failures assert Swift texture-wrapper identity: one kit-map test, one far-head test and three palette tests. Kit getters produced 44 object identities while loading only six maps; generation/load counters and pixel checks passed. Public `TextureResource` equality and shared replacement/readback behavior will be tested with fresh textures before revising those assertions. No private GPU handle or name-based shortcut is planned.
+- Diagnostic code backed up as `6078f41` and pushed. Exact original source-stride calibration and fixed-camera native sequences continue in run 150; neither is yet a rig correction.
+- Calibration note: a previous research message's 300–400 cm figure was the non-shipping pilot builder's acceptance range, not a measured shipping stride. The committed animation has already had root X/Z removed. The original pinned run FBX must be retrieved and measured before using any distance value.
