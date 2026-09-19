@@ -8,6 +8,7 @@ struct AnnotationTimingEditor: View {
     let color: Color
     var draftSession: AnnotationTimingDraftSession? = nil
     var adjustPose: () -> Void = {}
+    var close: () -> Void = {}
     @State private var localSession = AnnotationTimingDraftSession()
     @State private var keyTimeLabels = AnnotationKeyTimeLabels()
     @FocusState private var focusedField: Field?
@@ -44,15 +45,28 @@ struct AnnotationTimingEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            adaptiveRow {
-                Label("In / Out", systemImage: "timer").font(.headline).foregroundStyle(color)
-                Toggle("To end", isOn: draftBinding.throughEnd).toggleStyle(.button).disabled(!canEdit)
-                    .accessibilityHint("Keep the annotation visible through the final replay frame")
-                Button("Reset In/Out", action: resetWindow).disabled(!isDirty || !canEdit)
-                    .accessibilityLabel("Reset In and Out changes only")
-                Button("Apply In/Out", action: applyWindow)
-                    .buttonStyle(.borderedProminent).tint(color)
-                    .disabled(!canEdit || !isDirty || draft.validationMessage(duration: duration) != nil)
+            HStack(alignment: .top, spacing: 12) {
+                Button(action: close) {
+                    Image(systemName: "xmark")
+                        .font(.headline.weight(.semibold))
+                        .frame(minWidth: PlaybackControlDeckPresentation.minimumSpatialHitTarget,
+                               minHeight: PlaybackControlDeckPresentation.minimumSpatialHitTarget)
+                }
+                .buttonStyle(.bordered)
+                .disabled(!store.canChangePlaybackView)
+                .accessibilityLabel("Close timing controls")
+                .accessibilityHint("Returns to this annotation. Unsaved changes need Apply or Discard.")
+                adaptiveRow {
+                    Label("In / Out", systemImage: "timer").font(.headline).foregroundStyle(color)
+                    Toggle("To end", isOn: draftBinding.throughEnd).toggleStyle(.button).disabled(!canEdit)
+                        .accessibilityHint("Keep the annotation visible through the final replay frame")
+                    Button("Reset In/Out", action: resetWindow).disabled(!isDirty || !canEdit)
+                        .accessibilityLabel("Reset In and Out changes only")
+                    Button("Apply In/Out", action: applyWindow)
+                        .buttonStyle(.borderedProminent).tint(color)
+                        .disabled(!canEdit || !isDirty || draft.validationMessage(duration: duration) != nil)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 12) {

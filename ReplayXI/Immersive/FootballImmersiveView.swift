@@ -2909,9 +2909,19 @@ private struct ImmersiveControlDeck: View {
         inlineShelf(color: annotationColor(for: mark.kind)) {
             AnnotationTimingEditor(markID: mark.id, color: annotationColor(for: mark.kind),
                 draftSession: timingDraftSession,
-                adjustPose: { inlinePanel = .annotationGeometry(mark.id) })
+                adjustPose: { inlinePanel = .annotationGeometry(mark.id) },
+                close: requestTimingSafeClose)
                 .id(mark.id)
         }
+    }
+
+    private func requestTimingSafeClose() {
+        guard store.canChangePlaybackView else { return }
+        guard timingDraftSession.hasUnsavedChanges else { inlinePanel = nil; return }
+        timingNavigation.observeDraft(isDirty: true, route: timingEditorRoute)
+        var destination = timingEditorRoute
+        destination.panel = nil
+        _ = timingNavigation.protect(destination)
     }
 
     private var timingDeckRoute: AnnotationTimingDeckRoute {

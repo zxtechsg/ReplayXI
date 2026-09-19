@@ -6,13 +6,18 @@ import XCTest
 @MainActor
 final class AnnotationTimingEditorVisualTests: XCTestCase {
     func testNativeTimingEditorRenders() throws {
-        try renderEditor(width: 1136, height: 700, typeSize: .large, name: "annotation-timestamp-editor")
+        try renderEditor(width: 1136, height: 700, typeSize: .large, name: "annotation-timestamp-editor-close-header")
     }
 
     func testLargestTextTimingEditorUsesBoundedScrollablePanel() throws {
         // The image covers the panel's top state, not controls below the scroll fold.
         try renderEditor(width: 900, height: 1100, typeSize: .accessibility5,
-                         name: "annotation-timestamp-editor-largest-text-top")
+                         name: "annotation-timestamp-editor-largest-text-close-header")
+    }
+
+    func testCloseHeaderRemainsAvailableWithBothTimingDraftsPending() throws {
+        try renderEditor(width: 1136, height: 900, typeSize: .large,
+                         name: "annotation-timestamp-editor-pending-drafts-close-header", pendingDrafts: true)
     }
 
     func testOutsideWindowEditorExplainsSelectionPreview() throws {
@@ -26,7 +31,8 @@ final class AnnotationTimingEditorVisualTests: XCTestCase {
     }
 
     private func renderEditor(width: CGFloat, height: CGFloat, typeSize: DynamicTypeSize, name: String,
-                              previewTime: TimeInterval? = nil, extraKeyTimes: [TimeInterval] = []) throws {
+                              previewTime: TimeInterval? = nil, extraKeyTimes: [TimeInterval] = [],
+                              pendingDrafts: Bool = false) throws {
         let store = ReplayStore()
         store.seek(to: 2)
         store.beginDrawing(.arc)
@@ -41,7 +47,20 @@ final class AnnotationTimingEditorVisualTests: XCTestCase {
             store.seek(to: previewTime)
             XCTAssertFalse(mark.isVisible(at: store.playhead))
         }
-        let view = AnnotationTimingEditor(markID: mark.id, color: ReplayTheme.cyan)
+        let session = AnnotationTimingDraftSession()
+        if pendingDrafts {
+            let current = try XCTUnwrap(store.marks.first { $0.id == mark.id })
+            XCTAssertTrue(session.begin(mark: current, scenarioID: store.selectedScenarioID,
+                                        duration: store.selectedScenario.duration, store: store))
+            session.window.startText = "1"
+            XCTAssertTrue(session.position.select(2))
+            session.position.text = "3"
+            XCTAssertTrue(session.hasUnsavedChanges)
+            XCTAssertTrue(store.canChangePlaybackView, "Close stays available with unsaved drafts")
+        }
+        defer { session.releaseOwnership() }
+        let view = AnnotationTimingEditor(markID: mark.id, color: ReplayTheme.cyan,
+                                          draftSession: pendingDrafts ? session : nil)
             .environment(store).environment(\.colorScheme, .dark)
             .dynamicTypeSize(typeSize)
             .padding(24).frame(width: width)
