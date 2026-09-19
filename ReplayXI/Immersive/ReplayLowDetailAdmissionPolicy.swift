@@ -24,11 +24,13 @@ enum ReplayLowDetailAdmissionPolicy {
         posesByPlayerID: [String: PlayerPose],
         nearPlayerIDs: Set<String>,
         maximumTotal: Int,
-        lowDetailIsReady: Bool
+        lowDetailIsReady: Bool,
+        allowsFirstPerson: Bool = false
     ) -> State {
         guard lowDetailIsReady,
               scenarioKind != .shapeLab,
-              viewMode == .tacticalTable || viewMode == .touchline,
+              viewMode == .tacticalTable || viewMode == .touchline
+                || (allowsFirstPerson && viewMode == .firstPerson),
               maximumTotal > nearPlayerIDs.count,
               let origin = posesByPlayerID[perspectiveID]?.position,
               origin.x.isFinite, origin.z.isFinite

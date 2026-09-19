@@ -74,8 +74,13 @@ enum ReplayRealityRendererAudit {
     }
 
     static func makeTexture(size: Int) throws -> any MTLTexture {
-        guard (64...512).contains(size), let device = MTLCreateSystemDefaultDevice() else {
-            throw Failure.unsupported("No Metal device or invalid audit dimensions")
+        // Four MiB maximum colour target: enough to inspect a whole group at
+        // real pitch distances without making offscreen tests unbounded.
+        guard (64...1024).contains(size) else {
+            throw Failure.unsupported("Audit dimensions must be 64...1024")
+        }
+        guard let device = MTLCreateSystemDefaultDevice() else {
+            throw Failure.unsupported("No Metal device")
         }
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: .bgra8Unorm_srgb, width: size, height: size, mipmapped: false
@@ -91,7 +96,7 @@ enum ReplayRealityRendererAudit {
     static func read(_ texture: any MTLTexture) throws -> Frame {
         guard texture.pixelFormat == .bgra8Unorm_srgb,
               texture.storageMode == .shared,
-              (64...512).contains(texture.width), (64...512).contains(texture.height) else {
+              (64...1024).contains(texture.width), (64...1024).contains(texture.height) else {
             throw Failure.unsupported("Unrecognised offscreen target")
         }
         var bytes = [UInt8](repeating: 0, count: texture.width * texture.height * 4)

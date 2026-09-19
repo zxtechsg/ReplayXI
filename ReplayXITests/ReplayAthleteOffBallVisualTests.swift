@@ -284,6 +284,296 @@ final class ReplayAthleteOffBallVisualTests: XCTestCase {
         receipt.lifetime = .keepAlways; add(receipt)
     }
 
+    /// Forced detail comparison, not a simulation of production POV admission.
+    /// Actual POV ranks neighbours and switches near/far; low is a parity view.
+    func testActualReboundArmsMatchedNearLowFar147() async throws {
+        resetProviders()
+        defer { resetProviders() }
+        try ReplayArmLOD147Probe.prepare()
+        let context = try await ReplayArmLOD147Probe.context()
+        let calibration = try await calibrate()
+        var rows: [[String: Any]] = []
+        for playerID in ["arg-13", "arg-19"] {
+            let player = try XCTUnwrap(context.scenario.player(id: playerID))
+            let input = ReplayArmLOD147Probe.input(context, player: player, time: 0.3)
+            try ReplayAthleteFactory.prewarm(for: [player], lods: [.far])
+            let near = try ReplaySkinnedAthleteProvider.make(for: player, detail: .near)
+            let low = try ReplaySkinnedAthleteProvider.make(for: player, detail: .lowDetail)
+            let far = try ReplayAthleteFactory.make(for: player, lod: .far)
+            let avatars = [near.root, low.root, far.root]
+            let actor = Entity()
+            let origin = SIMD3<Float>(input.presentation.position.x, 0, input.presentation.position.z)
+            let heading = simd_quatf(angle: input.presentation.facingDegrees * .pi / 180, axis: [0, 1, 0])
+            actor.position = origin; actor.orientation = heading
+            for avatar in avatars { actor.addChild(avatar) }
+            let scene = Entity(); scene.addChild(actor)
+            defer {
+                for avatar in avatars { avatar.removeFromParent() }
+                actor.removeFromParent()
+                for child in Array(scene.children) { child.removeFromParent() }
+            }
+            ReplayArmLOD147Probe.update(near, player: player, input: input)
+            ReplayArmLOD147Probe.update(low, player: player, input: input)
+            ReplayArmLOD147Probe.update(far, player: player, input: input)
+            try assertDimensionsAndFloor(near); try assertDimensionsAndFloor(low)
+            XCTAssertEqual(far.metrics.modelEntities, 7)
+            XCTAssertNotNil(far.joints.articulatedFar)
+            let arms = try [
+                ReplayArmLOD147Probe.arms(near, pose: ReplayArmLOD147Probe.submitted(near), relativeTo: actor),
+                ReplayArmLOD147Probe.arms(low, pose: ReplayArmLOD147Probe.submitted(low), relativeTo: actor),
+                ReplayArmLOD147Probe.arms(far, relativeTo: actor)
+            ]
+            let skinTransforms = [near.model.jointTransforms, low.model.jointTransforms]
+            let farTransforms = ReplayAthleteJoint.allCases.map { far.joints[$0].transform }
+            let actorTransform = actor.transform
+            let rootTransforms = avatars.map(\.transform)
+            let floor = ModelEntity(mesh: .generateBox(size: [1.8, 0.008, 1.8]),
+                materials: [SimpleMaterial(color: UIColor(red: 0.07, green: 0.12, blue: 0.09, alpha: 1),
+                                           roughness: 1, isMetallic: false)])
+            floor.position = origin + [0, -0.006, 0]; scene.addChild(floor)
+            let camera = PerspectiveCamera()
+            camera.camera = .init(near: 0.05, far: 20, fieldOfViewInDegrees: 40)
+            let key = DirectionalLight(); key.light.intensity = 2_200
+            key.look(at: origin + [0, 0.9, 0], from: origin + heading.act([3, 4, 3]), relativeTo: nil)
+            let fill = DirectionalLight(); fill.light.intensity = 500
+            fill.look(at: origin + [0, 0.9, 0], from: origin + heading.act([-3, 2, 2]), relativeTo: nil)
+            let views: [(String, SIMD3<Float>)] = [
+                ("front", [0, 1.45, 3.8]),
+                ("folded-side", [playerID == "arg-13" ? -2.2 : 2.2, 1.45, 3.2])
+            ]
+            for (view, cameraOffset) in views {
+                camera.look(at: origin + [0, 0.95, 0], from: origin + heading.act(cameraOffset), relativeTo: nil)
+                let cameraTransform = camera.transform
+                for (index, detail) in ["near", "low", "far"].enumerated() {
+                    for (candidate, avatar) in avatars.enumerated() { avatar.isEnabled = candidate == index }
+                    XCTAssertEqual(avatars.filter(\.isEnabled).count, 1)
+                    let frame = try await render([scene, camera, key, fill], camera: camera, size: 512)
+                    XCTAssertGreaterThan(nonBackgroundPixels(frame), 5_000)
+                    XCTAssertEqual(camera.transform, cameraTransform)
+                    XCTAssertEqual(actor.transform, actorTransform)
+                    XCTAssertEqual(avatars.map(\.transform), rootTransforms)
+                    XCTAssertEqual(near.model.jointTransforms, skinTransforms[0])
+                    XCTAssertEqual(low.model.jointTransforms, skinTransforms[1])
+                    XCTAssertEqual(ReplayAthleteJoint.allCases.map { far.joints[$0].transform }, farTransforms)
+                    let image = XCTAttachment(data: try ReplayRealityRendererAudit.png(frame, calibration: calibration),
+                                              uniformTypeIdentifier: "public.png")
+                    image.name = "ReplayXI-ArmLOD147-\(playerID)-0.300-\(view)-\(detail).png"
+                    image.lifetime = .keepAlways; add(image)
+                    rows.append(["scenario": context.scenario.id, "player": playerID, "time": input.time,
+                        "detail": detail, "view": view, "left": arms[index][0].row, "right": arms[index][1].row,
+                        "cameraOffsetActorMetres": ReplayArmLOD147Probe.vector(cameraOffset),
+                        "cameraTargetOffsetMetres": [0, 0.95, 0], "cameraFOV": 40,
+                        "actorWorldPosition": ReplayArmLOD147Probe.vector(origin),
+                        "actorHeadingDegrees": input.presentation.facingDegrees,
+                        "ballWorldPosition": ReplayArmLOD147Probe.vector(input.ball.position),
+                        "lookWorldPosition": ReplayArmLOD147Probe.vector(input.look),
+                        "speedMetresPerSecond": input.locomotion.speedMetresPerSecond,
+                        "locomotionState": input.locomotion.state.rawValue,
+                        "sameTimeCameraLightingAndActor": true, "visibilityDoesNotChangeSubmittedPose": true,
+                        "scope": "Forced admitted LODs, same native demo frame/camera/lights. Low is parity only; actual POV has near/far admission. No natural visible-switch, motion-quality or headset claim."])
+                }
+            }
+            XCTAssertEqual(context.recording.sample(at: input.time).position, input.ball.position)
+            XCTAssertEqual(context.recording.sample(at: input.time).velocity, input.ball.velocity)
+        }
+        XCTAssertEqual(rows.count, 12)
+        let receipt = XCTAttachment(data: try JSONSerialization.data(withJSONObject: rows, options: [.sortedKeys]),
+                                    uniformTypeIdentifier: "public.json")
+        receipt.name = "ReplayXI-ArmLOD147-MatchedVisualReceipts.json"
+        receipt.lifetime = .keepAlways; add(receipt)
+    }
+
+    /// Actual first-person squad admission, not the forced single-actor LOD
+    /// comparison above. Eye height is a fixed 1.70 m test stand-in for the
+    /// wearer's headset; the production root supplies the player's position.
+    /// These stills do not establish device FPS or headset comfort.
+    func testActualSquadLowSkinsMatchedPOV147() async throws {
+        resetProviders()
+        ReplayStrategyBallProvider.resetForTesting()
+        let priorSquadFlag = PitchSceneFactory.fullSquadSkinsForTesting
+        defer {
+            PitchSceneFactory.fullSquadSkinsForTesting = priorSquadFlag
+            ReplayStrategyBallProvider.resetForTesting()
+            resetProviders()
+        }
+        try ReplayArmLOD147Probe.prepare()
+        // Match room admission, not the primitive pitch/ball fallbacks. The
+        // pitch keeps its immutable shared cache, as in the strategy tests.
+        try ReplayStrategyPitchProvider.prewarm()
+        try ReplayStrategyBallProvider.prewarm()
+        let context = try await ReplayArmLOD147Probe.context()
+        let scenario = context.scenario
+        let time = 0.3
+        let wearerID = "arg-10"
+        let calibration = try await calibrate()
+        let root = PitchSceneFactory.makeMatchRoot(for: scenario, nativeRecording: context.recording)
+        defer { for child in Array(root.children) { child.removeFromParent() } }
+        let pitch = try XCTUnwrap(root.findEntity(named: "pitch"))
+        XCTAssertNotNil(pitch.components[ReplayStrategyPitchProvider.Admission.self])
+        XCTAssertNotNil(root.findEntity(named: ReplayStrategyBallProvider.visualRootName))
+        let camera = PerspectiveCamera()
+        let fov: Float = 90
+        camera.camera = .init(near: 0.05, far: 150, fieldOfViewInDegrees: fov)
+        let key = DirectionalLight(); key.light.intensity = 2_200
+        key.look(at: [0, 0, 0], from: [3, 4, 3], relativeTo: nil)
+        let fill = DirectionalLight(); fill.light.intensity = 1_600
+        fill.look(at: [0, 0, 0], from: [-3, 4, -3], relativeTo: nil)
+        let lightTransforms = [key.transform, fill.transform]
+        let views: [(name: String, targets: [String])] = [
+            ("attacking-group", ["arg-22", "fra-4"]),
+            ("midfield-group", ["arg-5", "fra-8"])
+        ]
+        var rows: [[String: Any]] = []
+
+        func body(_ id: String) throws -> Entity {
+            try XCTUnwrap(root.findEntity(named: "player-\(id)"))
+        }
+        func visibleModels(_ entity: Entity) -> Int {
+            guard entity.isEnabledInHierarchy else { return 0 }
+            return (entity.components[ModelComponent.self] == nil ? 0 : 1)
+                + entity.children.reduce(0) { $0 + visibleModels($1) }
+        }
+
+        for view in views {
+            var baselineFrame: ReplayRealityRendererAudit.Frame?
+            var baselineRoot: Transform?
+            var baselineCamera: Transform?
+            var baselineBodies: [String: Transform] = [:]
+            var baselineBall: Transform?
+            var baselineNearIDs: [String] = []
+            var baselineNearJoints: [String: [Transform]] = [:]
+            for fullSquad in [false, true] {
+                PitchSceneFactory.fullSquadSkinsForTesting = fullSquad
+                PitchSceneFactory.update(root: root, scenario: scenario, time: time, viewMode: .firstPerson,
+                    perspectiveID: wearerID, marks: scenario.coachMarks, showsLaneLens: false,
+                    isDrawing: false, positionalOriginTransform: nil)
+                let wearer = try body(wearerID)
+                let eye = wearer.convert(position: [0, 1.70, 0], to: nil)
+                XCTAssertEqual(eye.x, 0, accuracy: 0.000_01)
+                XCTAssertEqual(eye.y, 1.70, accuracy: 0.000_01)
+                XCTAssertEqual(eye.z, 0, accuracy: 0.000_01)
+                let targets = try view.targets.map { try body($0).convert(position: [0, 1.05, 0], to: nil) }
+                // A world-position midpoint biases towards the farther actor
+                // and can crop the nearer one. Bisect their angular directions
+                // instead; both actors retain the same actual pitch positions.
+                let directions = targets.map { simd_normalize($0 - eye) }
+                let directionSum = directions.reduce(SIMD3<Float>.zero, +)
+                XCTAssertGreaterThan(simd_length_squared(directionSum), 0.01)
+                let gaze = eye + simd_normalize(directionSum) * 10
+                camera.look(at: gaze, from: eye, relativeTo: nil)
+                XCTAssertEqual(visibleModels(wearer), 0, "The actual POV wearer must remain invisible")
+                XCTAssertNil(PitchSceneFactory.skinnedAthletesForTesting(in: root)[wearerID])
+                XCTAssertFalse(try XCTUnwrap(wearer.findEntity(named: "interaction-target")).isEnabledInHierarchy)
+
+                let skins = PitchSceneFactory.skinnedAthletesForTesting(in: root)
+                let nearIDs = skins.filter { $0.value.detail == .near }.keys.sorted()
+                let lowIDs = skins.filter { $0.value.detail == .lowDetail }.keys.sorted()
+                let enabledSkinIDs = skins.filter { $0.value.root.isEnabledInHierarchy }.keys.sorted()
+                let farIDs = try scenario.players.compactMap { player -> String? in
+                    let far = try XCTUnwrap(body(player.id).children.first { $0.name == "table-marker" })
+                    return far.isEnabledInHierarchy ? player.id : nil
+                }.sorted()
+                XCTAssertEqual(nearIDs.count, PitchSceneFactory.firstPersonDetailedRigLimit)
+                XCTAssertEqual(lowIDs.count, fullSquad ? scenario.players.count - 1 - nearIDs.count : 0)
+                XCTAssertEqual(enabledSkinIDs.count, fullSquad ? scenario.players.count - 1 : nearIDs.count)
+                XCTAssertEqual(farIDs.count, fullSquad ? 0 : scenario.players.count - 1 - nearIDs.count)
+
+                var inView: [[String: Any]] = []
+                var inViewTeams: Set<FootballTeam> = []
+                let halfFOVTangent = tan(fov * .pi / 360)
+                for player in scenario.players where player.id != wearerID {
+                    let actor = try body(player.id)
+                    let pose = player.presentationPose(at: time)
+                    XCTAssertEqual(actor.position, [pose.position.x, 0, pose.position.z])
+                    let centre = actor.convert(position: [0, 1, 0], to: nil)
+                    let projected = camera.convert(position: centre, from: nil)
+                    let distance = simd_distance(centre, eye)
+                    guard distance <= 28, projected.z < -0.05,
+                          abs(projected.x) < -projected.z * halfFOVTangent,
+                          abs(projected.y) < -projected.z * halfFOVTangent else { continue }
+                    inViewTeams.insert(player.team)
+                    inView.append(["player": player.id, "team": player.team.rawValue,
+                        "distanceMetres": distance, "worldCentre": ReplayArmLOD147Probe.vector(centre),
+                        "detail": skins[player.id].map { String(describing: $0.detail) } ?? "far"])
+                }
+                XCTAssertGreaterThanOrEqual(inView.count, 2, "Use a real group, not a single isolated actor")
+                XCTAssertEqual(inViewTeams, Set(FootballTeam.allCases), "Both teams must be within this practical POV cone")
+                for targetID in view.targets {
+                    XCTAssertTrue(inView.contains { $0["player"] as? String == targetID })
+                    // A centre-in-cone test alone admitted the cropped first
+                    // fixture. Keep a conservative body-width/height envelope
+                    // on screen, independent of the two visual LODs' bounds.
+                    let origin = try body(targetID).convert(position: .zero, to: nil)
+                    let cameraRight = camera.orientation.act(SIMD3<Float>(1, 0, 0))
+                    for height in [Float(0), 2.05] {
+                        for halfWidth in [Float(-0.75), 0.75] {
+                            let corner = origin + [0, height, 0] + cameraRight * halfWidth
+                            let projected = camera.convert(position: corner, from: nil)
+                            XCTAssertLessThan(projected.z, -0.05)
+                            XCTAssertLessThan(abs(projected.x), -projected.z * halfFOVTangent,
+                                "The full target body must fit horizontally: \(targetID)")
+                            XCTAssertLessThan(abs(projected.y), -projected.z * halfFOVTangent,
+                                "The full target body must fit vertically: \(targetID)")
+                        }
+                    }
+                }
+
+                let bodyTransforms = try Dictionary(uniqueKeysWithValues: scenario.players.map {
+                    ($0.id, try body($0.id).transform)
+                })
+                let ball = try XCTUnwrap(root.findEntity(named: "ball"))
+                let nativeBall = context.recording.sample(at: time)
+                XCTAssertEqual(ball.position, [nativeBall.position.x, max(nativeBall.position.y, 0.11), nativeBall.position.z])
+                XCTAssertEqual(ball.orientation.vector, context.recording.orientation(at: time).vector)
+                let attachedRecording = try XCTUnwrap(PitchSceneFactory.nativeBallRecordingForTesting(in: root))
+                XCTAssertEqual(attachedRecording.samples.map(\.position), context.recording.samples.map(\.position))
+                XCTAssertEqual(attachedRecording.samples.map(\.velocity), context.recording.samples.map(\.velocity))
+                if fullSquad {
+                    XCTAssertEqual(root.transform, baselineRoot)
+                    XCTAssertEqual(camera.transform, baselineCamera)
+                    XCTAssertEqual(bodyTransforms, baselineBodies)
+                    XCTAssertEqual(ball.transform, baselineBall)
+                    XCTAssertEqual(nearIDs, baselineNearIDs)
+                    for id in nearIDs {
+                        XCTAssertEqual(skins[id]?.model.jointTransforms, baselineNearJoints[id])
+                    }
+                } else {
+                    baselineRoot = root.transform; baselineCamera = camera.transform
+                    baselineBodies = bodyTransforms; baselineBall = ball.transform; baselineNearIDs = nearIDs
+                    baselineNearJoints = skins.filter { $0.value.detail == .near }.mapValues { $0.model.jointTransforms }
+                }
+                XCTAssertEqual([key.transform, fill.transform], lightTransforms)
+                let frame = try await render([root, camera, key, fill], camera: camera, size: 1024)
+                XCTAssertGreaterThan(nonBackgroundPixels(frame), 20_000)
+                let changed = baselineFrame.map { differentPixels($0, frame) } ?? 0
+                if fullSquad { XCTAssertGreaterThan(changed, 20, "Squad admission must make a visible difference") }
+                else { baselineFrame = frame }
+                let image = XCTAttachment(data: try ReplayRealityRendererAudit.png(frame, calibration: calibration),
+                    uniformTypeIdentifier: "public.png")
+                image.name = "ReplayXI-SquadPOV147-\(wearerID)-0.300-\(view.name)-\(fullSquad ? "full-squad-low" : "current-near-far").png"
+                image.lifetime = .keepAlways; add(image)
+                rows.append(["scenario": scenario.id, "wearer": wearerID, "time": time, "view": view.name,
+                    "fullSquadSkinsForTesting": fullSquad, "nearIDs": nearIDs, "lowIDs": lowIDs,
+                    "enabledSkinIDs": enabledSkinIDs, "enabledFarIDs": farIDs,
+                    "within28MetresAndCameraCone": inView, "cameraFOV": fov, "frameSize": [1024, 1024],
+                    "cameraWorldPosition": ReplayArmLOD147Probe.vector(eye),
+                    "cameraWorldTarget": ReplayArmLOD147Probe.vector(gaze),
+                    "gazeFraming": "Angular bisector of target directions; 1.5m wide ×2.05m high target envelopes fit",
+                    "lightIntensities": [2_200, 1_600],
+                    "strategyPitchAndBallAdmitted": true,
+                    "pitchRootPosition": ReplayArmLOD147Probe.vector(root.position),
+                    "changedPixelsOverTwoChannelLevels": changed,
+                    "sameBallPlayerRootsCameraAndLights": true, "wearerVisibleModels": visibleModels(wearer),
+                    "scope": "Production first-person update with actual native recording. Fixed 1.70m test eye height at the transformed wearer position; free-look gaze is held identical for each A/B pair. Debug-only squad admission comparison, not headset imagery, FPS or motion-quality proof."])
+            }
+        }
+        XCTAssertEqual(rows.count, 4)
+        let receipt = XCTAttachment(data: try JSONSerialization.data(withJSONObject: rows, options: [.sortedKeys]),
+            uniformTypeIdentifier: "public.json")
+        receipt.name = "ReplayXI-SquadPOV147-MatchedVisualReceipts.json"
+        receipt.lifetime = .keepAlways; add(receipt)
+    }
+
     private func frames(before: Float, after: Float) -> [MotionKeyframe] {
         [.init(time: 0, position: .init(x: 0, z: before), facingDegrees: 0),
          .init(time: 1, position: .zero, facingDegrees: 0),
@@ -349,7 +639,7 @@ final class ReplayAthleteOffBallVisualTests: XCTestCase {
     private func render(_ entities: [Entity], camera: Entity, size: Int) async throws -> ReplayRealityRendererAudit.Frame {
         let renderer = try RealityRenderer()
         renderer.entities.append(contentsOf: entities)
-        defer { renderer.entities.removeAll() }
+        defer { renderer.activeCamera = nil; renderer.entities.removeAll() }
         renderer.activeCamera = camera
         renderer.cameraSettings.isToneMappingEnabled = true
         renderer.cameraSettings.antialiasing = .none

@@ -16,6 +16,19 @@ enum PitchSceneFactory {
     /// readable identities, the ball, and coach annotations.
     static let firstPersonDetailedRigLimit = 2
 
+    #if DEBUG
+    /// Bounded native-squad experiment. Off by default; not a shipping quality
+    /// setting or a claim that simulator CPU timings establish headset FPS.
+    static var fullSquadSkinsForTesting = false
+    #endif
+
+    private static var skinAdmissionConfiguration: (maximum: Int, allowsPOVLow: Bool) {
+        #if DEBUG
+        if fullSquadSkinsForTesting { return (22, true) }
+        #endif
+        return (ReplaySkinnedAthleteProvider.maximumConcurrentInstances, false)
+    }
+
     /// A root represents one immutable authored match. Keep its rolling table
     /// with that root, independent of annotation-cache eviction or view mode.
     private struct BallRollingCache: Component {
@@ -936,6 +949,7 @@ enum PitchSceneFactory {
                 // player is selected. Near subjects take priority over lows.
                 nearSkinIDs.insert(resolvedRagdollCue.playerID)
             }
+            let skinAdmission = skinAdmissionConfiguration
             let lowDetailAdmission = ReplayLowDetailAdmissionPolicy.resolve(
                 previous: sceneState?.lowDetailAdmission ?? .init(),
                 scenarioID: scenario.id,
@@ -944,9 +958,10 @@ enum PitchSceneFactory {
                 perspectiveID: perspectiveID,
                 posesByPlayerID: playerPosesByID,
                 nearPlayerIDs: nearSkinIDs,
-                maximumTotal: ReplaySkinnedAthleteProvider.maximumConcurrentInstances,
+                maximumTotal: skinAdmission.maximum,
                 lowDetailIsReady: ReplaySkinnedAthleteProvider.isLowDetailPrewarmed
-                    && !importedPlayerPilotIsEnabled
+                    && !importedPlayerPilotIsEnabled,
+                allowsFirstPerson: skinAdmission.allowsPOVLow
             )
             var admittedSkinDetails = Dictionary(
                 uniqueKeysWithValues: nearSkinIDs.map { ($0, ReplaySkinnedAthleteProvider.Detail.near) }
@@ -1146,7 +1161,7 @@ enum PitchSceneFactory {
                    ReplaySkinnedAthleteProvider.isPrewarmed,
                    !importedPlayerPilotIsEnabled,
                    let sceneState, sceneState.skinnedAthletes[player.id] == nil,
-                   sceneState.skinnedAthletes.count < ReplaySkinnedAthleteProvider.maximumConcurrentInstances,
+                   sceneState.skinnedAthletes.count < skinAdmission.maximum,
                    !sceneState.skinnedAthleteFailedVariants.contains(
                         SkinnedAthleteVariantKey(playerID: player.id, detail: admittedSkinDetail)
                    ) {

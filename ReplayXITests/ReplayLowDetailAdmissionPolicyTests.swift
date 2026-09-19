@@ -17,11 +17,13 @@ final class ReplayLowDetailAdmissionPolicyTests: XCTestCase {
         selected: String = "selected",
         scenarioID: String = "match",
         ready: Bool = true,
-        cap: Int = 4
+        cap: Int = 4,
+        allowsFirstPerson: Bool = false
     ) -> Policy.State {
         Policy.resolve(previous: previous, scenarioID: scenarioID, scenarioKind: kind,
                        viewMode: view, perspectiveID: selected, posesByPlayerID: poses(distances),
-                       nearPlayerIDs: near, maximumTotal: cap, lowDetailIsReady: ready)
+                       nearPlayerIDs: near, maximumTotal: cap, lowDetailIsReady: ready,
+                       allowsFirstPerson: allowsFirstPerson)
     }
 
     func testFillsOnlySpareSlotsAndExcludesNearImpactSubjects() {
@@ -58,6 +60,23 @@ final class ReplayLowDetailAdmissionPolicyTests: XCTestCase {
         XCTAssertEqual(shrunk.playerIDs, ["a", "b"])
     }
 
+    func testCapacityExpansionThenShrinkSelectsClosestInsteadOfPreviousStickyMember() {
+        let initial = resolve()
+        let crossed: [String: Float] = ["selected": 0, "a": 1, "b": 2, "c": 3, "d": 2.9]
+        let sticky = resolve(initial, distances: crossed)
+        XCTAssertEqual(sticky.playerIDs, ["a", "b", "c"])
+        XCTAssertLessThan(crossed["c"]! - crossed["d"]!, Policy.switchMargin)
+
+        let expanded = resolve(sticky, distances: crossed, cap: 5)
+        XCTAssertEqual(Set(expanded.playerIDs), ["a", "b", "c", "d"])
+        XCTAssertEqual(expanded.context, sticky.context)
+        let shrunk = resolve(expanded, distances: crossed)
+        XCTAssertEqual(shrunk.playerIDs, ["a", "b", "d"])
+        XCTAssertEqual(shrunk.context, sticky.context)
+        XCTAssertNotEqual(shrunk.playerIDs, sticky.playerIDs)
+        XCTAssertEqual(resolve(resolve(shrunk, distances: crossed, cap: 5), distances: crossed), shrunk)
+    }
+
     func testViewTransitionsPreserveEligibleContextButSelectionAndMatchResetIt() {
         let initial = resolve()
         let crossed = ["selected": Float(0), "a": 1, "b": 2, "c": 3, "d": 2.9]
@@ -89,5 +108,24 @@ final class ReplayLowDetailAdmissionPolicyTests: XCTestCase {
         XCTAssertEqual(valid.playerIDs, ["a"])
         let stale = Policy.State(context: valid.context, playerIDs: ["gone", "a", "a"])
         XCTAssertEqual(resolve(stale).playerIDs, ["a", "b", "c"])
+    }
+
+    func testPOVExperimentFillsSquadButNeverAdmitsWearerOrNearSubjectsTwice() {
+        let squad = Dictionary(uniqueKeysWithValues: (0..<22).map { ("p\($0)", Float($0)) })
+        let near: Set<String> = ["p1", "p2"]
+        let admitted = resolve(distances: squad, near: near, view: .firstPerson,
+                               selected: "p0", cap: 22, allowsFirstPerson: true)
+        XCTAssertEqual(admitted.playerIDs.count, 19)
+        XCTAssertEqual(Set(admitted.playerIDs).count, 19)
+        XCTAssertTrue(Set(admitted.playerIDs).isDisjoint(with: near.union(["p0"])))
+        XCTAssertEqual(resolve(admitted, distances: squad, near: near, view: .firstPerson,
+                               selected: "p0", cap: 22), Policy.State())
+        XCTAssertTrue(resolve(distances: squad, near: near, kind: .shapeLab, view: .firstPerson,
+                              selected: "p0", cap: 22, allowsFirstPerson: true).playerIDs.isEmpty)
+        XCTAssertTrue(resolve(distances: squad, near: near, view: .positional,
+                              selected: "p0", cap: 22, allowsFirstPerson: true).playerIDs.isEmpty)
+        XCTAssertTrue(resolve(distances: squad, near: near, view: .firstPerson,
+                              selected: "p0", ready: false, cap: 22,
+                              allowsFirstPerson: true).playerIDs.isEmpty)
     }
 }
