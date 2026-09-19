@@ -3989,13 +3989,13 @@ enum PitchSceneFactory {
         let startPosition = SIMD3<Float>(start.x, baseY + startElevation, start.z)
         let endPosition = SIMD3<Float>(end.x, baseY + endElevation, end.z)
         let direction = endPosition - startPosition
-        let length = max(simd_length(direction), 0.001)
+        let directionLength = simd_length(direction)
+        let length = max(directionLength, 0.001)
         entity.position = (startPosition + endPosition) / 2
         entity.scale = [1, 1, length]
-        entity.orientation = simd_quatf(
-            from: SIMD3<Float>(0, 0, 1),
-            to: simd_normalize(direction)
-        )
+        entity.orientation = directionLength > 0.0001
+            ? simd_quatf(from: SIMD3<Float>(0, 0, 1), to: direction / directionLength)
+            : simd_quatf()
     }
 
     /// A thin vertical tether makes Y unambiguous from first-person and

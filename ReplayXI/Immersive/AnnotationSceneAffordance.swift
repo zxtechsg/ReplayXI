@@ -320,12 +320,14 @@ enum AnnotationSceneAffordance {
                 mark.end.z
             )
             let direction = end - start
-            let length = max(simd_length(direction), 0.45)
+            let directionLength = simd_length(direction)
+            let length = max(directionLength, 0.45)
             target.position = (start + end) / 2
-            target.orientation = simd_quatf(
-                from: SIMD3<Float>(0, 0, 1),
-                to: simd_normalize(direction)
-            )
+            // Two valid position keys can cross their endpoints at an
+            // intermediate timestamp. Keep that instantaneous target usable.
+            target.orientation = directionLength > 0.0001
+                ? simd_quatf(from: SIMD3<Float>(0, 0, 1), to: direction / directionLength)
+                : simd_quatf()
             target.scale = [1, 1, length + 0.65]
         }
     }
@@ -659,7 +661,9 @@ enum AnnotationSceneAffordance {
     ) {
         guard let zone else { return }
         zone.position = [centre.x, lift + elevation, centre.z]
-        zone.scale = [radius * scale, scale, radius * scale]
+        // View scale may thicken the highlight, never change the actual
+        // coaching area or detach its boundary from the keyed radius handle.
+        zone.scale = [radius, scale, radius]
     }
 
     private static func configureLabelOutline(
@@ -709,13 +713,13 @@ enum AnnotationSceneAffordance {
         let startPosition = SIMD3<Float>(start.x, y + startElevation, start.z)
         let endPosition = SIMD3<Float>(end.x, y + endElevation, end.z)
         let direction = endPosition - startPosition
-        let length = max(simd_length(direction), 0.001)
+        let directionLength = simd_length(direction)
+        let length = max(directionLength, 0.001)
         entity.position = (startPosition + endPosition) / 2
         entity.scale = [crossScale, crossScale, length]
-        entity.orientation = simd_quatf(
-            from: SIMD3<Float>(0, 0, 1),
-            to: simd_normalize(direction)
-        )
+        entity.orientation = directionLength > 0.0001
+            ? simd_quatf(from: SIMD3<Float>(0, 0, 1), to: direction / directionLength)
+            : simd_quatf()
     }
 
     private static func restyleIfNeeded(_ selection: Entity, for mark: CoachMark) {
