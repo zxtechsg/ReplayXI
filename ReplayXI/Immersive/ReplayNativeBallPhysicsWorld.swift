@@ -15,6 +15,10 @@ final class ReplayNativeBallPhysicsWorld {
     /// Synchronous observation only. Tests must keep weak references so this
     /// hook cannot extend the world or renderer's lifetime.
     static var creationObserverForTesting: ((ReplayNativeBallPhysicsWorld, ConstructionForTesting) -> Void)?
+    static var finishObserverForTesting: ((ReplayNativeBallPhysicsWorld) -> Void)?
+    /// Compare the previous release order without changing any solver inputs.
+    var skipsDetachmentForTesting = false
+    var startErrorForTesting: Error?
     #endif
 
     let renderer: RealityRenderer
@@ -100,7 +104,28 @@ final class ReplayNativeBallPhysicsWorld {
         ball.components.set(PhysicsMotionComponent(linearVelocity: velocity, angularVelocity: angularVelocity))
     }
 
-    func start() throws { try renderer.update(0) }
+    func start() throws {
+        #if DEBUG
+        if let startErrorForTesting { throw startErrorForTesting }
+        #endif
+        try renderer.update(0)
+    }
+
+    /// Detach while this owner still holds the complete physics hierarchy.
+    /// Repeating this is harmless. It does not tick the solver or establish
+    /// completion of RealityKit's deferred internal scene destruction.
+    func finish() {
+        #if DEBUG
+        if skipsDetachmentForTesting {
+            Self.finishObserverForTesting?(self)
+            return
+        }
+        #endif
+        renderer.entities.removeAll()
+        #if DEBUG
+        Self.finishObserverForTesting?(self)
+        #endif
+    }
 
     func configureIntents(_ intents: [ReplayNativeBallPhysics.Intent]) {
         self.intents = intents

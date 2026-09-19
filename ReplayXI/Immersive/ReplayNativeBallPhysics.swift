@@ -168,6 +168,7 @@ enum ReplayNativeBallPhysics {
               let last = track.keyframes.last else { throw Failure.invalidInput }
         let intents = try makeIntents(track: track, players: players, plan: plannedTouches)
         let world = try ReplayNativeBallPhysicsWorld()
+        defer { world.finish() }
         world.configureIntents(intents)
         var initialPosition = SIMD3<Float>(first.position.x, max(first.height, radius + 0.002), first.position.z)
         // A source knot often names the carrier's root, not the ball surface.

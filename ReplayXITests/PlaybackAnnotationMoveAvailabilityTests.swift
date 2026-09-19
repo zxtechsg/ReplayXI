@@ -114,11 +114,77 @@ final class PlaybackAnnotationMoveAvailabilityTests: XCTestCase {
         XCTAssertTrue(PlaybackAnnotationMovePolicy.canMove(throughEnd, to: 32, in: store))
     }
 
+    func testSavedPositionBoundsExplainWhyShorteningWindowCannotUnblockMove146() throws {
+        let (store, original) = try makeMark()
+        XCTAssertEqual(store.selectedScenario.duration, 32)
+        XCTAssertTrue(store.setCoachMarkTracking(id: original.id, playerID: nil))
+        let fixed = try XCTUnwrap(store.marks.first { $0.id == original.id && !$0.followsPlayerTracks },
+                                 "Position keys require unlinking the automatically tracked mark first")
+        XCTAssertFalse(fixed.followsPlayerTracks)
+        let firstKeys = try XCTUnwrap(store.captureCoachMarkKeyframe(id: fixed.id)
+            ? store.marks.first(where: { $0.id == fixed.id })?.keyframes : nil,
+            "Stop if the first fixed-position key was not captured")
+        XCTAssertEqual(firstKeys.map(\.time), [5])
+        store.seek(to: 32, broadcast: false)
+        let bothKeys = try XCTUnwrap(store.captureCoachMarkKeyframe(id: fixed.id)
+            ? store.marks.first(where: { $0.id == fixed.id })?.keyframes : nil,
+            "Stop if the clip-end position key was not captured")
+        XCTAssertEqual(bothKeys.map(\.time), [5, 32])
+        store.seek(to: 6, broadcast: false)
+        let mark = try currentMark(original.id, in: store)
+        XCTAssertEqual(mark.keyframes?.map(\.time), [5, 32])
+        XCTAssertTrue(CoachMarkTimingPolicy.windowFits(revealTime: 6, displayDuration: 8, replayDuration: 32))
+        let snapshot = store.makeSnapshot()
+        let undoTitle = store.annotationUndoTitle
+        XCTAssertEqual(PlaybackAnnotationMovePolicy.blockReason(mark, to: 6, in: store), .positionKeyBounds)
+        XCTAssertFalse(PlaybackAnnotationMovePolicy.canMove(mark, to: 6, in: store))
+        XCTAssertEqual(PlaybackAnnotationMovePolicy.compactHint(mark, to: 6, in: store), "CHECK KEYS")
+        XCTAssertTrue(PlaybackAnnotationMovePolicy.guidance(mark, to: 6, in: store).contains("Shortening In/Out does not move position keys"))
+        XCTAssertFalse(store.retimeCoachMark(id: mark.id, to: 6))
+        XCTAssertEqual(store.makeSnapshot(), snapshot)
+        XCTAssertEqual(store.annotationUndoTitle, undoTitle)
+
+        XCTAssertTrue(store.setCoachMarkWindow(id: mark.id, start: 5, end: 6))
+        let shorter = try currentMark(mark.id, in: store)
+        XCTAssertEqual(shorter.keyframes, mark.keyframes)
+        XCTAssertEqual(PlaybackAnnotationMovePolicy.blockReason(shorter, to: 6, in: store), .positionKeyBounds)
+        XCTAssertFalse(PlaybackAnnotationMovePolicy.canMove(shorter, to: 6, in: store))
+        XCTAssertFalse(store.retimeCoachMark(id: mark.id, to: 6))
+
+        XCTAssertTrue(store.retimeCoachMarkKeyframe(id: mark.id, from: 32, to: 31))
+        let repaired = try currentMark(mark.id, in: store)
+        XCTAssertNil(PlaybackAnnotationMovePolicy.blockReason(repaired, to: 6, in: store))
+        XCTAssertTrue(PlaybackAnnotationMovePolicy.canMove(repaired, to: 6, in: store))
+        XCTAssertEqual(PlaybackAnnotationMovePolicy.compactHint(repaired, to: 6, in: store), "SCRUB ABOVE")
+        XCTAssertTrue(store.retimeCoachMark(id: mark.id, to: 6))
+        let moved = try currentMark(mark.id, in: store)
+        XCTAssertEqual(moved.revealTime, 6)
+        XCTAssertEqual(moved.hideTime, 7)
+        XCTAssertEqual(moved.keyframes?.map(\.time), [6, 32])
+        XCTAssertEqual(store.playhead, 6)
+        XCTAssertTrue(store.undoAnnotationEdit())
+        XCTAssertEqual(try currentMark(mark.id, in: store), repaired)
+    }
+
+    func testMoveReasonPriorityDistinguishesGestureTimeAndWindow146() throws {
+        let (store, mark) = try makeMark()
+        XCTAssertEqual(PlaybackAnnotationMovePolicy.blockReason(mark, to: .nan, in: store), .invalidTime)
+        XCTAssertEqual(PlaybackAnnotationMovePolicy.blockReason(mark, to: 33, in: store), .invalidTime)
+        XCTAssertEqual(PlaybackAnnotationMovePolicy.blockReason(mark, to: 5.04, in: store), .currentTime)
+        XCTAssertEqual(PlaybackAnnotationMovePolicy.blockReason(mark, to: 25, in: store), .visibilityWindow)
+        XCTAssertNil(PlaybackAnnotationMovePolicy.blockReason(mark, to: 12, in: store))
+        XCTAssertTrue(store.beginTimelineScrub())
+        XCTAssertEqual(PlaybackAnnotationMovePolicy.blockReason(mark, to: .nan, in: store), .activeGesture)
+        XCTAssertEqual(PlaybackAnnotationMovePolicy.guidance(mark, to: 12, in: store),
+                       "Finish or cancel the current gesture first")
+        store.cancelTimelineScrub()
+    }
+
     func testVisibleMoveUsesTheLivePolicyAndGuardsItsCallbackAndHint() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         let source = try String(contentsOf: root.appendingPathComponent(
             "ReplayXI/Immersive/FootballImmersiveView.swift"), encoding: .utf8)
-        let lower = try XCTUnwrap(source.range(of: "Label(\"SCRUB ABOVE\"")?.lowerBound)
+        let lower = try XCTUnwrap(source.range(of: "Label(PlaybackAnnotationMovePolicy.compactHint(")?.lowerBound)
         let upper = try XCTUnwrap(source.range(of: "private func annotationGeometryButton(",
             range: lower..<source.endIndex)?.lowerBound)
         let move = String(source[lower..<upper])
@@ -130,8 +196,9 @@ final class PlaybackAnnotationMoveAvailabilityTests: XCTestCase {
         if let gate { XCTAssertLessThan(gate, pause) }
         let hintStart = try XCTUnwrap(move.range(of: ".accessibilityHint(")?.lowerBound)
         let hint = move[hintStart...]
-        XCTAssertTrue(hint.contains("store.canChangePlaybackView"))
-        XCTAssertTrue(hint.contains("Finish or cancel the current gesture first"))
+        XCTAssertTrue(hint.contains("PlaybackAnnotationMovePolicy.guidance(mark, to: store.playhead, in: store)"))
+        XCTAssertTrue(move.contains(".help(PlaybackAnnotationMovePolicy.guidance(mark, to: store.playhead, in: store))"))
+        XCTAssertFalse(hint.contains("Choose a different time or shorten the annotation duration"))
     }
 
     private func assertStoreRejectsMove(_ mark: CoachMark, in store: ReplayStore,

@@ -4723,9 +4723,11 @@ private struct ImmersiveControlDeck: View {
 
                     Spacer(minLength: 8)
 
-                    Label("SCRUB ABOVE", systemImage: "hand.draw.fill")
+                    Label(PlaybackAnnotationMovePolicy.compactHint(mark, to: store.playhead, in: store),
+                          systemImage: "hand.draw.fill")
                         .font(.caption2.monospaced().weight(.black))
                         .foregroundStyle(.white.opacity(0.62))
+                        .help(PlaybackAnnotationMovePolicy.guidance(mark, to: store.playhead, in: store))
 
                     Button {
                         guard canMoveAnnotation(mark, to: store.playhead) else { return }
@@ -4749,13 +4751,8 @@ private struct ImmersiveControlDeck: View {
                     .disabled(!canMoveAnnotation(mark, to: store.playhead))
                     .accessibilityLabel("Move annotation to current playhead")
                     .accessibilityValue(formatTime(store.playhead))
-                    .accessibilityHint(
-                        !store.canChangePlaybackView
-                            ? "Finish or cancel the current gesture first"
-                            : (canMoveAnnotation(mark, to: store.playhead)
-                                ? "Commits the annotation at the time selected on the main timeline"
-                                : "Choose a different time or shorten the annotation duration")
-                    )
+                    .help(PlaybackAnnotationMovePolicy.guidance(mark, to: store.playhead, in: store))
+                    .accessibilityHint(PlaybackAnnotationMovePolicy.guidance(mark, to: store.playhead, in: store))
                 }
                 .padding(.horizontal, 8)
             }

@@ -37,6 +37,7 @@ enum ReplayNativeBallPhysicsAim {
             speed = min(max(speed, 0), 28)
             vertical = min(max(vertical, -11), 11)
             let world = try ReplayNativeBallPhysicsWorld(includeGoals: false)
+            defer { world.finish() }
             world.placeBall(position: [0, max(start.y, ReplayNativeBallPhysics.radius), 0])
             try world.start()
             world.applyContactVelocity([speed, vertical, 0], spinScale: spinScale)
