@@ -302,10 +302,12 @@ final class PlaybackTimelineScrubTests: XCTestCase {
         )
         let transport = String(source[start..<end])
 
-        XCTAssertTrue(transport.contains("store.beginTimelineScrub()"))
-        XCTAssertTrue(transport.contains("store.previewTimelineScrub(to: time)"))
-        XCTAssertTrue(transport.contains("store.commitTimelineScrub(to: finalPlayhead)"))
-        XCTAssertTrue(transport.contains("store.cancelTimelineScrub()"))
+        XCTAssertTrue(transport.contains("scrubController.begin(in: store)"))
+        XCTAssertTrue(transport.contains("scrubController.valueChanged(to: time, in: store)"))
+        XCTAssertTrue(transport.contains("scrubController.finish(in: store)"))
+        XCTAssertTrue(transport.contains("scrubController.disappear(in: store)"))
+        XCTAssertTrue(transport.contains(".accessibilityAdjustableAction"))
+        XCTAssertFalse(transport.contains("store.seek(to: time"), "Idle binding writes cannot become stale seeks")
         XCTAssertFalse(transport.contains("wasPlayingBeforeScrub"))
     }
 }

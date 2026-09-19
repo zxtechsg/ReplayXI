@@ -17,6 +17,23 @@ and immersive exit release ownership.
 ownership tests. The combined baseline batch passed 34 tests total:
 /private/tmp/replayxi-cycle137-baseline-v3.xcresult.
 
+The dashboard now has its own transaction controller too. Closing it cannot cancel
+an immersive scrub; old value/end callbacks cannot take a replacement transaction or
+fall back to a discrete seek. Both rails disable only for a foreign scrub, preserving
+their own continuous drag. Explicit VoiceOver actions retain 0.1-second steps. A
+same-turn staged sample supports native Slider's setter-before-start ordering without
+seeking from an idle binding callback. A new explicit start or accessibility action
+recovers after a missing end callback. Fourteen dashboard tests passed. After updating
+an older immersive source-wiring expectation for the foreign-owner gate, all 42
+timeline/controller/gesture-autosave tests passed in the integrated rerun:
+/private/tmp/replayxi-cycle137-arc-baseline-dashboard-v2.xcresult. That combined batch
+also exposed an unrelated pre-existing zero-quaternion arc fallback in its four new
+arc tests; the fallback is being corrected separately.
+
+Scope: native Slider supplies no gesture identity for `editing=true`. Delayed start
+events are not claimed to be distinguishable from a new start. Generation checks
+protect value/end/disappearance handling; no saved-review schema change is needed.
+
 ## Player-tag update baseline
 
 Five native entity tests confirm that 60 unchanged updates of 22 tags request 3,960 transform

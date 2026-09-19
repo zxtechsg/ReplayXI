@@ -787,6 +787,7 @@ private struct ShapeFocusStepButton: View {
 
 private struct DashboardTransport: View {
     @Environment(ReplayStore.self) private var store
+    @State private var scrubController = DashboardTimelineScrubController()
 
     private var scenario: ReplayScenario { store.selectedScenario }
 
@@ -849,7 +850,7 @@ private struct DashboardTransport: View {
                         set: { previewScrub(to: $0) }
                     ),
                     in: 0...max(scenario.duration, 0.1),
-                    step: 0.1,
+                    step: DashboardTimelineScrubController.step,
                     onEditingChanged: handleScrubbing
                 )
                 .tint(ReplayTheme.signal)
@@ -858,6 +859,13 @@ private struct DashboardTransport: View {
                 .accessibilityValue(
                     "\(formatTime(store.playhead)) of \(formatTime(scenario.duration)) seconds"
                 )
+                .accessibilityAdjustableAction { direction in
+                    switch direction {
+                    case .increment: _ = scrubController.adjustDiscrete(direction: 1, in: store)
+                    case .decrement: _ = scrubController.adjustDiscrete(direction: -1, in: store)
+                    @unknown default: break
+                    }
+                }
                 .disabled(playbackControlsAreDisabled)
 
                 Menu {
@@ -895,20 +903,19 @@ private struct DashboardTransport: View {
             RoundedRectangle(cornerRadius: 20)
                 .stroke(ReplayTheme.signal.opacity(0.20), lineWidth: 1)
         }
-        .onDisappear {
-            store.cancelTimelineScrub()
-        }
+        .onAppear { scrubController.appear() }
+        .onDisappear { scrubController.disappear(in: store) }
     }
 
     private var playbackControlsAreDisabled: Bool {
-        // A timeline drag must remain enabled while it owns the transaction.
-        // Only an unfinished spatial edit blocks this slider itself.
-        store.isDrawing || store.hasActiveCoachMarkGeometryPreview
+        // Keep this slider enabled for its own drag, never for another rail's.
+        store.isDrawing || store.hasActiveCoachMarkGeometryPreview || !scrubController.isEnabled(in: store)
     }
 
     private var editingHint: String? {
         if store.isDrawing { return "Finish or cancel your annotation to use playback and POV controls." }
         if store.hasActiveCoachMarkGeometryPreview { return "Release the annotation handle to use playback and POV controls." }
+        if store.hasActiveTimelineScrub, !scrubController.ownsScrub(in: store) { return "Finish the other timeline gesture first." }
         return nil
     }
 
@@ -918,23 +925,15 @@ private struct DashboardTransport: View {
 
     private func handleScrubbing(_ editing: Bool) {
         if editing {
-            _ = store.beginTimelineScrub()
+            _ = scrubController.begin(in: store)
             return
         }
-
-        let finalPlayhead = store.playhead
-        guard store.commitTimelineScrub(to: finalPlayhead) else { return }
+        guard scrubController.finish(in: store) else { return }
         store.flushReviewAutosave()
     }
 
     private func previewScrub(to time: TimeInterval) {
-        if store.hasActiveTimelineScrub {
-            _ = store.previewTimelineScrub(to: time)
-        } else {
-            // Accessibility adjustments can update a Slider without opening a
-            // continuous drag. Keep that discrete route bounded and local.
-            store.seek(to: time, broadcast: false)
-        }
+        _ = scrubController.valueChanged(to: time, in: store)
     }
 
     private func formatTime(_ value: TimeInterval) -> String {

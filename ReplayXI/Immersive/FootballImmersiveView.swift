@@ -5012,6 +5012,8 @@ private struct ImmersiveControlDeck: View {
 
     private var timelineControlsAreDisabled: Bool {
         store.isDrawing || store.hasActiveCoachMarkGeometryPreview
+            || (store.hasActiveTimelineScrub
+                && timelineScrubController.storeScrubID != store.activeTimelineScrubID)
     }
 
     private var rateControlsAreDisabled: Bool {

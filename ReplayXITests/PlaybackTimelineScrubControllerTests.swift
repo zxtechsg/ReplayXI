@@ -138,6 +138,28 @@ final class PlaybackTimelineScrubControllerTests: XCTestCase {
         XCTAssertTrue(completion.contains("if ownsScrub(in: store) { store.cancelTimelineScrub() }"))
     }
 
+    func testImmersiveRailDisablesForForeignOwnershipButNotItsOwnDrag() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(contentsOf: root.appendingPathComponent(
+            "ReplayXI/Immersive/FootballImmersiveView.swift"), encoding: .utf8)
+        let start = try XCTUnwrap(source.range(of: "private var timelineControlsAreDisabled: Bool")?.lowerBound)
+        let end = try XCTUnwrap(source.range(of: "private var rateControlsAreDisabled: Bool")?.lowerBound)
+        let gate = String(source[start..<end])
+        XCTAssertTrue(gate.contains("store.hasActiveTimelineScrub"))
+        XCTAssertTrue(gate.contains("timelineScrubController.storeScrubID != store.activeTimelineScrubID"))
+
+        let store = fixture()
+        let own = PlaybackTimelineScrubController()
+        let other = PlaybackTimelineScrubController()
+        XCTAssertTrue(own.preview(in: store, startLocation: 200, railWidth: 1000, translation: .zero))
+        XCTAssertEqual(own.storeScrubID, store.activeTimelineScrubID)
+        XCTAssertNotEqual(other.storeScrubID, store.activeTimelineScrubID)
+        XCTAssertFalse(other.preview(in: store, startLocation: 700, railWidth: 1000, translation: .zero))
+        XCTAssertTrue(own.preview(in: store, startLocation: 200, railWidth: 1000,
+                                  translation: .init(width: 10, height: 0)))
+        own.cancel(in: store)
+    }
+
     private func fixture() -> ReplayStore {
         let store = ReplayStore()
         store.prepareForLocalExperience()

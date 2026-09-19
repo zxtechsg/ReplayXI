@@ -54,7 +54,9 @@ final class PlaybackDiscreteTransportOwnershipTests: XCTestCase {
         let source = try immersiveSource()
         let policy = try slice(source, after: "private var timelineControlsAreDisabled: Bool", before: "private var rateControlsAreDisabled:")
         XCTAssertTrue(policy.contains("store.isDrawing || store.hasActiveCoachMarkGeometryPreview"))
-        XCTAssertFalse(policy.contains("hasActiveTimelineScrub"))
+        XCTAssertTrue(policy.contains("store.hasActiveTimelineScrub"))
+        XCTAssertTrue(policy.contains("timelineScrubController.storeScrubID != store.activeTimelineScrubID"),
+                      "Only a foreign timeline owner disables the rail during scrubbing")
         XCTAssertFalse(policy.contains("canChangePlaybackView"))
         let update = try slice(source, after: "private func updateTimelineScrub(", before: "private func finishTimelineScrub(")
         let finish = try slice(source, after: "private func finishTimelineScrub(", before: "private func cancelInterruptedTimelineScrub()")
