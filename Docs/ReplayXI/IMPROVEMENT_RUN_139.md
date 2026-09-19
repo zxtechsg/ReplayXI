@@ -162,7 +162,11 @@ overrides. Existing exact-source assertions were retained unchanged.
 All 26 focused native regressions pass after this fix: arm swing, grounding,
 scene bindings and both phase/transition diagnostic classes, including new
 exact-override and real raw-zero opt-in checks.
-/private/tmp/replayxi-cycle139-motion-opt-in.xcresult. A full rerun is pending.
+/private/tmp/replayxi-cycle139-motion-opt-in.xcresult. The subsequent full run,
+including Timing Close and the setter experiment from run140, passed all 1,405
+XCTest cases with two intentional skips and zero failures, plus both Swift
+Testing asset cases. /private/tmp/replayxi-cycle140-full.xcresult. Unsigned device
+Release also passes. Existing exact-source arm and flight assertions are green.
 
 Saved-review hash is unchanged from the previous checkpoint; no personal
 signing or Info.plist edits are included.

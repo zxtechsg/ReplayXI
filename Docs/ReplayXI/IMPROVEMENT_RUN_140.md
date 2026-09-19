@@ -41,12 +41,28 @@ measurements are kept for review rather than generalized into app-level gains.
 - /private/tmp/replayxi-cycle140-ball-setter-benchmark/
   C21983AD-1A63-4505-A62D-FBAB2154F8BD.json.
 
-## Validation in progress
+## Validation
 
-The cycle139 caller-override fix passed all 26 focused motion regressions. A
-fresh full native suite and unsigned device Release build are running with that
-fix and the new Timing Close control.
+The cycle139 caller-override fix passed all 26 focused motion regressions.
+The fresh full native suite passes: 1,405 XCTest cases, two intentional skips,
+zero failures, plus both Swift Testing asset cases. This includes unchanged
+exact-source arm and airborne-pose assertions that caught the earlier regression.
+
+- /private/tmp/replayxi-cycle140-full.xcresult and .log.
+- Unsigned device Release succeeds; only unused AppIntents metadata warning.
+  /private/tmp/replayxi-cycle140-release.log.
+
+Normal demo relaunched successfully (PID 59698), then process-checked. Production
+reviews remain byte-identical, SHA-256
+`952e501de62f36e391a5b471175c883d0deb9e981a5c6cfc04f607c6dc5ded65`.
+The Mac remains locked; no hands-on headset/gesture validation is claimed.
 
 Next animation target: confirm the discrete chest-retarget switch when a header
 cue ends. The existing 30.743-degree chest step is still present; it was not
 hidden by reducing validation coverage or clamping joint angles.
+
+Next performance target: attribute the full-skin floor scan with optimized
+native measurements before changing it. Verified contact assets contain 339
+vertices/603 influences (near) and 1,707/2,823 (low). One near plus three low
+instances therefore scan 5,460 vertices and 9,072 influences per update. These
+counts identify work, not measured time; no grounding coverage is reduced.
