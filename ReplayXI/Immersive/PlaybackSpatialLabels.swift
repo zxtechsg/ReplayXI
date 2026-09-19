@@ -7,6 +7,20 @@ import UIKit
 /// readable at every LOD and does not inherit a player's running rotation.
 @MainActor
 enum PlaybackSpatialLabels {
+    #if DEBUG
+    /// Requested RealityKit property/component writes, not internal engine
+    /// work, allocation counts, frame time or headset FPS.
+    struct UpdateWork: Codable, Equatable {
+        var updateCalls = 0
+        var visitedPlayerLabels = 0
+        var transformWrites = 0
+        var stylePropertyWrites = 0
+        var visibilityWrites = 0
+        var inputComponentWrites = 0
+    }
+    private(set) static var updateWork = UpdateWork()
+    static func resetUpdateWorkForTesting() { updateWork = UpdateWork() }
+    #endif
     static let firstPersonVisibleLabelLimit = 4
     static let firstPersonVisibleAnnotationLimit = 2
     /// A focused tactical review names only the directly relevant shirts. The
@@ -80,6 +94,9 @@ enum PlaybackSpatialLabels {
         guard let labelsRoot = root.children.first(where: { $0.name == "player-labels-root" }) else {
             return
         }
+        #if DEBUG
+        updateWork.updateCalls &+= 1
+        #endif
 
         // Only POV needs a ranked visibility set. Other views evaluate their
         // optional filters in-place, avoiding a throwaway 22-ID Set every frame.
@@ -109,6 +126,9 @@ enum PlaybackSpatialLabels {
             guard let label = labelsRoot.children.first(where: {
                 $0.name == "player-label-\(player.id)"
             }) else { continue }
+            #if DEBUG
+            updateWork.visitedPlayerLabels &+= 1
+            #endif
             setInputEnabled(acceptsInput, on: label)
             let passesBaseFilter: Bool = switch viewMode {
             case .firstPerson:
@@ -131,7 +151,7 @@ enum PlaybackSpatialLabels {
             let passesFocusFilter = viewMode != .tacticalTable
                 || focusedPlayerIDs?.contains(player.id) != false
             let isVisible = passesBaseFilter && passesFocusFilter
-            label.isEnabled = isVisible
+            setVisibility(isVisible, on: label)
             guard isVisible, let pose = posesByPlayerID[player.id] else { continue }
 
             let dx = observer.x - pose.position.x
@@ -169,28 +189,76 @@ enum PlaybackSpatialLabels {
             case .touchline, .positional:
                 max(defaultLabelHeight, minimumReviewHeight)
             }
-            label.position = [pose.position.x, resolvedHeight, pose.position.z]
-            label.orientation = simd_quatf(angle: atan2(dx, dz), axis: [0, 1, 0])
-            label.scale = SIMD3<Float>(repeating: resolvedScale)
-            label.children.first(where: { $0.name == "selected-outline" })?.isEnabled =
-                player.id == perspectiveID
+            applyLabelTransform(on: label, position: [pose.position.x, resolvedHeight, pose.position.z],
+                                orientation: simd_quatf(angle: atan2(dx, dz), axis: [0, 1, 0]),
+                                scale: SIMD3<Float>(repeating: resolvedScale))
+            setStyleEnabled(player.id == perspectiveID,
+                            on: label.children.first(where: { $0.name == "selected-outline" }))
             let usesCompactTacticalTag = (viewMode == .tacticalTable || viewMode == .touchline)
                 && player.id != perspectiveID
-            label.children.first(where: { $0.name == "label-glyph" })?.isEnabled =
-                !usesCompactTacticalTag
-            label.children.first(where: { $0.name == "compact-label-glyph" })?.isEnabled =
-                usesCompactTacticalTag
+            setStyleEnabled(!usesCompactTacticalTag,
+                            on: label.children.first(where: { $0.name == "label-glyph" }))
+            setStyleEnabled(usesCompactTacticalTag,
+                            on: label.children.first(where: { $0.name == "compact-label-glyph" }))
             if let board = label.children.first(where: { $0.name == "label-board" }) {
-                board.scale.x = usesCompactTacticalTag ? 0.54 : 1
+                setStyleScaleX(usesCompactTacticalTag ? 0.54 : 1, on: board)
                 // Context identities are a single high-contrast number draw.
                 // The detailed active player retains the complete card.
-                board.isEnabled = !usesCompactTacticalTag
+                setStyleEnabled(!usesCompactTacticalTag, on: board)
             }
             if let strip = label.children.first(where: { $0.name == "team-strip" }) {
-                strip.position.x = usesCompactTacticalTag ? -0.205 : -0.405
-                strip.isEnabled = !usesCompactTacticalTag
+                setStylePositionX(usesCompactTacticalTag ? -0.205 : -0.405, on: strip)
+                setStyleEnabled(!usesCompactTacticalTag, on: strip)
             }
         }
+    }
+
+    private static func applyLabelTransform(on label: Entity, position: SIMD3<Float>,
+                                            orientation: simd_quatf, scale: SIMD3<Float>) {
+        // Inspect the entity, not a last-request cache: clones, reparented tags
+        // and external edits still need their actual presentation restored.
+        let current = label.transform
+        let sameRotation = current.rotation.vector == orientation.vector
+            || current.rotation.vector == -orientation.vector
+        guard current.translation != position || current.scale != scale || !sameRotation else { return }
+        // One component update instead of three. Exact comparisons (including
+        // q/-q equivalence) retain even very small position or facing changes.
+        label.transform = Transform(scale: scale, rotation: orientation, translation: position)
+        #if DEBUG
+        updateWork.transformWrites &+= 1
+        #endif
+    }
+
+    private static func setVisibility(_ isEnabled: Bool, on label: Entity) {
+        guard label.isEnabled != isEnabled else { return }
+        label.isEnabled = isEnabled
+        #if DEBUG
+        updateWork.visibilityWrites &+= 1
+        #endif
+    }
+
+    private static func setStyleEnabled(_ isEnabled: Bool, on entity: Entity?) {
+        guard let entity, entity.isEnabled != isEnabled else { return }
+        entity.isEnabled = isEnabled
+        #if DEBUG
+        updateWork.stylePropertyWrites &+= 1
+        #endif
+    }
+
+    private static func setStyleScaleX(_ value: Float, on entity: Entity) {
+        guard entity.scale.x != value else { return }
+        entity.scale.x = value
+        #if DEBUG
+        updateWork.stylePropertyWrites &+= 1
+        #endif
+    }
+
+    private static func setStylePositionX(_ value: Float, on entity: Entity) {
+        guard entity.position.x != value else { return }
+        entity.position.x = value
+        #if DEBUG
+        updateWork.stylePropertyWrites &+= 1
+        #endif
     }
 
     /// Keep identity visible while an editable annotation owns spatial input.
@@ -200,9 +268,15 @@ enum PlaybackSpatialLabels {
         if isEnabled {
             if label.components[InputTargetComponent.self] == nil {
                 label.components.set(InputTargetComponent(allowedInputTypes: .all))
+                #if DEBUG
+                updateWork.inputComponentWrites &+= 1
+                #endif
             }
         } else if label.components[InputTargetComponent.self] != nil {
             label.components.remove(InputTargetComponent.self)
+            #if DEBUG
+            updateWork.inputComponentWrites &+= 1
+            #endif
         }
     }
 

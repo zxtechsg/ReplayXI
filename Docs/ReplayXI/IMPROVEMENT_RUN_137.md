@@ -22,8 +22,17 @@ ownership tests. The combined baseline batch passed 34 tests total:
 Five native entity tests confirm that 60 unchanged updates of 22 tags request 3,960 transform
 field writes, 9,240 style-property writes and 1,320 visibility writes. Input components already
 avoid redundant writes. This counts requested RealityKit writes, not internal engine work or
-headset FPS. Optimization is in progress; selection, focus, hidden-to-visible catch-up, cloned
+headset FPS. Selection, focus, hidden-to-visible catch-up, cloned
 entities, detached parents and pitch transforms are covered.
+
+The optimized native rerun passed six tests. Unchanged updates now request zero writes;
+the forward/reverse sequence requests 1,268 combined transform writes, one per changed
+tag, instead of 14,520 property writes. Style, visibility and input writes are zero in
+that sequence. Guards read actual entities, so external changes are repaired. Quaternion
+sign equivalence is accepted; 0.0001 position, angle and scale changes are not discarded.
+
+Evidence: /private/tmp/replayxi-cycle137-labels-fingerprint.xcresult and its exported
+PlayerLabelWork receipt. This is reduced submission work, not a measured FPS gain.
 
 ## Fast direction baseline
 
