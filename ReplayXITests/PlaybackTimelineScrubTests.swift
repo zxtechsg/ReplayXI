@@ -2,6 +2,40 @@ import XCTest
 @testable import ReplayXI
 
 final class PlaybackTimelineScrubTests: XCTestCase {
+    func testScrubGenerationChangesOnlyForNewAcceptedTransactionsAndStaysLocal() throws {
+        let store = ReplayStore()
+        XCTAssertNil(store.activeTimelineScrubID)
+        store.beginDrawing(.arc)
+        XCTAssertFalse(store.beginTimelineScrub())
+        XCTAssertNil(store.activeTimelineScrubID)
+        store.cancelDrawing()
+        XCTAssertTrue(store.beginTimelineScrub())
+        let first = try XCTUnwrap(store.activeTimelineScrubID)
+        XCTAssertTrue(store.beginTimelineScrub())
+        XCTAssertEqual(store.activeTimelineScrubID, first, "Idempotent begin must not replace the current owner")
+        XCTAssertTrue(store.previewTimelineScrub(to: 4))
+        XCTAssertEqual(store.activeTimelineScrubID, first)
+        let encoded = String(decoding: try JSONEncoder().encode(store.makeSavedReviewState()), as: UTF8.self)
+        XCTAssertFalse(encoded.contains(first.uuidString))
+        XCTAssertFalse(encoded.contains("activeTimelineScrubID"))
+        XCTAssertTrue(store.commitTimelineScrub(to: 4))
+        XCTAssertNil(store.activeTimelineScrubID)
+        XCTAssertFalse(store.hasActiveTimelineScrub)
+        XCTAssertTrue(store.beginTimelineScrub())
+        let second = try XCTUnwrap(store.activeTimelineScrubID)
+        XCTAssertNotEqual(second, first)
+        XCTAssertFalse(store.commitTimelineScrub(to: .nan))
+        XCTAssertNil(store.activeTimelineScrubID)
+        XCTAssertFalse(store.hasActiveTimelineScrub)
+        XCTAssertTrue(store.beginTimelineScrub())
+        XCTAssertNotEqual(store.activeTimelineScrubID, second)
+        store.prepareForImmersiveExit()
+        XCTAssertNil(store.activeTimelineScrubID)
+        XCTAssertFalse(store.hasActiveTimelineScrub)
+        store.cancelTimelineScrub()
+        XCTAssertNil(store.activeTimelineScrubID)
+    }
+
     func testStoreOwnsScrubMasksPreviewAndBlocksCompetingSpatialMutation() throws {
         let store = ReplayStore()
         store.playhead = 5

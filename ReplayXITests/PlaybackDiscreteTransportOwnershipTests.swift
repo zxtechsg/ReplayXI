@@ -57,10 +57,12 @@ final class PlaybackDiscreteTransportOwnershipTests: XCTestCase {
         XCTAssertFalse(policy.contains("hasActiveTimelineScrub"))
         XCTAssertFalse(policy.contains("canChangePlaybackView"))
         let update = try slice(source, after: "private func updateTimelineScrub(", before: "private func finishTimelineScrub(")
-        let finish = try slice(source, after: "private func finishTimelineScrub(", before: "private func resetTimelineScrubState()")
+        let finish = try slice(source, after: "private func finishTimelineScrub(", before: "private func cancelInterruptedTimelineScrub()")
         XCTAssertTrue(update.contains("guard !timelineControlsAreDisabled else"))
         XCTAssertTrue(finish.contains("guard !timelineControlsAreDisabled else"))
-        XCTAssertTrue(finish.contains("store.commitTimelineScrub(to: committedTime)"))
+        XCTAssertTrue(update.contains("timelineScrubController.preview(in: store"))
+        XCTAssertTrue(finish.contains("timelineScrubController.finish(in: store"))
+        XCTAssertFalse(finish.contains("updateTimelineScrub("), "End callbacks cannot start a fresh scrub")
     }
 
     func testStoreKeepsTheOwnedPreviewWhenACompetingCueOrMarkJumpIsAttempted() throws {

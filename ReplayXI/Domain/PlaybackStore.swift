@@ -123,6 +123,9 @@ final class ReplayStore {
     /// external control cannot start annotation/POV work against a transient
     /// playhead while the control deck owns the scrub.
     private(set) var hasActiveTimelineScrub = false
+    /// Device-local generation; late callbacks can identify a replaced scrub
+    /// without committing or cancelling another control surface's transaction.
+    private(set) var activeTimelineScrubID: UUID?
     private(set) var shapeFocusStage: ShapeFocusStage = .problem {
         didSet { if oldValue != shapeFocusStage { scheduleReviewAutosave() } }
     }
@@ -704,6 +707,7 @@ final class ReplayStore {
             isPlaying: isPlaying && playhead < selectedScenario.duration,
             isLocallyPaused: isLocallyPaused
         )
+        activeTimelineScrubID = UUID()
         hasActiveTimelineScrub = true
         isPlaying = false
         return true
@@ -741,6 +745,7 @@ final class ReplayStore {
         isLocallyPaused = checkpoint.isLocallyPaused
         timelineScrubCheckpoint = nil
         hasActiveTimelineScrub = false
+        activeTimelineScrubID = nil
         scheduleReviewAutosave()
         return true
     }
@@ -751,6 +756,7 @@ final class ReplayStore {
         defer {
             timelineScrubCheckpoint = nil
             hasActiveTimelineScrub = false
+            activeTimelineScrubID = nil
         }
         guard let checkpoint = timelineScrubCheckpoint,
               checkpoint.scenarioID == selectedScenarioID else { return }

@@ -1943,7 +1943,8 @@ private struct ImmersiveControlDeck: View {
     @State private var timelineTickClusters: [PlaybackEventRailLayout.TimelineTickCluster] = []
     @State private var selectedPositionKeyCount: Int?
     @State private var timelineTrackWidth: CGFloat = 0
-    @State private var timelineScrubState: PlaybackTimelineScrub.GestureState?
+    @State private var timelineScrubController = PlaybackTimelineScrubController()
+    private var timelineScrubState: PlaybackTimelineScrub.GestureState? { timelineScrubController.state }
     @ScaledMetric(relativeTo: .subheadline) private var timelineReadoutHeight: CGFloat = 20
     @GestureState private var timelineScrubIsActive = false
     @State private var isClearAnnotationsPending = false
@@ -4228,8 +4229,7 @@ private struct ImmersiveControlDeck: View {
                     .onEnded { value in
                         finishTimelineScrub(
                             value,
-                            railWidth: trackWidth,
-                            railLeadingInset: trackInset
+                            railWidth: trackWidth
                         )
                     }
             )
@@ -5136,65 +5136,29 @@ private struct ImmersiveControlDeck: View {
     ) {
         guard !timelineControlsAreDisabled else { return }
 
-        var gestureState: PlaybackTimelineScrub.GestureState
-        if let timelineScrubState {
-            gestureState = timelineScrubState
-        } else {
-            gestureState = PlaybackTimelineScrub.begin(
-                atRailLocation: value.startLocation.x - railLeadingInset,
-                duration: store.selectedScenario.duration,
-                railWidth: railWidth
-            )
-            guard store.beginTimelineScrub() else { return }
-        }
-
-        gestureState = PlaybackTimelineScrub.update(
-            gestureState,
-            duration: store.selectedScenario.duration,
-            railWidth: railWidth,
-            horizontalTranslation: value.translation.width,
-            verticalTranslation: value.translation.height
-        )
-        timelineScrubState = gestureState
         // Preview stays device-local; only the final sample is published.
-        guard store.previewTimelineScrub(to: gestureState.time) else {
-            cancelInterruptedTimelineScrub()
-            return
-        }
+        _ = timelineScrubController.preview(in: store,
+            startLocation: value.startLocation.x - railLeadingInset,
+            railWidth: railWidth, translation: value.translation)
     }
 
     private func finishTimelineScrub(
         _ value: DragGesture.Value,
-        railWidth: CGFloat,
-        railLeadingInset: CGFloat
+        railWidth: CGFloat
     ) {
         guard !timelineControlsAreDisabled else {
             cancelInterruptedTimelineScrub()
             return
         }
-        updateTimelineScrub(
-            value,
-            railWidth: railWidth,
-            railLeadingInset: railLeadingInset
-        )
-        let committedTime = timelineScrubState?.time ?? store.playhead
-        guard store.commitTimelineScrub(to: committedTime) else {
-            resetTimelineScrubState()
-            return
-        }
+        guard timelineScrubController.finish(in: store,
+            railWidth: railWidth, translation: value.translation) else { return }
         if store.localRole == .coach {
             store.flushReviewAutosave()
         }
-        resetTimelineScrubState()
-    }
-
-    private func resetTimelineScrubState() {
-        timelineScrubState = nil
     }
 
     private func cancelInterruptedTimelineScrub() {
-        defer { resetTimelineScrubState() }
-        store.cancelTimelineScrub()
+        timelineScrubController.cancel(in: store)
     }
 
     private func adjustTimelineForAccessibility(direction: Int) {
