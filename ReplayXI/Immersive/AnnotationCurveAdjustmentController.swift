@@ -13,7 +13,6 @@ final class AnnotationCurveAdjustmentController {
         var id: Self { self }
         var horizontalTitle: String { self == .shape ? "Curve" : "Bend" }
         var verticalTitle: String { self == .shape ? "Angle" : "Lift" }
-        var verticalStep: Float { self == .shape ? 5 : AnnotationCurveAdjustmentController.step }
         var symbol: String { self == .shape ? "rotate.3d" : "arrow.up.and.down.and.arrow.left.and.right" }
 
         func adjusted(_ curve: CoachMarkCurve, horizontal: Float, vertical: Float) -> CoachMarkCurve {
@@ -38,7 +37,6 @@ final class AnnotationCurveAdjustmentController {
     private var lastRequestedCurve: CoachMarkCurve?
     private var rejectsCurrentGesture = false
     var isActive: Bool { transaction != nil }
-    static let step: Float = 0.25
 
     func isEnabled(in store: ReplayStore, markID: UUID) -> Bool {
         guard !store.hasActiveTimelineScrub, !store.isDrawing,
@@ -63,9 +61,9 @@ final class AnnotationCurveAdjustmentController {
         }
         sample = AnnotationJoystickMath.sample(for: translation)
         let baseline = transaction?.baseline ?? mark.sampled(at: store.playhead).resolvedCurve
-        let precision: Float = fine ? 0.2 : 1
-        let curve = mode.adjusted(baseline, horizontal: Float(sample.steps.x) * Self.step * precision,
-                                  vertical: -Float(sample.steps.y) * mode.verticalStep * precision)
+        let precision = AnnotationCurveAdjustmentPrecision(fine: fine)
+        let curve = mode.adjusted(baseline, horizontal: Float(sample.steps.x) * precision.distanceStep,
+                                  vertical: -Float(sample.steps.y) * precision.verticalStep(isAngle: mode == .shape))
         if transaction == nil, curve == baseline { return true }
         if transaction != nil, curve == lastRequestedCurve { return true }
         let proposed = transaction ?? Transaction(markID: markID, gestureID: UUID(), baseline: baseline, mode: mode)

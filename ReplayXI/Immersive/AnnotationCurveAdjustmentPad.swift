@@ -12,6 +12,7 @@ struct AnnotationCurveAdjustmentPad: View {
     @GestureState private var dragIsActive = false
 
     private var isEnabled: Bool { controller.isEnabled(in: store, markID: markID) }
+    private var precision: AnnotationCurveAdjustmentPrecision { .init(fine: fine) }
     private var curve: CoachMarkCurve {
         store.marks.first(where: { $0.id == markID })?.sampled(at: store.playhead).resolvedCurve ?? CoachMarkCurve(bend: 0, lift: 0)
     }
@@ -116,27 +117,25 @@ struct AnnotationCurveAdjustmentPad: View {
             ? "Curve \(metres(curve.amount)), angle \(degrees(curve.rollDegrees))"
             : "Bend \(metres(curve.bend)), lift \(metres(curve.lift))")
         .accessibilityHint(isEnabled
-            ? (mode == .shape
-                ? "Drag sideways for curve amount, up or down to rotate around its endpoints. Quarter-metre and five-degree steps. The arc stays above the pitch."
-                : "Drag sideways to bend, up to lift. Quarter-metre steps. The rotation angle is preserved.")
+            ? precision.padHint(isAngle: mode == .shape)
             : "Finish or cancel the current gesture first")
-        .accessibilityAction(named: "Decrease curve") { adjust(mode: .shape, horizontal: -0.25, vertical: 0) }
-        .accessibilityAction(named: "Increase curve") { adjust(mode: .shape, horizontal: 0.25, vertical: 0) }
-        .accessibilityAction(named: "Rotate arc clockwise") { adjust(mode: .shape, horizontal: 0, vertical: -5) }
-        .accessibilityAction(named: "Rotate arc anticlockwise") { adjust(mode: .shape, horizontal: 0, vertical: 5) }
-        .accessibilityAction(named: "Decrease bend") { nudge(bend: -0.25, lift: 0) }
-        .accessibilityAction(named: "Increase bend") { nudge(bend: 0.25, lift: 0) }
-        .accessibilityAction(named: "Lower arc") { nudge(bend: 0, lift: -0.25) }
-        .accessibilityAction(named: "Lift arc") { nudge(bend: 0, lift: 0.25) }
+        .accessibilityAction(named: "Decrease curve") { adjust(mode: .shape, horizontal: -precision.distanceStep, vertical: 0) }
+        .accessibilityAction(named: "Increase curve") { adjust(mode: .shape, horizontal: precision.distanceStep, vertical: 0) }
+        .accessibilityAction(named: "Rotate arc clockwise") { adjust(mode: .shape, horizontal: 0, vertical: -precision.angleStep) }
+        .accessibilityAction(named: "Rotate arc anticlockwise") { adjust(mode: .shape, horizontal: 0, vertical: precision.angleStep) }
+        .accessibilityAction(named: "Decrease bend") { nudge(bend: -precision.distanceStep, lift: 0) }
+        .accessibilityAction(named: "Increase bend") { nudge(bend: precision.distanceStep, lift: 0) }
+        .accessibilityAction(named: "Lower arc") { nudge(bend: 0, lift: -precision.distanceStep) }
+        .accessibilityAction(named: "Lift arc") { nudge(bend: 0, lift: precision.distanceStep) }
     }
 
     private var nudgeControls: some View {
         VStack(alignment: .leading, spacing: 8) {
             nudgeRow(title: mode.horizontalTitle,
-                value: metres(mode == .shape ? curve.amount : curve.bend), horizontal: fine ? 0.05 : 0.25, vertical: 0)
+                value: metres(mode == .shape ? curve.amount : curve.bend), horizontal: precision.distanceStep, vertical: 0)
             nudgeRow(title: mode.verticalTitle,
                 value: mode == .shape ? degrees(curve.rollDegrees) : metres(curve.lift),
-                horizontal: 0, vertical: mode.verticalStep * (fine ? 0.2 : 1))
+                horizontal: 0, vertical: precision.verticalStep(isAngle: mode == .shape))
         }
     }
 
@@ -162,7 +161,7 @@ struct AnnotationCurveAdjustmentPad: View {
         .disabled(!controller.canAdjust(in: store, markID: markID, mode: mode,
                                        horizontal: horizontal, vertical: vertical))
         .accessibilityLabel("\(symbol == "minus" ? "Decrease" : "Increase") arc \(title.lowercased())")
-        .accessibilityHint(fine ? "Fine adjustment" : (mode == .shape && vertical != 0 ? "Five-degree step" : "Quarter-metre step"))
+        .accessibilityHint(mode == .shape && vertical != 0 ? precision.angleHint : precision.distanceHint)
         .help("\(symbol == "minus" ? "Decrease" : "Increase") \(title.lowercased())")
     }
 
