@@ -11,9 +11,11 @@ struct FootballImmersiveView: View {
         PlaybackControlDeckPreset.standard.rawValue
     @AppStorage("ReplayXI.PlaybackControlDeckSize") private var controlDeckSize = 1.0
     @State private var selectedAnnotationID: UUID?
-    @State private var draggedAnnotationTarget: AnnotationSceneTarget?
+    @State private var annotationHandleDrag = AnnotationHandleDragController()
+    private var draggedAnnotationTarget: AnnotationSceneTarget? { annotationHandleDrag.target }
     @State private var annotationStroke: PlaybackAnnotationStroke?
     @GestureState private var spatialDragIsActive = false
+    @GestureState private var spatialHandleGestureID: UUID?
     @State private var showsDecisionStrip = false
     @State private var showsPlaybackAnnotations = true
     // Wearer-local HUD state. PitchSceneFactory owns the eventual ball-emphasis
@@ -323,7 +325,7 @@ struct FootballImmersiveView: View {
             let requestID = roomPresentationID
             guard store.immersiveRoomDidDisappear(requestID) else {
                 annotationStroke = nil
-                draggedAnnotationTarget = nil
+                annotationHandleDrag.cancelCurrent(in: store)
                 sharedSpace.stopTracking(for: pitchTrackingOwner)
                 return
             }
@@ -356,7 +358,7 @@ struct FootballImmersiveView: View {
         .onChange(of: store.selectedScenarioID) { _, _ in
             cancelWorkspaceMove(rejectCurrentGesture: workspaceMove.isActive)
             annotationStroke = nil
-            draggedAnnotationTarget = nil
+            annotationHandleDrag.cancelCurrent(in: store)
             selectedAnnotationID = nil
         }
         .onChange(of: controlDeckPresetRawValue) { _, _ in
@@ -376,14 +378,11 @@ struct FootballImmersiveView: View {
             // down here rather than relying on the control deck's observer.
             // SwiftUI does not guarantee observer ordering: the deck may have
             // already cleared the shared selection by the time this runs.
-            if let draggedAnnotationTarget {
-                _ = store.cancelCoachMarkGeometryPreview(
-                    id: draggedAnnotationTarget.markID
-                )
+            if draggedAnnotationTarget != nil {
+                annotationHandleDrag.cancelCurrent(in: store)
             } else if let selectedAnnotationID {
                 _ = store.cancelCoachMarkGeometryPreview(id: selectedAnnotationID)
             }
-            draggedAnnotationTarget = nil
             selectedAnnotationID = nil
             annotationStroke = nil
             if store.isDrawing {
@@ -393,7 +392,11 @@ struct FootballImmersiveView: View {
         .onChange(of: spatialDragIsActive) { wasActive, isActive in
             guard wasActive, !isActive else { return }
             cancelWorkspaceMove()
-            cancelInterruptedSpatialInteraction()
+            cancelInterruptedSpatialInteraction(includingHandle: false)
+        }
+        .onChange(of: spatialHandleGestureID) { oldID, newID in
+            guard let oldID, newID != oldID else { return }
+            annotationHandleDrag.scheduleInterruptedCleanup(in: store, gestureID: oldID)
         }
     }
 
@@ -617,6 +620,9 @@ struct FootballImmersiveView: View {
                     coordinateSpace: .local
                 )
                 .targetedToAnyEntity()
+                .updating($spatialHandleGestureID) { _, id, _ in
+                    if id == nil { id = UUID() }
+                }
                 .updating($spatialDragIsActive) { _, isActive, _ in
                     isActive = true
                 }
@@ -733,10 +739,10 @@ struct FootballImmersiveView: View {
     private func handleAnnotationDragChanged(
         _ value: EntityTargetValue<DragGesture.Value>
     ) {
-        guard let target = AnnotationSceneAffordance.targetAncestor(of: value.entity),
+        guard showsPlaybackAnnotations,
+              let target = AnnotationSceneAffordance.targetAncestor(of: value.entity),
               target.role == .start || target.role == .end,
-              let matchRoot = matchRootAncestor(of: value.entity),
-              let mark = store.marks.first(where: { $0.id == target.markID })
+              let matchRoot = matchRootAncestor(of: value.entity)
         else { return }
 
         guard let point = pitchPoint(
@@ -744,53 +750,27 @@ struct FootballImmersiveView: View {
             fallback3D: value.location3D,
             in: matchRoot
         ) else { return }
-        let geometry = store.presentedCoachMarkGeometry(mark, at: store.playhead)
-        let start = target.role == .start ? point : geometry.start
-        let end = target.role == .end ? point : geometry.end
-        guard store.updateCoachMarkGeometry(
-            id: target.markID,
-            start: start,
-            end: end,
-            broadcast: false
-        ) else { return }
-
-        draggedAnnotationTarget = target
+        guard annotationHandleDrag.preview(handleInputSample(value, target: target), point: point, in: store) else { return }
         selectedAnnotationID = target.markID
     }
 
     private func handleAnnotationDragEnded(
         _ value: EntityTargetValue<DragGesture.Value>
     ) {
-        guard let target = draggedAnnotationTarget,
-              target == AnnotationSceneAffordance.targetAncestor(of: value.entity),
-              let matchRoot = matchRootAncestor(of: value.entity),
-              let mark = store.marks.first(where: { $0.id == target.markID })
-        else {
-            if let interrupted = draggedAnnotationTarget {
-                _ = store.cancelCoachMarkGeometryPreview(id: interrupted.markID)
-            }
-            draggedAnnotationTarget = nil
-            return
+        guard showsPlaybackAnnotations,
+              let target = AnnotationSceneAffordance.targetAncestor(of: value.entity) else { return }
+        let point = matchRootAncestor(of: value.entity).flatMap {
+            pitchPoint(for: value, fallback3D: value.location3D, in: $0)
         }
+        _ = annotationHandleDrag.finish(handleInputSample(value, target: target), point: point, in: store)
+    }
 
-        guard let point = pitchPoint(
-            for: value,
-            fallback3D: value.location3D,
-            in: matchRoot
-        ) else {
-            _ = store.cancelCoachMarkGeometryPreview(id: target.markID)
-            draggedAnnotationTarget = nil
-            return
-        }
-        let geometry = store.presentedCoachMarkGeometry(mark, at: store.playhead)
-        let start = target.role == .start ? point : geometry.start
-        let end = target.role == .end ? point : geometry.end
-        _ = store.commitCoachMarkGeometryPreview(
-            id: target.markID,
-            start: start,
-            end: end
-        )
-        draggedAnnotationTarget = nil
+    private func handleInputSample(_ value: EntityTargetValue<DragGesture.Value>,
+                                   target: AnnotationSceneTarget) -> AnnotationHandleInputSample {
+        let start = value.startLocation3D
+        return AnnotationHandleInputSample(gestureID: spatialHandleGestureID, target: target,
+            sourceID: ObjectIdentifier(value.entity), startLocation: SIMD3(start.x, start.y, start.z),
+            time: value.gestureValue.time)
     }
 
     private func handleAnnotationStrokeChanged(
@@ -881,7 +861,9 @@ struct FootballImmersiveView: View {
             return
         }
         guard acceptsMatchInteraction else {
-            draggedAnnotationTarget = nil
+            if let target = AnnotationSceneAffordance.targetAncestor(of: value.entity) {
+                _ = annotationHandleDrag.finish(handleInputSample(value, target: target), point: nil, in: store)
+            }
             annotationStroke = nil
             return
         }
@@ -974,16 +956,13 @@ struct FootballImmersiveView: View {
         )
     }
 
-    private func cancelInterruptedSpatialInteraction() {
+    private func cancelInterruptedSpatialInteraction(includingHandle: Bool = true) {
         guard store.roomPresentation.owns(roomPresentationID) else {
-            draggedAnnotationTarget = nil
+            if includingHandle { annotationHandleDrag.cancelCurrent(in: store) }
             annotationStroke = nil
             return
         }
-        if let target = draggedAnnotationTarget {
-            _ = store.cancelCoachMarkGeometryPreview(id: target.markID)
-            draggedAnnotationTarget = nil
-        }
+        if includingHandle { annotationHandleDrag.cancelCurrent(in: store) }
         if annotationStroke != nil {
             annotationStroke = nil
             store.resetPendingAnnotationPointAfterInterruption()

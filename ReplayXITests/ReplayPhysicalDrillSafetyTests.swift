@@ -344,7 +344,8 @@ final class ReplayPhysicalDrillSafetyTests: XCTestCase {
         let dragStart = try XCTUnwrap(source.range(of: "private func handleAnnotationDragEnded(")?.lowerBound)
         let dragEnd = try XCTUnwrap(source.range(of: "private func handleAnnotationStrokeChanged(")?.lowerBound)
         let drag = source[dragStart..<dragEnd]
-        XCTAssertTrue(drag.contains("store.commitCoachMarkGeometryPreview("))
+        XCTAssertTrue(drag.contains("annotationHandleDrag.finish("))
+        XCTAssertFalse(drag.contains("store.commitCoachMarkGeometryPreview("))
         XCTAssertFalse(drag.contains("store.updateCoachMarkGeometry("))
     }
 

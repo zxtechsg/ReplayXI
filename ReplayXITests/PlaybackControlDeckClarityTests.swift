@@ -127,7 +127,7 @@ final class PlaybackControlDeckClarityTests: XCTestCase {
         )
 
         XCTAssertTrue(transition.contains("cancelCoachMarkGeometryPreview"))
-        XCTAssertTrue(transition.contains("draggedAnnotationTarget = nil"))
+        XCTAssertTrue(transition.contains("annotationHandleDrag.cancelCurrent(in: store)"))
         XCTAssertTrue(transition.contains("selectedAnnotationID = nil"))
         XCTAssertTrue(transition.contains("inlinePanel = nil"))
         XCTAssertTrue(transition.contains("isClearAnnotationsPending = false"))

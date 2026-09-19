@@ -193,6 +193,13 @@ final class ReplayStore {
 
     @ObservationIgnored private var pendingCoachMarkCurveGestures: [UUID: UUID] = [:]
     @ObservationIgnored private var finishedCoachMarkCurveGestures: [UUID] = []
+    @ObservationIgnored private var pendingCoachMarkHandleGestures: [UUID: CoachMarkHandleGesture] = [:]
+    @ObservationIgnored private var finishedCoachMarkHandleGestures: [UUID] = []
+
+    private struct CoachMarkHandleGesture {
+        let gestureID: UUID
+        let endpoint: CoachMarkEndpoint
+    }
 
     private struct CoachMarkGeometry {
         let keyframes: [CoachMarkKeyframe]?
@@ -618,6 +625,7 @@ final class ReplayStore {
         marks = resettingReview ? scenario.coachMarks : (retainedScenarioMarks[id] ?? scenario.coachMarks)
         annotationEditHistory.reset(to: marks)
         pendingCoachMarkGeometryBaselines.removeAll(keepingCapacity: true)
+        finishAllCoachMarkHandleGestures()
         removeAllPendingCoachMarkEndpointPreviews()
         sharedPitchAnchorID = nil
         triangleLockMode = .visualise
@@ -1687,6 +1695,17 @@ final class ReplayStore {
         curve: CoachMarkCurve? = nil,
         broadcast: Bool = true
     ) -> Bool {
+        applyCoachMarkGeometry(id: id, start: start, end: end, curve: curve,
+                               broadcast: broadcast, handleGestureID: nil)
+    }
+
+    private func applyCoachMarkGeometry(id: UUID, start: PitchPoint, end: PitchPoint,
+                                       curve: CoachMarkCurve?, broadcast: Bool,
+                                       handleGestureID: UUID?) -> Bool {
+        guard pendingCoachMarkHandleGestures[id]?.gestureID == handleGestureID else {
+            statusMessage = "Finish the spatial handle adjustment first"
+            return false
+        }
         guard allowsAnnotationAuthoring() else { return false }
         guard !hasActiveTimelineScrub else {
             statusMessage = "Finish or cancel the timeline scrub first"
@@ -1778,6 +1797,73 @@ final class ReplayStore {
             emitSnapshot()
         }
         return true
+    }
+
+    func isCoachMarkHandlePreviewOwner(id: UUID, gestureID: UUID) -> Bool {
+        pendingCoachMarkHandleGestures[id]?.gestureID == gestureID && pendingCoachMarkGeometryBaselines[id] != nil
+    }
+
+    /// A direct world handle owns an endpoint and a generation, not just the
+    /// annotation ID. Its spatial points remain absolute pitch coordinates.
+    @discardableResult
+    func previewCoachMarkHandle(id: UUID, endpoint: CoachMarkEndpoint,
+                                gestureID: UUID, point: PitchPoint) -> Bool {
+        guard !finishedCoachMarkHandleGestures.contains(gestureID), !isDrawing,
+              point.x.isFinite, point.z.isFinite,
+              let mark = marks.first(where: { $0.id == id }) else { return false }
+        let owner = pendingCoachMarkHandleGestures[id]
+        if let owner {
+            guard owner.gestureID == gestureID, owner.endpoint == endpoint,
+                  pendingCoachMarkGeometryBaselines[id] != nil else { return false }
+        } else {
+            guard !hasActiveCoachMarkGeometryPreview else { return false }
+            pendingCoachMarkHandleGestures[id] = CoachMarkHandleGesture(gestureID: gestureID, endpoint: endpoint)
+        }
+        let geometry = presentedCoachMarkGeometry(mark, at: playhead)
+        let accepted = applyCoachMarkGeometry(id: id,
+            start: endpoint == .start ? point : geometry.start,
+            end: endpoint == .end ? point : geometry.end, curve: nil,
+            broadcast: false, handleGestureID: gestureID)
+        if !accepted, owner == nil { pendingCoachMarkHandleGestures.removeValue(forKey: id) }
+        return accepted
+    }
+
+    @discardableResult
+    func commitCoachMarkHandlePreview(id: UUID, gestureID: UUID, point: PitchPoint) -> Bool {
+        guard isCoachMarkHandlePreviewOwner(id: id, gestureID: gestureID),
+              let owner = pendingCoachMarkHandleGestures[id],
+              let mark = marks.first(where: { $0.id == id }) else { return false }
+        guard point.x.isFinite, point.z.isFinite else {
+            _ = cancelCoachMarkHandlePreview(id: id, gestureID: gestureID)
+            return false
+        }
+        let geometry = presentedCoachMarkGeometry(mark, at: playhead)
+        let committed = applyCoachMarkGeometry(id: id,
+            start: owner.endpoint == .start ? point : geometry.start,
+            end: owner.endpoint == .end ? point : geometry.end, curve: nil,
+            broadcast: true, handleGestureID: gestureID)
+        if !committed { _ = cancelCoachMarkHandlePreview(id: id, gestureID: gestureID) }
+        finishCoachMarkHandleGesture(id: id, gestureID: gestureID)
+        return committed
+    }
+
+    @discardableResult
+    func cancelCoachMarkHandlePreview(id: UUID, gestureID: UUID) -> Bool {
+        guard isCoachMarkHandlePreviewOwner(id: id, gestureID: gestureID) else { return false }
+        return cancelCoachMarkGeometryPreview(id: id)
+    }
+
+    private func finishCoachMarkHandleGesture(id: UUID, gestureID: UUID) {
+        guard pendingCoachMarkHandleGestures[id]?.gestureID == gestureID else { return }
+        pendingCoachMarkHandleGestures.removeValue(forKey: id)
+        finishedCoachMarkHandleGestures.append(gestureID)
+        if finishedCoachMarkHandleGestures.count > 128 { finishedCoachMarkHandleGestures.removeFirst() }
+    }
+
+    private func finishAllCoachMarkHandleGestures() {
+        for (id, owner) in Array(pendingCoachMarkHandleGestures) {
+            finishCoachMarkHandleGesture(id: id, gestureID: owner.gestureID)
+        }
     }
 
     /// Curve dragging uses the same masked save/Undo baseline as endpoint
@@ -2337,6 +2423,9 @@ final class ReplayStore {
     /// local and emits no collaboration snapshot.
     @discardableResult
     func cancelCoachMarkGeometryPreview(id: UUID) -> Bool {
+        if let owner = pendingCoachMarkHandleGestures[id] {
+            finishCoachMarkHandleGesture(id: id, gestureID: owner.gestureID)
+        }
         if pendingCoachMarkEndpointPreviews[id] != nil {
             return cancelCoachMarkEndpointPreview(id: id)
         }
@@ -2353,6 +2442,9 @@ final class ReplayStore {
     }
 
     private func rollbackCoachMarkGeometryPreview(id: UUID, index: Int) {
+        if let owner = pendingCoachMarkHandleGestures[id] {
+            finishCoachMarkHandleGesture(id: id, gestureID: owner.gestureID)
+        }
         if let gestureID = pendingCoachMarkCurveGestures[id] {
             finishCoachMarkCurveGesture(id: id, gestureID: gestureID)
         }
@@ -2851,6 +2943,7 @@ final class ReplayStore {
         pendingDrawStart = nil
         isDrawing = false
         pendingCoachMarkGeometryBaselines.removeAll(keepingCapacity: true)
+        finishAllCoachMarkHandleGestures()
         removeAllPendingCoachMarkEndpointPreviews()
         latestCoachSnapshot = sanitizedSnapshot
         participantSeatAssignments = sanitizedSeatAssignments
@@ -3163,6 +3256,7 @@ final class ReplayStore {
     private func rollbackAllCoachMarkGeometryPreviews(
         interruptingEndpointGesture: Bool = false
     ) {
+        finishAllCoachMarkHandleGestures()
         for (id, gestureID) in Array(pendingCoachMarkCurveGestures) {
             finishCoachMarkCurveGesture(id: id, gestureID: gestureID)
         }

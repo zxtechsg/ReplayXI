@@ -35,13 +35,39 @@ Baselines: /private/tmp/replayxi-cycle138-rig-baseline.xcresult and
 
 Native Store probe confirms mark ID alone cannot distinguish A-preview → cancel →
 B-preview → stale A-commit/cancel on the same mark. A token-owned handle API and
-controller are being added. Authoritative lifecycle cancellation remains distinct
-from gesture callbacks; curve/joystick previews retain their separate ownership.
+controller now protect the matching endpoint and gesture. Authoritative lifecycle
+cancellation remains distinct from gesture callbacks; curve/joystick previews
+retain their separate ownership. Old cleanup cannot cancel a replacement. A fresh
+gesture can recover after authoritative cancellation before deferred view cleanup.
+
+Preview samples stay masked from disk saves. Final coordinates survive reopening,
+and all samples form one Undo/Redo step. Too-short samples can recover; invalid
+final points restore all keyframes and tracking anchors. Interrupted callbacks
+match their input source instead of cancelling whichever gesture is now active.
+
+Initial native batch: 103 tests, zero failures. After tightening the rejected-room
+callback, all 50 handle/source-wiring tests passed again. That second batch also
+included two deliberately failing render-budget baseline tests, recorded below.
+Evidence: /private/tmp/replayxi-cycle138-handle-candidate.xcresult and
+/private/tmp/replayxi-cycle138-budget-baseline-handle-v2.xcresult.
 
 SwiftUI DragGesture exposes time and starting position, but no native stable
 gesture identifier. Source/target/start/time checks and a per-gesture token can
 reject old events; indistinguishable reassigned native events are not claimed to
-be solved. Reset-before-end and deferred old cleanup need explicit coverage.
+be solved. Reset-before-end, missing-end cleanup and deferred old cleanup have
+explicit controller tests. Native user gesture behaviour remains unverified while
+the Mac is locked; these tests do not replace headset interaction checks.
+
+## Animated annotation budget
+
+Native baseline confirms four zones with ground → raised → ground keyframes
+were admitted using their base elevations. At raised/interpolated frames this
+enabled 24 annotation models against the normal 18-model budget. Both reverse
+seeks and selected-overlay reservation checks reproduce the mismatch: two tests,
+40 assertion failures. Selected actual model counts still fit in these fixtures;
+their conservative reservations, not actual counts, exceeded 24.
+Evidence: /private/tmp/replayxi-cycle138-budget-baseline-captures.
+These are enabled ModelComponent counts, not measured GPU calls or headset FPS.
 
 ## Foot contact investigation
 
