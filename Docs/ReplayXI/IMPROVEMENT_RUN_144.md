@@ -33,5 +33,8 @@ No retained Swift owner was found. This does **not** observe completion of CoreR
 - UI captures: `/private/tmp/replayxi-cycle144-timing-candidate/`
 - Toe receipt: `/private/tmp/replayxi-cycle144-toe-captures/A419EE17-5486-4AB4-A9CA-8B0EDEC55A12.json`
 - Ownership receipt: `/private/tmp/replayxi-cycle144-ownership-captures/DCF4212F-299E-4247-AC2A-54A5E07721C1.json`
-- Full suite and device Release validation are pending at this checkpoint.
-- User signing/project settings and unrelated files remain excluded. Saved review SHA before tests: `952e501de62f36e391a5b471175c883d0deb9e981a5c6cfc04f607c6dc5ded65`.
+- Full suite: **1,448 passed, two intentional skips, zero failures** (1,450 total across XCTest and Swift Testing). No runner restart. `/private/tmp/replayxi-cycle144-full.xcresult` and `.log`; about 315 seconds.
+- Unsigned device Release build passed: `/private/tmp/replayxi-cycle144-release.log`. Only the existing unused AppIntents metadata warning.
+- Normal simulator demo relaunched as PID `66006` and verified alive. Mac remains locked, so no fresh hands-on UI/gaze/gesture or headset-comfort claim.
+- User signing/project settings and unrelated files remain excluded. Saved reviews are unchanged before/after testing and normal launch: SHA `952e501de62f36e391a5b471175c883d0deb9e981a5c6cfc04f607c6dc5ded65`.
+- Implementation backed up to `origin/main` as `08f433c`; this follow-up records final validation. The broad improvement goal remains active; the earlier CoreRE teardown crash is still unresolved, not reproduced in this cycle.
