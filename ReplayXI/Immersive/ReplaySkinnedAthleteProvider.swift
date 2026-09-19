@@ -227,6 +227,7 @@ final class ReplaySkinnedAthleteInstance {
     var disablesCutPhaseAlignmentForTesting = false
     /// Retains the independently measured cycle138 aligned, unsmoothed control.
     var disablesCutWeightSmoothingForTesting = false
+    var disablesHeaderHandoffForTesting = false
     enum DiagnosticStage: String, CaseIterable {
         case source, footballRetargetAndContact, offBall, look, impact
         case stationarySupport, headerAim, cervical, finalFloor
@@ -355,6 +356,17 @@ final class ReplaySkinnedAthleteInstance {
             : ReplaySkinnedAthleteFootballPose.influence(locomotion: locomotion, ballAction: ballAction)
         let influence = max(nativeLocomotion.influence, ballInfluence,
                             interactionSample?.influence ?? 0, movement?.influence ?? 0, keeper?.influence ?? 0)
+        // Header cues outlive the nonzero action sample by the existing
+        // preparation/release margin. Hand the source chest back to locomotion
+        // continuously instead of switching when the action becomes nil.
+        var headerChestAdmission: Float?
+        if interaction?.kind == .header, stationaryPose == nil, impact == nil {
+            headerChestAdmission = 1 - ReplayAthleteMovementIntent.contactProtection(
+                for: interaction, track: track, at: time)
+        }
+        #if DEBUG
+        if disablesHeaderHandoffForTesting { headerChestAdmission = nil }
+        #endif
         if influence > 0, footballPose != nil {
             let phaseWeight = ReplaySkinnedAthleteCutPhase.weight(source: motion.sourceCommit,
                 track: track, at: time, locomotion: locomotion, interaction: interaction,
@@ -374,7 +386,7 @@ final class ReplaySkinnedAthleteInstance {
                                                   interactionSample?.influence ?? 0, movement?.readiness ?? 0,
                                                   keeper?.armInfluence ?? 0),
                                 motion: motion, to: &pose, interaction: interactionSample,
-                                goalkeeperReadiness: keeper)
+                                goalkeeperReadiness: keeper, headerChestAdmission: headerChestAdmission)
         }
         #if DEBUG
         poseStageObserverForTesting?(.footballRetargetAndContact, pose)

@@ -241,7 +241,7 @@ final class PlaybackAccessibilityActivationTests: XCTestCase {
         XCTAssertTrue(source.contains("PlaybackAccessibilityActivationRouter.handle("))
         XCTAssertTrue(source.contains("hasActiveDrawingStroke: annotationStroke != nil"))
         XCTAssertTrue(source.contains("PlaybackAccessibilityActivationRouter.playerIDAncestor(of: entity)"))
-        XCTAssertTrue(source.contains("PlaybackAccessibilityActivationRouter.reviewAnnotation(mark, in: store)"))
+        XCTAssertTrue(source.contains("PlaybackAccessibilityActivationRouter.selectSpatialAnnotation(mark, in: store)"))
     }
 
     private struct Snapshot: Equatable {

@@ -30,7 +30,7 @@ enum PlaybackAccessibilityActivationRouter {
                   let mark = store.marks.first(where: { $0.id == annotationTarget.markID })
             else { return }
             selectAnnotation(annotationTarget.markID)
-            reviewAnnotation(mark, in: store)
+            selectSpatialAnnotation(mark, in: store)
             return
         }
 
@@ -75,6 +75,25 @@ enum PlaybackAccessibilityActivationRouter {
             cursor = current.parent
         }
         return nil
+    }
+
+    /// Select the pose the user actually hit. Seeking to In would move an
+    /// animated mark underneath the next edit and modify the wrong timestamp.
+    /// Authored overlays retain their existing review-from-In action.
+    static func selectSpatialAnnotation(_ mark: CoachMark, in store: ReplayStore) {
+        guard store.canChangePlaybackView,
+              let current = store.marks.first(where: { $0.id == mark.id }) else { return }
+        let isCoachAnimation = current.hasAnimatedGeometry
+            && !store.selectedScenario.coachMarks.contains { $0.id == current.id }
+        guard isCoachAnimation else {
+            reviewAnnotation(current, in: store)
+            return
+        }
+        if store.localRole == .player {
+            _ = store.beginLocalReview(at: store.playhead)
+        } else {
+            store.setPlaying(false, broadcast: store.localRole == .coach)
+        }
     }
 
     static func reviewAnnotation(_ mark: CoachMark, in store: ReplayStore) {

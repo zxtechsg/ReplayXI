@@ -104,7 +104,8 @@ struct ReplaySkinnedAthleteFootballPose {
         motion: ReplaySkinnedAthleteMotion,
         to pose: inout ReplaySkinnedAthleteMotion.Pose,
         interaction: ReplayAthleteInteractionSample? = nil,
-        goalkeeperReadiness: ReplayGoalkeeperReadiness.Sample? = nil
+        goalkeeperReadiness: ReplayGoalkeeperReadiness.Sample? = nil,
+        headerChestAdmission: Float? = nil
     ) {
         let weight = influence.isFinite ? min(max(influence, 0), 1) : 0
         let armWeight = armInfluence.isFinite ? min(max(armInfluence, 0), 1) : 0
@@ -142,7 +143,13 @@ struct ReplaySkinnedAthleteFootballPose {
         // and fingers; arm rotations cannot stretch their existing segments.
         // Headers retain the source chest here: their final aim is solved once
         // from the skin's actual head/chest pivots by the instance provider.
-        let retargetsChest = interaction?.kind != .header
+        // A nil admission retains the original path for other actions and
+        // callers without a validated header cue. Zero skips the arithmetic
+        // entirely, preserving the active header/source chest byte-for-byte.
+        let legacyChestAdmission: Float = interaction?.kind == .header ? 0 : 1
+        let chestAdmission = headerChestAdmission.flatMap { $0.isFinite ? min(max($0, 0), 1) : nil }
+            ?? legacyChestAdmission
+        let retargetsChest = chestAdmission > 0
         var torso = body
         var leftParry: ReplayAthleteParryIK.Solution?
         var rightParry: ReplayAthleteParryIK.Solution?
@@ -193,7 +200,10 @@ struct ReplaySkinnedAthleteFootballPose {
                 // `authored.spineOrientation` already includes explicit touch
                 // pitch and pelvis counter-turn. Do not add those a second time.
                 let chestModel = body * authored.spineOrientation * inverseRestChestRotation.inverse
-                target.rotations[index] = simd_normalize(simd_quatf(parentMatrix).inverse * chestModel)
+                let locomotionChest = simd_normalize(simd_quatf(parentMatrix).inverse * chestModel)
+                target.rotations[index] = chestAdmission < 1
+                    ? ReplayAthleteInteractionPose.blend(pose.rotations[index], locomotionChest, chestAdmission)
+                    : locomotionChest
             }
             if armWeight > 0, interaction?.kind != .save,
                let rotation = leftArm.rotation(for: index, authored: authored, torso: torso)

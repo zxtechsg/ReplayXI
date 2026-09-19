@@ -975,7 +975,7 @@ struct FootballImmersiveView: View {
     }
 
     private func reviewSpatialAnnotation(_ mark: CoachMark) {
-        PlaybackAccessibilityActivationRouter.reviewAnnotation(mark, in: store)
+        PlaybackAccessibilityActivationRouter.selectSpatialAnnotation(mark, in: store)
     }
 
     private func exitRoom() {
