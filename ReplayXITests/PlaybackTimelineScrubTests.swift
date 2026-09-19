@@ -292,7 +292,7 @@ final class PlaybackTimelineScrubTests: XCTestCase {
             .appendingPathComponent("ReplayDashboardView.swift")
         let source = try String(contentsOf: sourceURL, encoding: .utf8)
         let start = try XCTUnwrap(
-            source.range(of: "private struct DashboardTransport: View")?.lowerBound
+            source.range(of: "struct DashboardTransport: View")?.lowerBound
         )
         let end = try XCTUnwrap(
             source.range(

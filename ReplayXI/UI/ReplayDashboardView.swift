@@ -785,7 +785,7 @@ private struct ShapeFocusStepButton: View {
     }
 }
 
-private struct DashboardTransport: View {
+struct DashboardTransport: View {
     @Environment(ReplayStore.self) private var store
     @State private var scrubController = DashboardTimelineScrubController()
 
@@ -804,10 +804,11 @@ private struct DashboardTransport: View {
 
                 if let player = store.activePerspective {
                     StatusPill(
-                        text: "\(store.viewMode == .firstPerson ? "POV" : "Selected") • \(player.team.compactTitle) • #\(player.shirtNumber) \(player.role)",
+                        text: "\(store.viewMode == .firstPerson ? "POV" : "Selected") • \(FootballReferenceScenarios.teamTitle(player.team, in: scenario)) • #\(player.shirtNumber) \(player.positionCode)",
                         systemImage: "viewfinder",
                         color: player.team == .home ? ReplayTheme.cyan : ReplayTheme.danger
                     )
+                    .accessibilityLabel("\(store.viewMode == .firstPerson ? "Player view" : "Selected player"), \(FootballReferenceScenarios.teamTitle(player.team, in: scenario)), number \(player.shirtNumber), \(player.role), \(player.displayName)")
                 }
             }
 
