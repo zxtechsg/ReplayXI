@@ -27,7 +27,17 @@ Local-only Match Replay and Strategy Analysis. Goal remains active.
 All are pushed to origin/main. Pre-existing project/Info edits remain excluded.
 Production review bytes were unchanged after the timing/library run.
 
+## Planted keeper knees
+
+- Reproduced a keeper-save defect before patching: knees followed the outgoing rebound
+  while boots used the planted support direction. Baseline had 132 failed assertions.
+- Imported near/low skins now use the support boot frame for save knee direction, matching
+  the procedural keeper. Foot targets, other contact types and physics stay unchanged.
+- Seven save/contact tests and thirteen goalkeeper readiness/scene tests passed.
+  Before/after calibrated native renders inspected. Knee-to-boot-forward alignment changed
+  from approximately −0.60…−0.68 to 1.0. Limb lengths, sole contact and exact rewind pass.
+
 ## Still in progress
 
-Keeper knee-pole alignment during non-foot saves, and Saved Reviews large-text layout.
+Saved Reviews large-text layout.
 No claim of match mocap accuracy, FIFA fidelity, or measured headset performance.

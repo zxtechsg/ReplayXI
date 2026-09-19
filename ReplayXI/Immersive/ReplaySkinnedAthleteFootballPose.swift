@@ -335,11 +335,15 @@ struct ReplaySkinnedAthleteFootballPose {
             let surface = (striking ? interaction.strikeSurfaceTarget : interaction.plantedSoleTarget(for: leg.side))
                 + SIMD3<Float>(0, groundOffset, 0)
             let ankleGoal = surface - foot.act(localMarker)
+            // A parry redirects the ball, not the planted knees. Use the same
+            // support frame as its boots and the procedural keeper rig. Leave
+            // existing foot-strike and grounded-header targets unchanged.
+            let kneeFrame = interaction.kind == .save || interaction.headerSupportLeg != nil
+                ? interaction.supportFootOrientation : interaction.footOrientation
             if let solved = ReplayAthleteTwoBoneIK.solve(hip: hipPosition, ankle: ankleGoal,
                                                          upperLength: leg.upperLength,
                                                          lowerLength: leg.lowerLength,
-                                                         pole: (interaction.headerSupportLeg == nil
-                                                            ? interaction.footOrientation : interaction.supportFootOrientation).act([0, 0, 1])) {
+                                                         pole: kneeFrame.act([0, 0, 1])) {
                 let blend = interaction.influence
                 // Readiness fades before the contact core. Its corrected foot
                 // remains the initial target at the cue's near-zero edge, so
