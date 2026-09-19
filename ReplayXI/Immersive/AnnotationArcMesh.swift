@@ -79,12 +79,19 @@ enum AnnotationArcMesh {
         /// Comparing all three control points also catches pitch/floor/ceiling
         /// clipping, which changes the shape rather than simply translating it.
         func translation(to other: Key) -> SIMD3<Float>? {
-            guard curve == other.curve, radius == other.radius, baseY == other.baseY else { return nil }
+            guard radius == other.radius, baseY == other.baseY else { return nil }
             let shift = SIMD3<Float>(other.start.x - start.x, other.startY - startY,
                                      other.start.z - start.z)
             let endShift = SIMD3<Float>(other.end.x - end.x, other.endY - endY,
                                         other.end.z - end.z)
             let controlShift = other.control - control
+            if curve != other.curve {
+                // Clipping can make different bend/lift/roll values render
+                // exactly the same quadratic. Reuse only exact resolved
+                // translations here: tiny real curve edits must still rebuild.
+                guard endShift == shift, controlShift == shift else { return nil }
+                return shift
+            }
             // Subtracting pitch-space floats can differ by a few micrometres.
             let toleranceSquared: Float = 0.0001 * 0.0001
             guard simd_length_squared(endShift - shift) <= toleranceSquared,
