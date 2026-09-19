@@ -249,7 +249,12 @@ final class ReplayReviewLibrary {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys]
             let data = try encoder.encode(document)
-            guard data.count <= Self.maximumFileBytes else { throw LibraryError.invalidDocument }
+            guard data.count <= Self.maximumFileBytes else {
+                // This is the app's bounded library, not proof that the device
+                // is out of disk space. Never replace the last valid document.
+                status = "Review library full. Delete a saved review or reduce annotations."
+                return false
+            }
             if let fileURL {
                 try FileManager.default.createDirectory(
                     at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true

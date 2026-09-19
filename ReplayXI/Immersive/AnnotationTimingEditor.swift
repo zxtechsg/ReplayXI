@@ -8,8 +8,9 @@ struct AnnotationTimingEditor: View {
     let color: Color
     var adjustPose: () -> Void = {}
     @State private var draft = AnnotationTimingDraft()
-    @State private var selectedKey: TimeInterval?
-    @State private var keyTimeText = ""
+    @State private var positionDraft = AnnotationPositionTimeDraft()
+    @FocusState private var focusedField: Field?
+    private enum Field: Hashable { case inTime, outTime, positionTime }
     @State private var measuredContentHeight: CGFloat?
     @ScaledMetric(relativeTo: .body) private var fieldWidth = 130.0
 
@@ -20,6 +21,9 @@ struct AnnotationTimingEditor: View {
             && mark != nil && !store.selectedScenario.coachMarks.contains { $0.id == markID }
     }
     private var isDirty: Bool { mark.map { draft.differs(from: $0) } ?? false }
+    private var canLeaveEditor: Bool {
+        AnnotationTimingEditPolicy.canLeaveEditor(windowIsDirty: isDirty, positionIsDirty: positionDraft.isDirty)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -27,22 +31,22 @@ struct AnnotationTimingEditor: View {
                 Label("In / Out", systemImage: "timer").font(.headline).foregroundStyle(color)
                 Toggle("To end", isOn: $draft.throughEnd).toggleStyle(.button).disabled(!canEdit)
                     .accessibilityHint("Keep the annotation visible through the final replay frame")
-                Button("Reset", action: reload).disabled(!isDirty || !canEdit)
-                    .accessibilityLabel("Discard unapplied annotation timing changes")
-                Button("Apply", action: applyWindow)
+                Button("Reset In/Out", action: resetWindow).disabled(!isDirty || !canEdit)
+                    .accessibilityLabel("Reset In and Out changes only")
+                Button("Apply In/Out", action: applyWindow)
                     .buttonStyle(.borderedProminent).tint(color)
                     .disabled(!canEdit || !isDirty || draft.validationMessage(duration: duration) != nil)
             }
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 12) {
-                    timeRow("In", text: $draft.startText, fallback: mark?.revealTime ?? 0)
+                    timeRow("In", text: $draft.startText, fallback: mark?.revealTime ?? 0, field: .inTime)
                     if !draft.throughEnd {
-                        timeRow("Out", text: $draft.endText, fallback: mark?.hideTime ?? duration)
+                        timeRow("Out", text: $draft.endText, fallback: mark?.hideTime ?? duration, field: .outTime)
                     }
                     if let error = draft.validationMessage(duration: duration) {
                         Label(error, systemImage: "exclamationmark.circle").font(.caption).foregroundStyle(.orange)
                     } else if isDirty {
-                        Text("Not applied. Apply keeps position key times unchanged.")
+                        Text("In/Out not applied. Saved position times stay unchanged.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     if let mark {
@@ -54,10 +58,14 @@ struct AnnotationTimingEditor: View {
                                 Button("+1s") { shift(mark, by: 1) }.disabled(!canShift(mark, by: 1))
                                     .accessibilityLabel("Move annotation window and all position keys one second later")
                             }
-                            Label(mark.isVisible(at: store.playhead) ? "Visible now" : "Hidden now",
+                            Label(AnnotationTimingEditPolicy.visibilityLabel(for: mark, at: store.playhead),
                                   systemImage: mark.isVisible(at: store.playhead) ? "eye" : "eye.slash")
                                 .font(.caption).foregroundStyle(.secondary)
                         }.buttonStyle(.bordered)
+                        if !mark.isVisible(at: store.playhead) {
+                            Text(AnnotationTimingEditPolicy.outsideWindowHint)
+                                .font(.caption).foregroundStyle(.orange)
+                        }
                         if mark.kind != .playerLabel {
                             Divider()
                             keyframeSection(mark)
@@ -80,21 +88,27 @@ struct AnnotationTimingEditor: View {
             .accessibilityHint("Scroll for position keys and key timing controls")
         }
         .onAppear(perform: reload)
-        .onChange(of: markID) { _, _ in selectedKey = nil; reload() }
+        .onChange(of: markID) { _, _ in positionDraft.clear(); focusedField = nil; reload() }
+        .onChange(of: draft.throughEnd) { _, throughEnd in
+            if throughEnd, focusedField == .outTime { focusedField = nil }
+        }
         .onChange(of: mark?.revealTime) { _, _ in reload() }
         .onChange(of: mark?.hideTime) { _, _ in reload() }
         .onChange(of: mark?.keyframes?.map(\.time)) { _, times in
-            if let selectedKey, !(times ?? []).contains(selectedKey) { self.selectedKey = nil }
+            if let selectedTime = positionDraft.selectedTime, !(times ?? []).contains(selectedTime) { positionDraft.clear() }
         }
     }
 
-    private func timeRow(_ title: String, text: Binding<String>, fallback: Double) -> some View {
+    private func timeRow(_ title: String, text: Binding<String>, fallback: Double, field: Field) -> some View {
         adaptiveRow {
             Text(title).font(.subheadline.weight(.bold)).frame(minWidth: 36, alignment: .leading)
             TextField("Seconds or m:ss", text: text)
                 .textFieldStyle(.roundedBorder).frame(width: fieldWidth).monospacedDigit()
                 .accessibilityLabel("Exact annotation \(title) time")
                 .accessibilityHint("Enter seconds or a minutes and seconds timestamp")
+                .focused($focusedField, equals: field)
+                .submitLabel(.done)
+                .onSubmit { applyWindow() }
             HStack {
                 Button("Now") { text.wrappedValue = AnnotationTimestamp.editable(store.playhead) }
                     .accessibilityLabel("Set \(title) to playhead")
@@ -114,13 +128,13 @@ struct AnnotationTimingEditor: View {
         VStack(alignment: .leading, spacing: 8) {
             adaptiveRow {
                 Label("Saved positions", systemImage: "diamond").font(.headline)
-                Button("Adjust shape", action: adjustPose).disabled(!canEdit)
+                Button("Adjust shape", action: openShapeEditor).disabled(!canEdit || !canLeaveEditor)
                 if mark.hasKeyframes {
                     Button {
-                        if store.freezeCoachMarkKeyframes(id: markID) { selectedKey = nil }
+                        if store.freezeCoachMarkKeyframes(id: markID) { positionDraft.clear() }
                     } label: { Label("Freeze here", systemImage: "pause.circle") }
                         .accessibilityHint("Keep the current pose and remove its movement keys. Undo can restore them.")
-                        .disabled(!canEdit)
+                        .disabled(!canEdit || positionDraft.isDirty)
                 }
                 Button {
                     if store.captureCoachMarkKeyframe(id: markID) { selectKey(at: store.playhead, seek: false) }
@@ -131,27 +145,23 @@ struct AnnotationTimingEditor: View {
                     .accessibilityLabel("Playhead \(AnnotationTimestamp.display(store.playhead))")
             }
             Text(keyframeHint(mark)).font(.caption).foregroundStyle(.secondary)
-            if !mark.isVisible(at: store.playhead) {
-                Label("Hidden here. Change In / Out to see this pose.", systemImage: "eye.slash")
-                    .font(.caption).foregroundStyle(.orange)
-            }
             if mark.hasKeyframes {
                 ScrollView(.horizontal) {
                     HStack(spacing: 8) {
                         ForEach(mark.keyframes ?? [], id: \.time) { key in
                             Button { selectKey(at: key.time, seek: true) } label: {
-                                Label(AnnotationTimestamp.display(key.time), systemImage: selectedKey == key.time ? "diamond.fill" : "diamond")
+                                Label(AnnotationTimestamp.display(key.time), systemImage: positionDraft.selectedTime == key.time ? "diamond.fill" : "diamond")
                                     .frame(minHeight: 44)
                             }
-                            .tint(selectedKey == key.time ? color : Color.secondary)
+                            .tint(positionDraft.selectedTime == key.time ? color : Color.secondary)
                             .accessibilityLabel("Select and preview position key at \(AnnotationTimestamp.display(key.time))")
-                            .accessibilityAddTraits(selectedKey == key.time ? [.isSelected] : [])
+                            .accessibilityAddTraits(positionDraft.selectedTime == key.time ? [.isSelected] : [])
                         }
                     }.buttonStyle(.bordered)
-                }.disabled(!store.canChangePlaybackView)
+                }.disabled(!store.canChangePlaybackView || positionDraft.isDirty)
             }
-            if let selectedKey, mark.keyframes?.contains(where: { $0.time == selectedKey }) == true {
-                selectedKeyEditor(mark, time: selectedKey)
+            if let selectedTime = positionDraft.selectedTime, mark.keyframes?.contains(where: { $0.time == selectedTime }) == true {
+                selectedKeyEditor(mark, time: selectedTime)
             }
         }
     }
@@ -160,23 +170,30 @@ struct AnnotationTimingEditor: View {
         VStack(alignment: .leading, spacing: 6) {
             adaptiveRow {
                 Text("Position time").font(.caption)
-                TextField("Seconds or m:ss", text: $keyTimeText)
+                TextField("Seconds or m:ss", text: $positionDraft.text)
                     .textFieldStyle(.roundedBorder).frame(width: fieldWidth).monospacedDigit()
                     .accessibilityLabel("Selected position key time")
-                Button("Move") { moveKey(mark, from: time, to: AnnotationTimestamp.parse(keyTimeText)) }
-                    .disabled(!canMoveKey(mark, from: time, to: AnnotationTimestamp.parse(keyTimeText)))
+                    .focused($focusedField, equals: .positionTime)
+                    .submitLabel(.done)
+                    .onSubmit { submitPositionTime(mark, from: time) }
+                Button("Reset") { resetPositionTime() }
+                    .disabled(!positionDraft.isDirty)
+                    .accessibilityLabel("Reset selected position time only")
+                Button("Move") { moveKey(mark, from: time, to: AnnotationTimestamp.parse(positionDraft.text)) }
+                    .disabled(!canMoveKey(mark, from: time, to: AnnotationTimestamp.parse(positionDraft.text)))
                     .accessibilityHint("Change this key's time without changing its position")
                 Button("To playhead") { moveKey(mark, from: time, to: store.playhead) }
-                    .disabled(!canMoveKey(mark, from: time, to: store.playhead))
+                    .disabled(positionDraft.isDirty || !canMoveKey(mark, from: time, to: store.playhead))
                 Button(role: .destructive) {
-                    if store.removeCoachMarkKeyframe(id: markID, at: time) { selectedKey = nil }
+                    if store.removeCoachMarkKeyframe(id: markID, at: time) { positionDraft.clear() }
                 } label: { Image(systemName: "trash").frame(minWidth: 44, minHeight: 44) }
                     .accessibilityLabel("Delete position key at \(AnnotationTimestamp.display(time))")
+                    .disabled(positionDraft.isDirty)
             }.disabled(!canEdit)
-            if let destination = AnnotationTimestamp.parse(keyTimeText), abs(destination - time) < CoachMark.keyframeTimeTolerance {
+            if let destination = AnnotationTimestamp.parse(positionDraft.text), abs(destination - time) < CoachMark.keyframeTimeTolerance {
                 Text("Move changes the time. Adjust shape edits the current position.")
                     .font(.caption).foregroundStyle(.secondary)
-            } else if !canMoveKey(mark, from: time, to: AnnotationTimestamp.parse(keyTimeText)) {
+            } else if !canMoveKey(mark, from: time, to: AnnotationTimestamp.parse(positionDraft.text)) {
                 Text("Choose an unused time inside this replay.").font(.caption).foregroundStyle(.orange)
             }
         }
@@ -204,12 +221,27 @@ struct AnnotationTimingEditor: View {
         guard let mark else { return }
         draft = AnnotationTimingDraft(mark: mark, duration: duration)
     }
+    private func resetWindow() {
+        reload()
+        if focusedField != .positionTime { focusedField = nil }
+    }
     private func applyWindow() {
-        guard draft.validationMessage(duration: duration) == nil, let start = draft.start else { return }
-        if store.setCoachMarkWindow(id: markID, start: start, end: draft.throughEnd ? nil : draft.end) { reload() }
+        guard canEdit, draft.validationMessage(duration: duration) == nil, let start = draft.start else { return }
+        guard isDirty else {
+            if focusedField != .positionTime { focusedField = nil }
+            return
+        }
+        if store.setCoachMarkWindow(id: markID, start: start, end: draft.throughEnd ? nil : draft.end) {
+            resetWindow()
+        }
+    }
+    private func openShapeEditor() {
+        guard canEdit, canLeaveEditor else { return }
+        focusedField = nil
+        adjustPose()
     }
     private func canShift(_ mark: CoachMark, by delta: Double) -> Bool {
-        canEdit && !isDirty && CoachMarkTimingPolicy.windowFits(revealTime: mark.revealTime + delta,
+        canEdit && canLeaveEditor && CoachMarkTimingPolicy.windowFits(revealTime: mark.revealTime + delta,
             displayDuration: mark.hideTime.map { $0 - mark.revealTime }, replayDuration: duration)
             && mark.canShiftKeyframes(by: delta, duration: duration)
     }
@@ -217,18 +249,30 @@ struct AnnotationTimingEditor: View {
         _ = store.retimeCoachMark(id: markID, to: mark.revealTime + delta)
     }
     private func canCapture(_ mark: CoachMark) -> Bool {
-        !mark.followsPlayerTracks && (mark.keyframes?.count ?? 0) < CoachMark.maximumKeyframes
+        !positionDraft.isDirty && !mark.followsPlayerTracks && (mark.keyframes?.count ?? 0) < CoachMark.maximumKeyframes
             && !(mark.keyframes ?? []).contains { abs($0.time - store.playhead) < CoachMark.keyframeTimeTolerance }
     }
     private func keyframeHint(_ mark: CoachMark) -> String {
+        if positionDraft.isDirty { return "Move or reset this position time before switching." }
+        if isDirty { return "Apply or reset In/Out before adjusting shape." }
         if mark.followsPlayerTracks { return "Switch to Fixed before adding position keys." }
         if (mark.keyframes?.count ?? 0) >= CoachMark.maximumKeyframes { return "64 keys saved. Select a key to move or delete it." }
         if !mark.hasKeyframes { return "Add here, seek, then adjust the shape to animate it." }
         return "Tap a timestamp to preview or move it. Seek + Adjust shape saves a new position."
     }
     private func selectKey(at time: TimeInterval, seek: Bool) {
-        selectedKey = time; keyTimeText = AnnotationTimestamp.editable(time)
+        guard positionDraft.select(time) else { return }
+        if focusedField == .positionTime { focusedField = nil }
         if seek { preview(time) }
+    }
+    private func resetPositionTime() {
+        positionDraft.reset()
+        if focusedField == .positionTime { focusedField = nil }
+    }
+    private func submitPositionTime(_ mark: CoachMark, from time: TimeInterval) {
+        guard canEdit else { return }
+        guard positionDraft.isDirty else { focusedField = nil; return }
+        moveKey(mark, from: time, to: AnnotationTimestamp.parse(positionDraft.text))
     }
     private func canMoveKey(_ mark: CoachMark, from time: TimeInterval, to destination: TimeInterval?) -> Bool {
         guard canEdit, let destination else { return false }
@@ -237,6 +281,8 @@ struct AnnotationTimingEditor: View {
     private func moveKey(_ mark: CoachMark, from time: TimeInterval, to destination: TimeInterval?) {
         guard let destination, canMoveKey(mark, from: time, to: destination),
               store.retimeCoachMarkKeyframe(id: markID, from: time, to: destination) else { return }
-        selectKey(at: destination, seek: true)
+        positionDraft.acceptCommittedTime(destination)
+        if focusedField == .positionTime { focusedField = nil }
+        preview(destination)
     }
 }

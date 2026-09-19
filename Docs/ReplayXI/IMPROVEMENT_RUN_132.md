@@ -1,4 +1,4 @@
-# Improvement run 132–133
+# Improvement run 132–134
 
 Local-only. Match Replay and Strategy Analysis stay the focus.
 User requested a 1,000,000,000-token goal and parallel work; the goal remains active.
@@ -33,11 +33,18 @@ references. Header test resource teardown is now explicit; the isolated contact/
 pass, including in the full suite. Exact originating renderer remains unknown; a passing run
 does not prove an intermittent framework teardown issue is permanently fixed.
 
-## Next usability pass
+## Follow-up usability and save safety
 
-- Timing should distinguish outside-window annotations from the selected editing preview.
-- Make In/Out and selected-position draft actions unambiguous, with isolated Reset/submit.
-- Keep keyboard and draft changes from being silently discarded when switching positions.
+- Timing now distinguishes outside-window annotations from the selected editing preview.
+- In/Out and selected-position drafts have separate Reset/submit actions.
+- Pending position edits block key switching; Adjust shape requires resolved drafts.
+- The app's 8 MiB library cap now reports a full review library, not a device-storage problem.
+  A heavy-keyframe persistence test fills that cap and verifies byte-for-byte preservation,
+  reopening and recovery after an explicit deletion in an isolated test library.
+
+53 focused simulator tests passed. Native regular, largest-text and outside-window captures
+inspected. Next parallel pass: selected position markers on the replay timeline, measured
+annotation work during playback, and planted-foot continuity during slow turns.
 
 ## Preservation
 

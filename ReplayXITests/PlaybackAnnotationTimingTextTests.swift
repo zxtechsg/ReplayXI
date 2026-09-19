@@ -56,6 +56,11 @@ final class PlaybackAnnotationTimingTextTests: XCTestCase {
         XCTAssertTrue(source.contains("@ScaledMetric"))
         XCTAssertTrue(source.contains("store.retimeCoachMarkKeyframe"))
         XCTAssertTrue(source.contains("mark.canShiftKeyframes"))
+        XCTAssertTrue(source.contains("Button(\"Apply In/Out\""))
+        XCTAssertTrue(source.contains("Button(\"Reset In/Out\""))
+        XCTAssertTrue(source.contains(".disabled(!canEdit || !canLeaveEditor)"))
+        XCTAssertTrue(source.contains(".focused($focusedField, equals: .positionTime)"))
+        XCTAssertTrue(source.contains(".onSubmit { submitPositionTime(mark, from: time) }"))
     }
 
     private func checkText(_ categories: [UIContentSizeCategory], usesAccessibilityText: Bool) throws {

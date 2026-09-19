@@ -15,13 +15,23 @@ final class AnnotationTimingEditorVisualTests: XCTestCase {
                          name: "annotation-timestamp-editor-largest-text-top")
     }
 
-    private func renderEditor(width: CGFloat, height: CGFloat, typeSize: DynamicTypeSize, name: String) throws {
+    func testOutsideWindowEditorExplainsSelectionPreview() throws {
+        try renderEditor(width: 1136, height: 700, typeSize: .large,
+                         name: "annotation-timestamp-editor-outside-window", previewTime: 11)
+    }
+
+    private func renderEditor(width: CGFloat, height: CGFloat, typeSize: DynamicTypeSize, name: String,
+                              previewTime: TimeInterval? = nil) throws {
         let store = ReplayStore()
         store.seek(to: 2)
         store.beginDrawing(.arc)
         _ = store.registerPitchTap(.init(x: 0, z: 0))
         let mark = try XCTUnwrap(store.registerPitchTap(.init(x: 8, z: 10)))
         XCTAssertTrue(store.captureCoachMarkKeyframe(id: mark.id))
+        if let previewTime {
+            store.seek(to: previewTime)
+            XCTAssertFalse(mark.isVisible(at: store.playhead))
+        }
         let view = AnnotationTimingEditor(markID: mark.id, color: ReplayTheme.cyan)
             .environment(store).environment(\.colorScheme, .dark)
             .dynamicTypeSize(typeSize)
