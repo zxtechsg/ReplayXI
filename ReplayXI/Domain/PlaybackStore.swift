@@ -1282,7 +1282,8 @@ final class ReplayStore {
         if let start = windowStart {
             guard CoachMarkTimingPolicy.windowFits(revealTime: start,
                 displayDuration: windowEnd.map { $0 - start }, replayDuration: selectedScenario.duration),
-                windowEnd.map({ $0 - start >= 0.5 }) ?? true else { return false }
+                windowEnd.map({ CoachMarkTimingPolicy.meetsMinimumEditableDuration(revealTime: start, hideTime: $0) })
+                    ?? true else { return false }
         }
         var frames = mark.keyframes
         if let from = keyframeFrom, let to = keyframeTo {
@@ -1315,7 +1316,8 @@ final class ReplayStore {
               let index = marks.firstIndex(where: { $0.id == id }),
               CoachMarkTimingPolicy.windowFits(revealTime: start, displayDuration: end.map { $0 - start },
                   replayDuration: selectedScenario.duration),
-              end.map({ $0 - start >= 0.5 }) ?? true else { return false }
+              end.map({ CoachMarkTimingPolicy.meetsMinimumEditableDuration(revealTime: start, hideTime: $0) })
+                ?? true else { return false }
         let mark = marks[index]
         let replacement = CoachMark(id: mark.id, kind: mark.kind, start: mark.start, end: mark.end,
             startElevation: mark.startElevation, endElevation: mark.endElevation, curve: mark.curve,
@@ -3115,7 +3117,8 @@ final class ReplayStore {
         let hasValidWindow = mark.hideTime.map {
             $0.isFinite
                 && $0 > mark.revealTime
-                && $0 - mark.revealTime <= Self.maximumCoachAnnotationDuration
+                && CoachMarkTimingPolicy.fitsMaximumDuration(revealTime: mark.revealTime,
+                    displayDuration: $0 - mark.revealTime)
         } ?? true
         let hasValidText = !mark.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && mark.label.count <= Self.maximumCoachMarkLabelLength

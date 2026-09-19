@@ -25,8 +25,9 @@ struct AnnotationTimingDraft: Equatable {
             return "Keep In and Out inside this replay."
         }
         if !throughEnd, let end {
-            guard end - start >= 0.5 else { return "Out must be at least 0.5 seconds after In." }
-            guard end - start <= CoachMarkTimingPolicy.maximumDuration else {
+            guard CoachMarkTimingPolicy.meetsMinimumEditableDuration(revealTime: start, hideTime: end)
+            else { return "Out must be at least 0.5 seconds after In." }
+            guard CoachMarkTimingPolicy.fitsMaximumDuration(revealTime: start, displayDuration: end - start) else {
                 return "Use a window up to 30 seconds, or choose To end."
             }
         }
