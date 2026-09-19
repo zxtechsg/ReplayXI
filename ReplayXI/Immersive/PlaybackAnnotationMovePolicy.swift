@@ -13,7 +13,9 @@ enum PlaybackAnnotationMovePolicy {
         guard time.isFinite,
               store.selectedScenario.duration.isFinite,
               (0...store.selectedScenario.duration).contains(time),
-              abs(mark.revealTime - time) >= 0.05 else { return false }
+              abs(mark.revealTime - time) >= 0.05,
+              mark.canShiftKeyframes(by: time - mark.revealTime, duration: store.selectedScenario.duration)
+        else { return false }
         return CoachMarkTimingPolicy.windowFits(
             revealTime: time, displayDuration: mark.hideTime.map { $0 - mark.revealTime },
             replayDuration: store.selectedScenario.duration

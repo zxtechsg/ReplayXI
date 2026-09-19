@@ -1266,6 +1266,30 @@ final class ReplayStore {
         return true
     }
 
+    /// Move a saved pose in time, not in space. The edit is atomic and undoable.
+    @discardableResult
+    func retimeCoachMarkKeyframe(id: UUID, from time: TimeInterval, to destination: TimeInterval) -> Bool {
+        guard allowsAnnotationAuthoring(), allowsMutationOutsideEndpointPreview(), canChangePlaybackView,
+              localRole == .coach, !selectedScenario.coachMarks.contains(where: { $0.id == id }),
+              let index = marks.firstIndex(where: { $0.id == id }) else { return false }
+        var replacement = marks[index]
+        guard replacement.canRetimeKeyframe(from: time, to: destination, duration: selectedScenario.duration),
+              var frames = replacement.keyframes,
+              let frameIndex = frames.firstIndex(where: { abs($0.time - time) < CoachMark.keyframeTimeTolerance })
+        else {
+            statusMessage = "Choose an unoccupied key time inside the replay"
+            return false
+        }
+        frames[frameIndex].time = destination
+        replacement.keyframes = frames.sorted { $0.time < $1.time }
+        guard isValidSharedMark(replacement, for: selectedScenario) else { return false }
+        marks[index] = replacement
+        isPlaying = false
+        statusMessage = "Position key moved"
+        emitSnapshot()
+        return true
+    }
+
     /// Moves one coach-created annotation to a new match instant without
     /// changing its geometry or authored display duration. Fixture overlays
     /// remain immutable so a local edit cannot erase the teaching baseline.
@@ -1273,6 +1297,7 @@ final class ReplayStore {
     func retimeCoachMark(id: UUID, to revealTime: TimeInterval) -> Bool {
         guard allowsAnnotationAuthoring() else { return false }
         guard allowsMutationOutsideEndpointPreview() else { return false }
+        guard !isDrawing else { return false }
         guard localRole == .coach,
               revealTime.isFinite,
               selectedScenario.duration.isFinite,
@@ -1292,6 +1317,9 @@ final class ReplayStore {
         }
 
         let mark = marks[index]
+        guard abs(revealTime - mark.revealTime) >= CoachMark.keyframeTimeTolerance,
+              mark.canShiftKeyframes(by: revealTime - mark.revealTime, duration: selectedScenario.duration)
+        else { return false }
         guard CoachMarkTimingPolicy.windowFits(
             revealTime: revealTime, displayDuration: mark.hideTime.map { $0 - mark.revealTime },
             replayDuration: selectedScenario.duration

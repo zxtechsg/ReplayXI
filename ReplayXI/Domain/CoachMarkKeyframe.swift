@@ -19,8 +19,30 @@ struct CoachMarkKeyframe: Codable, Hashable, Sendable {
 
 extension CoachMark {
     static let maximumKeyframes = 64
+    static let keyframeTimeTolerance: TimeInterval = 0.000_001
     var hasKeyframes: Bool { !(keyframes?.isEmpty ?? true) }
     var hasAnimatedGeometry: Bool { hasKeyframes || followsPlayerTracks }
+
+    func canShiftKeyframes(by delta: TimeInterval, duration: TimeInterval) -> Bool {
+        guard delta.isFinite, duration.isFinite, duration >= 0 else { return false }
+        return (keyframes ?? []).allSatisfy {
+            $0.time.isFinite && (0...duration).contains($0.time + delta)
+        }
+    }
+
+    func canRetimeKeyframe(from time: TimeInterval, to destination: TimeInterval,
+                          duration: TimeInterval) -> Bool {
+        guard time.isFinite, destination.isFinite, duration.isFinite, duration >= 0,
+              (0...duration).contains(destination),
+              abs(destination - time) >= Self.keyframeTimeTolerance,
+              let frames = keyframes,
+              let index = frames.firstIndex(where: { abs($0.time - time) < Self.keyframeTimeTolerance })
+        else { return false }
+        // Never silently overwrite another saved pose, including nearly-equal timestamps.
+        return !frames.enumerated().contains {
+            $0.offset != index && abs($0.element.time - destination) < Self.keyframeTimeTolerance
+        }
+    }
 
     /// Linear, absolute-time sampling: seeking and reverse playback are exact.
     /// End poses hold outside their keyed interval; visibility is independent.
@@ -60,7 +82,7 @@ extension CoachMark {
     func recordingPose(at time: TimeInterval) -> CoachMark {
         var result = self
         var frames = keyframes ?? []
-        if let i = frames.firstIndex(where: { abs($0.time - time) < 0.000_001 }) {
+        if let i = frames.firstIndex(where: { abs($0.time - time) < Self.keyframeTimeTolerance }) {
             frames[i] = CoachMarkKeyframe(time: frames[i].time, mark: self)
         } else { frames.append(CoachMarkKeyframe(time: time, mark: self)) }
         result.keyframes = frames.sorted { $0.time < $1.time }
