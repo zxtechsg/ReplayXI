@@ -296,6 +296,14 @@ final class ReplayReferenceHeaderContactTests: XCTestCase {
         let renderer = try RealityRenderer()
         renderer.entities.append(contentsOf: entities)
         renderer.activeCamera = camera
+        // Detach fixture entities while the renderer and their resources are
+        // still alive, before its asynchronous native scene destruction. This
+        // makes ownership explicit; it is not proof that the simulator's
+        // PhysicsSimulation weak-reference teardown crash is fixed.
+        defer {
+            renderer.activeCamera = nil
+            renderer.entities.removeAll()
+        }
         renderer.cameraSettings.isToneMappingEnabled = true
         renderer.cameraSettings.antialiasing = .none
         renderer.cameraSettings.colorBackground = .color(CGColor(gray: 0, alpha: 1))
@@ -308,7 +316,9 @@ final class ReplayReferenceHeaderContactTests: XCTestCase {
         })
         await fulfillment(of: [completion], timeout: 10)
         guard flag.isComplete else { throw ReplayRealityRendererAudit.Failure.unsupported("Header frame timed out") }
-        return try withExtendedLifetime(renderer) { try ReplayRealityRendererAudit.read(texture) }
+        return try withExtendedLifetime((renderer, entities, camera, output)) {
+            try ReplayRealityRendererAudit.read(texture)
+        }
     }
 
     private func vector(_ point: SIMD3<Float>) -> [Float] { [point.x, point.y, point.z] }

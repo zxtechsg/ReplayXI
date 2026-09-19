@@ -2,6 +2,20 @@ import XCTest
 @testable import ReplayXI
 
 final class PlaybackControlDeckLayoutTests: XCTestCase {
+    func testSizeControlAndSceneShareFiniteBoundsWithoutMovingTheRoomAnchor() {
+        for factor in [-1.0, 0.8, 1, 1.5, 100, .nan, .infinity] {
+            let clamped = PlaybackControlDeckLayout.clampedSize(factor)
+            XCTAssertTrue((0.8...1.5).contains(clamped))
+            for preset in PlaybackControlDeckPreset.allCases {
+                let original = PlaybackControlDeckLayout.resolve(preset: preset, usesAccessibilityText: true)
+                let resized = original.resized(by: factor)
+                XCTAssertEqual(resized.uniformScale, original.uniformScale * Float(clamped))
+                XCTAssertEqual(resized.forwardOffset, original.forwardOffset)
+                XCTAssertEqual(resized.verticalOffset, original.verticalOffset)
+                XCTAssertEqual(resized.attachmentWidth, original.attachmentWidth)
+            }
+        }
+    }
     func testComfortPresetsStayInsideInitialWorkspaceEnvelope() {
         let near = PlaybackControlDeckLayout.resolve(
             preset: .near,

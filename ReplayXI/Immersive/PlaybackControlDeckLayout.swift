@@ -37,9 +37,13 @@ struct PlaybackControlDeckLayout: Equatable, Sendable {
     }
 
     func resized(by factor: Double) -> Self {
-        let safe = factor.isFinite ? min(max(factor, 0.8), 1.5) : 1
+        let safe = Self.clampedSize(factor)
         return Self(attachmentWidth: attachmentWidth, uniformScale: uniformScale * Float(safe),
                     verticalOffset: verticalOffset, forwardOffset: forwardOffset)
+    }
+
+    static func clampedSize(_ factor: Double) -> Double {
+        factor.isFinite ? min(max(factor, 0.8), 1.5) : 1
     }
 
     static func resolve(

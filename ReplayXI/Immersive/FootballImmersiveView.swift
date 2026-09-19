@@ -2710,11 +2710,6 @@ private struct ImmersiveControlDeck: View {
                 HStack(spacing: 16) {
                     VStack(alignment: .leading, spacing: 3) {
                         Eyebrow(text: "Workspace", color: ReplayTheme.orange)
-                        Slider(value: controlDeckSize, in: 0.8...1.5, step: 0.05)
-                            .frame(minWidth: 160)
-                            .accessibilityLabel("Control bar size")
-                            .disabled(!store.canChangePlaybackView)
-                        Text("Bar size").font(.caption)
                         Text("Fixed in the room")
                             .font(.caption).foregroundStyle(.secondary)
                     }
@@ -2738,6 +2733,8 @@ private struct ImmersiveControlDeck: View {
                     ))
                     .accessibilityHint("Moves the workspace once; it does not follow your head")
                 }
+                PlaybackBarSizeControl(size: controlDeckSize)
+                    .disabled(!store.canChangePlaybackView)
             }
         }
     }
@@ -4439,7 +4436,8 @@ private struct ImmersiveControlDeck: View {
     }
 
     private func selectedAnnotationInspector(_ mark: CoachMark) -> some View {
-        VStack(spacing: 8) {
+        let pose = mark.sampled(at: store.playhead)
+        return VStack(spacing: 8) {
             HStack(spacing: 11) {
                 Button {
                     guard store.canChangePlaybackView else { return }
@@ -4486,9 +4484,9 @@ private struct ImmersiveControlDeck: View {
                     )
                 }
 
-                if mark.hasSpatialElevation {
+                if pose.hasSpatialElevation {
                     StatusPill(
-                        text: "3D · \(annotationElevationLabel(mark.resolvedStartElevation)) → \(annotationElevationLabel(mark.resolvedEndElevation))",
+                        text: "3D · \(annotationElevationLabel(pose.resolvedStartElevation)) → \(annotationElevationLabel(pose.resolvedEndElevation))",
                         systemImage: "cube.transparent",
                         color: annotationColor(for: mark.kind)
                     )
