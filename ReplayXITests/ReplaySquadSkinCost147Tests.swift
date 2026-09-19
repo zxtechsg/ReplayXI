@@ -35,7 +35,9 @@ final class ReplaySquadSkinCost147Tests: XCTestCase {
         var meshes: [ObjectIdentifier: MeshResource] = [:]
         var meshSizes: [ObjectIdentifier: (vertices: Int, triangles: Int)] = [:]
         var skinMeshes: [ReplaySkinnedAthleteProvider.Detail: Set<ObjectIdentifier>] = [:]
-        var skinTextures: [ObjectIdentifier: TextureResource] = [:]
+        // Material getters may return fresh Swift wrappers (visionOS 26.5).
+        // Count public resource equality, not wrappers or private GPU storage.
+        var skinTextures: [TextureResource] = []
     }
 
     override func setUp() {
@@ -471,7 +473,9 @@ final class ReplaySquadSkinCost147Tests: XCTestCase {
                         for material in component.materials {
                             guard let physical = material as? PhysicallyBasedMaterial else { continue }
                             for texture in [physical.baseColor.texture?.resource, physical.normal.texture?.resource].compactMap({ $0 }) {
-                                resources.skinTextures[ObjectIdentifier(texture)] = texture
+                                if !resources.skinTextures.contains(texture) {
+                                    resources.skinTextures.append(texture)
+                                }
                             }
                         }
                     }

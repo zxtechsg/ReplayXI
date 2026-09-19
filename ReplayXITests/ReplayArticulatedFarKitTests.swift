@@ -43,7 +43,9 @@ final class ReplayArticulatedFarKitTests: XCTestCase {
         let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay))
         try ReplayArticulatedFarProvider.prewarm()
         try ReplayArticulatedFarKitProvider.prewarm()
-        var textureIDs: Set<ObjectIdentifier> = []
+        // Material getters may return new Swift wrappers for one shared
+        // resource. Semantics150 verifies public equality and mutation aliasing.
+        var uniqueTextures: [TextureResource] = []
         var retainedTextures: [TextureResource] = []
         for player in scenario.players {
             let palette = try XCTUnwrap(ReplayArticulatedFarKitProvider.materials(for: .init(player: player)))
@@ -51,7 +53,7 @@ final class ReplayArticulatedFarKitTests: XCTestCase {
                 let texture = try XCTUnwrap(material.baseColor.texture).resource
                 XCTAssertEqual(texture.width,64)
                 XCTAssertEqual(texture.height,64)
-                textureIDs.insert(ObjectIdentifier(texture))
+                if !uniqueTextures.contains(texture) { uniqueTextures.append(texture) }
                 retainedTextures.append(texture)
             }
             let rig = try ReplayAthleteFactory.make(for: player,lod: .far)
@@ -64,7 +66,7 @@ final class ReplayArticulatedFarKitTests: XCTestCase {
             for time in [0.0,13.6,17.5,3.0] { ReplayAthleteMotion.update(rig,from: player,at: time) }
             try ReplayArticulatedFarKitProvider.prewarm()
         }
-        XCTAssertEqual(textureIDs.count,6)
+        XCTAssertEqual(uniqueTextures.count,6)
         XCTAssertEqual(retainedTextures.count,44)
         XCTAssertEqual(ReplayArticulatedFarKitProvider.cachedTextureCount,6)
         XCTAssertEqual(ReplayArticulatedFarKitProvider.textureLoadCount,6)

@@ -383,6 +383,262 @@ final class ReplayAthleteOffBallVisualTests: XCTestCase {
         receipt.lifetime = .keepAlways; add(receipt)
     }
 
+    /// Native moving evidence only. Pitch/camera remain fixed while the actual
+    /// factory actors travel; source-phase labels do not assert ground contact.
+    func testActualReboundBootMotionFixedCameraNearLow149() async throws {
+        resetProviders()
+        PitchSceneFactory.fullSquadSkinsForTesting = false
+        defer { resetProviders() }
+        try ReplayArmLOD147Probe.prepare()
+        try ReplayStrategyPitchProvider.prewarm()
+        try ReplayStrategyBallProvider.prewarm()
+        let context = try await ReplayArmLOD147Probe.context()
+        defer {
+            // Release expired factory cache ownership before asset reset.
+            let empty = Entity(), marks = Entity(); marks.name = "marks-root"; empty.addChild(marks)
+            updateSupport149(empty, context: context, wearer: "arg-10", time: 0)
+            for child in Array(empty.children) { child.removeFromParent() }
+        }
+        try ReplayAthleteFactory.prewarm(for: context.scenario.players, lods: [.near, .far])
+        let calibration = try await calibrate()
+        var rows: [[String: Any]] = [], totalBytes = 0
+        for playerID in ["arg-13", "arg-19"] {
+            for detail in [ReplaySkinnedAthleteProvider.Detail.near, .lowDetail] {
+                let result = try await captureSupport149(context, playerID: playerID, detail: detail,
+                                                         calibration: calibration)
+                rows.append(contentsOf: result.rows); totalBytes += result.bytes
+            }
+        }
+        XCTAssertEqual(rows.count, 136)
+        XCTAssertLessThanOrEqual(totalBytes, 96 * 1_024 * 1_024)
+        XCTAssertFalse(PitchSceneFactory.fullSquadSkinsForTesting)
+        let report: [String: Any] = ["scenario": context.scenario.id, "frames": rows,
+            "nativeFrames": rows.count, "frameSize": [512, 512], "sampleRateHz": 60,
+            "pngBytes": totalBytes, "renderersForSequences": 4, "gridSpacingMetres": 0.1,
+            "baselineReceipt": "E05C64BF-174D-4B18-A745-ABF23C5B22E5.json",
+            "scope": "Four native frame sequences, not interpolated/generated frames. Explicit Full squad factory admission; constant diagnostic pitch transform and fixed per-actor camera/light shared by near/low. All actor travel and joint poses remain actual native outputs.",
+            "labels": "source-phase-on/off in each attachment name and manifest means the frozen source animation support phase, NOT measured force/contact or proof of sliding. The 10 cm grid is a static, non-colliding diagnostic ground reference.",
+            "playback": "Sort each sequence by sourceFrame120Hz. 60 fps is real replay time; 30 fps displays the identical frames at half speed. No encoder or synthetic in-between frames added."]
+        let receipt = XCTAttachment(data: try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]),
+                                    uniformTypeIdentifier: "public.json")
+        receipt.name = "ReplayXI-OffBallSupport149-MovingVisualManifest.json"
+        receipt.lifetime = .keepAlways; add(receipt)
+    }
+
+    private func captureSupport149(_ context: ReplayArmLOD147Probe.Context, playerID: String,
+                                   detail: ReplaySkinnedAthleteProvider.Detail,
+                                   calibration: ReplayRealityRendererAudit.Calibration) async throws
+        -> (rows: [[String: Any]], bytes: Int) {
+        let player = try XCTUnwrap(context.scenario.player(id: playerID))
+        let wearer = detail == .near ? "arg-23" : "arg-10"
+        let detailName = detail == .near ? "near" : "low"
+        let sourceFrames = Array(stride(from: 30, through: 96, by: 2))
+        let root = PitchSceneFactory.makeMatchRoot(for: context.scenario, nativeRecording: context.recording)
+        defer { for child in Array(root.children) { child.removeFromParent() } }
+        updateSupport149(root, context: context, wearer: wearer, time: 0.25)
+        let skin = try XCTUnwrap(PitchSceneFactory.skinnedAthletesForTesting(in: root)[playerID])
+        XCTAssertEqual(skin.detail, detail)
+        XCTAssertNil(PitchSceneFactory.skinnedAthletesForTesting(in: root)[wearer])
+        let playersRoot = try XCTUnwrap(root.findEntity(named: "players-root"))
+        XCTAssertEqual(playersRoot.transform, Transform())
+        let actor = try XCTUnwrap(playersRoot.children.first { $0.name == "player-\(playerID)" })
+        XCTAssertTrue(skin.root.parent === actor)
+        XCTAssertNotNil(try XCTUnwrap(root.findEntity(named: "pitch"))
+            .components[ReplayStrategyPitchProvider.Admission.self])
+        let oracle = try ReplaySkinnedAthleteProvider.make(for: player, detail: detail)
+        let centrePose = player.presentationPose(at: 0.525)
+        let centre = SIMD3<Float>(centrePose.position.x, 0, centrePose.position.z)
+        let heading = simd_quatf(angle: centrePose.facingDegrees * .pi / 180, axis: [0, 1, 0])
+        let supportSide: Float = playerID == "arg-13" ? 1 : -1
+        let camera = PerspectiveCamera()
+        let fov: Float = 45
+        camera.camera = .init(near: 0.05, far: 30, fieldOfViewInDegrees: fov)
+        camera.look(at: centre + [0, 0.9, 0], from: centre + heading.act([supportSide * 4, 1.45, 2]), relativeTo: nil)
+        let key = DirectionalLight(); key.light.intensity = 2_200
+        key.look(at: centre, from: centre + [3, 4, 3], relativeTo: nil)
+        let fill = DirectionalLight(); fill.light.intensity = 1_000
+        fill.look(at: centre, from: centre + [-3, 3, -3], relativeTo: nil)
+        let cameraTransform = camera.transform, lightTransforms = [key.transform, fill.transform]
+        let fixedRootTransform = Transform()
+        let grid = supportGrid149(centre: centre)
+        root.addChild(grid)
+        let gridTransform = grid.transform
+        let baseline = supportPointBaseline149(playerID: playerID, detail: detail)
+        let renderer = try RealityRenderer()
+        renderer.entities.append(contentsOf: [root, camera, key, fill])
+        defer { renderer.activeCamera = nil; renderer.entities.removeAll() }
+        renderer.activeCamera = camera
+        renderer.cameraSettings.isToneMappingEnabled = true
+        renderer.cameraSettings.antialiasing = .none
+        renderer.cameraSettings.colorBackground = .color(CGColor(gray: 0, alpha: 1))
+        let texture = try ReplayRealityRendererAudit.makeTexture(size: 512)
+        let output = try RealityRenderer.CameraOutput(.singleProjection(colorTexture: texture))
+        var rows: [[String: Any]] = [], bytes = 0, savedJoints: [[Transform]] = [], savedActors: [Transform] = []
+        var savedBootPoints: [SIMD3<Float>] = [], previousFrame: ReplayRealityRendererAudit.Frame?
+        var changedFrames = 0, baselineChecks = 0
+        for sourceFrame in sourceFrames {
+            let time = Double(sourceFrame) / 120
+            updateSupport149(root, context: context, wearer: wearer, time: time)
+            // This is a fixed diagnostic camera, not the wearer's moving POV.
+            // Only the presentation root is normalized; no actor is recentered.
+            root.transform = fixedRootTransform
+            XCTAssertTrue(PitchSceneFactory.skinnedAthletesForTesting(in: root)[playerID] === skin)
+            let expected = player.presentationPose(at: time)
+            XCTAssertEqual(actor.position, [expected.position.x, 0, expected.position.z])
+            XCTAssertEqual(actor.scale, SIMD3<Float>(repeating: 1))
+            let input = ReplayArmLOD147Probe.input(context, player: player, time: time)
+            ReplayArmLOD147Probe.update(oracle, player: player, input: input)
+            XCTAssertTrue(skin.model.jointTransforms == oracle.model.jointTransforms,
+                          "Actual factory/native oracle pose: \(playerID)/\(detailName)/\(time)")
+            try assertDimensionsAndFloor(skin)
+            let nativeBall = context.recording.pose(at: time)
+            let ball = try XCTUnwrap(root.findEntity(named: "ball"))
+            XCTAssertEqual(ball.position, [nativeBall.position.x, max(nativeBall.height, 0.11), nativeBall.position.z])
+            let bootPoint = try supportVertex149(skin, actor: actor, part: 0, vertex: baseline.vertex)
+            if let expectedPoint = baseline.points[sourceFrame] {
+                XCTAssertEqual(bootPoint, expectedPoint, "Frozen accepted 149 boot point at \(playerID)/\(detailName)/\(time)")
+                baselineChecks += 1
+            }
+            // Conservative full-body volume; not just a centre-in-cone check.
+            let halfFOV = tan(fov * .pi / 360) * 0.97
+            for height: Float in [0, 2.10] {
+                for x: Float in [-0.75, 0.75] {
+                    for z: Float in [-0.75, 0.75] {
+                        let projected = camera.convert(position: actor.position + [x, height, z], from: nil)
+                        XCTAssertLessThan(projected.z, -0.05)
+                        XCTAssertLessThan(abs(projected.x), -projected.z * halfFOV, "Body width crop \(playerID)/\(time)")
+                        XCTAssertLessThan(abs(projected.y), -projected.z * halfFOV, "Body height crop \(playerID)/\(time)")
+                    }
+                }
+            }
+            let allSkins = PitchSceneFactory.skinnedAthletesForTesting(in: root)
+            let allJoints = allSkins.mapValues { $0.model.jointTransforms }
+            let allActors = playersRoot.children.map(\.transform), ballTransform = ball.transform
+            let completed = expectation(description: "Boot support149 native \(playerID)/\(detailName)/\(sourceFrame)")
+            let flag = OffBallRenderCompletion()
+            try renderer.updateAndRender(deltaTime: 0, cameraOutput: output, onComplete: { _ in
+                flag.finish(); completed.fulfill()
+            })
+            await fulfillment(of: [completed], timeout: 10)
+            guard flag.isComplete else { throw ReplayRealityRendererAudit.Failure.unsupported("Boot support frame timed out") }
+            let frame = try withExtendedLifetime(renderer) { try ReplayRealityRendererAudit.read(texture) }
+            XCTAssertGreaterThan(nonBackgroundPixels(frame), 20_000)
+            XCTAssertEqual(root.transform, fixedRootTransform); XCTAssertEqual(camera.transform, cameraTransform)
+            XCTAssertEqual([key.transform, fill.transform], lightTransforms); XCTAssertEqual(grid.transform, gridTransform)
+            XCTAssertTrue(playersRoot.children.map(\.transform) == allActors, "Render must not advance actor travel")
+            XCTAssertEqual(ball.transform, ballTransform)
+            for (id, body) in allSkins {
+                XCTAssertTrue(body.model.jointTransforms == allJoints[id], "Render must not advance native pose \(id)")
+            }
+            XCTAssertEqual(try supportVertex149(skin, actor: actor, part: 0, vertex: baseline.vertex), bootPoint)
+            if let previousFrame, differentPixels(previousFrame, frame) > 20 { changedFrames += 1 }
+            previousFrame = frame
+            let phase = player.gaitPhase(at: time) - (playerID == "arg-13" ? .pi : 0)
+            let marker = phase - floor(phase / (2 * .pi)) * 2 * .pi
+            let sourceSupport = marker >= 2.30 && marker <= 3.40
+            let name = "ReplayXI-Support149-\(playerID)-\(detailName)-f\(String(format: "%03d", sourceFrame))-t\(String(format: "%.3f", time))-source-phase-\(sourceSupport ? "on" : "off").png"
+            let png = try ReplayRealityRendererAudit.png(frame, calibration: calibration)
+            bytes += png.count
+            let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
+            attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
+            savedJoints.append(skin.model.jointTransforms); savedActors.append(actor.transform); savedBootPoints.append(bootPoint)
+            rows.append(["attachment": name, "player": playerID, "detail": detailName, "wearerForAdmission": wearer,
+                "sourceFrame120Hz": sourceFrame, "time": time, "sourceSupportPhaseActive": sourceSupport,
+                "notMeasuredContact": true, "supportFootAnatomical": playerID == "arg-13" ? "right" : "left",
+                "actorPosition": ReplayArmLOD147Probe.vector(actor.position), "facingDegrees": expected.facingDegrees,
+                "fixedBootVertex": "part0:v\(baseline.vertex)", "bootPoint": ReplayArmLOD147Probe.vector(bootPoint),
+                "cameraPosition": ReplayArmLOD147Probe.vector(camera.position), "cameraFOV": fov,
+                "cameraTarget": ReplayArmLOD147Probe.vector(centre + [0, 0.9, 0]), "groundGridSpacing": 0.1])
+        }
+        XCTAssertEqual(baselineChecks, 2)
+        XCTAssertGreaterThan(changedFrames, 25, "A moving sequence must not repeat a static frame")
+        for (index, sourceFrame) in sourceFrames.enumerated().reversed() {
+            updateSupport149(root, context: context, wearer: wearer, time: Double(sourceFrame) / 120)
+            root.transform = fixedRootTransform
+            XCTAssertTrue(skin.model.jointTransforms == savedJoints[index], "Exact native sequence rewind")
+            XCTAssertEqual(actor.transform, savedActors[index])
+            XCTAssertEqual(try supportVertex149(skin, actor: actor, part: 0, vertex: baseline.vertex), savedBootPoints[index])
+        }
+        return (rows, bytes)
+    }
+
+    private func updateSupport149(_ root: Entity, context: ReplayArmLOD147Probe.Context,
+                                  wearer: String, time: Double) {
+        PitchSceneFactory.update(root: root, scenario: context.scenario, time: time, viewMode: .firstPerson,
+            perspectiveID: wearer, marks: context.scenario.coachMarks, showsLaneLens: false, isDrawing: false,
+            positionalOriginTransform: nil, playerDetail: .fullSquad)
+    }
+
+    private func supportGrid149(centre: SIMD3<Float>) -> Entity {
+        let grid = Entity(); grid.name = "diagnostic-static-10cm-ground-grid"
+        grid.position = [round(centre.x * 10) / 10, 0.0015, round(centre.z * 10) / 10]
+        let mesh = MeshResource.generateBox(size: [3.6, 0.001, 0.004])
+        let material = UnlitMaterial(color: UIColor(white: 0.34, alpha: 1), applyPostProcessToneMap: false)
+        for index in -18...18 {
+            for axis in 0..<2 {
+                let line = ModelEntity(mesh: mesh, materials: [material])
+                if axis == 0 { line.position.z = Float(index) * 0.1 }
+                else {
+                    line.position.x = Float(index) * 0.1
+                    line.orientation = simd_quatf(angle: .pi / 2, axis: [0, 1, 0])
+                }
+                if index.isMultiple(of: 5) { line.scale.z = 2 }
+                XCTAssertNil(line.components[CollisionComponent.self])
+                grid.addChild(line)
+            }
+        }
+        XCTAssertEqual(grid.children.count, 74)
+        return grid
+    }
+
+    private func supportVertex149(_ skin: ReplaySkinnedAthleteInstance, actor: Entity,
+                                  part partIndex: Int, vertex: Int) throws -> SIMD3<Float> {
+        let contents = try XCTUnwrap(skin.model.model).mesh.contents
+        let skeleton = try XCTUnwrap(contents.skeletons.first)
+        let parts = contents.models.flatMap { Array($0.parts) }
+        XCTAssertTrue(parts.indices.contains(partIndex))
+        let part = parts[partIndex], weights = try XCTUnwrap(parts[partIndex].jointInfluences).influences.elements
+        XCTAssertTrue(part.positions.elements.indices.contains(vertex))
+        XCTAssertTrue(weights.count.isMultiple(of: part.positions.count))
+        let width = weights.count / part.positions.count
+        let point = SIMD4(part.positions.elements[vertex], 1)
+        let pose = ReplayArmLOD147Probe.submitted(skin)
+        let local = weights[(vertex * width)..<((vertex + 1) * width)].filter { $0.weight > 0 }
+            .reduce(SIMD4<Float>.zero) { result, influence in
+                result + pose.modelSpaceTransforms[influence.jointIndex]
+                    * (skeleton.joints[influence.jointIndex].inverseBindPoseMatrix * point) * influence.weight
+            }
+        var cursor: Entity? = skin.model, matrix = matrix_identity_float4x4, count = 0, foundSkinRoot = false
+        while let entity = cursor, entity !== actor {
+            guard count < 16 else { throw CocoaError(.fileReadCorruptFile) }
+            matrix = entity.transform.matrix * matrix
+            foundSkinRoot = foundSkinRoot || entity === skin.root
+            cursor = entity.parent; count += 1
+        }
+        guard cursor === actor, foundSkinRoot, skin.root.parent === actor else { throw CocoaError(.fileReadCorruptFile) }
+        let pitch = actor.transform.matrix * matrix * local
+        return [pitch.x, pitch.y, pitch.z]
+    }
+
+    private func supportPointBaseline149(playerID: String, detail: ReplaySkinnedAthleteProvider.Detail)
+        -> (vertex: Int, points: [Int: SIMD3<Float>]) {
+        // Frozen accepted numeric receipt, not regenerated from this capture.
+        if playerID == "arg-13", detail == .near {
+            return (2987, [56: [9.040996551513672, 0.009834503754973412, -16.843204498291016],
+                           74: [9.007147789001465, 0.011782187968492508, -16.963958740234375]])
+        }
+        if playerID == "arg-13" {
+            return (1110, [56: [9.037618637084961, 0.012078491970896721, -16.839021682739258],
+                           74: [9.00346851348877, 0.012547332793474197, -16.959627151489258]])
+        }
+        if detail == .near {
+            return (2481, [60: [-8.896486282348633, 0.016740329563617706, -16.61403465270996],
+                           78: [-9.05081844329834, 0.006000031717121601, -16.765060424804688]])
+        }
+        return (863, [60: [-8.89340877532959, 0.01773698814213276, -16.609392166137695],
+                      78: [-9.04787826538086, 0.005999987944960594, -16.759946823120117]])
+    }
+
     /// Actual first-person squad admission, not the forced single-actor LOD
     /// comparison above. Eye height is a fixed 1.70 m test stand-in for the
     /// wearer's headset; the production root supplies the player's position.

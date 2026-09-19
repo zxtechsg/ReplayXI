@@ -116,10 +116,10 @@ final class ReplayFarAthletePaletteTests: XCTestCase {
                 }
             }
             if textures.count == 4 {
-                XCTAssertTrue(textures["left-leg"] === textures["right-leg"])
-                XCTAssertTrue(textures["left-arm"] === textures["right-arm"])
-                XCTAssertFalse(textures["left-leg"] === textures["left-arm"],
-                               "Separate mip chains must never average arm and leg palettes together")
+                XCTAssertEqual(try XCTUnwrap(textures["left-leg"]), try XCTUnwrap(textures["right-leg"]))
+                XCTAssertEqual(try XCTUnwrap(textures["left-arm"]), try XCTUnwrap(textures["right-arm"]))
+                XCTAssertNotEqual(try XCTUnwrap(textures["left-leg"]), try XCTUnwrap(textures["left-arm"]),
+                                  "Separate mip chains must never average arm and leg palettes together")
             }
         }
     }
@@ -319,7 +319,7 @@ final class ReplayFarAthletePaletteTests: XCTestCase {
             let player = try XCTUnwrap(root.findEntity(named: "player-\(id)"))
             let marker = try XCTUnwrap(player.findEntity(named: "table-marker"))
             let material = try XCTUnwrap(model(named: "left-leg", in: marker).model?.materials.first as? SimpleMaterial)
-            XCTAssertTrue(try resource(material) === first[id])
+            XCTAssertEqual(try resource(material), try XCTUnwrap(first[id]))
         }
         try attach([["preparedPalettes": palettes, "textureCreationCount": generated,
                      "additionalPreparationsDuring15ViewSeeksAndSecondRoot":
@@ -354,8 +354,8 @@ final class ReplayFarAthletePaletteTests: XCTestCase {
             shirt: .init(red: 0.1 / 255, green: 0.2, blue: 0.3),
             identity: "other-player", appearance: changedShape)
         let reused = try XCTUnwrap(ReplayFarAthletePaletteProvider.materials(for: matchingQuantizedColour))
-        XCTAssertTrue(try resource(reused.leg) === resource(XCTUnwrap(first).leg))
-        XCTAssertTrue(try resource(reused.arm) === resource(XCTUnwrap(first).arm))
+        XCTAssertEqual(try resource(reused.leg), try resource(XCTUnwrap(first).leg))
+        XCTAssertEqual(try resource(reused.arm), try resource(XCTUnwrap(first).arm))
         XCTAssertEqual(ReplayFarAthletePaletteProvider.preparationAttemptCount, 32)
         XCTAssertEqual(ReplayFarAthletePaletteProvider.textureCreationCount, 64)
     }
