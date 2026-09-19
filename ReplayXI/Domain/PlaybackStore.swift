@@ -1371,7 +1371,8 @@ final class ReplayStore {
         }
 
         marks[index] = replacement
-        statusMessage = "Annotation moved to the current timestamp"
+        isPlaying = false
+        statusMessage = "Annotation timing shifted"
         emitSnapshot()
         return true
     }

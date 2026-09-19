@@ -27,6 +27,7 @@ enum ReplayAthleteTacticalAttention {
         var weightedDirection = SIMD2<Float>.zero
         var weightSum: Float = 0
         var threatPresence: Float = 0
+        var separationFreedom: Float = 1
         // Reuse the renderer's prepared poses. No Entity traversal, sorting,
         // resampling of tracks, or temporary neighbour arrays per frame.
         for other in players where other.team != player.team && !other.isGoalkeeper {
@@ -34,15 +35,26 @@ enum ReplayAthleteTacticalAttention {
             let delta = SIMD2<Float>(otherPose.position.x - pose.position.x,
                                      otherPose.position.z - pose.position.z)
             let squaredDistance = simd_length_squared(delta)
-            guard squaredDistance.isFinite, squaredDistance > 0.04,
-                  squaredDistance < 256 else { continue }
-            let proximity = 1 - smooth((sqrt(squaredDistance) - 5) / 11)
+            guard squaredDistance.isFinite, squaredDistance < 256 else { continue }
+            let neighbourDistance = sqrt(squaredDistance)
+            // Near-overlapping inferred routes make the opponent centroid
+            // unreliable. Prefer the ball, then restore the invented scan
+            // over one metre. Reweighting neighbours alone can still whip the
+            // centroid around as competing directions trade dominance.
+            separationFreedom = min(separationFreedom, smooth(neighbourDistance - 0.20))
+            // Authored routes can pass unusually close. Dropping a dominant
+            // neighbour abruptly at 20 cm flips the weighted scan to another
+            // opponent. Fade its direction AND presence before normalizing the
+            // centroid, retaining the existing attention outside 80 cm.
+            let separation = smooth((neighbourDistance - 0.20) / 0.60)
+            guard separation > 0 else { continue }
+            let proximity = (1 - smooth((neighbourDistance - 5) / 11)) * separation
             let weight = proximity / ((squaredDistance + 4) * (squaredDistance + 4))
             weightedDirection += delta * weight
             weightSum += weight
             threatPresence = max(threatPresence, proximity)
         }
-        guard weightSum > 0 else { return ball }
+        guard weightSum > 0, separationFreedom > 0 else { return ball }
         let threat = weightedDirection / weightSum
         let threatDistance = simd_length(threat)
         guard threatDistance > 0.01 else { return ball }
@@ -59,7 +71,8 @@ enum ReplayAthleteTacticalAttention {
         let phase = Double(seed % 1021) / 1021 * 2 * Double.pi
         let clock = min(max(time, -1_000_000), 1_000_000)
         let glance = smooth(Float((cos(clock * 2 * .pi / period + phase) - 0.1) / 0.8))
-        let weight = 0.85 * glance * rearFade * closeThreat * threatPresence * ballPriority * contactFreedom
+        let weight = 0.85 * glance * rearFade * closeThreat * threatPresence
+            * ballPriority * contactFreedom * separationFreedom
         guard weight > 0 else { return ball }
         let bearing = ballBearing + min(max(delta, -.pi / 3), .pi / 3) * weight
         // Keep horizontal range unchanged: scanning must not fool the separate

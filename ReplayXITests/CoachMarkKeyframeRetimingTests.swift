@@ -63,7 +63,9 @@ final class CoachMarkKeyframeRetimingTests: XCTestCase {
         XCTAssertFalse(PlaybackAnnotationMovePolicy.canMove(keyed, to: 3, in: store))
         XCTAssertFalse(store.retimeCoachMark(id: keyed.id, to: 3))
         XCTAssertTrue(PlaybackAnnotationMovePolicy.canMove(keyed, to: 1, in: store))
+        store.setPlaying(true)
         XCTAssertTrue(store.retimeCoachMark(id: keyed.id, to: 1))
+        XCTAssertFalse(store.isPlaying)
     }
 
     func testGestureOwnersAndUnfinishedDrawingBlockRetiming() throws {
