@@ -1,6 +1,6 @@
 # Run 150 — texture semantics and native stride calibration
 
-Status: in progress. No production rig or physics change yet.
+Status: timing fix shipped; cross-runtime texture checks corrected; native slow-run candidate verified only in test. No production rig or physics change yet.
 
 ## Cross-runtime texture checks
 
@@ -53,4 +53,12 @@ An independent test will capture Argentina 13/19 at near/low detail with fixed c
 - Across the entire 0.25–0.8 s window, 20 mm maxima improve less: near **211→182 mm** (13), **351→292 mm** (19). At 40 mm, maxima instead increase **270→337 mm** and **409→452 mm**, with different/longer low-height intervals. This is not universal sliding reduction or proof of a planted foot. Preserve these contrary observations when judging the candidate.
 - Maximum observed joint step (toe) at 120 Hz changes **7.05→4.66°** and **7.09→4.64°**. These are normalized-quaternion step measurements, not a proof of continuity or a hardware comfort result. Speed transitions, contacts, keepers and the rest of the demos remain untested with the slow source; it is still test-only.
 - Additional unchanged-binary timing checks on visionOS 26.5: **18 passed** (`replayxi-cycle150-timing265.xcresult`). These model tests did not compile or read changing Swift source. Saved user reviews remain byte-identical; normal updated demo PID 81993 was alive before the full-suite run.
-- Full visionOS 27 suite is running with all Swift frozen. LLDB attached only to verified simulator test-host PID 82626 to stop at the first `objc_weak_error`, capture stacks, then detach/resume. This is a diagnostic run, not a timing benchmark. No cleanup-fix claim follows from a negative reproduction.
+- Full visionOS 27 suite ran with all Swift frozen. LLDB attached only to verified simulator test-host PID 82626 to stop at the first `objc_weak_error`, capture stacks, then detach/resume. This was a diagnostic run, not a timing benchmark. No cleanup-fix claim follows from a negative reproduction.
+
+## Final validation
+
+- Full 27 diagnostic suite: **1,501 passed, two intentional skips, zero failures**, 1,503 total, approximately 454 s. `/private/tmp/replayxi-cycle150-full27-provenance.xcresult`. No unknown-weak warning, crash or runner restart. Native asset-manager cleanup warnings still occurred; they are not asserted to cause the earlier crash.
+- LLDB resolved `objc_weak_error` but did not hit it. The test app exited normally (status 0); the queued backtrace then failed because no stopped process remained, so LLDB returned 1. This is another negative reproduction, not a captured fault or a fix. Log: `/private/tmp/replayxi-cycle150-first-weak-lldb.log`.
+- Unsigned visionOS device Release build passed: `/private/tmp/replayxi-cycle150-release.log`. Only the existing unused AppIntents metadata warning. Test-only slow-run data is absent from the Release app.
+- Normal latest simulator demo relaunched as PID 83399 and verified alive. Saved reviews still match SHA-256 `952e501de62f36e391a5b471175c883d0deb9e981a5c6cfc04f607c6dc5ded65`. Mac remains locked; no fresh hands-on gesture or headset-performance claim.
+- Verified remote backups: `fad1e0c` (texture semantics/native baseline), `902fda9` (timing fix/source fixture), `70c26a8` (native A/B). User project/signing edits and unrelated work remain excluded. The broad improvement goal stays active; next candidate scope is in `IMPROVEMENT_RUN_151.md`.
