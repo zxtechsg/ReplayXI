@@ -46,7 +46,11 @@ Production review bytes were unchanged after the timing/library run.
 - 37 focused library/layout/persistence tests passed. Five native captures inspected,
   including regular/largest text, blocked saves and both confirmations.
 
-Full-suite and unsigned Release validation is running for this combined checkpoint.
+Full simulator validation passed: 1,243 XCTest tests, two intentional skips, zero failures;
+both Swift Testing asset tests passed too. Unsigned device Release build passed.
+The latest normal simulator app launched successfully after the run. Production review
+SHA-256 remained 952e501de62f36e391a5b471175c883d0deb9e981a5c6cfc04f607c6dc5ded65
+after all tests. User-owned project/Info changes and unrelated files remain untouched.
 No claim of match mocap accuracy, FIFA fidelity, or measured headset performance.
 
 ## Next performance audit

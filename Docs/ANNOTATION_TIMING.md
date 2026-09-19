@@ -25,8 +25,8 @@
 Arc controls: Curve adjusts amount/rotation; Offset adjusts bend/lift. Fine uses 5cm/1° steps.
 Settings → Bar size scales the room-anchored console from 80–150%, with a percentage and reset.
 
-Validation: full simulator suite passed (1,206 XCTest tests, two intentional skips, and two
-Swift Testing tests). Device Release build passed. Follow-up timing-draft and save-capacity
-checks passed (53 tests). Regular, largest-text and outside-window screenshots inspected.
-Headset interaction/comfort still needs device testing. See IMPROVEMENT_RUN_132.md for the
-earlier intermittent renderer teardown issue and its limits.
+Validation: full simulator suite passed (1,243 XCTest tests, two intentional skips, and two
+Swift Testing tests). Device Release build passed. Regular, largest-text, close-key and
+outside-window screenshots inspected. Headset interaction/comfort still needs device testing.
+See ReplayXI/IMPROVEMENT_RUN_135.md for current evidence and next performance work;
+ReplayXI/IMPROVEMENT_RUN_132.md records the earlier intermittent renderer teardown issue.
