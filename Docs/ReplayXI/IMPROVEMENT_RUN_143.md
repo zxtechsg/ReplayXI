@@ -38,5 +38,20 @@ that is a plausible lifecycle target, not an established cause. A bounded
 physics-bake/stage-only stress test is being prepared before changing shipping
 physics. No coverage is skipped to conceal the crash.
 
-Unsigned device Release verification and a clean full-suite retry remain
-pending. The Mac is locked; no hands-on headset input or comfort claim is made.
+The isolated stress baseline now passes: 12 fresh bakes cycle all five studies,
+checking exact full sample/touch digests against each study's first bake, zero
+missed contacts, both teams at near/low detail, all nine observed motion stages,
+exact reverse seeks and release of the test-owned skin instances. A queued main
+turn and task yield follow each iteration. No camera/capture renderer is made.
+The private physics renderer's identity and completed teardown are not observed;
+this pass does not establish a cause or prove the earlier crash fixed. Shipping
+physics is unchanged. An initial test-only expression exceeded Swift's type-
+checker budget; splitting the typed timestamp list preserved its sample values.
+
+- `/private/tmp/replayxi-cycle143-teardown-stress-02.xcresult` and `.log`
+- `/private/tmp/replayxi-cycle143-teardown-stress-captures/6BADE426-720B-40A0-80C7-08445ADCDBDD.json`
+
+Unsigned device Release succeeds:
+`/private/tmp/replayxi-cycle143-release.log` (only unused AppIntents metadata
+warning). A clean full-suite retry remains pending. The Mac is locked; no
+hands-on headset input or comfort claim is made.
