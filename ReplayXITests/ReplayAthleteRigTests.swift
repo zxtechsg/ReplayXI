@@ -164,6 +164,9 @@ final class ReplayAthleteRigTests: XCTestCase {
         XCTAssertEqual(rig.joints[.headRoot].parent?.name, ReplayAthleteJoint.neck.rawValue)
         XCTAssertNotNil(rig.root.findEntity(named: "neck-shell"))
 
+        let initialNeck = rig.joints[.neck].orientation.vector
+        let initialHead = rig.joints[.headRoot].orientation.vector
+
         let ball = scenario.ball.pose(at: 14.1)
         ReplayAthleteMotion.update(
             rig,
@@ -171,8 +174,8 @@ final class ReplayAthleteRigTests: XCTestCase {
             at: 14.1,
             lookTargetWorldPosition: [ball.position.x, ball.height, ball.position.z]
         )
-        XCTAssertNotEqual(rig.joints[.neck].orientation.vector, simd_quatf().vector)
-        XCTAssertNotEqual(rig.joints[.headRoot].orientation.vector, simd_quatf().vector)
+        XCTAssertNotEqual(rig.joints[.neck].orientation.vector, initialNeck)
+        XCTAssertNotEqual(rig.joints[.headRoot].orientation.vector, initialHead)
     }
 
     func testFootballGazeTracksEitherSideAndSplitsRotationAcrossNeckAndHead() {

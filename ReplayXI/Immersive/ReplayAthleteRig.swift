@@ -387,7 +387,7 @@ enum ReplayAthleteFactory {
             to parent: Entity,
             material: any Material,
             position: SIMD3<Float> = .zero,
-            orientation: simd_quatf = simd_quatf(),
+            orientation: simd_quatf = simd_quatf(real: 1, imag: .zero),
             scale: SIMD3<Float> = .one
         ) throws -> ModelEntity {
             let authoredPart: ReplayArticulatedFarProvider.Part?

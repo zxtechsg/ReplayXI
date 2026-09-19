@@ -105,7 +105,8 @@ final class ReplayKeyframedAnnotationPresentationTests: XCTestCase {
                 XCTAssertTrue(item.orientation.vector.y.isFinite)
                 XCTAssertTrue(item.orientation.vector.z.isFinite)
                 XCTAssertTrue(item.orientation.vector.w.isFinite)
-                XCTAssertEqual(item.orientation.vector, simd_quatf().vector)
+                XCTAssertEqual(item.orientation.vector, SIMD4<Float>(0, 0, 0, 1))
+                XCTAssertEqual(simd_length(item.orientation.vector), 1, accuracy: 0.00002)
                 XCTAssertGreaterThan(item.scale.z, 0)
             }
             XCTAssertFalse(try entity("annotation-mark-arrow", in: markRoot).isEnabled)

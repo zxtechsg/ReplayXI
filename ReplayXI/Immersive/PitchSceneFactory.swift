@@ -3713,7 +3713,7 @@ enum PitchSceneFactory {
             arrow?.isEnabled = false
             zone?.isEnabled = true
             zone?.position = [0, 0.078, 0]
-            zone?.orientation = simd_quatf()
+            zone?.orientation = simd_quatf(angle: 0, axis: [0, 1, 0])
             zone?.scale = [max(distance, 0.05), 1, max(distance, 0.05)]
             return
         }
@@ -3995,7 +3995,7 @@ enum PitchSceneFactory {
         entity.scale = [1, 1, length]
         entity.orientation = directionLength > 0.0001
             ? simd_quatf(from: SIMD3<Float>(0, 0, 1), to: direction / directionLength)
-            : simd_quatf()
+            : simd_quatf(angle: 0, axis: [0, 1, 0])
     }
 
     /// A thin vertical tether makes Y unambiguous from first-person and
@@ -4010,7 +4010,7 @@ enum PitchSceneFactory {
         let height = elevation + 0.10
         entity.position = [point.x, height / 2, point.z]
         entity.scale = [1, height, 1]
-        entity.orientation = simd_quatf()
+        entity.orientation = simd_quatf(angle: 0, axis: [0, 1, 0])
     }
 
     /// The economical squad LOD remains a genuinely animated football body.

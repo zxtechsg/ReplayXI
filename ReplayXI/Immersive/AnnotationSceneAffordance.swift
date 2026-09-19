@@ -312,14 +312,14 @@ enum AnnotationSceneAffordance {
             }
         case .playerLabel:
             target.position = labelPosition ?? [mark.end.x, 2.2, mark.end.z]
-            target.orientation = simd_quatf()
+            target.orientation = simd_quatf(angle: 0, axis: [0, 1, 0])
             target.scale = SIMD3<Float>(repeating: 1)
 
         case .space:
             let radius = max(ReplayGeometry.distance(mark.start, mark.end), 1.1)
             let elevation = (mark.resolvedStartElevation + mark.resolvedEndElevation) / 2
             target.position = [mark.start.x, 0.16 + elevation, mark.start.z]
-            target.orientation = simd_quatf()
+            target.orientation = simd_quatf(angle: 0, axis: [0, 1, 0])
             target.scale = SIMD3<Float>(repeating: 1)
             let visibleArcFraction: Float = 0.74
             let arcLength = (2 * Float.pi * radius / Float(spaceTargetSegmentCount))
@@ -354,7 +354,7 @@ enum AnnotationSceneAffordance {
             // intermediate timestamp. Keep that instantaneous target usable.
             target.orientation = directionLength > 0.0001
                 ? simd_quatf(from: SIMD3<Float>(0, 0, 1), to: direction / directionLength)
-                : simd_quatf()
+                : simd_quatf(angle: 0, axis: [0, 1, 0])
             target.scale = [1, 1, length + 0.65]
         }
     }
@@ -758,7 +758,7 @@ enum AnnotationSceneAffordance {
         entity.scale = [crossScale, crossScale, length]
         entity.orientation = directionLength > 0.0001
             ? simd_quatf(from: SIMD3<Float>(0, 0, 1), to: direction / directionLength)
-            : simd_quatf()
+            : simd_quatf(angle: 0, axis: [0, 1, 0])
     }
 
     private static func restyleIfNeeded(_ selection: Entity, for mark: CoachMark) {
