@@ -15,6 +15,9 @@
 - Enter decimal seconds or m:ss. Invalid or unchanged values cannot be applied.
 - Apply In/Out commits the window; Reset In/Out discards only its pending edits.
 - Position time has its own Reset and Move. Finish or reset that draft before selecting another key.
+- Closing or switching panels with unapplied timing opens Apply / Discard / Keep editing in place.
+  Both drafts survive panel remounts. Apply changes commits both in one Undo step; Discard never
+  deletes a saved annotation. Blocked reset/load/delete actions must be retried after resolution.
 - Return/Done applies the field's own edit. Invalid text stays editable.
 - Outside In/Out means outside the visible interval. The selected annotation stays shown for editing;
   close it to preview normal visibility.

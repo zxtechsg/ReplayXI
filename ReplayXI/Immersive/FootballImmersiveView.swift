@@ -1948,6 +1948,8 @@ private struct ImmersiveControlDeck: View {
     @GestureState private var timelineScrubIsActive = false
     @State private var isClearAnnotationsPending = false
     @State private var inlinePanel: PlaybackInlinePanel?
+    @State private var timingDraftSession = AnnotationTimingDraftSession()
+    @State private var timingNavigation = AnnotationTimingNavigationGate()
     @State private var showsAnnotationTools = false
     @State private var showsToolsShelf = false
     @Binding var selectedAnnotationID: UUID?
@@ -1973,7 +1975,7 @@ private struct ImmersiveControlDeck: View {
             ) {
             case .physicalStations:
             HStack(spacing: 12) {
-                Button(action: exit) {
+                Button(action: requestTimingSafeExit) {
                     Image(systemName: "xmark")
                 }
                 .buttonStyle(.bordered)
@@ -2008,6 +2010,7 @@ private struct ImmersiveControlDeck: View {
         }
         .onDisappear {
             cancelInterruptedTimelineScrub()
+            releaseTimingDraftOwnership()
         }
         .onChange(of: timelineScrubIsActive) { wasActive, isActive in
             guard wasActive, !isActive, timelineScrubState != nil else { return }
@@ -2065,7 +2068,7 @@ private struct ImmersiveControlDeck: View {
                     .padding(.horizontal, 8)
             }
             HStack(spacing: 8) {
-                Button(action: exit) {
+                Button(action: requestTimingSafeExit) {
                     Image(systemName: "xmark")
                         .frame(
                             minWidth: PlaybackControlDeckPresentation.minimumSpatialHitTarget,
@@ -2101,7 +2104,9 @@ private struct ImmersiveControlDeck: View {
                 playbackToolsButton
             }
 
-            if isClearAnnotationsPending {
+            if timingNavigation.request != nil {
+                timingDraftResolutionShelf
+            } else if isClearAnnotationsPending {
                 clearAnnotationsConfirmationStrip
             } else if showsPlayerGrid {
                 playerPOVGrid
@@ -2150,6 +2155,20 @@ private struct ImmersiveControlDeck: View {
         @ViewBuilder content: () -> Content
     ) -> some View {
         content()
+        .onChange(of: timingDraftSession.hasUnsavedChanges, initial: true) { _, isDirty in
+            timingNavigation.observeDraft(isDirty: isDirty, route: timingEditorRoute)
+        }
+        .onChange(of: timingDeckRoute) { _, attempted in
+            guard timingDraftSession.hasUnsavedChanges else { return }
+            timingNavigation.observeDraft(isDirty: true, route: timingEditorRoute)
+            if let retained = timingNavigation.protect(attempted) { restoreTimingRoute(retained) }
+        }
+        .onChange(of: store.annotationTimingNavigationAttempt) { _, _ in
+            guard timingDraftSession.hasUnsavedChanges else { return }
+            timingNavigation.observeDraft(isDirty: true, route: timingEditorRoute)
+            timingNavigation.ask(.retryExternalAction)
+            if let retained = timingNavigation.protectedRoute { restoreTimingRoute(retained) }
+        }
         .onChange(of: store.marks.count) { oldCount, newCount in
             guard store.localRole == .coach,
                   inlinePanel != .annotationEdit,
@@ -2194,6 +2213,9 @@ private struct ImmersiveControlDeck: View {
             reconcileAnnotationPresentationSelection()
         }
         .onChange(of: selectedAnnotationID) { _, selectedID in
+            // The persistent timing session and route guard own this selection
+            // until its draft is applied or explicitly discarded.
+            if timingDraftSession.hasUnsavedChanges { return }
             // Secondary controls belong to the selection that opened them.
             // Never carry a label, duration, geometry, or tracking shelf onto
             // a new mark.
@@ -2905,8 +2927,76 @@ private struct ImmersiveControlDeck: View {
     private func annotationDurationShelf(_ mark: CoachMark) -> some View {
         inlineShelf(color: annotationColor(for: mark.kind)) {
             AnnotationTimingEditor(markID: mark.id, color: annotationColor(for: mark.kind),
+                draftSession: timingDraftSession,
                 adjustPose: { inlinePanel = .annotationGeometry(mark.id) })
                 .id(mark.id)
+        }
+    }
+
+    private var timingDeckRoute: AnnotationTimingDeckRoute {
+        .init(selection: selectedAnnotationID, panel: inlinePanel,
+              showsTools: showsToolsShelf, showsPlayers: showsPlayerGrid,
+              showsEvents: showsEventStrip, showsDecisions: showsDecisionStrip,
+              showsDrawing: showsAnnotationTools, showsClear: isClearAnnotationsPending,
+              showsAnnotations: showsPlaybackAnnotations)
+    }
+
+    private var timingEditorRoute: AnnotationTimingDeckRoute {
+        guard let id = timingDraftSession.markID else { return timingDeckRoute }
+        return .init(selection: id, panel: .annotationDuration(id), showsTools: false, showsPlayers: false,
+                     showsEvents: false, showsDecisions: false, showsDrawing: false, showsClear: false,
+                     showsAnnotations: true)
+    }
+
+    private func restoreTimingRoute(_ route: AnnotationTimingDeckRoute) {
+        selectedAnnotationID = route.selection
+        inlinePanel = route.panel
+        showsToolsShelf = route.showsTools
+        showsPlayerGrid = route.showsPlayers
+        showsEventStrip = route.showsEvents
+        showsDecisionStrip = route.showsDecisions
+        showsAnnotationTools = route.showsDrawing
+        isClearAnnotationsPending = route.showsClear
+        showsPlaybackAnnotations = route.showsAnnotations
+    }
+
+    private var timingDraftResolutionShelf: some View {
+        inlineShelf(color: ReplayTheme.orange) {
+            AnnotationTimingDraftResolutionView(
+                canApply: timingDraftSession.canApply(in: store),
+                needsRetry: timingNavigation.request == .retryExternalAction,
+                keepEditing: { timingNavigation.keepEditing() },
+                discard: { resolveTimingDraft(apply: false) },
+                apply: { resolveTimingDraft(apply: true) })
+        }
+    }
+
+    private func requestTimingSafeExit() {
+        guard timingDraftSession.hasUnsavedChanges else { exit(); return }
+        timingNavigation.observeDraft(isDirty: true, route: timingEditorRoute)
+        timingNavigation.ask(.exit)
+        if let retained = timingNavigation.protectedRoute { restoreTimingRoute(retained) }
+    }
+
+    private func resolveTimingDraft(apply: Bool) {
+        if apply {
+            guard timingDraftSession.apply(in: store) else { return }
+        } else {
+            timingDraftSession.discard(in: store)
+        }
+        releaseTimingDraftOwnership()
+        let request = timingNavigation.consume()
+        switch request {
+        case .some(.route(let route)): restoreTimingRoute(route)
+        case .some(.exit): exit()
+        case .some(.retryExternalAction), .none: break
+        }
+    }
+
+    private func releaseTimingDraftOwnership() {
+        timingDraftSession.releaseOwnership()
+        if let id = timingDraftSession.markID {
+            _ = store.setAnnotationTimingDraftPending(id: id, isPending: false)
         }
     }
 
@@ -5160,7 +5250,9 @@ private struct ImmersiveControlDeck: View {
                 }
             }
 
-            if isClearAnnotationsPending {
+            if timingNavigation.request != nil {
+                timingDraftResolutionShelf
+            } else if isClearAnnotationsPending {
                 clearAnnotationsConfirmationStrip
             } else if let inlinePanel, inlinePanel.isAnnotationPanel {
                 inlinePanelShelf(inlinePanel)
@@ -5185,7 +5277,7 @@ private struct ImmersiveControlDeck: View {
 
     private var shapeFocusStatusDeck: some View {
         HStack(spacing: 12) {
-            Button(action: exit) {
+            Button(action: requestTimingSafeExit) {
                 Image(systemName: "xmark")
             }
             .buttonStyle(.bordered)

@@ -108,6 +108,11 @@ final class ReplayStore {
     var selectedTool: CoachMarkKind = .run
     var isDrawing = false
     var pendingDrawStart: PitchPoint?
+    /// Ephemeral UI ownership only; raw text drafts never enter saved reviews.
+    /// Navigation and destructive actions must resolve them before removing
+    /// their source annotation. Seeking and applying its timing remain allowed.
+    private(set) var pendingAnnotationTimingEditID: UUID?
+    private(set) var annotationTimingNavigationAttempt: UInt64 = 0
     /// True only while a joystick owns a local endpoint preview transaction.
     /// Control surfaces may use this to disable conflicting actions, but the
     /// store also enforces the barrier so correctness never depends on UI state.
@@ -325,6 +330,7 @@ final class ReplayStore {
     /// recovery guidance or leak an in-progress edit into persisted state.
     var reviewSaveBlockReason: String? {
         if reviewLibrary.isReadOnly { return reviewLibrary.status }
+        if pendingAnnotationTimingEditID != nil { return "Apply or discard annotation timing changes before saving" }
         if hasActiveTimelineScrub { return "Finish or cancel the timeline scrub before saving" }
         if hasActiveCoachMarkGeometryPreview { return "Finish or cancel the annotation adjustment before saving" }
         if isDrawing { return "Finish or cancel the annotation before saving" }
@@ -343,6 +349,30 @@ final class ReplayStore {
     var canRestoreSavedReview: Bool {
         !isCollaborationActive && triangleLockMode != .place
             && !hasActiveTimelineScrub && !hasActiveCoachMarkGeometryPreview && !isDrawing
+            && pendingAnnotationTimingEditID == nil
+    }
+
+    @discardableResult
+    func setAnnotationTimingDraftPending(id: UUID, isPending: Bool) -> Bool {
+        if !isPending {
+            // Lifecycle cleanup must remain possible if the source disappeared.
+            guard pendingAnnotationTimingEditID == id else { return false }
+            pendingAnnotationTimingEditID = nil
+            return true
+        }
+        guard localRole == .coach, !isCollaborationActive,
+              pendingAnnotationTimingEditID == nil || pendingAnnotationTimingEditID == id,
+              marks.contains(where: { $0.id == id }),
+              !selectedScenario.coachMarks.contains(where: { $0.id == id }) else { return false }
+        pendingAnnotationTimingEditID = id
+        return true
+    }
+
+    private func allowsNavigationOutsideTimingDraft() -> Bool {
+        guard pendingAnnotationTimingEditID != nil else { return true }
+        statusMessage = "Apply or discard annotation timing changes first"
+        annotationTimingNavigationAttempt &+= 1
+        return false
     }
 
     func makeSavedReviewState() -> SavedReplayState {
@@ -392,6 +422,7 @@ final class ReplayStore {
 
     @discardableResult
     func restoreReview(_ review: SavedReplayReview) -> Bool {
+        guard allowsNavigationOutsideTimingDraft() else { return false }
         guard canRestoreSavedReview else {
             statusMessage = isCollaborationActive
                 ? "Leave the squad room to open a saved review"
@@ -559,6 +590,7 @@ final class ReplayStore {
         guard !isCollaborationActive || localRole == .coach || !broadcast else { return }
         guard let scenario = scenarios.first(where: { $0.id == id }) else { return }
         guard selectedScenarioID != id || resettingReview else { return }
+        guard allowsNavigationOutsideTimingDraft() else { return }
         guard triangleLockMode != .place else {
             statusMessage = "End physical placement before changing scenarios."
             return
@@ -909,6 +941,7 @@ final class ReplayStore {
     }
 
     func beginDrawing(_ kind: CoachMarkKind) {
+        guard allowsNavigationOutsideTimingDraft() else { return }
         guard allowsAnnotationAuthoring() else { return }
         guard allowsMutationOutsideEndpointPreview() else { return }
         guard localRole == .coach else { return }
@@ -1157,6 +1190,7 @@ final class ReplayStore {
 
     @discardableResult
     func undoAnnotationEdit() -> Bool {
+        guard allowsNavigationOutsideTimingDraft() else { return false }
         guard allowsAnnotationAuthoring() else { return false }
         guard allowsPlaybackViewChange(), localRole == .coach, !isCollaborationActive else { return false }
         let action = annotationEditHistory.undoTitle
@@ -1173,6 +1207,7 @@ final class ReplayStore {
 
     @discardableResult
     func redoAnnotationEdit() -> Bool {
+        guard allowsNavigationOutsideTimingDraft() else { return false }
         guard allowsAnnotationAuthoring() else { return false }
         guard allowsPlaybackViewChange(), localRole == .coach, !isCollaborationActive else { return false }
         let action = annotationEditHistory.redoTitle
@@ -1191,6 +1226,7 @@ final class ReplayStore {
     /// authored teaching overlays. This supports mark-specific timeline menus.
     @discardableResult
     func removeCoachMark(id: UUID) -> Bool {
+        guard allowsNavigationOutsideTimingDraft() else { return false }
         guard allowsAnnotationAuthoring() else { return false }
         guard allowsMutationOutsideEndpointPreview() else { return false }
         guard localRole == .coach else { return false }
@@ -1206,6 +1242,47 @@ final class ReplayStore {
         removePendingCoachMarkEndpointPreview(for: id)
         marks.remove(at: index)
         statusMessage = "Annotation removed"
+        emitSnapshot()
+        return true
+    }
+
+    /// Resolve both timing drafts in one transaction. Nil windowStart means
+    /// keep In/Out; a nonnil start with nil end means visible through the end.
+    /// Both keyframe values must be supplied together, or both omitted.
+    @discardableResult
+    func applyCoachMarkTimingDraft(id: UUID, windowStart: TimeInterval?, windowEnd: TimeInterval?,
+                                   keyframeFrom: TimeInterval?, keyframeTo: TimeInterval?) -> Bool {
+        guard allowsAnnotationAuthoring(), allowsMutationOutsideEndpointPreview(), canChangePlaybackView,
+              localRole == .coach, !isDrawing,
+              pendingAnnotationTimingEditID == nil || pendingAnnotationTimingEditID == id,
+              !selectedScenario.coachMarks.contains(where: { $0.id == id }),
+              let index = marks.firstIndex(where: { $0.id == id }),
+              windowStart != nil || windowEnd == nil,
+              (keyframeFrom == nil) == (keyframeTo == nil) else { return false }
+        let mark = marks[index]
+        if let start = windowStart {
+            guard CoachMarkTimingPolicy.windowFits(revealTime: start,
+                displayDuration: windowEnd.map { $0 - start }, replayDuration: selectedScenario.duration),
+                windowEnd.map({ $0 - start >= 0.5 }) ?? true else { return false }
+        }
+        var frames = mark.keyframes
+        if let from = keyframeFrom, let to = keyframeTo {
+            guard mark.canRetimeKeyframe(from: from, to: to, duration: selectedScenario.duration),
+                  let keyIndex = frames?.firstIndex(where: { abs($0.time - from) < CoachMark.keyframeTimeTolerance })
+            else { return false }
+            frames?[keyIndex].time = to
+            frames?.sort { $0.time < $1.time }
+        }
+        let replacement = CoachMark(id: mark.id, kind: mark.kind, start: mark.start, end: mark.end,
+            startElevation: mark.startElevation, endElevation: mark.endElevation, curve: mark.curve,
+            label: mark.label, revealTime: windowStart ?? mark.revealTime,
+            hideTime: windowStart == nil ? mark.hideTime : windowEnd, author: mark.author,
+            playerID: mark.playerID, startTrackAnchor: mark.startTrackAnchor,
+            endTrackAnchor: mark.endTrackAnchor, keyframes: frames)
+        guard replacement != mark, isValidSharedMark(replacement, for: selectedScenario) else { return false }
+        marks[index] = replacement
+        isPlaying = false
+        statusMessage = "Annotation timing updated"
         emitSnapshot()
         return true
     }
@@ -2290,6 +2367,7 @@ final class ReplayStore {
     }
 
     func clearMarks() {
+        guard allowsNavigationOutsideTimingDraft() else { return }
         guard allowsAnnotationAuthoring() else { return }
         guard allowsMutationOutsideEndpointPreview() else { return }
         guard localRole == .coach else { return }
@@ -2469,6 +2547,7 @@ final class ReplayStore {
     }
 
     var trianglePlacementInputBlockReason: String? {
+        if pendingAnnotationTimingEditID != nil { return "Apply or discard annotation timing changes before placing stations" }
         if hasActiveTimelineScrub { return "Finish or cancel the timeline scrub before placing stations" }
         if hasActiveCoachMarkGeometryPreview { return "Finish or cancel the annotation adjustment before placing stations" }
         if isDrawing { return "Finish or cancel the annotation before placing stations" }
@@ -2477,6 +2556,7 @@ final class ReplayStore {
 
     @discardableResult
     func activateTrianglePlacement(anchorID: UUID) -> Bool {
+        guard allowsNavigationOutsideTimingDraft() else { return false }
         guard localRole == .coach, selectedScenario.kind == .shapeLab else { return false }
         if let reason = trianglePlacementInputBlockReason {
             statusMessage = reason
@@ -2501,6 +2581,7 @@ final class ReplayStore {
     /// appears in `makeSnapshot()`, even if SharePlay begins later.
     @discardableResult
     func activateLocalTrianglePreview(anchorID: UUID) -> Bool {
+        guard allowsNavigationOutsideTimingDraft() else { return false }
         guard localRole == .coach,
               !isCollaborationActive,
               selectedScenario.kind == .shapeLab else { return false }
@@ -2625,6 +2706,7 @@ final class ReplayStore {
     }
 
     func resetScenario() {
+        guard allowsNavigationOutsideTimingDraft() else { return }
         guard allowsMutationOutsideEndpointPreview() else { return }
         if triangleLockMode == .place {
             endTrianglePlacement()
@@ -2660,7 +2742,9 @@ final class ReplayStore {
         // endpoint joystick also publishes a real pause at its first accepted
         // sample, so the snapshot's transport must reflect `isPlaying` rather
         // than resurrecting its pre-gesture clock.
-        let sharedMarks = marks.map { mark in
+        // Ordinary seeks/saves can retain Array's copy-on-write storage. Only
+        // an active geometry preview requires a separately masked mark array.
+        let sharedMarks = pendingCoachMarkGeometryBaselines.isEmpty ? marks : marks.map { mark in
             guard let baseline = pendingCoachMarkGeometryBaselines[mark.id] else { return mark }
             return markRestoringGeometry(mark, from: baseline)
         }

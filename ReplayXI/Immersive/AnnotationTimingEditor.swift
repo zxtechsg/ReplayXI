@@ -6,9 +6,9 @@ struct AnnotationTimingEditor: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let markID: UUID
     let color: Color
+    var draftSession: AnnotationTimingDraftSession? = nil
     var adjustPose: () -> Void = {}
-    @State private var draft = AnnotationTimingDraft()
-    @State private var positionDraft = AnnotationPositionTimeDraft()
+    @State private var localSession = AnnotationTimingDraftSession()
     @State private var keyTimeLabels = AnnotationKeyTimeLabels()
     @FocusState private var focusedField: Field?
     private enum Field: Hashable { case inTime, outTime, positionTime }
@@ -16,9 +16,25 @@ struct AnnotationTimingEditor: View {
     @ScaledMetric(relativeTo: .body) private var fieldWidth = 130.0
 
     private var mark: CoachMark? { store.marks.first { $0.id == markID } }
+    private var session: AnnotationTimingDraftSession { draftSession ?? localSession }
+    private var draft: AnnotationTimingDraft {
+        get { session.window }
+        nonmutating set { session.window = newValue }
+    }
+    private var positionDraft: AnnotationPositionTimeDraft {
+        get { session.position }
+        nonmutating set { session.position = newValue }
+    }
+    private var draftBinding: Binding<AnnotationTimingDraft> {
+        Binding(get: { draft }, set: { draft = $0 })
+    }
+    private var positionBinding: Binding<AnnotationPositionTimeDraft> {
+        Binding(get: { positionDraft }, set: { positionDraft = $0 })
+    }
     private var duration: Double { store.selectedScenario.duration }
     private var canEdit: Bool {
         store.canChangePlaybackView && store.localRole == .coach && store.triangleLockMode != .place
+            && (store.pendingAnnotationTimingEditID == nil || store.pendingAnnotationTimingEditID == markID)
             && mark != nil && !store.selectedScenario.coachMarks.contains { $0.id == markID }
     }
     private var isDirty: Bool { mark.map { draft.differs(from: $0) } ?? false }
@@ -30,7 +46,7 @@ struct AnnotationTimingEditor: View {
         VStack(alignment: .leading, spacing: 12) {
             adaptiveRow {
                 Label("In / Out", systemImage: "timer").font(.headline).foregroundStyle(color)
-                Toggle("To end", isOn: $draft.throughEnd).toggleStyle(.button).disabled(!canEdit)
+                Toggle("To end", isOn: draftBinding.throughEnd).toggleStyle(.button).disabled(!canEdit)
                     .accessibilityHint("Keep the annotation visible through the final replay frame")
                 Button("Reset In/Out", action: resetWindow).disabled(!isDirty || !canEdit)
                     .accessibilityLabel("Reset In and Out changes only")
@@ -40,9 +56,9 @@ struct AnnotationTimingEditor: View {
             }
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 12) {
-                    timeRow("In", text: $draft.startText, fallback: mark?.revealTime ?? 0, field: .inTime)
+                    timeRow("In", text: draftBinding.startText, fallback: mark?.revealTime ?? 0, field: .inTime)
                     if !draft.throughEnd {
-                        timeRow("Out", text: $draft.endText, fallback: mark?.hideTime ?? duration, field: .outTime)
+                        timeRow("Out", text: draftBinding.endText, fallback: mark?.hideTime ?? duration, field: .outTime)
                     }
                     if let error = draft.validationMessage(duration: duration) {
                         Label(error, systemImage: "exclamationmark.circle").font(.caption).foregroundStyle(.orange)
@@ -88,15 +104,18 @@ struct AnnotationTimingEditor: View {
             .scrollIndicators(.visible)
             .accessibilityHint("Scroll for position keys and key timing controls")
         }
-        .onAppear { reload(); refreshKeyTimeLabels() }
+        .onAppear { beginSession(); refreshKeyTimeLabels() }
+        .onDisappear {
+            if draftSession == nil { localSession.releaseOwnership() }
+        }
         .onChange(of: markID) { _, _ in
-            positionDraft.clear(); focusedField = nil; reload(); refreshKeyTimeLabels()
+            focusedField = nil; beginSession(); refreshKeyTimeLabels()
         }
         .onChange(of: draft.throughEnd) { _, throughEnd in
             if throughEnd, focusedField == .outTime { focusedField = nil }
         }
-        .onChange(of: mark?.revealTime) { _, _ in reload() }
-        .onChange(of: mark?.hideTime) { _, _ in reload() }
+        .onChange(of: mark?.revealTime) { _, _ in refreshCommittedWindow() }
+        .onChange(of: mark?.hideTime) { _, _ in refreshCommittedWindow() }
         .onChange(of: mark?.keyframes?.map(\.time)) { _, times in
             if let selectedTime = positionDraft.selectedTime, !(times ?? []).contains(selectedTime) { positionDraft.clear() }
             keyTimeLabels = AnnotationKeyTimeLabels(times: times ?? [])
@@ -174,7 +193,7 @@ struct AnnotationTimingEditor: View {
         VStack(alignment: .leading, spacing: 6) {
             adaptiveRow {
                 Text("Position time").font(.caption)
-                TextField("Seconds or m:ss", text: $positionDraft.text)
+                TextField("Seconds or m:ss", text: positionBinding.text)
                     .textFieldStyle(.roundedBorder).frame(width: fieldWidth).monospacedDigit()
                     .accessibilityLabel("Selected position key time")
                     .focused($focusedField, equals: .positionTime)
@@ -223,7 +242,15 @@ struct AnnotationTimingEditor: View {
     }
     private func reload() {
         guard let mark else { return }
-        draft = AnnotationTimingDraft(mark: mark, duration: duration)
+        session.resetWindow(mark: mark, duration: duration)
+    }
+    private func beginSession() {
+        guard let mark else { return }
+        session.begin(mark: mark, scenarioID: store.selectedScenarioID, duration: duration, store: store)
+    }
+    private func refreshCommittedWindow() {
+        guard let mark else { return }
+        session.refreshWindow(mark: mark, duration: duration)
     }
     private func resetWindow() {
         reload()
