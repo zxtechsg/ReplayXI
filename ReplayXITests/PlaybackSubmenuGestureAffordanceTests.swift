@@ -28,15 +28,15 @@ final class PlaybackSubmenuGestureAffordanceTests: XCTestCase {
     func testFollowPitchAndPlayerChoicesUseTheSameOwnershipGate() throws {
         let source = try immersiveSource()
         let shelf = try slice(source, after: "private func annotationTrackingShelf(", before: "private func annotationTrackingTeamRow(")
-        XCTAssertTrue(shelf.contains(".disabled(isFixedToPitch || !store.canChangePlaybackView)"))
+        XCTAssertTrue(shelf.contains(".disabled(isFixedToPitch || !annotationTrackingIsEnabled(mark))"))
         XCTAssertTrue(shelf.contains(".accessibilityHint(store.canChangePlaybackView"))
         XCTAssertTrue(shelf.contains("Finish or cancel the current gesture first"))
         let button = try slice(source, after: "private func annotationTrackingPlayerButton(", before: "private func annotationTrackingPlayerID(")
-        XCTAssertTrue(button.contains(".disabled(!store.canChangePlaybackView)"))
-        XCTAssertTrue(button.contains(".accessibilityHint(store.canChangePlaybackView"))
-        XCTAssertTrue(button.contains("Finish or cancel the current gesture first"))
+        XCTAssertTrue(button.contains(".disabled(!annotationTrackingIsEnabled(mark))"))
+        XCTAssertTrue(button.contains(".accessibilityHint(AnnotationTrackingPolicy.playerHint(mark,"))
+        XCTAssertTrue(button.contains("canChangePlaybackView: store.canChangePlaybackView"))
         let callback = try slice(source, after: "private func setAnnotationTracking(", before: "private func annotationLabelShelf(")
-        assertGate("guard store.canChangePlaybackView else { return }",
+        assertGate("guard annotationTrackingIsEnabled(mark) else { return }",
                    precedes: "store.setCoachMarkTracking", in: callback)
     }
 

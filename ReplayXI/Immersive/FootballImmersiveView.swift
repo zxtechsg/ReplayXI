@@ -3276,7 +3276,7 @@ private struct ImmersiveControlDeck: View {
     /// current replay instant, so choosing a player never makes the mark jump.
     private func annotationTrackingShelf(_ mark: CoachMark) -> some View {
         let color = annotationColor(for: mark.kind)
-        let isFixedToPitch = !mark.followsPlayerTracks
+        let isFixedToPitch = !mark.hasKeyframes && !mark.followsPlayerTracks
 
         return inlineShelf(color: color) {
             VStack(spacing: 8) {
@@ -3290,52 +3290,64 @@ private struct ImmersiveControlDeck: View {
 
                     inlineChoiceDivider
 
-                    Text("Keeps both points at their current offset from the chosen player.")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.68))
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.78)
+                    if !mark.hasKeyframes {
+                        Text("Keeps both points at their current offset from the chosen player.")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.68))
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.78)
+                    }
 
                     Spacer(minLength: 8)
 
                     StatusPill(
                         text: annotationTrackingSummary(mark),
-                        systemImage: isFixedToPitch ? "mappin" : "link",
+                        systemImage: mark.hasKeyframes ? "diamond" : (isFixedToPitch ? "mappin" : "link"),
                         color: color
                     )
 
-                    Button {
-                        setAnnotationTracking(mark, playerID: nil)
-                    } label: {
-                        Label("Pitch", systemImage: "mappin")
-                            .font(.subheadline.weight(.black))
-                            .lineLimit(1)
-                            .frame(
-                                minWidth: 108,
-                                minHeight: PlaybackControlDeckPresentation.minimumSpatialHitTarget
-                            )
+                    if !mark.hasKeyframes {
+                        Button {
+                            setAnnotationTracking(mark, playerID: nil)
+                        } label: {
+                            Label("Pitch", systemImage: "mappin")
+                                .font(.subheadline.weight(.black))
+                                .lineLimit(1)
+                                .frame(
+                                    minWidth: 108,
+                                    minHeight: PlaybackControlDeckPresentation.minimumSpatialHitTarget
+                                )
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(isFixedToPitch ? color : .white.opacity(0.10))
+                        .foregroundStyle(isFixedToPitch ? Color.black : Color.white)
+                        .disabled(isFixedToPitch || !annotationTrackingIsEnabled(mark))
+                        .accessibilityLabel("Fix annotation to pitch")
+                        .accessibilityHint(store.canChangePlaybackView
+                            ? "Stops both annotation points following a player"
+                            : "Finish or cancel the current gesture first")
+                        .accessibilityAddTraits(isFixedToPitch ? .isSelected : [])
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(isFixedToPitch ? color : .white.opacity(0.10))
-                    .foregroundStyle(isFixedToPitch ? Color.black : Color.white)
-                    .disabled(isFixedToPitch || !store.canChangePlaybackView)
-                    .accessibilityLabel("Fix annotation to pitch")
-                    .accessibilityHint(store.canChangePlaybackView
-                        ? "Stops both annotation points following a player"
-                        : "Finish or cancel the current gesture first")
-                    .accessibilityAddTraits(isFixedToPitch ? .isSelected : [])
                 }
 
-                annotationTrackingTeamRow(
-                    team: .home,
-                    players: store.selectedScenario.homePlayers,
-                    mark: mark
-                )
-                annotationTrackingTeamRow(
-                    team: .away,
-                    players: store.selectedScenario.awayPlayers,
-                    mark: mark
-                )
+                if mark.hasKeyframes {
+                    AnnotationTrackingKeyframeNotice(keyCount: mark.keyframes?.count ?? 0,
+                        color: color, isEnabled: store.canChangePlaybackView) {
+                        guard store.canChangePlaybackView else { return }
+                        toggleInlinePanel(.annotationDuration(mark.id))
+                    }
+                } else {
+                    annotationTrackingTeamRow(
+                        team: .home,
+                        players: store.selectedScenario.homePlayers,
+                        mark: mark
+                    )
+                    annotationTrackingTeamRow(
+                        team: .away,
+                        players: store.selectedScenario.awayPlayers,
+                        mark: mark
+                    )
+                }
             }
         }
     }
@@ -3399,14 +3411,13 @@ private struct ImmersiveControlDeck: View {
         }
         .buttonStyle(.plain)
         .hoverEffect(.highlight)
-        .disabled(!store.canChangePlaybackView)
+        .disabled(!annotationTrackingIsEnabled(mark))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
             "Follow \(FootballReferenceScenarios.teamTitle(player.team, in: store.selectedScenario)) number \(player.shirtNumber), \(player.role)"
         )
-        .accessibilityHint(store.canChangePlaybackView
-            ? "Keeps both annotation points at their current offsets from this player"
-            : "Finish or cancel the current gesture first")
+        .accessibilityHint(AnnotationTrackingPolicy.playerHint(mark,
+            canChangePlaybackView: store.canChangePlaybackView))
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
@@ -3418,6 +3429,7 @@ private struct ImmersiveControlDeck: View {
     }
 
     private func annotationTrackingSummary(_ mark: CoachMark) -> String {
+        if let status = AnnotationTrackingPolicy.keyframeStatus(mark) { return status }
         guard mark.followsPlayerTracks else { return "PITCH FIXED" }
         if let playerID = annotationTrackingPlayerID(mark),
            let player = store.selectedScenario.player(id: playerID) {
@@ -3427,7 +3439,7 @@ private struct ImmersiveControlDeck: View {
     }
 
     private func setAnnotationTracking(_ mark: CoachMark, playerID: String?) {
-        guard store.canChangePlaybackView else { return }
+        guard annotationTrackingIsEnabled(mark) else { return }
         guard store.setCoachMarkTracking(id: mark.id, playerID: playerID) else { return }
         if let playerID,
            let player = store.selectedScenario.player(id: playerID) {
@@ -3436,6 +3448,10 @@ private struct ImmersiveControlDeck: View {
             annotationConfirmation = "FIXED TO PITCH · \(formatTime(store.playhead))"
         }
         inlinePanel = nil
+    }
+
+    private func annotationTrackingIsEnabled(_ mark: CoachMark) -> Bool {
+        AnnotationTrackingPolicy.canSetTracking(mark, canChangePlaybackView: store.canChangePlaybackView)
     }
 
     private func annotationLabelShelf(_ mark: CoachMark) -> some View {
@@ -4752,7 +4768,9 @@ private struct ImmersiveControlDeck: View {
         .tint(annotationColor(for: mark.kind))
         .accessibilityLabel("Annotation player tracking")
         .accessibilityValue(annotationTrackingAccessibilityValue(mark))
-        .accessibilityHint("Opens both teams. Choose a shirt to follow or fix the mark to the pitch")
+        .accessibilityHint(mark.hasKeyframes
+            ? "Shows how to switch saved positions to player tracking"
+            : "Opens both teams. Choose a shirt to follow or fix the mark to the pitch")
         .accessibilityAddTraits(
             inlinePanel == .annotationTracking(mark.id) ? .isSelected : []
         )
@@ -4767,6 +4785,7 @@ private struct ImmersiveControlDeck: View {
     }
 
     private func annotationTrackingAccessibilityValue(_ mark: CoachMark) -> String {
+        if let value = AnnotationTrackingPolicy.keyframeAccessibilityValue(mark) { return value }
         guard mark.followsPlayerTracks else { return "Fixed to pitch" }
         if let playerID = annotationTrackingPlayerID(mark),
            let player = store.selectedScenario.player(id: playerID) {

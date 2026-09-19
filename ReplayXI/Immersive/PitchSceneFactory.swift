@@ -78,6 +78,8 @@ enum PitchSceneFactory {
         var unchangedRevisionGeometryUpdates = 0
         var trackedGeometryUpdates = 0
         var unchangedTrackedGeometrySkips = 0
+        var visibilityWriteRequests = 0
+        var visibilityPropertyWrites = 0
         var syncElapsedNanoseconds: UInt64 = 0
     }
 
@@ -1324,8 +1326,9 @@ enum PitchSceneFactory {
         func canPresentAnnotation(_ mark: CoachMark) -> Bool {
             annotationPresentation.isEligible(mark, in: scenario)
         }
-        annotationCache?.marksRoot?.isEnabled = !isTriangleView
-            || annotationCache?.marks.contains(where: canPresentAnnotation) == true
+        setAnnotationVisibility(!isTriangleView
+            || annotationCache?.marks.contains(where: canPresentAnnotation) == true,
+                                on: annotationCache?.marksRoot)
 
         let selectedBindingCandidate = selectedAnnotationID.flatMap {
             annotationCache?.bindingsByID[$0]
@@ -1390,8 +1393,8 @@ enum PitchSceneFactory {
                 let isRevealed = binding.mark.isVisible(at: time)
                 let keepsEditableSelectionVisible = selectedAnnotationIsEditable
                     && spatialFocus.selectedMarkID == binding.mark.id
-                entity.isEnabled = renderedAnnotationIDs.contains(binding.mark.id)
-                    && (isRevealed || keepsEditableSelectionVisible)
+                setAnnotationVisibility(renderedAnnotationIDs.contains(binding.mark.id)
+                    && (isRevealed || keepsEditableSelectionVisible), on: entity)
 
                 let isSelected = spatialFocus.selectedMarkID == binding.mark.id
                 let opacity: Float = switch spatialFocus {
@@ -1420,8 +1423,8 @@ enum PitchSceneFactory {
                     case .decision: false
                     }
                 }
-                binding.bodyTarget.value?.isEnabled = acceptsAnnotationInput
-                binding.labelTarget.value?.isEnabled = acceptsAnnotationInput
+                setAnnotationVisibility(acceptsAnnotationInput, on: binding.bodyTarget.value)
+                setAnnotationVisibility(acceptsAnnotationInput, on: binding.labelTarget.value)
             }
         }
         // Resolve track geometry after admission. Hidden history can contain
@@ -3150,6 +3153,20 @@ enum PitchSceneFactory {
         }
     }
 
+    private static func setAnnotationVisibility(_ isEnabled: Bool, on entity: Entity?) {
+        guard let entity else { return }
+        #if DEBUG
+        annotationSceneWork.visibilityWriteRequests &+= 1
+        #endif
+        // Inspect the live property, not a remembered request: retained scene
+        // targets can be changed externally and must recover on this update.
+        guard entity.isEnabled != isEnabled else { return }
+        entity.isEnabled = isEnabled
+        #if DEBUG
+        annotationSceneWork.visibilityPropertyWrites &+= 1
+        #endif
+    }
+
     private static func makeMark(_ mark: CoachMark) -> Entity {
         #if DEBUG
         annotationSceneWork.markTreeBuilds &+= 1
@@ -3794,10 +3811,10 @@ enum PitchSceneFactory {
             guard cache.marksRoot?.isEnabled == true,
                   binding.entity.value?.isEnabled == true,
                   semanticMark.isVisible(at: time) || focus.selectedMarkID == semanticMark.id else {
-                label.isEnabled = false
+                setAnnotationVisibility(false, on: label)
                 continue
             }
-            label.isEnabled = switch focus {
+            let isVisible = switch focus {
             case .normal:
                 visibleFirstPersonLabels?.contains(semanticMark.id) ?? true
             case .annotation:
@@ -3805,6 +3822,7 @@ enum PitchSceneFactory {
             case .decision:
                 false
             }
+            setAnnotationVisibility(isVisible, on: label)
             guard label.isEnabled else { continue }
             let mark = semanticMark.resolvingTrackGeometry(
                 in: scenario, at: time, presentedPlayerPoses: posesByPlayerID
