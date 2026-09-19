@@ -45,7 +45,9 @@ final class PlaybackClearConfirmationOwnershipTests: XCTestCase {
             after: "private var timelineControlsAreDisabled: Bool",
             before: "private var rateControlsAreDisabled:")
         XCTAssertFalse(railGate.contains("isClearAnnotationsPending"))
-        XCTAssertFalse(railGate.contains("hasActiveTimelineScrub"))
+        XCTAssertTrue(railGate.contains("store.hasActiveTimelineScrub"))
+        XCTAssertTrue(railGate.contains("timelineScrubController.storeScrubID != store.activeTimelineScrubID"),
+                      "A foreign rail may block input, but this rail must retain its own drag")
         XCTAssertFalse(railGate.contains("canChangePlaybackView"))
     }
 

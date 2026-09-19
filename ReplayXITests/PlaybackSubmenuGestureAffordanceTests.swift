@@ -132,7 +132,9 @@ final class PlaybackSubmenuGestureAffordanceTests: XCTestCase {
         let rail = try slice(source, after: "private var timelineControlsAreDisabled:", before: "private var rateControlsAreDisabled:")
         XCTAssertTrue(rail.contains("store.isDrawing || store.hasActiveCoachMarkGeometryPreview"))
         XCTAssertFalse(rail.contains("canChangePlaybackView"))
-        XCTAssertFalse(rail.contains("hasActiveTimelineScrub"))
+        XCTAssertTrue(rail.contains("store.hasActiveTimelineScrub"))
+        XCTAssertTrue(rail.contains("timelineScrubController.storeScrubID != store.activeTimelineScrubID"),
+                      "A foreign rail may block input, but this rail must retain its own drag")
         let roster = try slice(source, after: "private var playerPOVGrid:", before: "private func perspectiveTeamRow(")
         let close = try slice(roster, after: "Button {", before: "Image(systemName: \"person.crop.rectangle.stack.fill\")")
         XCTAssertTrue(close.contains("showsPlayerGrid = false"))
