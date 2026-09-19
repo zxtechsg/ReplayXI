@@ -15,14 +15,15 @@ enum AnnotationArcMesh {
         let baseY: Float
         let control: SIMD3<Float>
 
-        /// A run tied to one player normally translates without changing its
-        /// shape. Keep the existing GPU mesh in that common case. Comparing
-        /// the clamped control point also catches a bend nearing the sideline.
+        /// Player tracking and keyframed 3D translations need no new GPU mesh.
+        /// Comparing all three control points also catches pitch/floor/ceiling
+        /// clipping, which changes the shape rather than simply translating it.
         func translation(to other: Key) -> SIMD3<Float>? {
-            guard startY == other.startY, endY == other.endY,
-                  curve == other.curve, radius == other.radius, baseY == other.baseY else { return nil }
-            let shift = SIMD3<Float>(other.start.x - start.x, 0, other.start.z - start.z)
-            let endShift = SIMD3<Float>(other.end.x - end.x, 0, other.end.z - end.z)
+            guard curve == other.curve, radius == other.radius, baseY == other.baseY else { return nil }
+            let shift = SIMD3<Float>(other.start.x - start.x, other.startY - startY,
+                                     other.start.z - start.z)
+            let endShift = SIMD3<Float>(other.end.x - end.x, other.endY - endY,
+                                        other.end.z - end.z)
             let controlShift = other.control - control
             // Subtracting pitch-space floats can differ by a few micrometres.
             let toleranceSquared: Float = 0.0001 * 0.0001

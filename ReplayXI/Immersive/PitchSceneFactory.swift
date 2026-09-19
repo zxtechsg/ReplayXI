@@ -77,6 +77,7 @@ enum PitchSceneFactory {
         var revisionGeometryUpdates = 0
         var unchangedRevisionGeometryUpdates = 0
         var trackedGeometryUpdates = 0
+        var unchangedTrackedGeometrySkips = 0
         var syncElapsedNanoseconds: UInt64 = 0
     }
 
@@ -121,6 +122,28 @@ enum PitchSceneFactory {
         let labelTarget: WeakEntityReference
         let bodyTarget: WeakEntityReference
         let playerAttachment: WeakEntityReference
+    }
+
+    /// Stores only the geometry actually applied to this entity. Authored
+    /// keyframe arrays and tracking metadata are deliberately excluded: held
+    /// poses should not rewrite RealityKit transforms or arc hit volumes.
+    /// Entity ownership bounds this state and drops it with repaired trees.
+    private struct AppliedMarkGeometry: Component, Equatable {
+        let kind: CoachMarkKind
+        let start: PitchPoint
+        let end: PitchPoint
+        let startElevation: Float
+        let endElevation: Float
+        let curve: CoachMarkCurve?
+
+        init(_ mark: CoachMark) {
+            kind = mark.kind
+            start = mark.start
+            end = mark.end
+            startElevation = mark.resolvedStartElevation
+            endElevation = mark.resolvedEndElevation
+            curve = mark.kind == .arc ? mark.resolvedCurve : nil
+        }
     }
 
     private struct PlayerSceneBuild {
@@ -2997,6 +3020,12 @@ enum PitchSceneFactory {
                 at: time,
                 presentedPlayerPoses: presentedPlayerPoses
             )
+            if entity.components[AppliedMarkGeometry.self] == AppliedMarkGeometry(presentation) {
+                #if DEBUG
+                annotationSceneWork.unchangedTrackedGeometrySkips &+= 1
+                #endif
+                continue
+            }
             #if DEBUG
             annotationSceneWork.trackedGeometryUpdates &+= 1
             #endif
@@ -3260,6 +3289,21 @@ enum PitchSceneFactory {
     private static func updateMarkGeometry(
         in entity: Entity,
         from previous: CoachMark,
+        to incoming: CoachMark,
+        bodyTarget: Entity?
+    ) -> Bool {
+        // Semantic revisions must still inspect/repair their tree. Record the
+        // applied geometry only after every required descendant was updated;
+        // the presentation path can then skip an identical paused/held pose.
+        let updated = applyMarkGeometry(in: entity, to: incoming, bodyTarget: bodyTarget)
+        if updated {
+            entity.components.set(AppliedMarkGeometry(incoming))
+        }
+        return updated
+    }
+
+    private static func applyMarkGeometry(
+        in entity: Entity,
         to incoming: CoachMark,
         bodyTarget: Entity?
     ) -> Bool {
