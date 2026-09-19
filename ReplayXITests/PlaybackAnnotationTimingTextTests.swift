@@ -58,7 +58,7 @@ final class PlaybackAnnotationTimingTextTests: XCTestCase {
         XCTAssertTrue(source.contains("mark.canShiftKeyframes"))
         XCTAssertTrue(source.contains("Button(\"Apply In/Out\""))
         XCTAssertTrue(source.contains("Button(\"Reset In/Out\""))
-        XCTAssertTrue(source.contains(".disabled(!canEdit || !canLeaveEditor)"))
+        XCTAssertTrue(source.contains(".disabled(!canEdit || !canLeaveEditor || !mark.canRecordPose(at: store.playhead))"))
         XCTAssertTrue(source.contains(".focused($focusedField, equals: .positionTime)"))
         XCTAssertTrue(source.contains(".onSubmit { submitPositionTime(mark, from: time) }"))
     }

@@ -23,6 +23,23 @@ extension CoachMark {
     var hasKeyframes: Bool { !(keyframes?.isEmpty ?? true) }
     var hasAnimatedGeometry: Bool { hasKeyframes || followsPlayerTracks }
 
+    /// At capacity, editing an existing timestamp replaces its pose; editing
+    /// between timestamps would need an additional key. Match recordingPose's
+    /// strict tolerance, without silently dropping any saved position.
+    func canRecordPose(at time: TimeInterval) -> Bool {
+        guard time.isFinite, time >= 0 else { return false }
+        return (keyframes?.count ?? 0) < Self.maximumKeyframes || keyframeIndex(at: time) != nil
+    }
+
+    func keyframeCapacityBlockReason(at time: TimeInterval) -> String? {
+        guard time.isFinite, time >= 0, !canRecordPose(at: time) else { return nil }
+        return "\(Self.maximumKeyframes) positions saved. Select a key or delete one."
+    }
+
+    private func keyframeIndex(at time: TimeInterval) -> Int? {
+        keyframes?.firstIndex { abs($0.time - time) < Self.keyframeTimeTolerance }
+    }
+
     func canShiftKeyframes(by delta: TimeInterval, duration: TimeInterval) -> Bool {
         guard delta.isFinite, duration.isFinite, duration >= 0 else { return false }
         return (keyframes ?? []).allSatisfy {
@@ -82,7 +99,7 @@ extension CoachMark {
     func recordingPose(at time: TimeInterval) -> CoachMark {
         var result = self
         var frames = keyframes ?? []
-        if let i = frames.firstIndex(where: { abs($0.time - time) < Self.keyframeTimeTolerance }) {
+        if let i = keyframeIndex(at: time) {
             frames[i] = CoachMarkKeyframe(time: frames[i].time, mark: self)
         } else { frames.append(CoachMarkKeyframe(time: time, mark: self)) }
         result.keyframes = frames.sorted { $0.time < $1.time }

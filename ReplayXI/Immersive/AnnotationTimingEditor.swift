@@ -151,7 +151,10 @@ struct AnnotationTimingEditor: View {
         VStack(alignment: .leading, spacing: 8) {
             adaptiveRow {
                 Label("Saved positions", systemImage: "diamond").font(.headline)
-                Button("Adjust shape", action: openShapeEditor).disabled(!canEdit || !canLeaveEditor)
+                Button("Adjust shape", action: openShapeEditor)
+                    .disabled(!canEdit || !canLeaveEditor || !mark.canRecordPose(at: store.playhead))
+                    .accessibilityHint(mark.keyframeCapacityBlockReason(at: store.playhead)
+                        ?? "Edit the annotation's position at the playhead")
                 if mark.hasKeyframes {
                     Button {
                         if store.freezeCoachMarkKeyframes(id: markID) { positionDraft.clear() }
@@ -270,7 +273,7 @@ struct AnnotationTimingEditor: View {
         }
     }
     private func openShapeEditor() {
-        guard canEdit, canLeaveEditor else { return }
+        guard canEdit, canLeaveEditor, let mark, mark.canRecordPose(at: store.playhead) else { return }
         focusedField = nil
         adjustPose()
     }
@@ -290,7 +293,8 @@ struct AnnotationTimingEditor: View {
         if positionDraft.isDirty { return "Move or reset this position time before switching." }
         if isDirty { return "Apply or reset In/Out before adjusting shape." }
         if mark.followsPlayerTracks { return "Switch to Fixed before adding position keys." }
-        if (mark.keyframes?.count ?? 0) >= CoachMark.maximumKeyframes { return "64 keys saved. Select a key to move or delete it." }
+        if let reason = mark.keyframeCapacityBlockReason(at: store.playhead) { return reason }
+        if (mark.keyframes?.count ?? 0) >= CoachMark.maximumKeyframes { return "64 keys saved. Adjust this position, or delete a key." }
         if !mark.hasKeyframes { return "Add here, seek, then adjust the shape to animate it." }
         return "Tap a timestamp to preview or move it. Seek + Adjust shape saves a new position."
     }

@@ -29,6 +29,24 @@ final class AnnotationCurvePadVisualTests: XCTestCase {
                     size: .large, name: "arc-pad-negative-angle-pitch-limit")
     }
 
+    func testNativeFullCapacityPadExplainsBlockedNewPositionsAtBothTextSizes() throws {
+        let (store, mark) = try makeArc()
+        for index in 0..<CoachMark.maximumKeyframes {
+            store.seek(to: Double(index) / 10)
+            XCTAssertTrue(store.captureCoachMarkKeyframe(id: mark.id))
+        }
+        store.seek(to: 6.35)
+        let full = try XCTUnwrap(store.marks.first { $0.id == mark.id })
+        XCTAssertNotNil(full.keyframeCapacityBlockReason(at: store.playhead))
+        XCTAssertFalse(AnnotationCurveAdjustmentController().isEnabled(in: store, markID: mark.id))
+        for (name, size) in [("default", DynamicTypeSize.large), ("accessibility5", .accessibility5)] {
+            let layout = PlaybackControlDeckLayout.resolve(preset: .standard,
+                usesAccessibilityText: size.isAccessibilitySize)
+            try capture(store: store, mark: full, width: layout.contentWidth - 64,
+                        size: size, name: "arc-pad-full-capacity-\(name)")
+        }
+    }
+
     private func capture(store: ReplayStore, mark: CoachMark, width: CGFloat,
                          size: DynamicTypeSize, name: String) throws {
         let view = AnnotationCurveAdjustmentPad(markID: mark.id, color: ReplayTheme.cyan, onCommit: {})

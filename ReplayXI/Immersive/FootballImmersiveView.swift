@@ -1687,6 +1687,7 @@ private struct AnnotationAdjustmentJoystick: View {
     let accessibilityTarget: String
     let color: Color
     let isEnabled: Bool
+    let disabledReason: String?
     let onPreview: (_ gestureID: UUID, _ cumulativeX: Float, _ cumulativeZ: Float) -> CoachMarkEndpointPreviewResult?
     let onCommit: (_ gestureID: UUID) -> PitchPoint?
     let onCancel: (_ gestureID: UUID) -> Bool
@@ -1763,7 +1764,7 @@ private struct AnnotationAdjustmentJoystick: View {
         .accessibilityHint(
             isEnabled
                 ? "Pinch and drag. Up moves upfield and down moves back."
-                : "Finish the active endpoint adjustment first."
+                : (disabledReason ?? "Finish the active endpoint adjustment first.")
         )
         .accessibilityAction(named: "Move left") { atomicNudge(x: -stepMetres, z: 0) }
         .accessibilityAction(named: "Move right") { atomicNudge(x: stepMetres, z: 0) }
@@ -2985,6 +2986,9 @@ private struct ImmersiveControlDeck: View {
         let mark = mark.sampled(at: store.playhead)
         return inlineShelf(color: annotationColor(for: mark.kind)) {
             VStack(alignment: .leading, spacing: 12) {
+                if mark.kind != .arc, let reason = mark.keyframeCapacityBlockReason(at: store.playhead) {
+                    Text(reason).font(.caption).foregroundStyle(.secondary)
+                }
                 annotationEndpointGeometryRow(mark)
                 if mark.kind == .arc {
                     Divider()
@@ -3013,6 +3017,7 @@ private struct ImmersiveControlDeck: View {
                     accessibilityTarget: annotationStartPointAccessibilityTarget(for: mark.kind),
                     color: annotationColor(for: mark.kind),
                     isEnabled: annotationJoystickIsEnabled(markID: mark.id, endpoint: .start),
+                    disabledReason: mark.keyframeCapacityBlockReason(at: store.playhead),
                     onPreview: { gestureID, x, z in
                         previewAnnotation(
                             mark,
@@ -3047,6 +3052,7 @@ private struct ImmersiveControlDeck: View {
                     accessibilityTarget: annotationEndPointAccessibilityTarget(for: mark.kind),
                     color: annotationColor(for: mark.kind),
                     isEnabled: annotationJoystickIsEnabled(markID: mark.id, endpoint: .end),
+                    disabledReason: mark.keyframeCapacityBlockReason(at: store.playhead),
                     onPreview: { gestureID, x, z in
                         previewAnnotation(
                             mark,
@@ -3179,7 +3185,7 @@ private struct ImmersiveControlDeck: View {
         )
         .accessibilityValue(annotationElevationAccessibilityValue(mark, target: target))
         .accessibilityHint(store.canChangePlaybackView
-            ? "Moves vertically by 0.25 metres"
+            ? (mark.keyframeCapacityBlockReason(at: store.playhead) ?? "Moves vertically by 0.25 metres")
             : "Finish or cancel the current gesture first")
     }
 
@@ -3189,6 +3195,7 @@ private struct ImmersiveControlDeck: View {
         delta: Float
     ) -> Bool {
         guard store.canChangePlaybackView else { return false }
+        guard mark.canRecordPose(at: store.playhead) else { return false }
         let elevations: [Float] = switch target {
         case .start: [mark.resolvedStartElevation]
         case .end: [mark.resolvedEndElevation]
@@ -3250,6 +3257,8 @@ private struct ImmersiveControlDeck: View {
         endpoint: CoachMarkEndpoint
     ) -> Bool {
         guard !store.hasActiveTimelineScrub else { return false }
+        guard let mark = store.marks.first(where: { $0.id == markID }),
+              mark.canRecordPose(at: store.playhead) else { return false }
         guard let owner = store.activeCoachMarkEndpointPreviewOwner else {
             // A world handle owns geometry without creating a joystick owner.
             return !store.hasActiveCoachMarkGeometryPreview
@@ -4705,6 +4714,7 @@ private struct ImmersiveControlDeck: View {
 
     private func annotationGeometryButton(_ mark: CoachMark) -> some View {
         Button {
+            guard mark.canRecordPose(at: store.playhead) else { return }
             toggleInlinePanel(.annotationGeometry(mark.id))
         } label: {
             Label("Adjust", systemImage: "arrow.up.and.down.and.arrow.left.and.right")
@@ -4718,9 +4728,11 @@ private struct ImmersiveControlDeck: View {
         }
         .buttonStyle(.bordered)
         .tint(annotationColor(for: mark.kind))
+        .disabled(!mark.canRecordPose(at: store.playhead))
         .accessibilityLabel("Adjust annotation endpoints")
         .accessibilityHint(
-            "Steer either endpoint on the pitch, then raise an endpoint or the complete stroke in quarter-metre steps"
+            mark.keyframeCapacityBlockReason(at: store.playhead)
+                ?? "Steer either endpoint on the pitch, then raise an endpoint or the complete stroke in quarter-metre steps"
         )
         .accessibilityAddTraits(
             inlinePanel == .annotationGeometry(mark.id) ? .isSelected : []

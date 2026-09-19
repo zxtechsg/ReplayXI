@@ -40,7 +40,8 @@ final class AnnotationCurveAdjustmentController {
 
     func isEnabled(in store: ReplayStore, markID: UUID) -> Bool {
         guard !store.hasActiveTimelineScrub, !store.isDrawing,
-              store.marks.contains(where: { $0.id == markID && $0.kind == .arc }) else { return false }
+              let mark = store.marks.first(where: { $0.id == markID && $0.kind == .arc }),
+              mark.canRecordPose(at: store.playhead) else { return false }
         if let transaction {
             return transaction.markID == markID && store.isCoachMarkCurvePreviewOwner(
                 id: markID, gestureID: transaction.gestureID)
@@ -113,7 +114,8 @@ final class AnnotationCurveAdjustmentController {
 
     func canNudge(in store: ReplayStore, markID: UUID, bend: Float, lift: Float) -> Bool {
         guard !isActive, store.canChangePlaybackView,
-              let mark = store.marks.first(where: { $0.id == markID }), mark.kind == .arc else { return false }
+              let mark = store.marks.first(where: { $0.id == markID }), mark.kind == .arc,
+              mark.canRecordPose(at: store.playhead) else { return false }
         let curve = mark.sampled(at: store.playhead).resolvedCurve
         return Mode.offset.adjusted(curve, horizontal: bend, vertical: lift) != curve
     }
@@ -129,7 +131,8 @@ final class AnnotationCurveAdjustmentController {
     func canAdjust(in store: ReplayStore, markID: UUID, mode: Mode,
                    horizontal: Float, vertical: Float) -> Bool {
         guard horizontal.isFinite, vertical.isFinite, !isActive, store.canChangePlaybackView,
-              let mark = store.marks.first(where: { $0.id == markID }), mark.kind == .arc else { return false }
+              let mark = store.marks.first(where: { $0.id == markID }), mark.kind == .arc,
+              mark.canRecordPose(at: store.playhead) else { return false }
         return mode.adjusted(mark.sampled(at: store.playhead).resolvedCurve, horizontal: horizontal, vertical: vertical) != mark.sampled(at: store.playhead).resolvedCurve
     }
 

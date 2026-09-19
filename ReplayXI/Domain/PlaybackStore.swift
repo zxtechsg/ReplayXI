@@ -1331,6 +1331,7 @@ final class ReplayStore {
               localRole == .coach, !selectedScenario.coachMarks.contains(where: { $0.id == id }),
               let index = marks.firstIndex(where: { $0.id == id }),
               marks[index].kind != .playerLabel, !marks[index].followsPlayerTracks else { return false }
+        guard allowsCoachMarkPoseRecording(marks[index]) else { return false }
         let replacement = marks[index].sampled(at: playhead).recordingPose(at: playhead)
         guard replacement != marks[index], isValidSharedMark(replacement, for: selectedScenario) else { return false }
         marks[index] = replacement
@@ -1738,6 +1739,7 @@ final class ReplayStore {
             return false
         }
         let mark = marks[index]
+        guard allowsCoachMarkPoseRecording(mark) else { return false }
         let replacement = markReplacingGeometry(
             mark,
             start: start,
@@ -2007,6 +2009,7 @@ final class ReplayStore {
             return false
         }
 
+        guard allowsCoachMarkPoseRecording(mark) else { return false }
         let replacement = markReplacingGeometry(
             mark,
             start: start,
@@ -2080,6 +2083,7 @@ final class ReplayStore {
 
         // Ground level remains nil on newly edited marks. This keeps the wire
         // payload compact and semantically identical to legacy annotations.
+        guard allowsCoachMarkPoseRecording(mark) else { return false }
         var replacement = CoachMark(
             id: mark.id,
             kind: mark.kind,
@@ -2237,6 +2241,10 @@ final class ReplayStore {
             return nil
         }
 
+        guard allowsCoachMarkPoseRecording(mark) else {
+            invalidateCoachMarkEndpointPreview(id: id)
+            return nil
+        }
         let replacement = markReplacingGeometry(
             mark,
             start: start,
@@ -3168,6 +3176,12 @@ final class ReplayStore {
                 scenario: scenario, viewMode: .positional, showsIdealBranch: true
             ))
         }
+        return false
+    }
+
+    private func allowsCoachMarkPoseRecording(_ mark: CoachMark) -> Bool {
+        guard let reason = mark.keyframeCapacityBlockReason(at: playhead) else { return true }
+        statusMessage = reason
         return false
     }
 

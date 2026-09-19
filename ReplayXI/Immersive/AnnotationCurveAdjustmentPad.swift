@@ -13,6 +13,9 @@ struct AnnotationCurveAdjustmentPad: View {
 
     private var isEnabled: Bool { controller.isEnabled(in: store, markID: markID) }
     private var precision: AnnotationCurveAdjustmentPrecision { .init(fine: fine) }
+    private var capacityBlockReason: String? {
+        store.marks.first(where: { $0.id == markID })?.keyframeCapacityBlockReason(at: store.playhead)
+    }
     private var curve: CoachMarkCurve {
         store.marks.first(where: { $0.id == markID })?.sampled(at: store.playhead).resolvedCurve ?? CoachMarkCurve(bend: 0, lift: 0)
     }
@@ -73,6 +76,10 @@ struct AnnotationCurveAdjustmentPad: View {
             Text("\(mode.horizontalTitle) ↔\u{FE0E}  \(mode.verticalTitle) ↕\u{FE0E}")
                 .font(.caption.weight(.semibold))
                 .fixedSize(horizontal: false, vertical: true)
+            if let capacityBlockReason {
+                Text(capacityBlockReason).font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if isLimitedByPitch {
                 Label("Pitch limit", systemImage: "exclamationmark.circle")
                     .font(.caption2)
@@ -118,7 +125,7 @@ struct AnnotationCurveAdjustmentPad: View {
             : "Bend \(metres(curve.bend)), lift \(metres(curve.lift))")
         .accessibilityHint(isEnabled
             ? precision.padHint(isAngle: mode == .shape)
-            : "Finish or cancel the current gesture first")
+            : (capacityBlockReason ?? "Finish or cancel the current gesture first"))
         .accessibilityAction(named: "Decrease curve") { adjust(mode: .shape, horizontal: -precision.distanceStep, vertical: 0) }
         .accessibilityAction(named: "Increase curve") { adjust(mode: .shape, horizontal: precision.distanceStep, vertical: 0) }
         .accessibilityAction(named: "Rotate arc clockwise") { adjust(mode: .shape, horizontal: 0, vertical: -precision.angleStep) }
@@ -161,7 +168,8 @@ struct AnnotationCurveAdjustmentPad: View {
         .disabled(!controller.canAdjust(in: store, markID: markID, mode: mode,
                                        horizontal: horizontal, vertical: vertical))
         .accessibilityLabel("\(symbol == "minus" ? "Decrease" : "Increase") arc \(title.lowercased())")
-        .accessibilityHint(mode == .shape && vertical != 0 ? precision.angleHint : precision.distanceHint)
+        .accessibilityHint(capacityBlockReason
+            ?? (mode == .shape && vertical != 0 ? precision.angleHint : precision.distanceHint))
         .help("\(symbol == "minus" ? "Decrease" : "Increase") \(title.lowercased())")
     }
 
