@@ -1165,7 +1165,8 @@ enum PitchSceneFactory {
                                              lookTarget: playerLookTarget, ballAction: ballAction,
                                              impact: impactSample, stationaryPose: stationaryPose,
                                              interaction: interaction, presentationPose: motionPresentation,
-                                             goalkeeperReadiness: keeperReadiness)
+                                             goalkeeperReadiness: keeperReadiness,
+                                             allowsTrackLocomotionSampling: stationaryPose == nil)
                 } else {
                     usesNewSkin = false
                 }

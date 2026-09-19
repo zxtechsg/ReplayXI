@@ -225,6 +225,17 @@ final class ReplaySkinnedAthleteInstance {
     #if DEBUG
     /// Native same-frame A/B audit; not exposed in the shipped app.
     var disablesCutPhaseAlignmentForTesting = false
+    /// Retains the independently measured cycle138 aligned, unsmoothed control.
+    var disablesCutWeightSmoothingForTesting = false
+    enum DiagnosticStage: String, CaseIterable {
+        case source, footballRetargetAndContact, offBall, look, impact
+        case stationarySupport, headerAim, cervical, finalFloor
+    }
+    /// Local arrays are authoritative at every stage. Intermediate model-space
+    /// matrices may be stale; a test observer must rebuild its own value copy.
+    /// No observer/storage or extra hierarchy work exists in Release builds.
+    var poseStageObserverForTesting: ((DiagnosticStage, ReplaySkinnedAthleteMotion.Pose) -> Void)?
+    var authoredPoseObserverForTesting: ((ReplayAthleteLocomotionPose, Float, Float) -> Void)?
     #endif
     let root: Entity
     let playerID: String
@@ -288,6 +299,9 @@ final class ReplaySkinnedAthleteInstance {
                               translation: motion.numberAnchors.back).matrix
     }
 
+    /// Supplied locomotion is authoritative by default, including deliberate
+    /// straight-run overrides. Only callers using the track's exact sample may
+    /// opt into neighbour-track sampling for the cut-weight crossfade.
     @discardableResult
     func update(at time: TimeInterval, track: PlayerTrack, locomotion suppliedLocomotion: PlayerLocomotionSample,
                 lookTarget: SIMD3<Float>?, ballAction: ReplayAthleteBallActionPose?,
@@ -296,7 +310,8 @@ final class ReplaySkinnedAthleteInstance {
                 interaction: ReplayAthleteInteractionCue? = nil,
                 presentationPose: PlayerPose? = nil,
                 allowsOffBallPose: Bool = true,
-                goalkeeperReadiness: ReplayGoalkeeperReadiness.Sample? = nil) -> Bool {
+                goalkeeperReadiness: ReplayGoalkeeperReadiness.Sample? = nil,
+                allowsTrackLocomotionSampling: Bool = false) -> Bool {
         let locomotion = stationaryPose == nil ? suppliedLocomotion : track.stationaryLocomotion
         // Never apply a stale or different player's collision sample. Unsupported
         // assets still fail soft to the procedural body rather than disappear.
@@ -314,6 +329,9 @@ final class ReplaySkinnedAthleteInstance {
         let upperBodyEffort = effort * min(max(locomotion.speedMetresPerSecond / 2.4, 0), 1)
         motion.sample(time: time, locomotionEffort: upperBodyEffort,
                       gaitPhase: gaitPhase, rebuildingModelSpace: false, into: &pose)
+        #if DEBUG
+        poseStageObserverForTesting?(.source, pose)
+        #endif
         let interactionSample = ReplayAthleteInteractionPose.sample(
             cue: interaction, at: time, track: track, presentationPose: stationaryPose ?? presentationPose)
         // Callers already ease readiness out around a touch. Defend the actual
@@ -324,16 +342,23 @@ final class ReplaySkinnedAthleteInstance {
         let movement = stationaryPose == nil
             ? ReplayAthleteMovementIntent.sample(track: track, at: time, presentationPose: presentationPose,
                                                lookTarget: lookTarget, interaction: interaction) : nil
-        let influence = max(ReplaySkinnedAthleteFootballPose.influence(locomotion: locomotion, ballAction: ballAction),
+        var phaseEnabled = allowsOffBallPose && stationaryPose == nil && impact == nil && ballAction == nil
+        #if DEBUG
+        phaseEnabled = phaseEnabled && !disablesCutPhaseAlignmentForTesting
+        let cutWeightEnabled = phaseEnabled && allowsTrackLocomotionSampling && !disablesCutWeightSmoothingForTesting
+        #else
+        let cutWeightEnabled = phaseEnabled && allowsTrackLocomotionSampling
+        #endif
+        let nativeLocomotion = ReplaySkinnedAthleteCutWeight.sample(source: motion.sourceCommit,
+            track: track, at: time, locomotion: locomotion, interaction: interaction, enabled: cutWeightEnabled)
+        let ballInfluence = ballAction == nil ? 0
+            : ReplaySkinnedAthleteFootballPose.influence(locomotion: locomotion, ballAction: ballAction)
+        let influence = max(nativeLocomotion.influence, ballInfluence,
                             interactionSample?.influence ?? 0, movement?.influence ?? 0, keeper?.influence ?? 0)
         if influence > 0, footballPose != nil {
-            var phaseEnabled = allowsOffBallPose && stationaryPose == nil && impact == nil && ballAction == nil
-            #if DEBUG
-            phaseEnabled = phaseEnabled && !disablesCutPhaseAlignmentForTesting
-            #endif
             let phaseWeight = ReplaySkinnedAthleteCutPhase.weight(source: motion.sourceCommit,
                 track: track, at: time, locomotion: locomotion, interaction: interaction,
-                retargetInfluence: influence, enabled: phaseEnabled)
+                retargetInfluence: influence, enabled: phaseEnabled, cutInfluence: nativeLocomotion.influence)
             let authored = ReplaySkinnedAthleteCutPhase.authoredPose(phase: gaitPhase, weight: phaseWeight) { phase in
                 ReplayAthleteMotion.locomotionPose(
                     for: track, at: time, locomotion: locomotion, gaitPhase: phase,
@@ -341,13 +366,19 @@ final class ReplaySkinnedAthleteInstance {
                     stationaryPose: stationaryPose, interaction: interaction, presentationPose: presentationPose,
                     movementIntent: movement, allowsOffBallPose: false, goalkeeperReadiness: keeper)
             }
+            #if DEBUG
+            authoredPoseObserverForTesting?(authored, phaseWeight, influence)
+            #endif
             footballPose?.apply(authored, influence: influence,
-                                armInfluence: max(ReplaySkinnedAthleteFootballPose.influence(locomotion: locomotion, ballAction: nil),
+                                armInfluence: max(nativeLocomotion.influence,
                                                   interactionSample?.influence ?? 0, movement?.readiness ?? 0,
                                                   keeper?.armInfluence ?? 0),
                                 motion: motion, to: &pose, interaction: interactionSample,
                                 goalkeeperReadiness: keeper)
         }
+        #if DEBUG
+        poseStageObserverForTesting?(.footballRetargetAndContact, pose)
+        #endif
         let baseLook = ReplayAthleteMotion.lookPose(for: track, at: time, locomotion: locomotion,
                                                targetWorldPosition: lookTarget,
                                                stationaryPose: stationaryPose,
@@ -360,6 +391,9 @@ final class ReplaySkinnedAthleteInstance {
             enabled: allowsOffBallPose && presentationPose != nil && stationaryPose == nil
                 && impact == nil && lookTarget != nil)
         applyOffBall(offBall)
+        #if DEBUG
+        poseStageObserverForTesting?(.offBall, pose)
+        #endif
         let look = offBall.adjusting(baseLook)
         if let action = interactionSample {
             applyLook(ReplayAthleteLookPose(neckYawRadians: look.neckYawRadians,
@@ -367,9 +401,15 @@ final class ReplaySkinnedAthleteInstance {
                 neckPitchRadians: look.neckPitchRadians,
                 headPitchRadians: look.headPitchRadians + action.headPitch * action.influence))
         } else { applyLook(look) }
+        #if DEBUG
+        poseStageObserverForTesting?(.look, pose)
+        #endif
         if let impact {
             impactPose?.apply(impact.pose, influence: impact.influence, motion: motion, to: &pose)
         }
+        #if DEBUG
+        poseStageObserverForTesting?(.impact, pose)
+        #endif
         motion.rebuildModelSpaceTransforms(in: &pose)
         if let turn = ReplaySkinnedAthleteTurnInPlace.sample(track: track, at: time,
             presentationPose: presentationPose, locomotion: locomotion, interaction: interaction,
@@ -377,6 +417,9 @@ final class ReplaySkinnedAthleteInstance {
             enabled: allowsOffBallPose && stationaryPose == nil && impact == nil) {
             turnInPlace?.apply(turn, motion: motion, to: &pose)
         }
+        #if DEBUG
+        poseStageObserverForTesting?(.stationarySupport, pose)
+        #endif
         if let action = interactionSample, action.kind == .header {
             // Source Biped axes and torso lengths differ from the generated
             // rig. Solve from the actual model-space chest/head pivots, then
@@ -404,8 +447,17 @@ final class ReplaySkinnedAthleteInstance {
             pose.rotations[chestIndex] = simd_normalize(parentRotation.inverse * desired)
             motion.rebuildModelSpaceTransforms(in: &pose)
         }
+        #if DEBUG
+        poseStageObserverForTesting?(.headerAim, pose)
+        #endif
         constrainHeadRelativeToChest()
+        #if DEBUG
+        poseStageObserverForTesting?(.cervical, pose)
+        #endif
         contactSurface.raiseAboveFloor(motion.geometry.restMinY + contactSurface.paddingMetres, in: &pose)
+        #if DEBUG
+        poseStageObserverForTesting?(.finalFloor, pose)
+        #endif
         for index in transforms.indices {
             transforms[index] = Transform(scale: pose.scales[index], rotation: pose.rotations[index],
                                           translation: pose.translations[index])

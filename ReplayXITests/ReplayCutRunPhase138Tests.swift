@@ -97,7 +97,8 @@ final class ReplayCutRunPhase138Tests: XCTestCase {
             poses: poses, contacts: context.cues)
         XCTAssertTrue(skin.update(at: time, track: context.track,
             locomotion: context.track.locomotion(at: time), lookTarget: look,
-            ballAction: nil, interaction: context.cue(at: time), presentationPose: presented))
+            ballAction: nil, interaction: context.cue(at: time), presentationPose: presented,
+            allowsTrackLocomotionSampling: true))
         return presented
     }
 
@@ -214,8 +215,14 @@ final class ReplayCutRunPhase138Tests: XCTestCase {
         var maxBoneError: Float = 0, maxJointStep: Float = 0, minFloor = Float.infinity
         var legacyMaxJointStep: Float = 0, maximumSoleSpeed: Float = 0, legacyMaximumSoleSpeed: Float = 0
         var coreSamples = 0
+        var observedInfluence: Float = 0, observedAlignment: Float = 0
+        skin.authoredPoseObserverForTesting = { _, alignment, influence in
+            observedAlignment = alignment; observedInfluence = influence
+        }
+        defer { skin.authoredPoseObserverForTesting = nil }
         for time in times {
             let locomotion = track.locomotion(at: time), phase = track.gaitPhase(at: time)
+            observedInfluence = 0; observedAlignment = 0
             let presented = update(skin, context: context, time: time)
             _ = update(legacy, context: context, time: time)
             let feet = try sourceFeet(motion: skin.motion, phase: phase, locomotion: locomotion)
@@ -227,10 +234,9 @@ final class ReplayCutRunPhase138Tests: XCTestCase {
             let interaction = ReplayAthleteInteractionPose.sample(cue: context.cue(at: time), at: time,
                 track: track, presentationPose: presented)
             let cut = ReplaySkinnedAthleteFootballPose.influence(locomotion: locomotion, ballAction: nil)
-            let actualInfluence = max(cut, movement?.influence ?? 0, interaction?.influence ?? 0)
-            let alignment = ReplaySkinnedAthleteCutPhase.weight(source: skin.motion.sourceCommit, track: track,
-                at: time, locomotion: locomotion, interaction: context.cue(at: time),
-                retargetInfluence: actualInfluence, enabled: true)
+            // Read the actual provider values. Reconstructing from raw cut
+            // weights misses native smoothing and its phase-share admission.
+            let actualInfluence = observedInfluence, alignment = observedAlignment
             let protection = ReplayAthleteMovementIntent.contactProtection(for: context.cue(at: time), track: track, at: time)
             if protection >= 1 {
                 XCTAssertEqual(alignment, 0)
@@ -244,6 +250,7 @@ final class ReplayCutRunPhase138Tests: XCTestCase {
                 "phase": phase, "speed": locomotion.speedMetresPerSecond,
                 "turnRate": locomotion.turnRateDegreesPerSecond, "cutWeight": cut,
                 "actualRetargetInfluence": actualInfluence, "movementInfluence": movement?.influence ?? 0,
+                "retargetMetadataSource": "Native provider observer; cutWeight remains the raw policy value",
                 "interactionInfluence": interaction?.influence ?? 0, "protectedCue": context.cue(at: time) != nil,
                 "alignmentAdmission": alignment, "contactProtection": protection]
             for side in ["left", "right"] {
@@ -507,35 +514,67 @@ final class ReplayCutRunPhase138Tests: XCTestCase {
         for detail in [ReplaySkinnedAthleteProvider.Detail.near, .lowDetail] {
             let skin = try ReplaySkinnedAthleteProvider.make(for: track, detail: detail)
             for time in [6.85, 6.875, 6.925] {
-                let presented = update(skin, context: context, time: time)
-                let scene = Entity(), actor = Entity()
-                actor.position = SIMD3<Float>(presented.position.x, 0, presented.position.z) - origin
-                actor.orientation = simd_quatf(angle: presented.facingDegrees * .pi / 180, axis: [0, 1, 0])
-                actor.addChild(skin.root); scene.addChild(actor)
-                defer {
-                    skin.root.removeFromParent()
-                    for child in Array(scene.children) { child.removeFromParent() }
-                }
-                let floor = ModelEntity(mesh: .generateBox(size: [8, 0.008, 8]),
-                    materials: [SimpleMaterial(color: UIColor(red: 0.07, green: 0.12, blue: 0.09, alpha: 1),
-                                               roughness: 1, isMetallic: false)])
-                floor.position.y = -0.006; scene.addChild(floor)
-                let ball = ModelEntity(mesh: .generateSphere(radius: 0.11),
-                    materials: [SimpleMaterial(color: .white, roughness: 0.7, isMetallic: false)])
-                ball.position = context.recording.sample(at: time).position - origin; scene.addChild(ball)
-                let camera = PerspectiveCamera()
-                camera.camera = .init(near: 0.05, far: 80, fieldOfViewInDegrees: 35)
-                camera.look(at: [0, 0.8, 0], from: [4, 2, -3.2], relativeTo: nil)
-                let key = DirectionalLight(), fill = DirectionalLight()
-                key.light.intensity = 2_200; key.look(at: [0, 0.8, 0], from: [3, 4, -3], relativeTo: nil)
-                fill.light.intensity = 500; fill.look(at: [0, 0.8, 0], from: [-3, 2, -2], relativeTo: nil)
-                let frame = try await render([scene, camera, key, fill], camera: camera, size: 512)
-                let image = XCTAttachment(data: try ReplayRealityRendererAudit.png(frame, calibration: calibration),
-                                          uniformTypeIdentifier: "public.png")
-                image.name = "ReplayXI-CutRunPhase138-fra-22-\(detail)-\(time).png"
-                image.lifetime = .keepAlways; add(image)
+                try await captureNative(skin, context: context, time: time, origin: origin,
+                    calibration: calibration, name: "ReplayXI-CutRunPhase138-fra-22-\(detail)-\(time).png")
             }
         }
+    }
+
+    func testCaptureNativeCutWeight139MatchedControls() async throws {
+        try ReplaySkinnedAthleteProvider.prewarm()
+        try ReplaySkinnedAthleteProvider.prewarmLowDetail()
+        let calibration = try await calibrate()
+        // These are the independently measured cycle138 maximum-step instants,
+        // not selected from a candidate's most flattering pose.
+        let examples = [("final-108-rebound-v2", "arg-10", 1.20 + 16.0 / 120),
+                        ("final-36-counter-v2", "fra-5", Double(338) / 30 - 0.075 + 18.0 / 120)]
+        for (scenarioID, playerID, time) in examples {
+            let scenario = try XCTUnwrap(FootballReferenceScenarios.all.first { $0.id == scenarioID })
+            let track = try XCTUnwrap(scenario.player(id: playerID))
+            let context = try await context(scenario, track)
+            let middle = track.presentationPose(at: time).position
+            let origin = SIMD3<Float>(middle.x, 0, middle.z)
+            for detail in [ReplaySkinnedAthleteProvider.Detail.near, .lowDetail] {
+                for smoothed in [false, true] {
+                    let skin = try ReplaySkinnedAthleteProvider.make(for: track, detail: detail)
+                    skin.disablesCutWeightSmoothingForTesting = !smoothed
+                    let variant = smoothed ? "candidate" : "cycle138Aligned"
+                    try await captureNative(skin, context: context, time: time, origin: origin,
+                        calibration: calibration, name: "ReplayXI-CutWeight139-\(playerID)-\(detail)-\(time)-\(variant).png")
+                }
+            }
+        }
+    }
+
+    private func captureNative(_ skin: ReplaySkinnedAthleteInstance, context: Context, time: Double,
+                               origin: SIMD3<Float>, calibration: ReplayRealityRendererAudit.Calibration,
+                               name: String) async throws {
+        let presented = update(skin, context: context, time: time)
+        let scene = Entity(), actor = Entity()
+        actor.position = SIMD3<Float>(presented.position.x, 0, presented.position.z) - origin
+        actor.orientation = simd_quatf(angle: presented.facingDegrees * .pi / 180, axis: [0, 1, 0])
+        actor.addChild(skin.root); scene.addChild(actor)
+        defer {
+            skin.root.removeFromParent()
+            for child in Array(scene.children) { child.removeFromParent() }
+        }
+        let floor = ModelEntity(mesh: .generateBox(size: [8, 0.008, 8]),
+            materials: [SimpleMaterial(color: UIColor(red: 0.07, green: 0.12, blue: 0.09, alpha: 1),
+                                       roughness: 1, isMetallic: false)])
+        floor.position.y = -0.006; scene.addChild(floor)
+        let ball = ModelEntity(mesh: .generateSphere(radius: 0.11),
+            materials: [SimpleMaterial(color: .white, roughness: 0.7, isMetallic: false)])
+        ball.position = context.recording.sample(at: time).position - origin; scene.addChild(ball)
+        let camera = PerspectiveCamera()
+        camera.camera = .init(near: 0.05, far: 80, fieldOfViewInDegrees: 35)
+        camera.look(at: [0, 0.8, 0], from: [4, 2, -3.2], relativeTo: nil)
+        let key = DirectionalLight(), fill = DirectionalLight()
+        key.light.intensity = 2_200; key.look(at: [0, 0.8, 0], from: [3, 4, -3], relativeTo: nil)
+        fill.light.intensity = 500; fill.look(at: [0, 0.8, 0], from: [-3, 2, -2], relativeTo: nil)
+        let frame = try await render([scene, camera, key, fill], camera: camera, size: 512)
+        let image = XCTAttachment(data: try ReplayRealityRendererAudit.png(frame, calibration: calibration),
+                                  uniformTypeIdentifier: "public.png")
+        image.name = name; image.lifetime = .keepAlways; add(image)
     }
 
     private func calibrate() async throws -> ReplayRealityRendererAudit.Calibration {

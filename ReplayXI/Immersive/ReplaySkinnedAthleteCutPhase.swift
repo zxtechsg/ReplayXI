@@ -13,12 +13,13 @@ enum ReplaySkinnedAthleteCutPhase {
 
     static func weight(source: String, track: PlayerTrack, at time: TimeInterval,
                        locomotion: PlayerLocomotionSample, interaction: ReplayAthleteInteractionCue?,
-                       retargetInfluence: Float, enabled: Bool) -> Float {
+                       retargetInfluence: Float, enabled: Bool, cutInfluence: Float? = nil) -> Float {
         guard enabled, source == sourceCommit, !track.isGoalkeeper,
               time.isFinite, locomotion.speedMetresPerSecond.isFinite,
               locomotion.turnRateDegreesPerSecond.isFinite,
               retargetInfluence.isFinite, retargetInfluence > 0 else { return 0 }
-        let cut = ReplaySkinnedAthleteFootballPose.influence(locomotion: locomotion, ballAction: nil)
+        let cut = cutInfluence ?? ReplaySkinnedAthleteFootballPose.influence(locomotion: locomotion, ballAction: nil)
+        guard cut.isFinite else { return 0 }
         let cutShare = min(max(cut / retargetInfluence, 0), 1)
         let protection = ReplayAthleteMovementIntent.contactProtection(for: interaction, track: track, at: time)
         // Fade complete poses, not their clock phase: interpolating phase can
