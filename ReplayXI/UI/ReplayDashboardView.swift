@@ -142,6 +142,7 @@ struct ReplayDashboardView: View {
 
 private struct ScenarioRail: View {
     @Environment(ReplayStore.self) private var store
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var showsSavedReviews = false
     @State private var showsExercises = true
     @State private var lastScenarioByMode: [ReplayAppMode: String] = [:]
@@ -243,9 +244,11 @@ private struct ScenarioRail: View {
             .buttonStyle(.bordered)
             .padding(14)
             .sheet(isPresented: $showsSavedReviews) {
+                let libraryLayout = ReplayReviewLibraryLayout.resolve(
+                    usesAccessibilityText: dynamicTypeSize.isAccessibilitySize)
                 ReplayReviewLibraryView { showsSavedReviews = false }
                     .padding(16)
-                    .frame(width: 820, height: 390)
+                    .frame(width: libraryLayout.sheetWidth, height: libraryLayout.sheetHeight, alignment: .topLeading)
                     .environment(store)
             }
         }

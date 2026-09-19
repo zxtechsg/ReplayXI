@@ -37,7 +37,23 @@ Production review bytes were unchanged after the timing/library run.
   Before/after calibrated native renders inspected. Knee-to-boot-forward alignment changed
   from approximately −0.60…−0.68 to 1.0. Limb lengths, sole contact and exact rewind pass.
 
-## Still in progress
+## Saved Reviews large-text layout
 
-Saved Reviews large-text layout.
+- Headers and row actions stack at accessibility text sizes; names/status wrap.
+- Review names use a full-width input row. Load/Delete confirmations stay inline and scroll.
+- Dashboard sheet adapts to text size; confirmation opens at the top of its scroll area.
+- A second Save request cannot replace the snapshot while naming the first.
+- 37 focused library/layout/persistence tests passed. Five native captures inspected,
+  including regular/largest text, blocked saves and both confirmations.
+
+Full-suite and unsigned Release validation is running for this combined checkpoint.
 No claim of match mocap accuracy, FIFA fidelity, or measured headset performance.
+
+## Next performance audit
+
+Read-only inspection found whole-document main-actor autosave work: validation, sorted-key
+encoding, atomic previous-document backup and atomic primary write. A near-8 MiB library can
+write roughly 16 MiB of file payload per changed save. No stall duration has been measured.
+The existing 600 ms debounce, passive-playback exclusion, preview masking and post-success
+state adoption must remain intact. Measure stages before considering a single ordered async
+persistence worker; detached autosave writes alone could race explicit Save/Restore.
