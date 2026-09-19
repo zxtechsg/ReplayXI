@@ -211,7 +211,7 @@ enum CityLiverpoolReferenceScenarios {
                     shirtNumber: entry.number, team: team, isGoalkeeper: entry.role == "Goalkeeper",
                     keyframes: route.map { .init(time: $0.time, position: $0.point, facingDegrees: 0) })
                 var heading: Float = team == .home ? 0 : 180
-                let frames = (0...Int(ceil(duration * 10))).map { sample -> MotionKeyframe in
+                var frames = (0...Int(ceil(duration * 10))).map { sample -> MotionKeyframe in
                     let time = min(duration, Double(sample) * 0.1)
                     let position = skeleton.presentationPose(at: time).position
                     let before = skeleton.presentationPose(at: max(0, time - 0.12)).position
@@ -239,6 +239,9 @@ enum CityLiverpoolReferenceScenarios {
                         heading += sample == 0 ? delta : min(max(delta, -14), 14)
                     }
                     return .init(time: time, position: position, facingDegrees: heading)
+                }
+                if !skeleton.isGoalkeeper, !beats.contains(where: { $0.playerID == playerID }) {
+                    frames = ReplayInferredRunningHeading.applying(to: frames, route: skeleton, ball: ball)
                 }
                 return PlayerTrack(id: playerID, displayName: entry.name, role: entry.role,
                     shirtNumber: entry.number, team: team, isGoalkeeper: entry.role == "Goalkeeper",

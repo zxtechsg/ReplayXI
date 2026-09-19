@@ -246,7 +246,7 @@ enum FootballReferenceScenarios {
                     role: roles[slot], shirtNumber: number, team: team, isGoalkeeper: slot == 0,
                     keyframes: waypoints.map { .init(time:$0.time,position:$0.point,facingDegrees:0) })
                 var heading: Float = isAttacking ? 0 : 180
-                let frames = (0...Int(ceil(duration*10))).map { sampleIndex -> MotionKeyframe in
+                var frames = (0...Int(ceil(duration*10))).map { sampleIndex -> MotionKeyframe in
                     let time = min(duration, Double(sampleIndex)*0.1)
                     let p = skeleton.presentationPose(at: time).position
                     let before = skeleton.presentationPose(at: max(0,time-0.12)).position
@@ -272,6 +272,13 @@ enum FootballReferenceScenarios {
                         heading += sampleIndex == 0 ? delta : min(max(delta,-14),14)
                     }
                     return .init(time:time,position:p,facingDegrees:heading)
+                }
+                // Preserve contact actors, keepers, explicit facing paths and
+                // legacy replays exactly. Only inferred off-ball outfield
+                // headings can anticipate a forthcoming recovery run.
+                if worldCupIDs.contains(id), slot != 0, facingPaths[playerID] == nil,
+                   !beats.contains(where: { $0.playerID == playerID }) {
+                    frames = ReplayInferredRunningHeading.applying(to: frames, route: skeleton, ball: ball)
                 }
                 return PlayerTrack(id: skeleton.id, displayName:skeleton.displayName, role:skeleton.role,
                     shirtNumber:number,team:team,isGoalkeeper:slot==0,keyframes:frames)

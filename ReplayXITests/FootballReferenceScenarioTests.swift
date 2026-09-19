@@ -175,6 +175,13 @@ final class FootballReferenceScenarioTests: XCTestCase {
                 "scenario":scenario.id, "samples":recording.samples.count,
                 "missed":recording.missedTouchCount,"planned":plan.count,
                 "elapsed":String(describing: elapsed),
+                // Keep the complete native path for A/B collision checks when
+                // an off-ball actor's heading or articulated pose changes.
+                "trajectory":recording.samples.map { sample in
+                    [sample.time, Double(sample.position.x), Double(sample.position.y),
+                     Double(sample.position.z), Double(sample.velocity.x),
+                     Double(sample.velocity.y), Double(sample.velocity.z)]
+                },
                 "diagnostics":recording.diagnostics.map { sample in
                     ["time":sample.time, "position":[sample.position.x,sample.position.y,sample.position.z],
                      "velocity":[sample.velocity.x,sample.velocity.y,sample.velocity.z],
