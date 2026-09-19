@@ -4487,10 +4487,10 @@ private struct ImmersiveControlDeck: View {
         case .mark(let mark):
             Button {
                 guard store.canChangePlaybackView else { return }
+                guard jump(to: mark) else { return }
                 showsPlaybackAnnotations = true
                 selectedAnnotationID = mark.id
                 showsDecisionStrip = false
-                jump(to: mark)
             } label: {
                 eventChipLabel(
                     time: mark.revealTime,
@@ -5110,10 +5110,9 @@ private struct ImmersiveControlDeck: View {
         store.seek(to: cue.time, broadcast: store.localRole == .coach)
     }
 
-    private func jump(to mark: CoachMark) {
-        guard store.canChangePlaybackView else { return }
-        store.setPlaying(false, broadcast: false)
-        store.seek(to: mark.revealTime, broadcast: store.localRole == .coach)
+    private func jump(to mark: CoachMark) -> Bool {
+        guard store.canChangePlaybackView else { return false }
+        return PlaybackAnnotationEventNavigation.jump(to: mark.id, in: store)
     }
 
     private func nudgeTimeline(by delta: TimeInterval) {

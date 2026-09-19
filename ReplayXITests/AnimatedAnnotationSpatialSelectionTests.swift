@@ -236,7 +236,12 @@ final class AnimatedAnnotationSpatialSelectionTests: XCTestCase {
         XCTAssertTrue(router.contains("selectAnnotation(annotationTarget.markID)\n            selectSpatialAnnotation(mark, in: store)"))
         let jump = try XCTUnwrap(scene.components(separatedBy: "private func jump(to mark: CoachMark)").last)
         XCTAssertTrue(jump.components(separatedBy: "private func ").first?.contains(
-            "store.seek(to: mark.revealTime, broadcast: store.localRole == .coach)") == true)
+            "PlaybackAnnotationEventNavigation.jump(to: mark.id, in: store)") == true)
+        let eventNavigation = try String(contentsOf: project.appendingPathComponent(
+            "ReplayXI/Immersive/PlaybackAnnotationEventNavigation.swift"), encoding: .utf8)
+        XCTAssertTrue(eventNavigation.contains("store.marks.first(where: { $0.id == markID })"))
+        XCTAssertTrue(eventNavigation.contains("store.seek(to: mark.revealTime, broadcast: store.localRole == .coach)"),
+                      "Explicit event review still seeks to the current In; spatial selection does not")
     }
 
     @MainActor

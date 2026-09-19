@@ -29,6 +29,11 @@ final class PlaybackDiscreteTransportOwnershipTests: XCTestCase {
         assertAdmissionBefore("showsPlaybackAnnotations = true", in: mark)
         assertAdmissionBefore("selectedAnnotationID = mark.id", in: mark)
         assertAdmissionBefore("showsDecisionStrip = false", in: mark)
+        let resolvedJump = try XCTUnwrap(mark.range(of: "guard jump(to: mark) else { return }")?.lowerBound)
+        for effect in ["showsPlaybackAnnotations = true", "selectedAnnotationID = mark.id", "showsDecisionStrip = false"] {
+            XCTAssertLessThan(resolvedJump, try XCTUnwrap(mark.range(of: effect)?.lowerBound),
+                              "Resolve the current mark before changing presentation")
+        }
         XCTAssertTrue(cue.contains(".disabled(!store.canChangePlaybackView)"))
         XCTAssertTrue(mark.contains(".disabled(!store.canChangePlaybackView)"))
     }
@@ -37,13 +42,16 @@ final class PlaybackDiscreteTransportOwnershipTests: XCTestCase {
         let source = try immersiveSource()
         for (start, end) in [
             ("private func jump(to cue: CueMoment)", "private func jump(to mark: CoachMark)"),
-            ("private func jump(to mark: CoachMark)", "private func nudgeTimeline(by delta:"),
             ("private func nudgeTimeline(by delta:", "private func openAdjacentPlayerPOV("),
             ("private func adjustTimelineForAccessibility(direction:", "private var shapeFocusStatusDeck:")
         ] {
             let callback = try slice(source, after: start, before: end)
             assertAdmissionBefore("store.setPlaying(false", in: callback)
         }
+        let mark = try slice(source, after: "private func jump(to mark: CoachMark)",
+                             before: "private func nudgeTimeline(by delta:")
+        XCTAssertTrue(mark.contains("guard store.canChangePlaybackView else { return false }"))
+        XCTAssertTrue(mark.contains("PlaybackAnnotationEventNavigation.jump(to: mark.id, in: store)"))
 
         let step = try slice(source, after: "private func timelineStepChoice(", before: "private func playbackRateChoice(")
         XCTAssertTrue(step.contains(".disabled(!store.canChangePlaybackView)"))

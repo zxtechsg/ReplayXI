@@ -42,6 +42,279 @@ final class ReplaySceneWorkDiagnosticsTests: XCTestCase {
         try recordFullSquad(lowDetail: true, farFaces: true)
     }
 
+    func testRecordsAllFiveNativeReferenceScenesAcrossViewsForwardReverseAndPaused() async throws {
+        try XCTSkipIf(ReplayImportedAthleteFeatureGate.isEnabled,
+                      "Measures the default current-asset path, not the opt-in legacy pilot")
+        ReplayArticulatedFarKitProvider.resetForTesting()
+        ReplayArticulatedFarProvider.resetForTesting()
+        ReplayNativeBallPhysics.resetCacheForTesting()
+        defer {
+            ReplayArticulatedFarKitProvider.resetForTesting()
+            ReplayArticulatedFarProvider.resetForTesting()
+            ReplayNativeBallPhysics.resetCacheForTesting()
+        }
+        try ReplaySkinnedAthleteProvider.prewarm()
+        try ReplaySkinnedAthleteProvider.prewarmLowDetail()
+        try ReplayFarAthleteHeadProvider.prewarm()
+        try ReplayArticulatedFarProvider.prewarm()
+        try ReplayArticulatedFarKitProvider.prewarm()
+        try ReplayStrategyPitchProvider.prewarm()
+        try ReplayStrategyBallProvider.prewarm()
+        XCTAssertEqual(FootballReferenceScenarios.all.count, 5)
+        for scenario in FootballReferenceScenarios.all {
+            let plan = try XCTUnwrap(FootballReferenceScenarios.touches(for: scenario))
+            // Native preparation is explicit and outside all update timings.
+            // Never let another test's cache decide which ball path is timed.
+            let recording = try await ReplayNativeBallPhysics.bake(track: scenario.ball,
+                players: scenario.players, plannedTouches: plan)
+            XCTAssertEqual(recording.missedTouchCount, 0, scenario.id)
+            XCTAssertEqual(recording.touches.count, plan.count, scenario.id)
+            try ReplayAthleteFactory.prewarm(for: scenario.players, lods: [.near, .far])
+            let regular = (0...48).map { scenario.duration * Double($0) / 48 }
+            let contactTimes = recording.touches.flatMap { [$0.time - 0.06, $0.time, $0.time + 0.06] }
+            let samples = regular + contactTimes + scenario.moments.map(\.time)
+            let forward = Array(Set(samples.map { min(max($0, 0), scenario.duration) })).sorted()
+            XCTAssertLessThanOrEqual(forward.count, 120)
+            guard forward.count <= 120 else { throw CocoaError(.fileReadTooLarge) }
+            let pausedTime = recording.touches.last?.time ?? scenario.duration * 0.5
+            var views: [[String: Any]] = []
+            for view in [ReplayViewMode.tacticalTable, .touchline, .firstPerson] {
+                views.append(try diagnoseNativeReference(scenario: scenario, recording: recording,
+                    view: view, forward: forward, pausedTime: pausedTime))
+            }
+            let report: [String: Any] = [
+                "scope": "Native test-process CPU: PitchSceneFactory.update on current referenced scenes; record compiler flags separately",
+                "includes": "Native ball/contact playback, 22 player tracks, procedural articulation, current near/low skins and far assets, annotations/labels, existing DEBUG counters and ordinary LOD transitions",
+                "excludes": "Native physics bake, asset prewarm, initial graph/warmup, assertions/oracles/census, renderer/GPU/compositor, SwiftUI/input and headset work",
+                "notFPS": true, "notPacedPlayback": true, "notColdStart": true,
+                "scenarioID": scenario.id, "playerIDs": scenario.players.map(\.id),
+                "perspectiveID": scenario.defaultPerspectiveID, "authoredMarkCount": scenario.coachMarks.count,
+                "nativeStepCount": recording.nativeStepCount, "plannedTouches": plan.count,
+                "actualTouches": recording.touches.count, "missedTouches": recording.missedTouchCount,
+                "skinCap": ReplaySkinnedAthleteProvider.maximumConcurrentInstances,
+                "firstPersonSkinCap": PitchSceneFactory.firstPersonDetailedRigLimit,
+                "resourceCountScope": "Separate untimed pass; enabled hierarchy counts, not frustum visibility/draw calls/GPU memory",
+                "determinismScope": "Exact player anchors, ball and same-time visible rig/joint/jersey state; reverse compares common visible variants because LOD membership intentionally has hysteresis",
+                "views": views
+            ]
+            let data = try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
+            let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
+            attachment.name = "ReplayXI-NativeScene141-\(scenario.id).json"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+    }
+
+    private struct NativeEntityState: Equatable {
+        let transform: Transform
+        let joints: [Transform]
+    }
+
+    private struct NativeSceneState: Equatable {
+        let presentation: Transform
+        let anchors: [Transform]
+        let ball: Transform
+        let visibleRigNodes: [String: NativeEntityState]
+    }
+
+    private func diagnoseNativeReference(scenario: ReplayScenario, recording: ReplayNativeBallPhysics.Recording,
+                                         view: ReplayViewMode, forward: [Double], pausedTime: Double) throws -> [String: Any] {
+        let root = PitchSceneFactory.makeMatchRoot(for: scenario, nativeRecording: recording)
+        defer { for child in Array(root.children) { child.removeFromParent() } }
+        XCTAssertTrue(PitchSceneFactory.nativeBallRecordingForTesting(in: root) === recording)
+        let phases: [(String, [Double])] = [
+            ("forward", forward), ("reverse", Array(forward.reversed())),
+            ("paused", Array(repeating: pausedTime, count: 60))
+        ]
+        var phaseReports: [[String: Any]] = []
+        for (name, times) in phases {
+            let start = try XCTUnwrap(times.first)
+            for _ in 0..<3 { update(root, scenario: scenario, view: view, time: start) }
+            let loadsBefore = nativeReferenceLoadCounts()
+            let playerBefore = PitchSceneFactory.playerSceneCacheDiagnostics(for: root)
+            let bindingsBefore = PitchSceneFactory.proceduralAthleteBindingCacheDiagnostics(for: root)
+            ReplayAthleteMotion.resetBallActionSampleCountForTesting()
+            PitchSceneFactory.resetAnnotationSceneWorkForTesting()
+            PitchSceneFactory.resetProceduralVisibilityWorkForTesting()
+            var elapsed: [UInt64] = []
+            elapsed.reserveCapacity(times.count)
+            for time in times {
+                let started = DispatchTime.now().uptimeNanoseconds
+                update(root, scenario: scenario, view: view, time: time)
+                elapsed.append(DispatchTime.now().uptimeNanoseconds &- started)
+            }
+            // No assertion, pose readback, resource walk or callback ran inside
+            // the timed interval. Read existing counters once per phase.
+            let loadsAfter = nativeReferenceLoadCounts()
+            let playerAfter = PitchSceneFactory.playerSceneCacheDiagnostics(for: root)
+            let bindingsAfter = PitchSceneFactory.proceduralAthleteBindingCacheDiagnostics(for: root)
+            let annotation = PitchSceneFactory.annotationSceneWork
+            let inferredActionSamples = ReplayAthleteMotion.ballActionSampleCount
+            XCTAssertEqual(loadsAfter, loadsBefore)
+            XCTAssertEqual(playerAfter.indexedPlayers, scenario.players.count)
+            XCTAssertEqual(playerAfter.entityIndexBuilds, playerBefore.entityIndexBuilds)
+            XCTAssertEqual(playerAfter.poseRefreshes - playerBefore.poseRefreshes, times.count)
+            XCTAssertEqual(inferredActionSamples, 0, "Explicit native contacts must not infer legacy touches again")
+            XCTAssertEqual(annotation.syncCalls, times.count)
+            XCTAssertEqual(annotation.markTreeBuilds, 0)
+            XCTAssertLessThanOrEqual(bindingsAfter.cachedBindings, 24)
+            if name == "paused" {
+                XCTAssertEqual(bindingsAfter.hierarchyResolutions, bindingsBefore.hierarchyResolutions)
+                XCTAssertEqual(bindingsAfter.invalidations, bindingsBefore.invalidations)
+            }
+            let sorted = elapsed.sorted()
+            let middle = sorted.count / 2
+            let median = sorted.count.isMultiple(of: 2)
+                ? (Double(sorted[middle - 1]) + Double(sorted[middle])) * 0.5 : Double(sorted[middle])
+            let p95 = max(0, Int(ceil(Double(sorted.count) * 0.95)) - 1)
+            phaseReports.append([
+                "phase": name, "updates": times.count, "sampleTimesSeconds": times,
+                "rawUpdateNanoseconds": elapsed, "medianUpdateNanoseconds": median,
+                "p95UpdateNanoseconds": sorted[p95], "maximumUpdateNanoseconds": sorted.last!,
+                "loadsBefore": loadsBefore, "loadsAfter": loadsAfter,
+                "playerIndexBuilds": playerAfter.entityIndexBuilds - playerBefore.entityIndexBuilds,
+                "poseRefreshes": playerAfter.poseRefreshes - playerBefore.poseRefreshes,
+                "bindingHierarchyResolutions": bindingsAfter.hierarchyResolutions - bindingsBefore.hierarchyResolutions,
+                "bindingInvalidations": bindingsAfter.invalidations - bindingsBefore.invalidations,
+                "inferredBallActionSamples": inferredActionSamples,
+                "annotationSyncs": annotation.syncCalls, "annotationTreeBuilds": annotation.markTreeBuilds,
+                "proceduralVisibilityNodeVisits": PitchSceneFactory.proceduralVisibilityNodeVisits,
+                "proceduralVisibilityWrites": PitchSceneFactory.proceduralVisibilityModelWrites
+            ])
+        }
+
+        var reference: [Double: NativeSceneState] = [:]
+        var resources: [[String: Int]] = []
+        var skinMeshes: [ObjectIdentifier: MeshResource] = [:]
+        var jointPaths: [String: Int] = [:]
+        var pathsOutsideSkin = Set<String>()
+        var comparedReverseNodes = 0
+        let expectedSkins = view == .firstPerson ? PitchSceneFactory.firstPersonDetailedRigLimit
+            : ReplaySkinnedAthleteProvider.maximumConcurrentInstances
+        let untimedLoads = nativeReferenceLoadCounts()
+        for (phase, times) in phases {
+            for time in times {
+                update(root, scenario: scenario, view: view, time: time)
+                let state = try nativeReferenceState(root, scenario: scenario)
+                update(root, scenario: scenario, view: view, time: time)
+                XCTAssertEqual(try nativeReferenceState(root, scenario: scenario), state,
+                               "Exact repeat at \(scenario.id)/\(view.rawValue)/\(time)")
+                if let previous = reference[time] {
+                    XCTAssertEqual(state.presentation, previous.presentation)
+                    XCTAssertEqual(state.anchors, previous.anchors)
+                    XCTAssertEqual(state.ball, previous.ball)
+                    for (path, actual) in state.visibleRigNodes {
+                        if let expected = previous.visibleRigNodes[path] {
+                            XCTAssertEqual(actual, expected, "Same rendered variant at \(time): \(path)")
+                            if phase == "reverse" { comparedReverseNodes += 1 }
+                        }
+                    }
+                } else { reference[time] = state }
+                let counts = resourceCounts(in: root, skinMeshes: &skinMeshes,
+                    jointModelPaths: &jointPaths, jointModelPathsOutsideSkin: &pathsOutsideSkin)
+                resources.append(counts)
+                XCTAssertEqual(counts["retainedSkinRoots"], expectedSkins)
+                XCTAssertEqual(counts["enabledSkinRoots"], expectedSkins)
+                XCTAssertEqual(counts["retainedFarRigs"], scenario.players.count)
+                XCTAssertEqual(counts["enabledFarRigs"], scenario.players.count - expectedSkins - (view == .firstPerson ? 1 : 0))
+                XCTAssertLessThanOrEqual(try XCTUnwrap(counts["retainedNearRigs"]), 2)
+            }
+        }
+        XCTAssertEqual(nativeReferenceLoadCounts(), untimedLoads)
+        XCTAssertGreaterThan(comparedReverseNodes, 0)
+        XCTAssertEqual(skinMeshes.count, view == .firstPerson ? 1 : 2)
+        // The current far asset deliberately has four three-joint limb skins
+        // per player. The legacy static-far diagnostic's zero-skeleton rule
+        // does not apply, but no other skeleton outside admitted skins is valid.
+        let limbPaths = [
+            "body-root/hips/left-hip/left-leg", "body-root/hips/right-hip/right-leg",
+            "body-root/hips/spine/left-shoulder/left-arm", "body-root/hips/spine/right-shoulder/right-arm"
+        ]
+        let expectedFarJointPaths = Set(scenario.players.flatMap { player in
+            limbPaths.map { "/\(root.name)/players-root/player-\(player.id)/table-marker/\($0)" }
+        })
+        XCTAssertEqual(pathsOutsideSkin, expectedFarJointPaths,
+                       "Exactly four admitted far limbs per player; no unexpected or missing skeletons")
+        for path in expectedFarJointPaths {
+            XCTAssertEqual(jointPaths[path], 3, "Far limbs must not acquire full-body skeletons: \(path)")
+            var entity: Entity? = root
+            for name in path.split(separator: "/").dropFirst() {
+                entity = entity?.children.first { $0.name == String(name) }
+            }
+            let model = try XCTUnwrap(entity as? ModelEntity)
+            XCTAssertEqual(model.jointNames, ["Root", "Root/Bend", "Root/Bend/Tip"])
+            XCTAssertEqual(model.jointTransforms.count, 3)
+        }
+        var ranges: [String: [Int]] = [:]
+        for key in try XCTUnwrap(resources.first).keys {
+            let values = resources.compactMap { $0[key] }
+            ranges[key] = [try XCTUnwrap(values.min()), try XCTUnwrap(values.max())]
+        }
+        return ["view": view.rawValue, "phases": phaseReports, "resourceMinMax": ranges,
+                "retainedSharedSkinMeshes": skinMeshes.count, "jointModelPathsAndCounts": jointPaths,
+                "jointModelPathsOutsideAdmittedSkin": pathsOutsideSkin.sorted(),
+                "expectedArticulatedFarJointModels": expectedFarJointPaths.count,
+                "unexpectedJointModelPathsOutsideAdmittedSkin": pathsOutsideSkin.subtracting(expectedFarJointPaths).sorted(),
+                "exactReverseVisibleNodeComparisons": comparedReverseNodes,
+                "untimedVerificationUpdates": phases.reduce(0) { $0 + $1.1.count * 2 }]
+    }
+
+    private func nativeReferenceState(_ root: Entity, scenario: ReplayScenario) throws -> NativeSceneState {
+        let playersRoot = try XCTUnwrap(root.findEntity(named: "players-root"))
+        var anchors: [Transform] = []
+        var nodes: [String: NativeEntityState] = [:]
+        @discardableResult
+        func visit(_ entity: Entity, path: String) -> Bool {
+            guard entity.isEnabled else { return false }
+            var variant = path
+            if entity.name == ReplaySkinnedAthleteProvider.visualRootName,
+               let model = ReplaySkinnedAthleteProvider.skinnedModels(in: entity).first,
+               let component = model.model {
+                // Near and low share names/skeletons but have different floor
+                // envelopes. Do not compare those intentionally different LODs.
+                let vertices = component.mesh.contents.models.reduce(0) { count, mesh in
+                    count + mesh.parts.reduce(0) { $0 + $1.positions.count }
+                }
+                variant += "#vertices-\(vertices)"
+            }
+            var hasVisibleModel = entity.components[ModelComponent.self] != nil
+            var occurrences: [String: Int] = [:]
+            for child in entity.children {
+                let ordinal = occurrences[child.name, default: 0]
+                occurrences[child.name] = ordinal + 1
+                hasVisibleModel = visit(child, path: variant + "/" + child.name + "[\(ordinal)]") || hasVisibleModel
+            }
+            // Procedural query joints intentionally stop animating while their
+            // meshes are hidden behind a skin. Compare rendered hierarchies,
+            // not stale invisible fallback/query bodies.
+            if hasVisibleModel {
+                nodes[variant] = NativeEntityState(transform: entity.transform,
+                                                   joints: (entity as? ModelEntity)?.jointTransforms ?? [])
+            }
+            return hasVisibleModel
+        }
+        for player in scenario.players {
+            let entity = try XCTUnwrap(playersRoot.children.first { $0.name == "player-\(player.id)" })
+            anchors.append(entity.transform)
+            visit(entity, path: player.id)
+        }
+        return NativeSceneState(presentation: root.transform, anchors: anchors,
+                                ball: try XCTUnwrap(root.findEntity(named: "ball")).transform,
+                                visibleRigNodes: nodes)
+    }
+
+    private func nativeReferenceLoadCounts() -> [String: Int] {
+        ["farPalettes": ReplayFarAthletePaletteProvider.preparedPaletteCount,
+         "farTextures": ReplayFarAthletePaletteProvider.cachedTextureCount,
+         "farPaletteAttempts": ReplayFarAthletePaletteProvider.preparationAttemptCount,
+         "farFaceAttempts": ReplayFarAthleteHeadProvider.preparationAttemptCount,
+         "farFaceMeshLoads": ReplayFarAthleteHeadProvider.meshLoadCount,
+         "articulatedFarPreparations": ReplayArticulatedFarProvider.preparationCount,
+         "articulatedKitPreparations": ReplayArticulatedFarKitProvider.preparationCount,
+         "articulatedKitTextureLoads": ReplayArticulatedFarKitProvider.textureLoadCount,
+         "articulatedKitTextures": ReplayArticulatedFarKitProvider.cachedTextureCount]
+    }
+
     private func recordFullSquad(lowDetail: Bool, farFaces: Bool = false) throws {
         try XCTSkipIf(ReplayImportedAthleteFeatureGate.isEnabled,
                       "This baseline measures default admission, not the opt-in imported pilot")
