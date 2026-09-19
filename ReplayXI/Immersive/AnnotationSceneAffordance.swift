@@ -26,6 +26,18 @@ struct AnnotationSceneTarget: Equatable, Sendable {
 /// accessibility metadata are restyled solely when the selection changes.
 @MainActor
 enum AnnotationSceneAffordance {
+    #if DEBUG
+    /// Explicit sampling work in arc body targets, not allocation counts,
+    /// engine work or headset frame time.
+    struct ArcTargetWork: Codable, Equatable {
+        var updates = 0
+        var controlPointResolutions = 0
+        var sampledPoints = 0
+    }
+    private(set) static var arcTargetWork = ArcTargetWork()
+    static func resetArcTargetWorkForTesting() { arcTargetWork = ArcTargetWork() }
+    #endif
+
     static let selectionRootName = "annotation-selection-root"
     static let bodyTargetName = "annotation-target-body"
     static let labelTargetName = "annotation-target-label"
@@ -272,16 +284,31 @@ enum AnnotationSceneAffordance {
     ) {
         switch mark.kind {
         case .arc:
+            #if DEBUG
+            arcTargetWork.updates &+= 1
+            #endif
             target.transform = .identity
+            guard !target.children.isEmpty else { return }
+            // All sixteen hit segments share this quadratic. Resolve its
+            // rolled/clipped control once per invocation, never across frames.
+            let start = SIMD3<Float>(mark.start.x, mark.resolvedStartElevation, mark.start.z)
+            let end = SIMD3<Float>(mark.end.x, mark.resolvedEndElevation, mark.end.z)
+            let control = mark.resolvedCurve.controlPoint(for: mark)
+            #if DEBUG
+            arcTargetWork.controlPointResolutions &+= 1
+            #endif
+            var segmentStart = arcTargetPoint(at: 0, start: start, control: control, end: end)
             for (index, segment) in target.children.enumerated() where index < 16 {
-                let start = mark.resolvedCurve.point(at: Float(index) / 16, for: mark, baseY: 0.17)
-                let end = mark.resolvedCurve.point(at: Float(index + 1) / 16, for: mark, baseY: 0.17)
-                let direction = end - start
+                let segmentEnd = arcTargetPoint(at: Float(index + 1) / 16,
+                                               start: start, control: control, end: end)
+                let direction = segmentEnd - segmentStart
                 let length = simd_length(direction)
-                segment.position = (start + end) / 2
+                segment.position = (segmentStart + segmentEnd) / 2
                 segment.orientation = length > 0.0001
-                    ? simd_quatf(from: SIMD3<Float>(0, 0, 1), to: direction / length) : simd_quatf()
+                    ? simd_quatf(from: SIMD3<Float>(0, 0, 1), to: direction / length)
+                    : simd_quatf(angle: 0, axis: [0, 1, 0])
                 segment.scale = [1, 1, max(length + 0.12, 0.12)]
+                segmentStart = segmentEnd
             }
         case .playerLabel:
             target.position = labelPosition ?? [mark.end.x, 2.2, mark.end.z]
@@ -330,6 +357,18 @@ enum AnnotationSceneAffordance {
                 : simd_quatf()
             target.scale = [1, 1, length + 0.65]
         }
+    }
+
+    private static func arcTargetPoint(at fraction: Float, start: SIMD3<Float>,
+                                       control: SIMD3<Float>, end: SIMD3<Float>) -> SIMD3<Float> {
+        #if DEBUG
+        arcTargetWork.sampledPoints &+= 1
+        #endif
+        // Match CoachMarkCurve.point exactly, including touchline rounding
+        // clamps and target lift. No sample array or persistent cache is needed.
+        let t = fraction.isFinite ? min(max(fraction, 0), 1) : 0
+        let point = (1 - t) * (1 - t) * start + 2 * (1 - t) * t * control + t * t * end
+        return [min(max(point.x, -34), 34), point.y + 0.17, min(max(point.z, -52.5), 52.5)]
     }
 
     static func updateSelection(
