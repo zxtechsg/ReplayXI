@@ -1941,6 +1941,7 @@ private struct ImmersiveControlDeck: View {
     @State private var orderedReviewMarks: [CoachMark] = []
     @State private var indexedReviewEvents: [PlaybackReviewEvent] = []
     @State private var timelineTickClusters: [PlaybackEventRailLayout.TimelineTickCluster] = []
+    @State private var selectedPositionKeyCount: Int?
     @State private var timelineTrackWidth: CGFloat = 0
     @State private var timelineScrubState: PlaybackTimelineScrub.GestureState?
     @ScaledMetric(relativeTo: .subheadline) private var timelineReadoutHeight: CGFloat = 20
@@ -4063,6 +4064,10 @@ private struct ImmersiveControlDeck: View {
                         .position(x: (startX + endX) / 2, y: 8)
                 }
 
+                PlaybackSelectedPositionTimeline(annotationID: selectedAnnotationID,
+                    railWidth: trackWidth, leadingInset: trackInset,
+                    keyCount: $selectedPositionKeyCount)
+
                 Capsule()
                     .fill(.white.opacity(0.13))
                     .frame(width: trackWidth, height: 7)
@@ -4142,6 +4147,7 @@ private struct ImmersiveControlDeck: View {
             .accessibilityLabel("Match timeline")
             .accessibilityValue(
                 "\(formatTime(store.playhead)) of \(formatTime(store.selectedScenario.duration))"
+                + PlaybackSelectedPositionTimelineCache.accessibilitySummary(keyCount: selectedPositionKeyCount)
             )
             .accessibilityHint("Pinch anywhere to jump, drag sideways, and lift for frame control.")
             .accessibilityAdjustableAction { direction in

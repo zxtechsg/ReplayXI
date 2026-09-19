@@ -6,6 +6,9 @@
 - Seek, then Adjust shape. Endpoint, height and curve changes save a key at that time.
 - Playback interpolates between keys. Before/after the keyed interval, the nearest pose holds.
 - Tap a saved timestamp to preview it. Position time / Move retimes that pose without redrawing it.
+- Nearby timestamps show extra decimals so position chips stay distinct. Cyan diamonds on the
+  main timeline show the selected annotation's keys; dense keys share a marker. Scrubbing works
+  through these markers as before.
 - To playhead moves the selected key to the current replay time; trash deletes only that key.
 - Freeze here removes all keys and holds the current sampled shape. Undo restores the animation.
 - In/Out trims visibility only. Shift all timing moves visibility and all keys together.
