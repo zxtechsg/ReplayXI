@@ -20,14 +20,23 @@ final class AnnotationTimingEditorVisualTests: XCTestCase {
                          name: "annotation-timestamp-editor-outside-window", previewTime: 11)
     }
 
+    func testClosePositionTimesRemainReadable() throws {
+        try renderEditor(width: 1136, height: 700, typeSize: .large,
+                         name: "annotation-timestamp-editor-close-keys", extraKeyTimes: [2.01, 2.04])
+    }
+
     private func renderEditor(width: CGFloat, height: CGFloat, typeSize: DynamicTypeSize, name: String,
-                              previewTime: TimeInterval? = nil) throws {
+                              previewTime: TimeInterval? = nil, extraKeyTimes: [TimeInterval] = []) throws {
         let store = ReplayStore()
         store.seek(to: 2)
         store.beginDrawing(.arc)
         _ = store.registerPitchTap(.init(x: 0, z: 0))
         let mark = try XCTUnwrap(store.registerPitchTap(.init(x: 8, z: 10)))
         XCTAssertTrue(store.captureCoachMarkKeyframe(id: mark.id))
+        for time in extraKeyTimes {
+            store.seek(to: time)
+            XCTAssertTrue(store.captureCoachMarkKeyframe(id: mark.id))
+        }
         if let previewTime {
             store.seek(to: previewTime)
             XCTAssertFalse(mark.isVisible(at: store.playhead))

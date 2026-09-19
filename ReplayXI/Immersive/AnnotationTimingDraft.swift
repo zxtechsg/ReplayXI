@@ -69,10 +69,37 @@ enum AnnotationTimestamp {
         return text
     }
 
-    static func display(_ time: TimeInterval) -> String {
-        guard time.isFinite, time >= 0, time < Double(Int.max / 10) else { return "—" }
+    static func display(_ time: TimeInterval, fractionalDigits: Int = 1) -> String {
+        let digits = min(max(fractionalDigits, 1), 6)
+        let scale = [10, 100, 1_000, 10_000, 100_000, 1_000_000][digits - 1]
         // Round before splitting so 59.99 displays as 01:00.0, never 00:60.0.
-        let tenths = Int((time * 10).rounded())
-        return String(format: "%02d:%02d.%d", tenths / 600, (tenths / 10) % 60, tenths % 10)
+        let rounded = (time * Double(scale)).rounded()
+        guard time.isFinite, time >= 0, rounded.isFinite, rounded < Double(Int.max) else { return "—" }
+        let units = Int(rounded)
+        func padded(_ value: Int, to width: Int) -> String {
+            let text = String(value)
+            return String(repeating: "0", count: max(0, width - text.count)) + text
+        }
+        return "\(padded(units / scale / 60, to: 2)):\(padded((units / scale) % 60, to: 2)).\(padded(units % scale, to: digits))"
+    }
+}
+
+/// Saved positions can be closer than a tenth of a second. Use the least
+/// precision that distinguishes them, computed only when their times change.
+struct AnnotationKeyTimeLabels {
+    private var labels: [TimeInterval: String] = [:]
+
+    init(times: [TimeInterval] = []) {
+        let valid = Set(times.filter { $0.isFinite && $0 >= 0 })
+        for digits in 1...6 {
+            labels = Dictionary(uniqueKeysWithValues: valid.map {
+                ($0, AnnotationTimestamp.display($0, fractionalDigits: digits))
+            })
+            if Set(labels.values).count == valid.count { break }
+        }
+    }
+
+    func label(at time: TimeInterval) -> String {
+        labels[time] ?? AnnotationTimestamp.display(time)
     }
 }

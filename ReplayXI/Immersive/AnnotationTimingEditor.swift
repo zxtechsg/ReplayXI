@@ -9,6 +9,7 @@ struct AnnotationTimingEditor: View {
     var adjustPose: () -> Void = {}
     @State private var draft = AnnotationTimingDraft()
     @State private var positionDraft = AnnotationPositionTimeDraft()
+    @State private var keyTimeLabels = AnnotationKeyTimeLabels()
     @FocusState private var focusedField: Field?
     private enum Field: Hashable { case inTime, outTime, positionTime }
     @State private var measuredContentHeight: CGFloat?
@@ -87,8 +88,10 @@ struct AnnotationTimingEditor: View {
             .scrollIndicators(.visible)
             .accessibilityHint("Scroll for position keys and key timing controls")
         }
-        .onAppear(perform: reload)
-        .onChange(of: markID) { _, _ in positionDraft.clear(); focusedField = nil; reload() }
+        .onAppear { reload(); refreshKeyTimeLabels() }
+        .onChange(of: markID) { _, _ in
+            positionDraft.clear(); focusedField = nil; reload(); refreshKeyTimeLabels()
+        }
         .onChange(of: draft.throughEnd) { _, throughEnd in
             if throughEnd, focusedField == .outTime { focusedField = nil }
         }
@@ -96,6 +99,7 @@ struct AnnotationTimingEditor: View {
         .onChange(of: mark?.hideTime) { _, _ in reload() }
         .onChange(of: mark?.keyframes?.map(\.time)) { _, times in
             if let selectedTime = positionDraft.selectedTime, !(times ?? []).contains(selectedTime) { positionDraft.clear() }
+            keyTimeLabels = AnnotationKeyTimeLabels(times: times ?? [])
         }
     }
 
@@ -120,7 +124,7 @@ struct AnnotationTimingEditor: View {
             Slider(value: sliderBinding(text, fallback: fallback), in: 0...max(duration, 0.1), step: 0.1)
                 .tint(color).frame(minWidth: 140)
                 .accessibilityLabel("Annotation \(title) time")
-                .accessibilityValue(AnnotationTimestamp.parse(text.wrappedValue).map(AnnotationTimestamp.display) ?? "Invalid time")
+                .accessibilityValue(AnnotationTimestamp.parse(text.wrappedValue).map { AnnotationTimestamp.display($0) } ?? "Invalid time")
         }.disabled(!canEdit)
     }
 
@@ -150,11 +154,11 @@ struct AnnotationTimingEditor: View {
                     HStack(spacing: 8) {
                         ForEach(mark.keyframes ?? [], id: \.time) { key in
                             Button { selectKey(at: key.time, seek: true) } label: {
-                                Label(AnnotationTimestamp.display(key.time), systemImage: positionDraft.selectedTime == key.time ? "diamond.fill" : "diamond")
+                                Label(keyTimeLabels.label(at: key.time), systemImage: positionDraft.selectedTime == key.time ? "diamond.fill" : "diamond")
                                     .frame(minHeight: 44)
                             }
                             .tint(positionDraft.selectedTime == key.time ? color : Color.secondary)
-                            .accessibilityLabel("Select and preview position key at \(AnnotationTimestamp.display(key.time))")
+                            .accessibilityLabel("Select and preview position key at \(keyTimeLabels.label(at: key.time))")
                             .accessibilityAddTraits(positionDraft.selectedTime == key.time ? [.isSelected] : [])
                         }
                     }.buttonStyle(.bordered)
@@ -187,7 +191,7 @@ struct AnnotationTimingEditor: View {
                 Button(role: .destructive) {
                     if store.removeCoachMarkKeyframe(id: markID, at: time) { positionDraft.clear() }
                 } label: { Image(systemName: "trash").frame(minWidth: 44, minHeight: 44) }
-                    .accessibilityLabel("Delete position key at \(AnnotationTimestamp.display(time))")
+                    .accessibilityLabel("Delete position key at \(keyTimeLabels.label(at: time))")
                     .disabled(positionDraft.isDirty)
             }.disabled(!canEdit)
             if let destination = AnnotationTimestamp.parse(positionDraft.text), abs(destination - time) < CoachMark.keyframeTimeTolerance {
@@ -224,6 +228,9 @@ struct AnnotationTimingEditor: View {
     private func resetWindow() {
         reload()
         if focusedField != .positionTime { focusedField = nil }
+    }
+    private func refreshKeyTimeLabels() {
+        keyTimeLabels = AnnotationKeyTimeLabels(times: mark?.keyframes?.map(\.time) ?? [])
     }
     private func applyWindow() {
         guard canEdit, draft.validationMessage(duration: duration) == nil, let start = draft.start else { return }
