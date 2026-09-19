@@ -1,7 +1,7 @@
 import Foundation
 
-/// Spends only spare existing skin slots on neighbours of the reviewed player.
-/// It does not change near/impact selection or the first-person rig budget.
+/// Spends the chosen visual budget on neighbours of the reviewed player.
+/// It does not change near/impact selection or the first-person close-rig cap.
 enum ReplayLowDetailAdmissionPolicy {
     static let switchMargin: Float = 1.25
 

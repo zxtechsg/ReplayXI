@@ -10,6 +10,8 @@ struct FootballImmersiveView: View {
     @AppStorage("ReplayXI.PlaybackControlDeckPreset") private var controlDeckPresetRawValue =
         PlaybackControlDeckPreset.standard.rawValue
     @AppStorage("ReplayXI.PlaybackControlDeckSize") private var controlDeckSize = 1.0
+    @AppStorage(ReplayPlayerDetail.storageKey) private var playerDetailRawValue =
+        ReplayPlayerDetail.defaultSelection.rawValue
     @State private var selectedAnnotationID: UUID?
     @State private var annotationHandleDrag = AnnotationHandleDragController()
     private var draggedAnnotationTarget: AnnotationSceneTarget? { annotationHandleDrag.target }
@@ -57,6 +59,10 @@ struct FootballImmersiveView: View {
 
     private var controlDeckPreset: PlaybackControlDeckPreset {
         PlaybackControlDeckPreset(rawValue: controlDeckPresetRawValue) ?? .standard
+    }
+
+    private var playerDetail: ReplayPlayerDetail {
+        ReplayPlayerDetail.resolved(playerDetailRawValue)
     }
 
     private var controlDeckLayout: PlaybackControlDeckLayout {
@@ -115,7 +121,8 @@ struct FootballImmersiveView: View {
                         sharedSession: false
                     ),
                 showsIdealBranch: store.showsIdealBranch,
-                emphasizesBall: emphasizesBall
+                emphasizesBall: emphasizesBall,
+                playerDetail: playerDetail
             )
                 applyLocalOverlayVisibility(to: root)
             }
@@ -169,7 +176,8 @@ struct FootballImmersiveView: View {
                             sharedSession: false
                         ),
                     showsIdealBranch: store.showsIdealBranch,
-                    emphasizesBall: emphasizesBall
+                    emphasizesBall: emphasizesBall,
+                    playerDetail: playerDetail
                 )
                 applyLocalOverlayVisibility(to: root)
             }
@@ -207,6 +215,7 @@ struct FootballImmersiveView: View {
                     showsDecisionStrip: $showsDecisionStrip,
                     showsPlaybackAnnotations: $showsPlaybackAnnotations,
                     controlDeckPresetRawValue: $controlDeckPresetRawValue,
+                    playerDetailRawValue: $playerDetailRawValue,
                     controlDeckSize: $controlDeckSize,
                     deckWidth: controlDeckLayout.contentWidth,
                     nativeActionSource: preparedNativeRecording.map {
@@ -1953,6 +1962,7 @@ private struct ImmersiveControlDeck: View {
     @Binding var showsDecisionStrip: Bool
     @Binding var showsPlaybackAnnotations: Bool
     @Binding var controlDeckPresetRawValue: String
+    @Binding var playerDetailRawValue: String
     var controlDeckSize: Binding<Double> = .constant(1)
 
     let deckWidth: CGFloat
@@ -1967,6 +1977,7 @@ private struct ImmersiveControlDeck: View {
     static func makeForTesting(width: CGFloat, showsRoster: Bool) -> Self {
         var view = Self(selectedAnnotationID: .constant(nil), showsDecisionStrip: .constant(false),
             showsPlaybackAnnotations: .constant(true), controlDeckPresetRawValue: .constant("standard"),
+            playerDetailRawValue: .constant(ReplayPlayerDetail.defaultSelection.rawValue),
             deckWidth: width, nativeActionSource: nil, isPinchDrawing: false, isPinchDrawingReady: false,
             recenterControls: {}, exit: {})
         view._showsPlayerGrid = State(initialValue: showsRoster)
@@ -2788,6 +2799,10 @@ private struct ImmersiveControlDeck: View {
                 }
                 PlaybackBarSizeControl(size: controlDeckSize)
                     .disabled(!store.canChangePlaybackView)
+                if store.selectedScenario.kind != .shapeLab {
+                    Divider()
+                    PlaybackPlayerDetailControl(rawValue: $playerDetailRawValue)
+                }
             }
         }
     }

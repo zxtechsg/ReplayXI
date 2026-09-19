@@ -126,7 +126,7 @@ enum ReplayArmLOD147Probe {
             let root = joints[0].matrix
             let bend = root * joints[1].matrix
             let tip = bend * joints[2].matrix
-            func point(_ matrix: simd_float4x4) -> SIMD3<Float> {
+            @MainActor func point(_ matrix: simd_float4x4) -> SIMD3<Float> {
                 let p = matrix.columns.3
                 return model.convert(position: [p.x, p.y, p.z], to: actor)
             }

@@ -18,7 +18,9 @@ enum ReplaySkinnedAthleteError: Error, Equatable {
 enum ReplaySkinnedAthleteProvider {
     enum Detail: Hashable, Sendable { case near, lowDetail }
     static let visualRootName = "skinned-athlete-visual"
-    static let maximumConcurrentInstances = 4
+    /// Historical default-cap diagnostic. Full squad is an explicit scene
+    /// preference; it does not expand the close-player rig budget.
+    static let maximumConcurrentInstances = ReplayPlayerDetail.balanced.maximumSkinnedPlayers
     static let assetSHA256 = "7cfb694888f111928643e8aca7041d21925f5d55f3f5adbd353a972ca255e772"
     static let motionSHA256 = "d30a7379b81a4b0ea3fef5ebd20ad101911ab4fd521a5be1f6c00c0804f59ce4"
     static let contactSurfaceSHA256 = "71eb134afa27eac0c23500afbd038dd11594a2b5ad30a5a178b303305a49c3ca"

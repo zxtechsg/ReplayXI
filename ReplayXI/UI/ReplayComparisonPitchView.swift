@@ -7,6 +7,8 @@ struct ReplayComparisonPitchView: View {
     let capture: ReplayConversionPreviewSession.Capture
     let playhead: TimeInterval
     var framing: ReplayComparisonPitchFraming = .play
+    @AppStorage(ReplayPlayerDetail.storageKey) private var playerDetailRawValue =
+        ReplayPlayerDetail.defaultSelection.rawValue
     @State private var recording: ReplayNativeBallPhysics.Recording?
     @State private var isReady = false
     @State private var playFocus: ReplayComparisonPitchFocus?
@@ -80,7 +82,8 @@ struct ReplayComparisonPitchView: View {
     private func update(_ root: Entity, bounds: BoundingBox) {
         PitchSceneFactory.update(root: root, scenario: capture.scenario, time: playhead,
             viewMode: .tacticalTable, perspectiveID: capture.perspectiveID, marks: capture.marks,
-            showsLaneLens: false, isDrawing: false, positionalOriginTransform: nil)
+            showsLaneLens: false, isDrawing: false, positionalOriginTransform: nil,
+            playerDetail: ReplayPlayerDetail.resolved(playerDetailRawValue))
         // The factory's room coordinates are intentionally overridden only for
         // this miniature. No track, ball/contact or annotation data is changed.
         let focus = framing == .play ? playFocus : nil

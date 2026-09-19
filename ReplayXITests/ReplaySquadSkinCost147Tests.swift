@@ -4,7 +4,7 @@ import RealityKit
 import XCTest
 @testable import ReplayXI
 
-/// DEBUG admission experiment only. Timings cover Factory.update without a
+/// Explicit production player-detail choices. Timings cover Factory.update without a
 /// renderer; hierarchy/material slots are not visible draws or headset FPS.
 @MainActor
 final class ReplaySquadSkinCost147Tests: XCTestCase {
@@ -96,9 +96,9 @@ final class ReplaySquadSkinCost147Tests: XCTestCase {
             XCTAssertLessThanOrEqual(forward.count * 2 + 6, 60)
             for view in [ReplayViewMode.tacticalTable, .firstPerson] {
                 let baseline = try measure(scenario, recording: recording, view: view,
-                    fullSquad: false, forward: forward, paused: paused)
+                    playerDetail: .balanced, forward: forward, paused: paused)
                 let candidate = try measure(scenario, recording: recording, view: view,
-                    fullSquad: true, forward: forward, paused: paused)
+                    playerDetail: .fullSquad, forward: forward, paused: paused)
                 XCTAssertEqual(candidate.trajectories, baseline.trajectories,
                     "Admission cannot alter the ball, player anchors or view transform")
                 reports.append(baseline.report); reports.append(candidate.report)
@@ -110,28 +110,33 @@ final class ReplaySquadSkinCost147Tests: XCTestCase {
             XCTAssertEqual(recording.samples.map { $0.orientation.vector }, orientationsBefore)
         }
         XCTAssertEqual(reports.count, 20)
+        XCTAssertFalse(PitchSceneFactory.fullSquadSkinsForTesting)
         let report: [String: Any] = [
             "cases": reports, "caseCount": reports.count,
-            "scope": "DEBUG-only full-squad admission experiment; compiler optimization is specified externally in the test build, not inferred here.",
+            "scope": "Explicit production Balanced and Full squad selections; compiler optimization is specified externally in the test build, not inferred here.",
+            "selectionSource": "ReplayPlayerDetail argument; fullSquadFlag is a comparison alias for playerDetail == fullSquad, not the disabled DEBUG override",
+            "debugOverrideEnabled": PitchSceneFactory.fullSquadSkinsForTesting,
             "timed": "PitchSceneFactory.update only, including its existing DEBUG counters and normal membership changes; initial population and paused quality switches are separate from the warmed phase timings",
             "excluded": "Native physics bake, asset prewarm, graph construction, warmup, one full-membership normalization update before policy switches, assertions, readbacks, census, renderer/GPU/compositor, UI/input and headset work",
             "resourceScope": "Retained and enabled hierarchy, not frustum visibility, GPU draws or resident GPU bytes. Strong mesh/texture references held during each untimed census.",
             "determinismScope": "Exact ball/player/view transforms, repeated poses and reverse common visible variants; LOD membership itself has intentional hysteresis.",
             "productionSkinCap": ReplaySkinnedAthleteProvider.maximumConcurrentInstances,
+            "productionFullSquadSkinCap": ReplayPlayerDetail.fullSquad.maximumSkinnedPlayers,
             "productionPOVNearCap": PitchSceneFactory.firstPersonDetailedRigLimit,
             "notFPS": true, "notColdStart": true, "notPacedPlayback": true,
-            "noProductionBudgetChange": true
+            "defaultBalancedBudgetUnchanged": true
         ]
         let receipt = XCTAttachment(data: try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]),
                                     uniformTypeIdentifier: "public.json")
-        receipt.name = "ReplayXI-SquadSkins147-FactoryCPUAndResources.json"
+        receipt.name = "ReplayXI-SquadSkins148-FactoryCPUAndResources.json"
         receipt.lifetime = .keepAlways; add(receipt)
     }
 
     private func measure(_ scenario: ReplayScenario, recording: ReplayNativeBallPhysics.Recording,
-                         view: ReplayViewMode, fullSquad: Bool, forward: [Double], paused: Double) throws -> Result {
-        PitchSceneFactory.fullSquadSkinsForTesting = fullSquad
-        defer { PitchSceneFactory.fullSquadSkinsForTesting = false }
+                         view: ReplayViewMode, playerDetail: ReplayPlayerDetail,
+                         forward: [Double], paused: Double) throws -> Result {
+        XCTAssertFalse(PitchSceneFactory.fullSquadSkinsForTesting)
+        let fullSquad = playerDetail == .fullSquad
         let root = PitchSceneFactory.makeMatchRoot(for: scenario, nativeRecording: recording)
         defer { for child in Array(root.children) { child.removeFromParent() } }
         XCTAssertTrue(PitchSceneFactory.nativeBallRecordingForTesting(in: root) === recording)
@@ -139,10 +144,13 @@ final class ReplaySquadSkinCost147Tests: XCTestCase {
                                           ("paused", Array(repeating: paused, count: 6))]
         XCTAssertTrue(PitchSceneFactory.skinnedAthletesForTesting(in: root).isEmpty)
         let initialPopulation = timedPopulationUpdate(root, scenario, view,
-            time: try XCTUnwrap(forward.first), label: "first-update-after-graph-construction")
+            time: try XCTUnwrap(forward.first), playerDetail: playerDetail,
+            label: "first-update-after-graph-construction")
         _ = try snapshot(root, scenario: scenario, recording: recording, view: view,
                          time: try XCTUnwrap(forward.first))
-        for _ in 0..<3 { update(root, scenario, view, time: try XCTUnwrap(forward.first)) }
+        for _ in 0..<3 {
+            update(root, scenario, view, time: try XCTUnwrap(forward.first), playerDetail: playerDetail)
+        }
         let loadsBefore = loadCounts()
         let indexBefore = PitchSceneFactory.playerSceneCacheDiagnostics(for: root)
         let bindingsBefore = PitchSceneFactory.proceduralAthleteBindingCacheDiagnostics(for: root)
@@ -156,7 +164,7 @@ final class ReplaySquadSkinCost147Tests: XCTestCase {
             durations.reserveCapacity(times.count)
             for time in times {
                 let start = DispatchTime.now().uptimeNanoseconds
-                update(root, scenario, view, time: time)
+                update(root, scenario, view, time: time, playerDetail: playerDetail)
                 durations.append(DispatchTime.now().uptimeNanoseconds &- start)
             }
             let sorted = durations.sorted(), middle = durations.count / 2
@@ -188,7 +196,7 @@ final class ReplaySquadSkinCost147Tests: XCTestCase {
         var previousSkins = PitchSceneFactory.skinnedAthletesForTesting(in: root)
         for (phase, times) in phases {
             for time in times {
-                update(root, scenario, view, time: time)
+                update(root, scenario, view, time: time, playerDetail: playerDetail)
                 let skins = PitchSceneFactory.skinnedAthletesForTesting(in: root)
                 for (id, skin) in skins where previousSkins[id] !== skin {
                     if skin.detail == .near { nearCreations += 1 } else { lowCreations += 1 }
@@ -230,13 +238,13 @@ final class ReplaySquadSkinCost147Tests: XCTestCase {
 
         // Same-time warm-cache probe, separate from timed forward/reverse work.
         do {
-            update(root, scenario, view, time: paused)
+            update(root, scenario, view, time: paused, playerDetail: playerDetail)
             let warmSkins = PitchSceneFactory.skinnedAthletesForTesting(in: root)
             let warmCount = census(root, resources: resources)
             let warmState = try snapshot(root, scenario: scenario, recording: recording, view: view, time: paused)
             let warmClones = ReplaySkinnedAthleteProvider.lowDetailCloneAttemptCount
             let warmBindings = PitchSceneFactory.proceduralAthleteBindingCacheDiagnostics(for: root)
-            for _ in 0..<20 { update(root, scenario, view, time: paused) }
+            for _ in 0..<20 { update(root, scenario, view, time: paused, playerDetail: playerDetail) }
             let afterWarm = PitchSceneFactory.skinnedAthletesForTesting(in: root)
             XCTAssertEqual(Set(afterWarm.keys), Set(warmSkins.keys))
             for (id, skin) in warmSkins { XCTAssertTrue(afterWarm[id] === skin) }
@@ -254,31 +262,31 @@ final class ReplaySquadSkinCost147Tests: XCTestCase {
         // Normalize both case variants to the same full membership/history.
         // Otherwise a sticky small set from playback can legitimately differ
         // from the closest small set retained after full-capacity admission.
-        PitchSceneFactory.fullSquadSkinsForTesting = true
-        update(root, scenario, view, time: paused)
+        update(root, scenario, view, time: paused, playerDetail: .fullSquad)
         let normalization: [String: Any]
         do {
             let skins = PitchSceneFactory.skinnedAthletesForTesting(in: root)
-            normalization = ["time": paused, "fullSquadFlag": true, "untimedUpdates": 1,
+            normalization = ["time": paused, "fullSquadFlag": true,
+                "playerDetail": ReplayPlayerDetail.fullSquad.rawValue, "untimedUpdates": 1,
                 "nearIDs": skins.filter { $0.value.detail == .near }.keys.sorted(),
                 "lowIDs": skins.filter { $0.value.detail == .lowDetail }.keys.sorted()]
             XCTAssertEqual(skins.count, scenario.players.count - (view == .firstPerson ? 1 : 0))
         }
         // Real, retained scene at a fixed paused time. This measures switch
         // work only, excluding normalization, graph construction and readbacks.
-        var qualitySwitches: [[String: Any]] = [], switchStates: [Bool: State] = [:]
+        var qualitySwitches: [[String: Any]] = [], switchStates: [ReplayPlayerDetail: State] = [:]
         var switchTrajectory: Trajectory?
-        for (index, flag) in [false, true, false, true].enumerated() {
-            PitchSceneFactory.fullSquadSkinsForTesting = flag
+        for (index, selection) in [ReplayPlayerDetail.balanced, .fullSquad, .balanced, .fullSquad].enumerated() {
             var switchReceipt = timedPopulationUpdate(root, scenario, view, time: paused,
+                playerDetail: selection,
                 label: index == 0 ? "establish-false" : "switch-\(index)")
             let state = try snapshot(root, scenario: scenario, recording: recording, view: view, time: paused)
-            let context = "\(scenario.id)/\(view.rawValue)/caseFlag=\(fullSquad)/flag=\(flag)/index=\(index)"
+            let context = "\(scenario.id)/\(view.rawValue)/case=\(playerDetail.rawValue)/selection=\(selection.rawValue)/index=\(index)"
             let skins = PitchSceneFactory.skinnedAthletesForTesting(in: root)
             switchReceipt["index"] = index
             switchReceipt["nearIDs"] = skins.filter { $0.value.detail == .near }.keys.sorted()
             switchReceipt["lowIDs"] = skins.filter { $0.value.detail == .lowDetail }.keys.sorted()
-            if let prior = switchStates[flag] {
+            if let prior = switchStates[selection] {
                 let currentKeys = Set(state.visible.keys), priorKeys = Set(prior.visible.keys)
                 let added = currentKeys.subtracting(priorKeys).sorted()
                 let removed = priorKeys.subtracting(currentKeys).sorted()
@@ -295,19 +303,21 @@ final class ReplaySquadSkinCost147Tests: XCTestCase {
                 switchReceipt["removedVisiblePaths"] = removed
                 switchReceipt["changedCommonVisiblePaths"] = changed
             }
-            switchStates[flag] = state
+            switchStates[selection] = state
             if let prior = switchTrajectory {
                 XCTAssertTrue(state.trajectory == prior, "\(context): cross-policy trajectory changed")
             }
             switchTrajectory = state.trajectory
-            let expectedSkins = flag ? scenario.players.count - (view == .firstPerson ? 1 : 0)
+            let expectedSkins = selection == .fullSquad ? scenario.players.count - (view == .firstPerson ? 1 : 0)
                 : (view == .firstPerson ? 2 : 4)
             XCTAssertEqual(skins.count, expectedSkins, context)
             qualitySwitches.append(switchReceipt)
         }
         XCTAssertEqual(loadCounts(), loadsBefore)
+        XCTAssertFalse(PitchSceneFactory.fullSquadSkinsForTesting)
         return Result(report: [
             "scenario": scenario.id, "view": view.rawValue, "fullSquadFlag": fullSquad,
+            "playerDetail": playerDetail.rawValue, "debugOverrideEnabled": false,
             "perspective": scenario.defaultPerspectiveID, "timing": timing, "timedUpdates": timedUpdates,
             "untimedVerificationUpdates": timedUpdates + 21, "initialWarmupUpdates": 3,
             "initialPopulation": initialPopulation, "pausedQualitySwitches": qualitySwitches,
@@ -337,23 +347,25 @@ final class ReplaySquadSkinCost147Tests: XCTestCase {
     }
 
     private func timedPopulationUpdate(_ root: Entity, _ scenario: ReplayScenario, _ view: ReplayViewMode,
-                                       time: Double, label: String) -> [String: Any] {
+                                       time: Double, playerDetail: ReplayPlayerDetail, label: String) -> [String: Any] {
         // Weak refs include destruction cost without mistaking a recycled
         // allocation address for an unchanged skin instance.
         let before = PitchSceneFactory.skinnedAthletesForTesting(in: root).mapValues(WeakSkin.init)
         let clones = ReplaySkinnedAthleteProvider.lowDetailCloneAttemptCount
         let loads = loadCounts()
+        XCTAssertFalse(PitchSceneFactory.fullSquadSkinsForTesting)
         XCTAssertTrue(ReplaySkinnedAthleteProvider.isPrewarmed)
         XCTAssertTrue(ReplaySkinnedAthleteProvider.isLowDetailPrewarmed)
         let start = DispatchTime.now().uptimeNanoseconds
-        update(root, scenario, view, time: time)
+        update(root, scenario, view, time: time, playerDetail: playerDetail)
         let duration = DispatchTime.now().uptimeNanoseconds &- start
         let after = PitchSceneFactory.skinnedAthletesForTesting(in: root)
         let newSkins = after.filter { before[$0.key]?.value !== $0.value }
         XCTAssertEqual(loadCounts(), loads)
         XCTAssertTrue(ReplaySkinnedAthleteProvider.isPrewarmed)
         XCTAssertTrue(ReplaySkinnedAthleteProvider.isLowDetailPrewarmed)
-        return ["label": label, "time": time, "fullSquadFlag": PitchSceneFactory.fullSquadSkinsForTesting,
+        return ["label": label, "time": time, "fullSquadFlag": playerDetail == .fullSquad,
+            "playerDetail": playerDetail.rawValue, "debugOverrideEnabled": PitchSceneFactory.fullSquadSkinsForTesting,
             "nanoseconds": duration, "skinCountBefore": before.count, "skinCountAfter": after.count,
             "nearAfter": after.values.filter { $0.detail == .near }.count,
             "lowAfter": after.values.filter { $0.detail == .lowDetail }.count,
@@ -483,9 +495,10 @@ final class ReplaySquadSkinCost147Tests: XCTestCase {
          "articulatedKitTextureLoads": ReplayArticulatedFarKitProvider.textureLoadCount]
     }
 
-    private func update(_ root: Entity, _ scenario: ReplayScenario, _ view: ReplayViewMode, time: Double) {
+    private func update(_ root: Entity, _ scenario: ReplayScenario, _ view: ReplayViewMode,
+                        time: Double, playerDetail: ReplayPlayerDetail) {
         PitchSceneFactory.update(root: root, scenario: scenario, time: time, viewMode: view,
             perspectiveID: scenario.defaultPerspectiveID, marks: scenario.coachMarks,
-            showsLaneLens: false, isDrawing: false, positionalOriginTransform: nil)
+            showsLaneLens: false, isDrawing: false, positionalOriginTransform: nil, playerDetail: playerDetail)
     }
 }

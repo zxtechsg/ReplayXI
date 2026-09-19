@@ -26,9 +26,9 @@ enum ReplayRoomLauncher {
             print("Replay XI skinned-player preparation failed; using standard rig: \(error)")
             #endif
         }
-        // Neighbours use the cheaper canonical skin only inside the
-        // existing four-player budget. Its complete contact profile
-        // and shared kit materials are prepared once, not per frame.
+        // Neighbours can use the cheaper canonical skin: spare balanced
+        // slots, or the squad when explicitly selected. Its complete contact
+        // profile and shared kit materials are prepared once, not per frame.
         do {
             try ReplaySkinnedAthleteProvider.prewarmLowDetail()
         } catch {

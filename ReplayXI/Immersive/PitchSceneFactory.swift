@@ -22,11 +22,15 @@ enum PitchSceneFactory {
     static var fullSquadSkinsForTesting = false
     #endif
 
-    private static var skinAdmissionConfiguration: (maximum: Int, allowsPOVLow: Bool) {
+    private static func skinAdmissionConfiguration(
+        for detail: ReplayPlayerDetail
+    ) -> (maximum: Int, allowsPOVLow: Bool) {
         #if DEBUG
-        if fullSquadSkinsForTesting { return (22, true) }
+        let resolvedDetail: ReplayPlayerDetail = fullSquadSkinsForTesting ? .fullSquad : detail
+        #else
+        let resolvedDetail = detail
         #endif
-        return (ReplaySkinnedAthleteProvider.maximumConcurrentInstances, false)
+        return (resolvedDetail.maximumSkinnedPlayers, resolvedDetail.allowsFirstPersonLowSkins)
     }
 
     /// A root represents one immutable authored match. Keep its rolling table
@@ -792,7 +796,8 @@ enum PitchSceneFactory {
         isTrianglePlacementReady: Bool = false,
         showsIdealBranch: Bool = false,
         ragdollCue: PlayerRagdollCue? = nil,
-        emphasizesBall: Bool = true
+        emphasizesBall: Bool = true,
+        playerDetail: ReplayPlayerDetail = .balanced
     ) {
         let effectiveTriangleMode: TriangleLockMode =
             triangleLockMode == .place && isTrianglePlacementReady ? .place : .visualise
@@ -949,7 +954,7 @@ enum PitchSceneFactory {
                 // player is selected. Near subjects take priority over lows.
                 nearSkinIDs.insert(resolvedRagdollCue.playerID)
             }
-            let skinAdmission = skinAdmissionConfiguration
+            let skinAdmission = skinAdmissionConfiguration(for: playerDetail)
             let lowDetailAdmission = ReplayLowDetailAdmissionPolicy.resolve(
                 previous: sceneState?.lowDetailAdmission ?? .init(),
                 scenarioID: scenario.id,
