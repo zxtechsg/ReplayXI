@@ -92,6 +92,18 @@ enum FootballReferenceScenarios {
         return team.shortTitle
     }
 
+    /// Short, distinct shirt context for compact POV controls. Use football
+    /// codes for the reference teams, not an ambiguous "MAN" prefix.
+    static func teamAbbreviation(_ team: FootballTeam, in scenario: ReplayScenario) -> String {
+        if worldCupIDs.contains(scenario.id) || legacyIDs.contains(scenario.id) {
+            return team == .home ? "ARG" : "FRA"
+        }
+        if CityLiverpoolReferenceScenarios.ids.contains(scenario.id) {
+            return team == .home ? "MCI" : "LIV"
+        }
+        return team == .home ? "HOME" : "AWAY"
+    }
+
     struct Waypoint {
         let time: Double
         let point: PitchPoint

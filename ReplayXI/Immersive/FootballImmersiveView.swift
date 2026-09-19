@@ -1256,10 +1256,20 @@ enum PlaybackControlDeckPresentation {
     }
 
     static func playerControlLabel(
-        shirtNumber: Int?
+        shirtNumber: Int?, teamAbbreviation: String? = nil
     ) -> String {
         guard let shirtNumber else { return "POV PLAYER" }
-        return "POV #\(shirtNumber)"
+        return "\(teamAbbreviation ?? "POV") #\(shirtNumber)"
+    }
+
+    static func playerControlAccessibilityLabel(player: PlayerTrack, scenario: ReplayScenario) -> String {
+        "Player point of view, \(FootballReferenceScenarios.teamTitle(player.team, in: scenario)), \(player.displayName), number \(player.shirtNumber), \(player.role)"
+    }
+
+    static func cameraActionHint(_ mode: ReplayViewMode, currentMode: ReplayViewMode) -> String {
+        if mode == currentMode { return "Current view; playback is unchanged" }
+        return mode == .firstPerson
+            ? "Enters free-look player view paused at this moment" : "Changes the replay camera"
     }
 
     static func shouldDismissDrawTools(annotationsAreVisible: Bool) -> Bool {
@@ -1634,7 +1644,7 @@ private struct PlaybackViewOverlayHUD: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(mode.title) view")
         .accessibilityHint(store.canChangePlaybackView
-            ? "Changes the replay camera"
+            ? PlaybackControlDeckPresentation.cameraActionHint(mode, currentMode: store.viewMode)
             : "Finish or cancel the current gesture first")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
@@ -1909,6 +1919,14 @@ private struct AnnotationAdjustmentJoystick: View {
     }
 }
 
+#if DEBUG
+/// Native test host for real POV controls, without the spatial glass compositor.
+@MainActor
+func playbackPOVControlsForTesting(width: CGFloat, showsRoster: Bool) -> some View {
+    ImmersiveControlDeck.makeForTesting(width: width, showsRoster: showsRoster)
+}
+#endif
+
 private struct ImmersiveControlDeck: View {
     @Environment(ReplayStore.self) private var store
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -1944,7 +1962,36 @@ private struct ImmersiveControlDeck: View {
     let recenterControls: () -> Void
     let exit: () -> Void
 
+    #if DEBUG
+    var showsPOVControlsOnlyForTesting = false
+    static func makeForTesting(width: CGFloat, showsRoster: Bool) -> Self {
+        var view = Self(selectedAnnotationID: .constant(nil), showsDecisionStrip: .constant(false),
+            showsPlaybackAnnotations: .constant(true), controlDeckPresetRawValue: .constant("standard"),
+            deckWidth: width, nativeActionSource: nil, isPinchDrawing: false, isPinchDrawingReady: false,
+            recenterControls: {}, exit: {})
+        view._showsPlayerGrid = State(initialValue: showsRoster)
+        view.showsPOVControlsOnlyForTesting = true
+        return view
+    }
+    #endif
+
     var body: some View {
+        #if DEBUG
+        if showsPOVControlsOnlyForTesting {
+            VStack(alignment: .leading, spacing: 11) {
+                compactPlayerControlButton
+                if showsPlayerGrid { playerPOVGrid }
+            }
+            .padding(22).frame(width: deckWidth).controlSize(.extraLarge)
+        } else {
+            annotationDeckBody
+        }
+        #else
+        annotationDeckBody
+        #endif
+    }
+
+    private var annotationDeckBody: some View {
         annotationWorkflowHost {
             switch PlaybackControlDeckPresentation.mode(
                 isPhysicalPlacement: store.triangleLockMode == .place,
@@ -2392,7 +2439,10 @@ private struct ImmersiveControlDeck: View {
 
     private var activePlayerCompactLabel: String {
         PlaybackControlDeckPresentation.playerControlLabel(
-            shirtNumber: store.viewMode == .firstPerson ? store.activePerspective?.shirtNumber : nil
+            shirtNumber: store.viewMode == .firstPerson ? store.activePerspective?.shirtNumber : nil,
+            teamAbbreviation: store.activePerspective.map {
+                FootballReferenceScenarios.teamAbbreviation($0.team, in: store.selectedScenario)
+            }
         )
     }
 
@@ -2400,7 +2450,8 @@ private struct ImmersiveControlDeck: View {
         guard store.viewMode == .firstPerson, let player = store.activePerspective else {
             return "Choose player point of view"
         }
-        return "Player point of view, number \(player.shirtNumber), \(player.role)"
+        return PlaybackControlDeckPresentation.playerControlAccessibilityLabel(
+            player: player, scenario: store.selectedScenario)
     }
 
     private var annotationToolsButton: some View {
@@ -3759,7 +3810,7 @@ private struct ImmersiveControlDeck: View {
 
                 if store.viewMode == .firstPerson, let player = store.activePerspective {
                     StatusPill(
-                        text: "#\(player.shirtNumber) · \(player.positionCode)",
+                        text: "\(FootballReferenceScenarios.teamAbbreviation(player.team, in: store.selectedScenario)) #\(player.shirtNumber) · \(player.positionCode)",
                         systemImage: "viewfinder",
                         color: ReplayTheme.signal
                     )
@@ -3793,9 +3844,7 @@ private struct ImmersiveControlDeck: View {
     ) -> some View {
         HStack(spacing: 6) {
             VStack(alignment: .leading, spacing: 1) {
-                Text(FootballReferenceScenarios.contains(store.selectedScenario)
-                     ? FootballReferenceScenarios.teamTitle(team, in: store.selectedScenario).prefix(3).uppercased()
-                     : (team == .home ? "HOME" : "AWAY"))
+                Text(FootballReferenceScenarios.teamAbbreviation(team, in: store.selectedScenario))
                     .font(.caption2.monospaced().weight(.black))
                     .foregroundStyle(teamAccent(team))
                 Text("XI")

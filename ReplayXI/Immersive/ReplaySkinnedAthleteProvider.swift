@@ -228,6 +228,7 @@ final class ReplaySkinnedAthleteInstance {
     /// Retains the independently measured cycle138 aligned, unsmoothed control.
     var disablesCutWeightSmoothingForTesting = false
     var disablesHeaderHandoffForTesting = false
+    var disablesOffBallReadyArmsForTesting = false
     enum DiagnosticStage: String, CaseIterable {
         case source, footballRetargetAndContact, offBall, look, impact
         case stationarySupport, headerAim, cervical, finalFloor
@@ -395,11 +396,18 @@ final class ReplaySkinnedAthleteInstance {
                                                targetWorldPosition: lookTarget,
                                                stationaryPose: stationaryPose,
                                                presentationPose: presentationPose)
+        #if DEBUG
+        let preservesReadyArms = !disablesOffBallReadyArmsForTesting
+        #else
+        let preservesReadyArms = true
+        #endif
         let offBall = ReplayAthleteOffBallPose.sample(
             playerID: track.id, at: time, locomotion: locomotion, look: baseLook,
             actionInfluence: max(interactionSample?.influence ?? 0, ballAction?.influence ?? 0,
                                  keeper?.influence ?? 0),
             sourceFraction: 1 - influence,
+            retargetedArmReadiness: preservesReadyArms && !track.isGoalkeeper
+                ? (movement?.readiness ?? 0) * (1 - (movement?.contactProtection ?? 0)) : 0,
             enabled: allowsOffBallPose && presentationPose != nil && stationaryPose == nil
                 && impact == nil && lookTarget != nil)
         applyOffBall(offBall)

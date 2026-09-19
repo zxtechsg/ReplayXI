@@ -1060,7 +1060,7 @@ struct PlaybackConsole: View {
                 Label(
                     store.viewMode == .firstPerson
                         ? "Free look · position follows player · brackets show facing"
-                        : "Switch views without changing the synchronized match clock.",
+                        : "POV pauses here. Play when ready; look around freely.",
                     systemImage: store.viewMode == .firstPerson ? "move.3d" : "clock.arrow.2.circlepath"
                 )
                 .font(.caption.weight(.semibold))
@@ -1087,6 +1087,7 @@ struct PlaybackConsole: View {
                             .disabled(!store.canChangePlaybackView)
                             .help(mode.title)
                             .accessibilityLabel(mode.title)
+                            .accessibilityHint(PlaybackControlDeckPresentation.cameraActionHint(mode, currentMode: store.viewMode))
                             .accessibilityAddTraits(store.viewMode == mode ? .isSelected : [])
                         }
                     }

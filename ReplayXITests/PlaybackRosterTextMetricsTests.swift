@@ -53,6 +53,23 @@ final class PlaybackRosterTextMetricsTests: XCTestCase {
         }
     }
 
+    func testEveryTeamAndShirtLabelFitsTheUnchangedCompactPOVBudget() {
+        for category in categories {
+            let traits = UITraitCollection(preferredContentSizeCategory: category)
+            let layout = PlaybackPrimaryControlLabelLayout.resolve(usesAccessibilityText: category.isAccessibilityCategory)
+            let font = UIFont.monospacedSystemFont(ofSize:
+                UIFont.preferredFont(forTextStyle: .caption1, compatibleWith: traits).pointSize, weight: .black)
+            for scenario in DemoScenarios.catalogue + DemoScenarios.all {
+                for player in scenario.players {
+                    let label = PlaybackControlDeckPresentation.playerControlLabel(shirtNumber: player.shirtNumber,
+                        teamAbbreviation: FootballReferenceScenarios.teamAbbreviation(player.team, in: scenario))
+                    XCTAssertLessThanOrEqual(width(label, font: font) * Double(layout.playerMinimumTextScale),
+                        Double(layout.playerLabelWidth), "\(category.rawValue): \(label)")
+                }
+            }
+        }
+    }
+
     func testProbeMatchesTheLiveTwoLineLabelAndFramePolicy() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         let source = try String(contentsOf: root.appendingPathComponent(

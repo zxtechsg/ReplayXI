@@ -188,6 +188,8 @@ enum ReplayNativeBallPhysics {
         var touches: [Touch] = []
         var missed = 0
         #if DEBUG
+        var completedNativeStepsForTesting = 0
+        defer { preparationObserverForTesting?(.finished(nativeSteps: completedNativeStepsForTesting)) }
         var diagnostics: [Diagnostic] = []
         diagnostics.reserveCapacity(256)
         #endif
@@ -199,6 +201,10 @@ enum ReplayNativeBallPhysics {
             if index % 60 == 0 {
                 try Task.checkCancellation()
                 await Task.yield()
+                #if DEBUG
+                preparationObserverForTesting?(.resumedAfterYield(nativeSteps: completedNativeStepsForTesting))
+                #endif
+                try Task.checkCancellation()
             }
             let time = first.time + Double(index) * step
             let delta = min(step, last.time - time)
@@ -218,6 +224,9 @@ enum ReplayNativeBallPhysics {
                 }
             }
             try world.advance(delta)
+            #if DEBUG
+            completedNativeStepsForTesting += 1
+            #endif
             let sample = world.sample(at: time + delta)
             guard sample.position.x.isFinite, sample.position.y.isFinite, sample.position.z.isFinite,
                   simd_length(sample.position) < 500, simd_length(sample.velocity) < 100,
@@ -333,6 +342,12 @@ enum ReplayNativeBallPhysics {
     }
 
     #if DEBUG
+    enum PreparationCheckpointForTesting {
+        case resumedAfterYield(nativeSteps: Int)
+        case finished(nativeSteps: Int)
+    }
+    /// Numeric checkpoints only; observers must not retain native solver state.
+    static var preparationObserverForTesting: ((PreparationCheckpointForTesting) -> Void)?
     static func resetCacheForTesting() { cache.removeAll() }
     static var cacheCountForTesting: Int { cache.count }
     #endif

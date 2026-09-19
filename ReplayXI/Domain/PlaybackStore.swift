@@ -812,13 +812,18 @@ final class ReplayStore {
             statusMessage = "End physical placement before changing views."
             return
         }
+        // Re-selecting the rendered camera is navigation-only. Entering a
+        // moving player camera must match the roster/pitch tap's comfort pause;
+        // changing between spectator views keeps the existing transport.
+        guard mode != viewMode else { return }
+        if mode == .firstPerson { isPlaying = false }
         if broadcast, isCollaborationActive, localRole == .player {
             followsCoach = false
             isLocallyPaused = true
         }
         viewMode = mode
         statusMessage = mode == .firstPerson
-            ? "Player POV ready. Position follows the run; your head controls free look. Green brackets show recorded facing."
+            ? "Player POV paused. Play to follow the run; your headset controls free look."
             : "\(mode.title) view ready"
         if broadcast, localRole == .coach {
             emitSnapshot()

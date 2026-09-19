@@ -71,11 +71,12 @@ enum ReplayAthleteOffBallPose {
     static func sample(playerID: String, at time: TimeInterval,
                        locomotion: PlayerLocomotionSample, look: ReplayAthleteLookPose,
                        actionInfluence: Float, sourceFraction: Float = 0,
+                       retargetedArmReadiness: Float = 0,
                        enabled: Bool = true) -> Sample {
         guard enabled, time.isFinite, locomotion.speedMetresPerSecond.isFinite,
               locomotion.accelerationMetresPerSecondSquared.isFinite,
               look.combinedYawRadians.isFinite, actionInfluence.isFinite,
-              sourceFraction.isFinite else { return .zero }
+              sourceFraction.isFinite, retargetedArmReadiness.isFinite else { return .zero }
         // Keep the admitted contact and its full-support core exactly intact.
         // The quintic edge avoids a new animation cut during preparation/release.
         let availability = 1 - smooth((actionInfluence - 0.05) / 0.65)
@@ -107,10 +108,14 @@ enum ReplayAthleteOffBallPose {
                               outward: 0.10 - armWave * 0.020,
                               elbowFlexion: 0.35 + otherWave * 0.050)
         let bracing = smooth((-acceleration - 0.12) / 0.88) * (1 - settled) * availability
+        // Native retargeting has already prepared the arms near the ball.
+        // Yield the relaxed idle overwrite continuously to that existing pose.
+        // Procedural callers apply readiness afterwards and keep the default.
+        let relaxedArmFreedom = 1 - min(max(retargetedArmReadiness, 0), 1)
         return .init(chestYaw: min(max(share + quietYaw, -0.16), 0.16) * availability,
                      chestPitch: (breath + sourcePitch) * availability,
                      chestRoll: balance * availability, leftArm: leftArm, rightArm: rightArm,
-                     armSetWeight: settled * availability, bracingWeight: bracing)
+                     armSetWeight: settled * availability * relaxedArmFreedom, bracingWeight: bracing)
     }
 
     /// Actual Biped arm axes, cached once for each admitted skin. The semantic

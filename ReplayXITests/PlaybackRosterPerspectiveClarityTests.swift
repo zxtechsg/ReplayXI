@@ -82,6 +82,53 @@ final class PlaybackRosterPerspectiveClarityTests: XCTestCase {
         }
     }
 
+    func testReferencePOVLabelsDistinguishBothTeamsWithTheSameShirtNumber() throws {
+        for scenario in FootballReferenceScenarios.all {
+            let home = try XCTUnwrap(scenario.homePlayers.first { home in
+                scenario.awayPlayers.contains { $0.shirtNumber == home.shirtNumber }
+            })
+            let away = try XCTUnwrap(scenario.awayPlayers.first { $0.shirtNumber == home.shirtNumber })
+            func label(_ player: PlayerTrack) -> String {
+                PlaybackControlDeckPresentation.playerControlLabel(shirtNumber: player.shirtNumber,
+                    teamAbbreviation: FootballReferenceScenarios.teamAbbreviation(player.team, in: scenario))
+            }
+            XCTAssertNotEqual(label(home), label(away), scenario.id)
+            for player in [home, away] {
+                let spoken = PlaybackControlDeckPresentation.playerControlAccessibilityLabel(player: player, scenario: scenario)
+                XCTAssertTrue(spoken.contains(FootballReferenceScenarios.teamTitle(player.team, in: scenario)))
+                XCTAssertTrue(spoken.contains(player.displayName))
+                XCTAssertTrue(spoken.contains("number \(player.shirtNumber)"))
+                XCTAssertTrue(spoken.contains(player.role))
+            }
+            XCTAssertEqual(PlaybackControlDeckPresentation.playerControlLabel(shirtNumber: nil,
+                teamAbbreviation: FootballReferenceScenarios.teamAbbreviation(home.team, in: scenario)), "POV PLAYER")
+        }
+    }
+
+    func testReferenceCodesAreDistinctAndIncludeManchesterCity() throws {
+        let city = try XCTUnwrap(FootballReferenceScenarios.all.first { $0.id == "city-45-overlap-header" })
+        XCTAssertEqual(FootballReferenceScenarios.teamAbbreviation(.home, in: city), "MCI")
+        XCTAssertEqual(FootballReferenceScenarios.teamAbbreviation(.away, in: city), "LIV")
+        let final = try XCTUnwrap(FootballReferenceScenarios.all.first { $0.id == "final-81-volley-v2" })
+        XCTAssertEqual(FootballReferenceScenarios.teamAbbreviation(.home, in: final), "ARG")
+        XCTAssertEqual(FootballReferenceScenarios.teamAbbreviation(.away, in: final), "FRA")
+        let practice = ReplayStore().selectedScenario
+        XCTAssertEqual(FootballReferenceScenarios.teamAbbreviation(.home, in: practice), "HOME")
+        XCTAssertEqual(FootballReferenceScenarios.teamAbbreviation(.away, in: practice), "AWAY")
+    }
+
+    func testImmersiveCompactControlAndRosterUseTeamAwareIdentity() throws {
+        let source = try immersiveSource()
+        let labels = try slice(source, after: "private var activePlayerCompactLabel: String",
+            before: "private var annotationToolsButton:")
+        XCTAssertTrue(labels.contains("teamAbbreviation: store.activePerspective.map"))
+        XCTAssertTrue(labels.contains("PlaybackControlDeckPresentation.playerControlAccessibilityLabel("))
+        let roster = try slice(source, after: "private var playerPOVGrid: some View",
+            before: "private func perspectivePlayerButton(")
+        XCTAssertTrue(roster.contains("FootballReferenceScenarios.teamAbbreviation(player.team, in: store.selectedScenario)"))
+        XCTAssertTrue(roster.contains("FootballReferenceScenarios.teamAbbreviation(team, in: store.selectedScenario)"))
+    }
+
     private func makeStore() -> ReplayStore {
         let store = ReplayStore()
         store.prepareForLocalExperience()

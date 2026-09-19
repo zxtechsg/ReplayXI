@@ -189,6 +189,101 @@ final class ReplayAthleteOffBallVisualTests: XCTestCase {
         add(receipt)
     }
 
+    /// Reuse the admitted renderer/calibration for two measured native cases.
+    /// The single toggle restores the old relaxed-arm overwrite only.
+    func testActualReadyDefendersNearLowBeforeAfter145() async throws {
+        resetProviders()
+        defer { resetProviders() }
+        try ReplaySkinnedAthleteProvider.prewarm()
+        try ReplaySkinnedAthleteProvider.prewarmLowDetail()
+        let calibration = try await calibrate()
+        var rows: [[String: Any]] = []
+        let cases: [(String, String, Double)] = [("city-45-overlap-header", "liv-4", 6.0),
+                                                ("city-57-underlap-cutback", "liv-5", 5.9)]
+        for (scenarioID, playerID, time) in cases {
+            let scenario = try XCTUnwrap(FootballReferenceScenarios.all.first { $0.id == scenarioID })
+            let player = try XCTUnwrap(scenario.player(id: playerID))
+            let recording = try await ReplayNativeBallPhysics.prewarm(track: scenario.ball,
+                players: scenario.players, plannedTouches: FootballReferenceScenarios.touches(for: scenario))
+            XCTAssertFalse(recording.touches.contains { $0.playerID == playerID })
+            let pose = player.presentationPose(at: time), locomotion = player.locomotion(at: time)
+            let poses = Dictionary(uniqueKeysWithValues: scenario.players.map { ($0.id, $0.presentationPose(at: time)) })
+            let ball = recording.sample(at: time)
+            let look = ReplayAthleteTacticalAttention.target(for: player, at: time, pose: pose,
+                ball: ball.position, players: scenario.players, poses: poses, contacts: [])
+            let heading = simd_quatf(angle: pose.facingDegrees * .pi / 180, axis: [0, 1, 0])
+            let origin = SIMD3<Float>(pose.position.x, 0, pose.position.z)
+            for detail in [ReplaySkinnedAthleteProvider.Detail.near, .lowDetail] {
+                let skin = try ReplaySkinnedAthleteProvider.make(for: player, detail: detail)
+                let actor = Entity()
+                actor.position = origin; actor.orientation = heading; actor.addChild(skin.root)
+                let scene = Entity(); scene.addChild(actor)
+                defer {
+                    skin.poseStageObserverForTesting = nil
+                    skin.root.removeFromParent(); actor.removeFromParent()
+                    for child in Array(scene.children) { child.removeFromParent() }
+                }
+                let floor = ModelEntity(mesh: .generateBox(size: [1.4, 0.008, 1.4]),
+                    materials: [SimpleMaterial(color: UIColor(red: 0.07, green: 0.12, blue: 0.09, alpha: 1),
+                                               roughness: 1, isMetallic: false)])
+                floor.position = origin + [0, -0.006, 0]; scene.addChild(floor)
+                let camera = PerspectiveCamera()
+                camera.camera = .init(near: 0.05, far: 20, fieldOfViewInDegrees: 40)
+                camera.look(at: origin + [0, 0.95, 0],
+                            from: origin + heading.act([2.2, 1.45, 3.2]), relativeTo: nil)
+                let key = DirectionalLight(); key.light.intensity = 2_200
+                key.look(at: origin + [0, 0.9, 0], from: origin + heading.act([3, 4, 3]), relativeTo: nil)
+                let fill = DirectionalLight(); fill.light.intensity = 500
+                fill.look(at: origin + [0, 0.9, 0], from: origin + heading.act([-3, 2, 2]), relativeTo: nil)
+                let actorTransform = actor.transform, skinTransform = skin.root.transform
+                let mesh = skin.model.model?.mesh
+                var beforeFrame: ReplayRealityRendererAudit.Frame?
+                var beforePose: ReplaySkinnedAthleteMotion.Pose?
+                var source: ReplaySkinnedAthleteMotion.Pose?, beforeSource: ReplaySkinnedAthleteMotion.Pose?
+                skin.poseStageObserverForTesting = { stage, pose in if stage == .source { source = pose } }
+                var changed = 0
+                for enabled in [false, true] {
+                    skin.disablesOffBallReadyArmsForTesting = !enabled
+                    XCTAssertTrue(skin.update(at: time, track: player, locomotion: locomotion,
+                        lookTarget: look, ballAction: nil, presentationPose: pose, allowsTrackLocomotionSampling: true))
+                    XCTAssertEqual(actor.transform, actorTransform); XCTAssertEqual(skin.root.transform, skinTransform)
+                    XCTAssertTrue(skin.model.model?.mesh === mesh)
+                    try assertDimensionsAndFloor(skin)
+                    if let beforePose {
+                        XCTAssertEqual(skin.pose.translations, beforePose.translations)
+                        XCTAssertEqual(skin.pose.scales, beforePose.scales)
+                        for name in ["hips", "leftHip", "rightHip", "leftKnee", "rightKnee", "leftAnkle", "rightAnkle"] {
+                            let index = try XCTUnwrap(skin.motion.semanticJointIndices[name])
+                            XCTAssertEqual(skin.pose.modelSpaceTransforms[index], beforePose.modelSpaceTransforms[index])
+                        }
+                        XCTAssertEqual(source?.rotations, beforeSource?.rotations)
+                        XCTAssertEqual(source?.translations, beforeSource?.translations)
+                    } else { beforePose = skin.pose; beforeSource = source }
+                    let frame = try await render([scene, camera, key, fill], camera: camera, size: 512)
+                    XCTAssertGreaterThan(nonBackgroundPixels(frame), 5_000)
+                    if let beforeFrame {
+                        changed = differentPixels(beforeFrame, frame)
+                        XCTAssertGreaterThan(changed, 20, "The measured ready-arm restoration must be visible")
+                    } else { beforeFrame = frame }
+                    let image = XCTAttachment(data: try ReplayRealityRendererAudit.png(frame, calibration: calibration),
+                                              uniformTypeIdentifier: "public.png")
+                    image.name = "ReplayXI-ReadyArms145-\(scenarioID)-\(playerID)-\(detail)-\(enabled ? "after" : "before").png"
+                    image.lifetime = .keepAlways; add(image)
+                }
+                XCTAssertEqual(recording.sample(at: time).position, ball.position)
+                XCTAssertEqual(recording.sample(at: time).velocity, ball.velocity)
+                rows.append(["scenario": scenarioID, "player": playerID, "time": time,
+                    "detail": String(describing: detail), "changedPixelsOverTwoChannelLevels": changed,
+                    "sourceBallFeetAndPlacementExact": true,
+                    "scope": "Same actual demo frame, admitted mesh and camera. Native offscreen A/B, not a headset or match-mocap claim."])
+            }
+        }
+        let receipt = XCTAttachment(data: try JSONSerialization.data(withJSONObject: rows, options: [.sortedKeys]),
+                                    uniformTypeIdentifier: "public.json")
+        receipt.name = "ReplayXI-ReadyArms145-VisualReceipts.json"
+        receipt.lifetime = .keepAlways; add(receipt)
+    }
+
     private func frames(before: Float, after: Float) -> [MotionKeyframe] {
         [.init(time: 0, position: .init(x: 0, z: before), facingDegrees: 0),
          .init(time: 1, position: .zero, facingDegrees: 0),
