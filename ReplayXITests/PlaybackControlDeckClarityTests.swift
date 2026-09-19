@@ -235,7 +235,7 @@ final class PlaybackControlDeckClarityTests: XCTestCase {
         let choice = try String(contentsOf: root.appendingPathComponent(
             "ReplayXI/Immersive/AnnotationTimingEditor.swift"), encoding: .utf8)
         XCTAssertTrue(choice.contains("CoachMarkTimingPolicy.windowFits"))
-        XCTAssertTrue(choice.contains(".disabled(!valid || !store.canChangePlaybackView)"))
+        XCTAssertTrue(choice.contains(".disabled(!canEdit || !isDirty || draft.validationMessage(duration: duration) != nil)"))
         XCTAssertTrue(choice.contains("store.setCoachMarkWindow"))
         let move = try sourceSlice(source,
             after: "private func canMoveAnnotation(", before: "private var directPlaybackRates")

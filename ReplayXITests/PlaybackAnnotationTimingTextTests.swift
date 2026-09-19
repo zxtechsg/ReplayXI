@@ -49,9 +49,13 @@ final class PlaybackAnnotationTimingTextTests: XCTestCase {
         let source = try String(contentsOf: root.appendingPathComponent(
             "ReplayXI/Immersive/AnnotationTimingEditor.swift"), encoding: .utf8)
         XCTAssertTrue(source.contains("CoachMarkTimingPolicy.windowFits"))
-        XCTAssertTrue(source.contains("TextField(\"Seconds\""))
-        XCTAssertTrue(source.contains(".disabled(!valid || !store.canChangePlaybackView)"))
+        XCTAssertTrue(source.contains("TextField(\"Seconds or m:ss\""))
+        XCTAssertTrue(source.contains(".disabled(!canEdit || !isDirty || draft.validationMessage(duration: duration) != nil)"))
         XCTAssertTrue(source.contains("store.setCoachMarkWindow"))
+        XCTAssertTrue(source.contains("ViewThatFits(in: .horizontal)"))
+        XCTAssertTrue(source.contains("@ScaledMetric"))
+        XCTAssertTrue(source.contains("store.retimeCoachMarkKeyframe"))
+        XCTAssertTrue(source.contains("mark.canShiftKeyframes"))
     }
 
     private func checkText(_ categories: [UIContentSizeCategory], usesAccessibilityText: Bool) throws {

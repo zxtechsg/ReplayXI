@@ -1290,6 +1290,21 @@ final class ReplayStore {
         return true
     }
 
+    @discardableResult
+    func freezeCoachMarkKeyframes(id: UUID) -> Bool {
+        guard allowsAnnotationAuthoring(), allowsMutationOutsideEndpointPreview(), canChangePlaybackView,
+              localRole == .coach, !selectedScenario.coachMarks.contains(where: { $0.id == id }),
+              let index = marks.firstIndex(where: { $0.id == id }), marks[index].hasKeyframes else { return false }
+        var replacement = marks[index].sampled(at: playhead)
+        replacement.keyframes = nil
+        guard isValidSharedMark(replacement, for: selectedScenario) else { return false }
+        marks[index] = replacement
+        isPlaying = false
+        statusMessage = "Position frozen here — Undo restores the animation"
+        emitSnapshot()
+        return true
+    }
+
     /// Moves one coach-created annotation to a new match instant without
     /// changing its geometry or authored display duration. Fixture overlays
     /// remain immutable so a local edit cannot erase the teaching baseline.

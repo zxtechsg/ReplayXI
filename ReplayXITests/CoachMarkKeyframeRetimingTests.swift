@@ -84,4 +84,22 @@ final class CoachMarkKeyframeRetimingTests: XCTestCase {
         store.cancelDrawing()
         XCTAssertEqual(store.marks.last, mark)
     }
+
+    func testFreezeHoldsSampledPoseAndUndoRestoresAllKeys() throws {
+        let (store, mark) = try keyedMark()
+        store.seek(to: 4)
+        XCTAssertTrue(store.freezeCoachMarkKeyframes(id: mark.id))
+        let frozen = try XCTUnwrap(store.marks.last)
+        XCTAssertNil(frozen.keyframes)
+        XCTAssertEqual(frozen.start, mark.sampled(at: 4).start)
+        XCTAssertEqual(frozen.end, mark.sampled(at: 4).end)
+        XCTAssertEqual(frozen.curve, mark.sampled(at: 4).curve)
+        XCTAssertEqual(frozen.revealTime, mark.revealTime)
+        XCTAssertEqual(frozen.hideTime, mark.hideTime)
+        XCTAssertFalse(store.freezeCoachMarkKeyframes(id: mark.id))
+        XCTAssertTrue(store.undoAnnotationEdit())
+        XCTAssertEqual(store.marks.last, mark)
+        XCTAssertTrue(store.redoAnnotationEdit())
+        XCTAssertEqual(store.marks.last, frozen)
+    }
 }
