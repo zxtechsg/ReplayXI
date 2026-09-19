@@ -93,7 +93,8 @@ is being unified with the accessibility path before final validation.
 
 Saved production reviews still match SHA-256
 `952e501de62f36e391a5b471175c883d0deb9e981a5c6cfc04f607c6dc5ded65`.
-Device Release verification remains pending.
+Device Release verification and the clean full-suite retry subsequently pass;
+see `IMPROVEMENT_RUN_143.md`. The intermittent crash itself remains unexplained.
 
 The Mac remains locked. No hands-on gaze, pinch or headset comfort validation
 is claimed.

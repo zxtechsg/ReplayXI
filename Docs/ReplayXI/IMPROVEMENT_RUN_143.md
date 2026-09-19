@@ -33,6 +33,10 @@ The same signature predates the header change (cycle131). The new capture
 helper's explicit camera/resource lifetime matches the established cut tests.
 Neither fact identifies the particular renderer or proves an SDK defect.
 
+Root inspection confirms the same leading 27 stack frames in:
+`/Users/zx/Library/Logs/DiagnosticReports/ReplayXI-2026-09-20-043652.ips` and
+`/Users/zx/Library/Logs/DiagnosticReports/ReplayXI-2026-09-18-163724.ips`.
+
 Native bake releases a populated renderer without an explicit shutdown phase;
 that is a plausible lifecycle target, not an established cause. A bounded
 physics-bake/stage-only stress test is being prepared before changing shipping
@@ -53,5 +57,22 @@ checker budget; splitting the typed timestamp list preserved its sample values.
 
 Unsigned device Release succeeds:
 `/private/tmp/replayxi-cycle143-release.log` (only unused AppIntents metadata
-warning). A clean full-suite retry remains pending. The Mac is locked; no
-hands-on headset input or comfort claim is made.
+warning).
+
+## Final checkpoint
+
+The full retry is green with no test-runner restart: 1,438 XCTest executions,
+two intentional skips, zero failures, plus both Swift Testing asset cases pass.
+The combined result summary is 1,438 passed / two skipped / zero failed. The
+run includes the complete five-scene baseline, all header/annotation tests and
+the 12-iteration lifecycle stress check; no failure-prone test was removed.
+
+- `/private/tmp/replayxi-cycle143-full-retry.xcresult` and `.log`
+
+This clean retry does not explain or fix the earlier intermittent teardown
+crash. Its saved evidence remains an open investigation item.
+
+Normal demo launch succeeds (PID 64331), verified alive after 12 seconds.
+Production reviews are byte-identical, SHA-256
+`952e501de62f36e391a5b471175c883d0deb9e981a5c6cfc04f607c6dc5ded65`.
+The Mac is locked; no hands-on headset input or comfort claim is made.

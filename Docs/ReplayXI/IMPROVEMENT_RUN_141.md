@@ -99,10 +99,12 @@ JSON oracle exactly; every imported low-mesh vertex is checked separately to
 - `/private/tmp/replayxi-cycle141-floor-optimized.xcresult` and `.log`
 - `/private/tmp/replayxi-cycle141-floor-optimized-captures/B4C1BCE2-6BCA-46AB-A515-AF5675BF28A5.json`
 
-## In progress
+## Follow-up
 
-- Refresh full-scene CPU measurements for all five native reference studies.
-- Run the complete native regression suite and unsigned device Release build.
+The five-study CPU baseline is recorded in `IMPROVEMENT_RUN_142.md`.
+Complete native regression and device Release verification subsequently pass
+in run 143. That receipt also records an earlier intermittent renderer-teardown
+crash, its bounded stress check and the remaining investigation limit.
 
 The Mac remains locked. Offscreen native tests are available; hands-on headset
 gesture, gaze and comfort testing is not claimed.
