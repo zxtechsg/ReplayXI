@@ -36,4 +36,8 @@ A post-yield cancellation check now stops that work. The deterministic regressio
 - Verified UI images: `/private/tmp/replayxi-cycle145-pov-captures-verified/`.
 - Arm images/metrics: `/private/tmp/replayxi-cycle145-readyarm-captures/` and `/private/tmp/replayxi-cycle145-offball-candidate/`.
 - Cancellation receipt: `/private/tmp/replayxi-cycle145-cancellation-candidate/EE1F8B72-A55C-42BB-836F-8DDE1FC29E06.json`.
-- Full suite, device Release, final saved-review check and demo relaunch pending at this checkpoint. User signing/project changes and unrelated files are excluded from Git.
+- Full suite: `/private/tmp/replayxi-cycle145-full.xcresult`: **1,463 passed, two skipped, one crashed**. The process restarted after SIGSEGV in `ReplayCutRunPhase138Tests.testActualCutReleaseAndProtectedContactNearLowFloorBonesAndRewind`; this is **not a green full run**. `/Users/zx/Library/Logs/DiagnosticReports/ReplayXI-2026-09-20-053223.ips` matches the earlier CoreRE physics-scene teardown stack. The failing method makes native physics worlds but no capture renderer; deferred cleanup of an earlier renderer remains possible. No originating renderer is identified.
+- Unsigned device Release: `/private/tmp/replayxi-cycle145-release.log`: **build passed**.
+- Saved reviews remain byte-identical (SHA-256 `952e501de62f36e391a5b471175c883d0deb9e981a5c6cfc04f607c6dc5ded65`).
+- Three-repeat reduced cohort: `/private/tmp/replayxi-cycle145-crash-isolation.xcresult`: **35 test invocations passed, one crashed** (12 unique tests). It reproduced the same cleanup failure during the stage-only lifecycle test; `/Users/zx/Library/Logs/DiagnosticReports/ReplayXI-2026-09-20-054056.ips`. This cohort also includes earlier visual tests, so it does not isolate the originating renderer.
+- Cleanup investigation continues in run 146; normal demo relaunch remains pending. User signing/project changes and unrelated files are excluded from Git. Implementation is backed up at `6fa93fb`.
