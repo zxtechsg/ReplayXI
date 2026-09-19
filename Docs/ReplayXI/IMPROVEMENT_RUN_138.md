@@ -69,6 +69,16 @@ their conservative reservations, not actual counts, exceeded 24.
 Evidence: /private/tmp/replayxi-cycle138-budget-baseline-captures.
 These are enabled ModelComponent counts, not measured GPU calls or headset FPS.
 
+Admission now uses the existing absolute keyframe sampler for current elevation;
+static marks retain their fast path. No new cache or scene-tree rebuild. Four
+native regression tests pass, including interpolation/reverse, selected reserves,
+decision mode, held keyframe endpoints and single-guide thresholds. Raised normal
+zones now admit three (18 models), and ground zones admit four (16 models).
+Entity identities remain unchanged across admission changes. All 41 tests in the
+combined budget/motion candidate batch pass. Evidence:
+/private/tmp/replayxi-cycle138-budget-motion-candidate.xcresult and
+/private/tmp/replayxi-cycle138-budget-candidate-captures.
+
 ## Foot contact investigation
 
 Cycle137's 10.61 m/s near-floor peak is not proven planted skating. At fra-22's

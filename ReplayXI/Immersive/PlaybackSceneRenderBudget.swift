@@ -34,6 +34,14 @@ enum PlaybackSceneRenderBudget {
             + (mark.resolvedEndElevation > 0.001 ? 1 : 0)
     }
 
+    /// Admission must count the guides rendered at this timestamp, not the
+    /// saved base pose. Reuse the renderer's absolute keyframe sampler so
+    /// interpolation, held endpoints and reverse seeks share its threshold.
+    static func estimatedDraws(for mark: CoachMark, at time: TimeInterval) -> Int {
+        guard mark.hasKeyframes else { return estimatedDraws(for: mark) }
+        return estimatedDraws(for: mark.sampled(at: time))
+    }
+
     /// Computes stable recency once when annotation identity/timing changes.
     /// The original index is the deterministic tie break, so no UUID strings
     /// are created in the playback path.
@@ -87,7 +95,7 @@ enum PlaybackSceneRenderBudget {
 
         if let selected {
             result.insert(selected.id)
-            consumedDraws += estimatedDraws(for: selected)
+            consumedDraws += estimatedDraws(for: selected, at: time)
         }
 
         for index in priorityIndices {
@@ -96,7 +104,7 @@ enum PlaybackSceneRenderBudget {
             guard mark.id != selected?.id,
                   isEligible(mark),
                   mark.isVisible(at: time) else { continue }
-            let cost = estimatedDraws(for: mark)
+            let cost = estimatedDraws(for: mark, at: time)
             guard consumedDraws + cost <= drawLimit else { continue }
             result.insert(mark.id)
             consumedDraws += cost
