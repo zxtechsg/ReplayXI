@@ -947,9 +947,10 @@ private struct DashboardTransport: View {
     }
 }
 
-private struct PlaybackConsole: View {
+struct PlaybackConsole: View {
     @Environment(ReplayStore.self) private var store
     @State private var rosterTeam: FootballTeam = .home
+    @State private var rosterScrollID: String?
 
     var scenario: ReplayScenario { store.selectedScenario }
 
@@ -1025,6 +1026,7 @@ private struct PlaybackConsole: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 7) {
                         ForEach(playersForRoster) { player in
+                            let isSelected = store.viewMode == .firstPerson && store.activePerspectiveID == player.id
                             Button {
                                 store.openLocalPlayerPOV(player.id)
                             } label: {
@@ -1033,19 +1035,24 @@ private struct PlaybackConsole: View {
                                         .font(.caption.weight(.black))
                                     Text(player.displayName)
                                         .font(.caption2)
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(isSelected ? Color.black.opacity(0.72) : Color.secondary)
                                 }
                                 .frame(minWidth: 112, alignment: .leading)
+                                .foregroundStyle(isSelected ? Color.black : Color.white)
                             }
                             .buttonStyle(.bordered)
-                            .tint(store.viewMode == .firstPerson && store.activePerspectiveID == player.id ? ReplayTheme.signal : .white.opacity(0.5))
+                            .tint(isSelected ? ReplayTheme.signal : .white.opacity(0.10))
                             .disabled(!store.canChangePlaybackView)
                             .accessibilityLabel("\(FootballReferenceScenarios.teamTitle(player.team, in: store.selectedScenario)), number \(player.shirtNumber), \(player.role), \(player.displayName)")
                             .accessibilityHint("Open this player's first-person view")
-                            .accessibilityAddTraits(store.viewMode == .firstPerson && store.activePerspectiveID == player.id ? .isSelected : [])
+                            .accessibilityAddTraits(isSelected ? .isSelected : [])
+                            .id(player.id)
                         }
                     }
+                    .scrollTargetLayout()
                 }
+                .scrollPosition(id: $rosterScrollID, anchor: .center)
+                .accessibilityIdentifier("dashboard-player-roster")
             }
 
             HStack(alignment: .center, spacing: 14) {
@@ -1069,11 +1076,15 @@ private struct PlaybackConsole: View {
                                 store.setViewMode(mode)
                             } label: {
                                 Label(mode.title, systemImage: mode.systemImage)
-                                    .font(.caption.weight(.bold))
+                                    .labelStyle(.iconOnly)
+                                    .font(.body.weight(.semibold))
+                                    .frame(minWidth: 44, minHeight: 44)
                             }
                             .buttonStyle(.bordered)
-                            .tint(store.viewMode == mode ? ReplayTheme.signal : .white.opacity(0.5))
+                            .tint(store.viewMode == mode ? ReplayTheme.signal : .white.opacity(0.10))
+                            .foregroundStyle(store.viewMode == mode ? Color.black : Color.white)
                             .disabled(!store.canChangePlaybackView)
+                            .help(mode.title)
                             .accessibilityLabel(mode.title)
                             .accessibilityAddTraits(store.viewMode == mode ? .isSelected : [])
                         }
@@ -1085,6 +1096,17 @@ private struct PlaybackConsole: View {
         .background(ReplayTheme.panel, in: RoundedRectangle(cornerRadius: 20))
         .overlay {
             RoundedRectangle(cornerRadius: 20).stroke(ReplayTheme.hairline, lineWidth: 1)
+        }
+        .onAppear { revealCurrentRosterPlayer() }
+        .onChange(of: store.activePerspectiveID) { _, _ in revealCurrentRosterPlayer() }
+        .onChange(of: store.selectedScenarioID) { _, _ in revealCurrentRosterPlayer() }
+        .onChange(of: store.viewMode) { _, mode in
+            if mode == .firstPerson { revealCurrentRosterPlayer() }
+        }
+        .onChange(of: rosterTeam) { _, _ in
+            // Browsing another team never changes the camera or playhead.
+            rosterScrollID = playersForRoster.first { $0.id == store.activePerspectiveID }?.id
+                ?? playersForRoster.first?.id
         }
     }
 
@@ -1100,6 +1122,12 @@ private struct PlaybackConsole: View {
 
     private var playersForRoster: [PlayerTrack] {
         rosterTeam == .home ? scenario.homePlayers : scenario.awayPlayers
+    }
+
+    private func revealCurrentRosterPlayer() {
+        guard let player = scenario.player(id: store.activePerspectiveID) else { return }
+        rosterTeam = player.team
+        rosterScrollID = player.id
     }
 
     private func openAdjacentPlayerPOV(by offset: Int) {

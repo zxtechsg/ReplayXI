@@ -296,7 +296,7 @@ final class PlaybackTimelineScrubTests: XCTestCase {
         )
         let end = try XCTUnwrap(
             source.range(
-                of: "private struct PlaybackConsole: View",
+                of: "struct PlaybackConsole: View",
                 range: start..<source.endIndex
             )?.lowerBound
         )

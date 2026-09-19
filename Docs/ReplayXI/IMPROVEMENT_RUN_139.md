@@ -44,5 +44,29 @@ The existing sync timing counter does not measure this visibility loop.
 - /private/tmp/replayxi-cycle139-visibility-baseline-captures.
 - /private/tmp/replayxi-cycle139-visibility-candidate-captures.
 
-Dashboard roster improvements and native cut-blend work remain under validation.
+## Dashboard POV roster
+
+Opening an opponent POV previously left the home team selected. Crossing teams
+with Previous/Next also left the selected player offscreen. A native baseline
+recorded zero horizontal offset for every last-player selection.
+
+The roster now reveals the selected player and matching team on entry, POV
+changes and scenario changes. Its scroll binding is presentation-only; browsing
+the strip never changes the camera or replay time. View controls use named,
+accessible icons with 44-point minimum targets instead of wrapped labels.
+Selected shirts and view icons use dark text on lime for clearer contrast.
+
+Four native/wiring tests pass, including both teams, a blocked POV request,
+scenario changes and largest accessibility text. Native scroll offsets reach the
+actual end for last-player selections and return to zero for the first opponent.
+Seven native captures were inspected; the selected player and view controls fit.
+Ten existing timeline tests also pass. This checks native hosting and Store
+transitions, not hands-on headset gaze/gesture input.
+
+- /private/tmp/replayxi-cycle139-dashboard-polish-captures.
+- /private/tmp/replayxi-cycle139-motion-dashboard.xcresult: dashboard 4/4,
+  timeline 10/10 and prior phase 6/6 pass. New motion tests are 3/4: the raw-zero
+  transition check caught a 0.0356 weight step against its 0.03 bound. Motion
+  work is not accepted by this checkpoint and remains under investigation.
+
 Hands-on gesture testing remains pending; the locked Mac was not bypassed.
