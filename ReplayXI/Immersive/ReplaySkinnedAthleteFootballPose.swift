@@ -346,14 +346,42 @@ struct ReplaySkinnedAthleteFootballPose {
                 // admitting a cue does not suddenly collapse the set stance.
                 let oldKnee = keeperTarget?.kneePosition ?? kneePosition
                 let oldAnkle = keeperTarget?.anklePosition ?? anklePosition
+                let upperRotation = ReplayAthleteInteractionPose.blend(
+                    keeperTarget?.hipRotation ?? hipDelta * leg.hipNeutralRotation,
+                    solved.upperRotation * leg.hipNeutralRotation, blend)
+                let lowerRotation = ReplayAthleteInteractionPose.blend(
+                    keeperTarget?.kneeRotation ?? kneeDelta * leg.kneeNeutralRotation,
+                    solved.lowerRotation * leg.kneeNeutralRotation, blend)
+                var transitionKnee = oldKnee + (solved.knee - oldKnee) * blend
+                var transitionAnkle = oldAnkle + (solved.ankle - oldAnkle) * blend
+                var transitionUpper = upperRotation
+                var transitionLower = lowerRotation
+                if blend > 0, blend < 1,
+                   let transition = ReplayAthleteTwoBoneIK.solve(
+                    hip: hipPosition, ankle: transitionAnkle,
+                    upperLength: leg.upperLength, lowerLength: leg.lowerLength,
+                    pole: transitionKnee - hipPosition) {
+                    // Separate position lerps shrink the thigh/shin while a
+                    // foot prepares or releases contact. Blend the foot goal,
+                    // then recover a constant-length chain in its existing
+                    // knee plane. Swing the blended bone frames onto that
+                    // chain without replacing their axial twist. The admitted
+                    // full-contact pose above remains exactly unchanged.
+                    let upperAxis = (upperRotation * leg.hipNeutralRotation.inverse).act([0, -1, 0])
+                    let lowerAxis = (lowerRotation * leg.kneeNeutralRotation.inverse).act([0, -1, 0])
+                    transitionUpper = simd_normalize(simd_quatf(from: upperAxis,
+                        to: simd_normalize(transition.knee - hipPosition)) * upperRotation)
+                    transitionLower = simd_normalize(simd_quatf(from: lowerAxis,
+                        to: simd_normalize(transition.ankle - transition.knee)) * lowerRotation)
+                    transitionKnee = transition.knee
+                    transitionAnkle = transition.ankle
+                }
                 return LegTarget(
                     hipPosition: hipPosition,
-                    kneePosition: oldKnee + (solved.knee - oldKnee) * blend,
-                    anklePosition: oldAnkle + (solved.ankle - oldAnkle) * blend,
-                    hipRotation: ReplayAthleteInteractionPose.blend(keeperTarget?.hipRotation ?? hipDelta * leg.hipNeutralRotation,
-                        solved.upperRotation * leg.hipNeutralRotation, blend),
-                    kneeRotation: ReplayAthleteInteractionPose.blend(keeperTarget?.kneeRotation ?? kneeDelta * leg.kneeNeutralRotation,
-                        solved.lowerRotation * leg.kneeNeutralRotation, blend),
+                    kneePosition: transitionKnee,
+                    anklePosition: transitionAnkle,
+                    hipRotation: transitionUpper,
+                    kneeRotation: transitionLower,
                     ankleRotation: ReplayAthleteInteractionPose.blend(keeperTarget?.ankleRotation ?? ankleDelta * leg.ankleNeutralRotation,
                         foot, blend)
                 )
