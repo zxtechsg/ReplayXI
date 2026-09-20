@@ -194,7 +194,7 @@ private struct ScenarioRail: View {
                         showsExercises.toggle()
                     } label: {
                         HStack {
-                            Text(activeMode == .situationRoleplay ? "Exercises" : "Match studies")
+                            Text(activeMode.scenarioListTitle)
                                 .font(.subheadline.weight(.semibold))
                             Spacer(minLength: 8)
                             Text("\(modeScenarios.count)")
@@ -205,7 +205,7 @@ private struct ScenarioRail: View {
                         .frame(minHeight: 44)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel(showsExercises ? "Collapse exercises" : "Show exercises")
+                    .accessibilityLabel(activeMode.scenarioDisclosureLabel(isExpanded: showsExercises))
                     .accessibilityValue(showsExercises ? "Expanded" : "Collapsed")
 
                     if showsExercises {
@@ -986,6 +986,9 @@ struct PlaybackConsole: View {
                         .buttonStyle(.bordered)
                         .tint(moment.id == store.activeMoment?.id ? ReplayTheme.orange : .white.opacity(0.45))
                         .disabled(!store.canChangePlaybackView)
+                        .accessibilityLabel("\(moment.headline), \(AnnotationTimestamp.display(moment.time, fractionalDigits: 2))")
+                        .accessibilityHint("Pause at this moment")
+                        .accessibilityAddTraits(moment.id == store.activeMoment?.id ? .isSelected : [])
                     }
                 }
             }

@@ -25,6 +25,14 @@ enum ReplayAppMode: String, CaseIterable, Identifiable, Hashable, Sendable {
         }
     }
 
+    var scenarioListTitle: String {
+        self == .situationRoleplay ? "Exercises" : "Match studies"
+    }
+
+    func scenarioDisclosureLabel(isExpanded: Bool) -> String {
+        "\(isExpanded ? "Collapse" : "Show") \(scenarioListTitle.lowercased())"
+    }
+
     var systemImage: String {
         switch self {
         case .situationRoleplay: "figure.soccer"
