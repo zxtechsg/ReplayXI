@@ -1202,6 +1202,7 @@ enum PlaybackInlinePanel: Equatable, Sendable {
     case annotationGeometry(UUID)
     case annotationLabel(UUID)
     case annotationTracking(UUID)
+    case annotationActions(UUID)
 
     /// Speed belongs to the main transport, not the secondary Tools command.
     var isToolsPanel: Bool { self != .playbackSpeed }
@@ -1209,7 +1210,7 @@ enum PlaybackInlinePanel: Equatable, Sendable {
     var isAnnotationPanel: Bool {
         switch self {
         case .annotationEdit, .annotationDuration, .annotationGeometry,
-             .annotationLabel, .annotationTracking:
+             .annotationLabel, .annotationTracking, .annotationActions:
             true
         case .settings, .playbackSpeed, .savedReviews:
             false
@@ -1230,8 +1231,17 @@ enum PlaybackInlinePanel: Equatable, Sendable {
         case .annotationDuration(let id),
              .annotationGeometry(let id),
              .annotationLabel(let id),
-             .annotationTracking(let id):
+             .annotationTracking(let id),
+             .annotationActions(let id):
             selectedAnnotationID == id
+        }
+    }
+
+    var annotationID: UUID? {
+        switch self {
+        case .annotationDuration(let id), .annotationGeometry(let id), .annotationLabel(let id),
+             .annotationTracking(let id), .annotationActions(let id): id
+        case .settings, .playbackSpeed, .savedReviews, .annotationEdit: nil
         }
     }
 }
@@ -1956,6 +1966,9 @@ private struct ImmersiveControlDeck: View {
     @State private var inlinePanel: PlaybackInlinePanel?
     @State private var timingDraftSession = AnnotationTimingDraftSession()
     @State private var timingNavigation = AnnotationTimingNavigationGate()
+    // A rejected action leaves playback running. Keep its source-scoped
+    // feedback through transport ticks so it remains readable.
+    @State private var annotationActionsFeedback: AnnotationActionsFeedback?
     @State private var showsAnnotationTools = false
     @State private var showsToolsShelf = false
     @Binding var selectedAnnotationID: UUID?
@@ -2212,6 +2225,8 @@ private struct ImmersiveControlDeck: View {
                   newCount > oldCount,
                   newCount > store.selectedScenario.coachMarks.count,
                   let mark = store.marks.last else { return }
+            guard !PlaybackAnnotationActionsRoute.keepsSelectedInsertion(
+                insertedID: mark.id, selectedID: selectedAnnotationID, panel: inlinePanel) else { return }
             annotationConfirmation = "\(mark.kind.title.uppercased()) SAVED · \(formatTime(mark.revealTime))"
             // Saving is the end of the spatial gesture, not an instruction to
             // open another editing workflow. Keep the compact draw shelf ready
@@ -2238,6 +2253,7 @@ private struct ImmersiveControlDeck: View {
             rebuildReviewIndex()
         }
         .onChange(of: store.reviewIndexVersion) { _, _ in
+            annotationActionsFeedback = nil
             rebuildReviewIndex()
             reconcileAnnotationPresentationSelection()
         }
@@ -2258,7 +2274,8 @@ private struct ImmersiveControlDeck: View {
             // a new mark.
             // Undo/Redo may erase the selected mark. Keep its history shelf
             // available so the next action can immediately restore that mark.
-            if inlinePanel != .annotationEdit || selectedID != nil { inlinePanel = nil }
+            inlinePanel = PlaybackAnnotationActionsRoute.panelAfterSelectionChange(
+                inlinePanel, selectedID: selectedID)
             if selectedID != nil {
                 showsPlayerGrid = false
                 showsAnnotationTools = false
@@ -2749,6 +2766,13 @@ private struct ImmersiveControlDeck: View {
             } else {
                 unavailableInlineShelf
             }
+        case .annotationActions(let markID):
+            if selectedAnnotationID == markID,
+               let mark = store.marks.first(where: { $0.id == markID }) {
+                annotationActionsShelf(mark)
+            } else {
+                unavailableInlineShelf
+            }
         }
     }
 
@@ -2977,6 +3001,61 @@ private struct ImmersiveControlDeck: View {
                 close: requestTimingSafeClose)
                 .id(mark.id)
         }
+    }
+
+    private func annotationActionsShelf(_ mark: CoachMark) -> some View {
+        inlineShelf(color: annotationColor(for: mark.kind)) {
+            AnnotationActionsShelf(color: annotationColor(for: mark.kind),
+                isAuthored: !isCoachCreated(mark), showsCopy: mark.kind != .playerLabel,
+                canCopy: store.canCopyCoachMarkPose(id: mark.id),
+                canErase: store.localRole == .coach && isCoachCreated(mark) && store.canChangePlaybackView
+                    && !timingDraftSession.hasUnsavedChanges,
+                canClose: store.canChangePlaybackView,
+                feedback: annotationActionsFeedback?.sourceID == mark.id ? annotationActionsFeedback?.message
+                    : (store.marks.count >= ReplayStore.maximumSharedCoachMarks
+                        ? "Annotation limit reached. Erase a coach mark before copying." : nil),
+                close: { toggleAnnotationActions(id: mark.id) },
+                copy: { copyAnnotationPose(id: mark.id) },
+                erase: { eraseAnnotationFromActions(id: mark.id) })
+        }
+    }
+
+    private func toggleAnnotationActions(id: UUID) {
+        guard store.canChangePlaybackView, selectedAnnotationID == id else { return }
+        annotationActionsFeedback = nil
+        let destination = PlaybackAnnotationActionsRoute.destination(id: id, from: timingDeckRoute)
+        timingNavigation.observeDraft(isDirty: timingDraftSession.hasUnsavedChanges, route: timingEditorRoute)
+        if let retained = timingNavigation.protect(destination) {
+            restoreTimingRoute(retained)
+        } else {
+            restoreTimingRoute(destination)
+        }
+    }
+
+    private func copyAnnotationPose(id: UUID) {
+        guard let copied = PlaybackAnnotationActionsRoute.copyPose(id: id, selectedID: selectedAnnotationID,
+            panel: inlinePanel, timingIsDirty: timingDraftSession.hasUnsavedChanges, in: store,
+            onFailure: { annotationActionsFeedback = .init(sourceID: id, message: $0) }) else { return }
+        annotationActionsFeedback = nil
+        selectedAnnotationID = copied.id
+        inlinePanel = .annotationGeometry(copied.id)
+        showsPlaybackAnnotations = true
+        showsEventStrip = false
+        showsDecisionStrip = false
+        showsPlayerGrid = false
+        showsToolsShelf = false
+        showsAnnotationTools = false
+        annotationConfirmation = "POSE COPIED · \(formatTime(store.playhead))"
+    }
+
+    private func eraseAnnotationFromActions(id: UUID) {
+        guard PlaybackAnnotationActionsRoute.permitsAction(id: id, selectedID: selectedAnnotationID,
+            panel: inlinePanel, timingIsDirty: timingDraftSession.hasUnsavedChanges),
+            store.removeCoachMark(id: id) else { return }
+        selectedAnnotationID = nil
+        showsEventStrip = false
+        annotationConfirmation = "MARK DELETED"
+        inlinePanel = .annotationEdit
     }
 
     private func requestTimingSafeClose() {
@@ -4686,29 +4765,23 @@ private struct ImmersiveControlDeck: View {
                         inlinePanel == .annotationDuration(mark.id) ? .isSelected : []
                     )
 
-                    Button(role: .destructive) {
-                        if store.removeCoachMark(id: mark.id) {
-                            selectedAnnotationID = nil
-                            showsEventStrip = false
-                            annotationConfirmation = "MARK DELETED"
-                            inlinePanel = .annotationEdit
-                        }
-                    } label: {
-                        Label("Erase", systemImage: "eraser.fill")
-                            .font(.subheadline.weight(.black))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.80)
-                            .frame(
-                                width: 92,
-                                height: PlaybackControlDeckPresentation.minimumSpatialHitTarget
-                            )
+                } else {
+                    StatusPill(text: "MATCH", systemImage: "lock.fill", color: .secondary)
+                }
+
+                if store.localRole == .coach, mark.kind != .playerLabel || isCoachCreated(mark) {
+                    Button { toggleAnnotationActions(id: mark.id) } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.headline.weight(.black))
+                            .frame(width: PlaybackControlDeckPresentation.minimumSpatialHitTarget,
+                                   height: PlaybackControlDeckPresentation.minimumSpatialHitTarget)
                     }
                     .buttonStyle(.bordered)
                     .disabled(!store.canChangePlaybackView)
-                    .accessibilityLabel("Delete annotation")
-                    .accessibilityHint("Erases this annotation and opens Undo")
-                } else {
-                    StatusPill(text: "MATCH", systemImage: "lock.fill", color: .secondary)
+                    .accessibilityLabel("Annotation actions")
+                    .accessibilityHint(PlaybackAnnotationActionsRoute.accessibilityHint(
+                        isSpatial: mark.kind.requiresTwoPitchPoints, isAuthored: !isCoachCreated(mark)))
+                    .accessibilityAddTraits(inlinePanel == .annotationActions(mark.id) ? .isSelected : [])
                 }
 
                 Button {

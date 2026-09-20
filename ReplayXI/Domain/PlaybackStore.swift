@@ -1202,6 +1202,59 @@ final class ReplayStore {
         CoachMarkTimingPolicy.defaultHideTime(revealTime: playhead, replayDuration: selectedScenario.duration)
     }
 
+    /// Read-only UI admission. The action also validates the current presented
+    /// geometry: a tracked or legacy pose may be too small or off the pitch.
+    /// No UUID, status change, pause or gesture ownership is created here.
+    func canCopyCoachMarkPose(id: UUID) -> Bool {
+        pendingAnnotationTimingEditID == nil && triangleLockMode != .place
+            && localRole == .coach && canChangePlaybackView
+            && marks.count < Self.maximumSharedCoachMarks
+            && CoachMarkTimingPolicy.windowFits(revealTime: playhead, displayDuration: nil,
+                                                replayDuration: selectedScenario.duration)
+            && marks.contains { $0.id == id && $0.kind.requiresTwoPitchPoints }
+    }
+
+    /// Freeze the pose at the current replay time, not its stored fallback or
+    /// reveal time. Authored and out-of-window sources remain untouched; their
+    /// copy is an ordinary editable coach mark with no inherited animation.
+    @discardableResult
+    func copyCoachMarkPose(id: UUID) -> CoachMark? {
+        guard allowsNavigationOutsideTimingDraft(), allowsAnnotationAuthoring(),
+              allowsPlaybackViewChange(), localRole == .coach,
+              allowsAnnotationAtCurrentTime() else { return nil }
+        guard marks.count < Self.maximumSharedCoachMarks else {
+            statusMessage = "Annotation limit reached. Remove one before copying."
+            return nil
+        }
+        guard let source = marks.first(where: { $0.id == id }),
+              source.kind.requiresTwoPitchPoints else {
+            statusMessage = "Choose a spatial annotation to copy"
+            return nil
+        }
+        let pose = source.sampled(at: playhead)
+        let geometry = presentedCoachMarkGeometry(source, at: playhead)
+        let copy = CoachMark(kind: source.kind, start: geometry.start, end: geometry.end,
+            startElevation: pose.startElevation, endElevation: pose.endElevation,
+            curve: source.kind == .arc ? editableCoachMarkCurve(source, at: playhead) : nil,
+            label: source.label, revealTime: playhead, hideTime: defaultCoachMarkHideTime,
+            author: "Coach")
+        guard CoachMarkGeometryPolicy.acceptsEditing(kind: copy.kind,
+            start: copy.start, end: copy.end, startElevation: copy.startElevation,
+            endElevation: copy.endElevation, curve: copy.curve) else {
+            statusMessage = "Choose a pose large enough to copy"
+            return nil
+        }
+        guard isValidSharedMark(copy, for: selectedScenario) else {
+            statusMessage = "Keep the copied pose within the pitch and height limits"
+            return nil
+        }
+        marks.append(copy)
+        isPlaying = false
+        statusMessage = "Pose copied — fixed at this time"
+        emitSnapshot()
+        return copy
+    }
+
     /// Compatibility entry point: all Undo routes use the same edit history.
     func undoMark() {
         _ = undoAnnotationEdit()
