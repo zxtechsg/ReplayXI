@@ -39,3 +39,7 @@ The corrected census keeps wrappers alive during both traversals. The first pair
 ## Cleanup probe
 
 The unchanged run152 test module UUID is checked before installing four narrow debugger tracepoints. They record root/child addresses around the existing detach/snapshot-destruction path, without calling getters or changing ownership. A first weak-runtime error or bad access stops and records frames/registers/images. The bounded ten-iteration reproduction and debugger alter timing; failure to reproduce cannot establish a fix.
+
+- `/private/tmp/replayxi-cycle153-cleanup-repeat27.xcresult`: the single method passed all ten repetitions in the same host, PID 90592. The result summary counts one distinct method; the console log records all ten executions.
+- `/private/tmp/replayxi-cycle153-cleanup-lldb.log`: 38 complete observed root cleanups (684 child detachments), each entering snapshot destruction and returning. Attachment occurred after two early cleanups, so coverage is 38 of 40 rather than all 40. No weak-error breakpoint or bad-access stop; host exit 0. Both debugger and test sessions closed normally.
+- A subsequent unchanged-binary ordered cohort, 145 → 147 → 149, also passed: `/private/tmp/replayxi-cycle154-cleanup-prefix27.xcresult`. Its debugger observed all four149 cleanups, host exit0. No cleanup code was changed. Full152's failure remains unresolved and recorded; these negative reproductions do not prove framework blame or a fix.

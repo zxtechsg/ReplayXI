@@ -20,6 +20,15 @@ enum PlaybackSpatialLabels {
     }
     private(set) static var updateWork = UpdateWork()
     static func resetUpdateWorkForTesting() { updateWork = UpdateWork() }
+    /// Calls made by centeredText only. Annotation-card extent measurement
+    /// remains separate; these counts are not engine work or timing estimates.
+    struct TextCenteringWork: Codable, Equatable {
+        var cacheHits = 0
+        var cacheMisses = 0
+        var nativeCenteringBoundsQueries = 0
+    }
+    private(set) static var textCenteringWork = TextCenteringWork()
+    static func resetTextCenteringWorkForTesting() { textCenteringWork = TextCenteringWork() }
     #endif
     static let firstPersonVisibleLabelLimit = 4
     static let firstPersonVisibleAnnotationLimit = 2
@@ -58,6 +67,9 @@ enum PlaybackSpatialLabels {
     static let maximumCachedTextMeshes = 64
     private struct CachedTextMesh {
         let mesh: MeshResource
+        /// Exact offset measured on the first fresh, unparented glyph using
+        /// this immutable mesh. Shares the mesh's existing bounded lifetime.
+        let centeringOffset: SIMD3<Float>
         var lastAccess: UInt64
     }
     private static var textMeshClock: UInt64 = 0
@@ -440,11 +452,16 @@ enum PlaybackSpatialLabels {
         cacheKey: String
     ) -> ModelEntity {
         let mesh: MeshResource
+        let cachedOffset: SIMD3<Float>?
         textMeshClock &+= 1
         if var cached = textMeshes[cacheKey] {
             cached.lastAccess = textMeshClock
             textMeshes[cacheKey] = cached
             mesh = cached.mesh
+            cachedOffset = cached.centeringOffset
+            #if DEBUG
+            textCenteringWork.cacheHits &+= 1
+            #endif
         } else {
             let generated = MeshResource.generateText(
                 text,
@@ -454,10 +471,26 @@ enum PlaybackSpatialLabels {
                 alignment: .left,
                 lineBreakMode: .byClipping
             )
-            textMeshes[cacheKey] = CachedTextMesh(
-                mesh: generated,
-                lastAccess: textMeshClock
-            )
+            mesh = generated
+            cachedOffset = nil
+            #if DEBUG
+            textCenteringWork.cacheMisses &+= 1
+            #endif
+        }
+
+        let entity = ModelEntity(
+            mesh: mesh,
+            materials: [UnlitMaterial(color: color, applyPostProcessToneMap: false)]
+        )
+        if let cachedOffset {
+            entity.position = cachedOffset
+        } else {
+            let bounds = entity.visualBounds(relativeTo: entity)
+            let offset = SIMD3<Float>(-bounds.center.x, -bounds.center.y, 0)
+            #if DEBUG
+            textCenteringWork.nativeCenteringBoundsQueries &+= 1
+            #endif
+            textMeshes[cacheKey] = CachedTextMesh(mesh: mesh, centeringOffset: offset, lastAccess: textMeshClock)
             if textMeshes.count > maximumCachedTextMeshes,
                let leastRecentlyUsedKey = textMeshes.min(by: {
                    $0.value.lastAccess < $1.value.lastAccess
@@ -465,15 +498,8 @@ enum PlaybackSpatialLabels {
                leastRecentlyUsedKey != cacheKey {
                 textMeshes.removeValue(forKey: leastRecentlyUsedKey)
             }
-            mesh = generated
+            entity.position = offset
         }
-
-        let entity = ModelEntity(
-            mesh: mesh,
-            materials: [UnlitMaterial(color: color, applyPostProcessToneMap: false)]
-        )
-        let bounds = entity.visualBounds(relativeTo: entity)
-        entity.position = [-bounds.center.x, -bounds.center.y, 0]
         return entity
     }
 
