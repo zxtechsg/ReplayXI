@@ -102,9 +102,10 @@ final class ReplaySlowRunIntegration151Tests: XCTestCase {
             "positiveWeightCoverage": positiveCoverage.sorted(), "noPositiveWeightCoverage": required.subtracting(positiveCoverage).sorted(),
             "hasSlowRun": ReplaySkinnedAthleteProvider.motion?.hasSlowRun == true,
             "slowSHA256": ReplaySkinnedAthleteProvider.slowRunSHA256,
-            "scope": "Five native reference recordings, each team selected as the near actor; all remaining native actors use low detail. Enabled and disabled Full squad roots have identical sampling history. CPU timings are warm Factory.update only, alternated A/B order, without assertions/readback/rendering inside the interval.",
-            "limits": "No rendering or hardware FPS claim. Floor clearance is geometry, not measured contact. Missing real track boundary crossings and missing positive team/detail cells are reported, not filled with synthetic data. Local joint steps are measured at gaps no larger than 1/120 s, not declared discontinuities."]
-        try attach(report, name: "ReplayXI-SlowRun151-FiveDemoIntegration.json")
+            "temporalSlopeLimitPerSecond": 4,
+            "scope": "152 prepared admission: five native recordings, each team selected as near; remaining native actors low. Enabled/disabled Full squad roots share sampling history. Cold root construction and inner timeline preparation are separate from warm Factory.update CPU timings, which alternate A/B order without assertions/readback/rendering inside the interval.",
+            "limits": "No rendering or hardware FPS claim. Floor clearance is geometry, not measured contact. Missing raw-track boundary crossings/positive cells are reported. Raw admission remains diagnostic; the prepared timeline is authoritative. Local joint steps are measured at gaps no larger than 1/120 s, not declared discontinuities."]
+        try attach(report, name: "ReplayXI-SlowRun152-FiveDemoIntegration.json")
     }
 
     func testActualReboundPOVNonNativeStationaryAndWholeTrackImpactGuards151() async throws {
@@ -165,7 +166,7 @@ final class ReplaySlowRunIntegration151Tests: XCTestCase {
                          "explicitImpactIsTestCue": impact != nil])
         }
         try attach(["cases": rows, "scope": "Actual rebound paths/ball, two wearer origins; nonnative and ideal-view fast-only guards; one explicit test impact cue excludes its subject before/during/after the cue."],
-                   name: "ReplayXI-SlowRun151-FactoryGuards.json")
+                   name: "ReplayXI-SlowRun152-FactoryGuards.json")
     }
 
     private func prepare() throws {
@@ -197,6 +198,7 @@ final class ReplaySlowRunIntegration151Tests: XCTestCase {
                           recording: ReplayNativeBallPhysics.Recording) -> Plan {
         var times = (0...8).map { scenario.duration * Double($0) / 8 }
         times += recording.touches.flatMap { [$0.time - 1 / 120.0, $0.time, $0.time + 1 / 120.0] }
+        if let pair = regressionPair(scenario.id) { times += [pair.start, pair.end] }
         var boundaries: [[String: Any]] = [], missing: [String] = []
         for (key, threshold) in [("speed", Float(1)), ("speed", 1.9), ("speed", 2.2), ("speed", 2.9),
                                  ("turn", 20), ("turn", 38), ("yaw", 0.22), ("yaw", 0.72)] {
@@ -241,9 +243,24 @@ final class ReplaySlowRunIntegration151Tests: XCTestCase {
     private func measure(_ scenario: ReplayScenario, recording: ReplayNativeBallPhysics.Recording,
                          focus: PlayerTrack, plan: Plan, protected: Set<String>) throws
         -> (row: [String: Any], coverage: Set<String>, positive: Set<String>) {
+        let fastStart = DispatchTime.now().uptimeNanoseconds
         let fast = PitchSceneFactory.makeMatchRoot(for: scenario, nativeRecording: recording)
+        let fastConstruction = DispatchTime.now().uptimeNanoseconds - fastStart
+        let enabledStart = DispatchTime.now().uptimeNanoseconds
         let enabled = PitchSceneFactory.makeMatchRoot(for: scenario, nativeRecording: recording)
+        let enabledConstruction = DispatchTime.now().uptimeNanoseconds - enabledStart
         defer { for root in [fast, enabled] { for child in Array(root.children) { child.removeFromParent() } } }
+        let timelines = PitchSceneFactory.slowRunTimelinesForTesting(in: enabled)
+        let fastTimelines = PitchSceneFactory.slowRunTimelinesForTesting(in: fast)
+        XCTAssertEqual(Set(timelines.keys), Set(scenario.players.map(\.id)).subtracting(protected))
+        XCTAssertEqual(Set(timelines.keys), Set(fastTimelines.keys))
+        for (id, timeline) in timelines {
+            XCTAssertTrue(timeline.knotsForTesting == fastTimelines[id]?.knotsForTesting, "Deterministic cold preparation \(id)")
+        }
+        let coldFast = timelineMetrics(fast, constructionNanoseconds: fastConstruction)
+        let coldEnabled = timelineMetrics(enabled, constructionNanoseconds: enabledConstruction)
+        let fastBuildNS = PitchSceneFactory.slowRunBuildNanosecondsForTesting(in: fast)
+        let enabledBuildNS = PitchSceneFactory.slowRunBuildNanosecondsForTesting(in: enabled)
         for _ in 0..<2 {
             _ = update(fast, scenario, time: plan.times[0], perspective: focus.id, enabled: false)
             _ = update(enabled, scenario, time: plan.times[0], perspective: focus.id, enabled: true)
@@ -278,8 +295,12 @@ final class ReplaySlowRunIntegration151Tests: XCTestCase {
                 let cell = "\(player.team.rawValue)/\(body.detail)"; coverage.insert(cell)
                 XCTAssertEqual(control.weight, 0)
                 XCTAssertTrue(body.weight.isFinite && (0...1).contains(body.weight), label)
-                let expected = protected.contains(player.id) ? Float(0) : features(player, time).weight
-                XCTAssertEqual(body.weight, expected, accuracy: 0.000001, label)
+                let raw = features(player, time)
+                let expected = protected.contains(player.id) ? Float(0) : timelines[player.id]?.weight(at: time) ?? 0
+                XCTAssertEqual(body.weight, expected, label)
+                if raw.weight == 0 {
+                    XCTAssertEqual(body.weight, 0, "Prepared source must retain known raw zero/fast-cut gate: \(label)")
+                }
                 if protected.contains(player.id) || body.weight == 0 { assertPose(body, control, label: label) }
                 if body.weight > 0 {
                     positive.insert(cell); positiveIDs.append(player.id)
@@ -294,7 +315,10 @@ final class ReplaySlowRunIntegration151Tests: XCTestCase {
                 if dt > 0, dt <= 1 / 120.0 + 0.0000001 {
                     for (id, body) in b.bodies {
                         let old = savedEnabled[index - 1].bodies[id]!, before = savedFast[index - 1].bodies[id]!, control = a.bodies[id]!
-                        weightPeak.add(abs(body.weight - old.weight), player: id, time: time, dt: dt)
+                        let weightChange = abs(body.weight - old.weight)
+                        XCTAssertLessThanOrEqual(weightChange, Float(4 * dt) + 0.000001,
+                            "4/s temporal admission bound: \(scenario.id)/\(id)/\(time), dt=\(dt)")
+                        weightPeak.add(weightChange, player: id, time: time, dt: dt)
                         // Report signed rates only on actual 120 Hz pairs, not
                         // tiny merged gaps between independent boundary probes.
                         if abs(dt - 1 / 120.0) < 0.0000001 {
@@ -315,7 +339,7 @@ final class ReplaySlowRunIntegration151Tests: XCTestCase {
             savedFast.append(a); savedEnabled.append(b)
             let feature = features(focus, time)
             rows.append(["time": time, "focusWeight": b.bodies[focus.id]!.weight, "speed": feature.speed,
-                "turn": feature.turn, "absoluteTravelYaw": feature.yaw, "positiveIDs": positiveIDs.sorted(),
+                "rawFocusWeight": feature.weight, "turn": feature.turn, "absoluteTravelYaw": feature.yaw, "positiveIDs": positiveIDs.sorted(),
                 "fastClipSamples": countsRow(fastCounts), "enabledClipSamples": countsRow(enabledCounts)])
         }
         for (index, time) in plan.times.enumerated().reversed() {
@@ -324,25 +348,100 @@ final class ReplaySlowRunIntegration151Tests: XCTestCase {
             assertState(try snapshot(fast), savedFast[index], label: "fast rewind \(scenario.id)/\(focus.id)/\(time)")
             assertState(try snapshot(enabled), savedEnabled[index], label: "enabled rewind \(scenario.id)/\(focus.id)/\(time)")
         }
+        XCTAssertEqual(PitchSceneFactory.slowRunBuildNanosecondsForTesting(in: fast), fastBuildNS)
+        XCTAssertEqual(PitchSceneFactory.slowRunBuildNanosecondsForTesting(in: enabled), enabledBuildNS)
         return (["scenario": scenario.id, "focus": focus.id, "focusTeam": focus.team.rawValue,
             "frames": rows, "sampleCount": plan.times.count, "sampledBoundaries": plan.boundaries,
             "missingBoundaries": plan.missing, "protectedIDs": protected.sorted(), "changedPositivePoses": changed,
             "maxFastJointStepDegrees": fastPeak.row, "maxEnabledJointStepDegrees": enabledPeak.row,
             "maxFocusFastJointStepDegrees": focusFastPeak.row, "maxFocusEnabledJointStepDegrees": focusEnabledPeak.row,
             "maxWeightDelta": weightPeak.row, "cpuFast": timing(cpuFast), "cpuEnabled": timing(cpuEnabled),
-            "maxPositiveWeightDerivative": slopeRow(riseRate, sign: 1, scenario: scenario, focus: focus),
-            "maxNegativeWeightDerivative": slopeRow(fallRate, sign: -1, scenario: scenario, focus: focus),
+            "coldFastRoot": coldFast, "coldEnabledRoot": coldEnabled,
+            "pairedRegression": try pairedRegression(scenario, plan: plan, fast: savedFast, enabled: savedEnabled),
+            "maxPositiveWeightDerivative": slopeRow(riseRate, sign: 1, scenario: scenario, focus: focus, timelines: timelines),
+            "maxNegativeWeightDerivative": slopeRow(fallRate, sign: -1, scenario: scenario, focus: focus, timelines: timelines),
             "exactRewind": true, "sourceBallRoutesExact": true], coverage, positive)
     }
 
-    private func slopeRow(_ peak: Peak, sign: Float, scenario: ReplayScenario, focus: PlayerTrack) -> [String: Any] {
+    private func slopeRow(_ peak: Peak, sign: Float, scenario: ReplayScenario, focus: PlayerTrack,
+                          timelines: [String: ReplaySlowRunTimeline]) -> [String: Any] {
         guard let player = scenario.player(id: peak.player), peak.value > 0 else { return ["observed": false] }
         let before = features(player, peak.time - peak.dt), after = features(player, peak.time)
         return ["observed": true, "player": player.id, "team": player.team.rawValue,
             "detail": player.id == focus.id ? "near" : "low", "signedWeightPerSecond": sign * peak.value,
             "startTime": before.time, "endTime": after.time, "dtSeconds": peak.dt,
-            "weightBeforeAfter": [before.weight, after.weight], "speedBeforeAfter": [before.speed, after.speed],
+            "weightBeforeAfter": [timelines[player.id]?.weight(at: before.time) ?? 0, timelines[player.id]?.weight(at: after.time) ?? 0],
+            "rawWeightBeforeAfter": [before.weight, after.weight], "speedBeforeAfter": [before.speed, after.speed],
             "turnBeforeAfter": [before.turn, after.turn], "absoluteTravelYawBeforeAfter": [before.yaw, after.yaw]]
+    }
+
+    private func timelineMetrics(_ root: Entity, constructionNanoseconds: UInt64) -> [String: Any] {
+        let timelines = PitchSceneFactory.slowRunTimelinesForTesting(in: root)
+        var knots = 0, samples = 0, bytes = 0
+        var rows: [[String: Any]] = []
+        for id in timelines.keys.sorted() {
+            let timeline = timelines[id]!, metrics = timeline.metricsForTesting
+            var cells = max(1, Int(ceil(timeline.duration * ReplaySlowRunTimeline.sampleRate)))
+            if cells > 1, timeline.startTime + Double(cells - 1) / ReplaySlowRunTimeline.sampleRate >= timeline.endTime { cells -= 1 }
+            XCTAssertEqual(metrics.knotCount, cells + 1)
+            XCTAssertEqual(metrics.rawSampleCount, (metrics.knotCount - 1) * 2 + 1)
+            XCTAssertEqual(metrics.storageBytes, metrics.knotCount * MemoryLayout<Float>.stride)
+            XCTAssertTrue(timeline.knotsForTesting.allSatisfy { $0.isFinite && (0...1).contains($0) })
+            knots += metrics.knotCount; samples += metrics.rawSampleCount; bytes += metrics.storageBytes
+            rows.append(["player": id, "startTime": timeline.startTime, "endTime": timeline.endTime,
+                         "duration": timeline.duration, "knotCount": metrics.knotCount,
+                         "rawSampleCount": metrics.rawSampleCount, "storageBytes": metrics.storageBytes])
+        }
+        return ["rootConstructionNanoseconds": constructionNanoseconds,
+            "timelineBuildNanoseconds": PitchSceneFactory.slowRunBuildNanosecondsForTesting(in: root),
+            "timelineCount": timelines.count, "knotCount": knots, "rawSampleCount": samples,
+            "storedWeightBytes": bytes, "players": rows,
+            "scope": "Cold per-root preparation after shared asset/physics prewarm; root construction includes graph work. Weight payload excludes array/dictionary/allocator overhead. Raw samples count policy requests, not expensive movement-intent evaluations. Separate from warm update timings."]
+    }
+
+    private func regressionPair(_ scenarioID: String) -> (id: String, joint: Int, start: Double, end: Double)? {
+        switch scenarioID {
+        case "city-57-underlap-cutback": ("liv-38", 56, 4.0666666666666664, 4.075)
+        case "city-45-overlap-header": ("liv-2", 61, 2.8833333333333333, 2.8916666666666666)
+        default: nil
+        }
+    }
+
+    private func pairedRegression(_ scenario: ReplayScenario, plan: Plan, fast: [State], enabled: [State]) throws -> [[String: Any]] {
+        guard let pair = regressionPair(scenario.id) else { return [] }
+        let start = try XCTUnwrap(plan.times.firstIndex(of: pair.start)), end = try XCTUnwrap(plan.times.firstIndex(of: pair.end))
+        let motion = try XCTUnwrap(ReplaySkinnedAthleteProvider.motion)
+        let majorNames = ["hips", "spine", "chest", "neck", "head", "leftHip", "rightHip", "leftKnee", "rightKnee",
+                          "leftAnkle", "rightAnkle", "leftToe", "rightToe", "leftShoulder", "rightShoulder",
+                          "leftElbow", "rightElbow", "leftWrist", "rightWrist"]
+        let majorIndices = try majorNames.map { try XCTUnwrap(motion.semanticJointIndices[$0]) }
+        var variants: [[String: Any]] = []
+        for (name, states) in [("fast", fast), ("prepared", enabled)] {
+            let a = try XCTUnwrap(states[start].bodies[pair.id]), b = try XCTUnwrap(states[end].bodies[pair.id])
+            let all = jointStep(a.joints, b.joints)
+            let major = majorIndices.map { ($0, jointAngle(a.joints[$0], b.joints[$0])) }.max { $0.1 < $1.1 }!
+            var global = Peak()
+            for (id, before) in states[start].bodies {
+                let after = try XCTUnwrap(states[end].bodies[id]), step = jointStep(before.joints, after.joints)
+                global.add(step.angle, player: id, time: pair.end, dt: pair.end - pair.start, joint: step.joint)
+            }
+            variants.append(["variant": name, "detail": b.detail, "weightBeforeAfter": [a.weight, b.weight],
+                "offendingFingerDegrees": jointAngle(a.joints[pair.joint], b.joints[pair.joint]),
+                "actorAllJointMaximum": ["degrees": all.angle, "jointIndex": all.joint,
+                    "jointName": all.joint >= 0 ? motion.jointNames[all.joint] : "none"],
+                "actorMajorJointMaximum": ["degrees": major.1, "jointIndex": major.0, "jointName": motion.jointNames[major.0]],
+                "samePairAllPlayersMaximum": global.row,
+                "majorJointSteps": zip(majorNames, majorIndices).map { semantic, index in
+                    ["semantic": semantic, "jointIndex": index, "degrees": jointAngle(a.joints[index], b.joints[index])] as [String: Any]
+                }])
+        }
+        let player = try XCTUnwrap(scenario.player(id: pair.id))
+        let before = features(player, pair.start), after = features(player, pair.end)
+        return [["player": pair.id, "startTime": pair.start, "endTime": pair.end, "dtSeconds": pair.end - pair.start,
+            "offendingFingerJointIndex": pair.joint, "offendingFingerJointName": motion.jointNames[pair.joint],
+            "rawWeightBeforeAfter": [before.weight, after.weight], "speedBeforeAfter": [before.speed, after.speed],
+            "turnBeforeAfter": [before.turn, after.turn], "yawBeforeAfter": [before.yaw, after.yaw], "variants": variants,
+            "scope": "Exact same actor/joint/time pair. Major set includes semantic trunk, head, limbs and toes, excludes fingers; global row covers all actors at this same pair."]]
     }
 
     private func snapshot(_ root: Entity) throws -> State {
@@ -391,15 +490,18 @@ final class ReplaySlowRunIntegration151Tests: XCTestCase {
     nonisolated private func jointStep(_ a: [Transform], _ b: [Transform]) -> (angle: Float, joint: Int) {
         var result: (Float, Int) = (0, -1)
         for index in a.indices {
-            let p = a[index].rotation.vector, q = b[index].rotation.vector
-            let x = SIMD4<Double>(Double(p.x), Double(p.y), Double(p.z), Double(p.w))
-            let y = SIMD4<Double>(Double(q.x), Double(q.y), Double(q.z), Double(q.w))
-            let denominator = sqrt(simd_dot(x, x) * simd_dot(y, y))
-            guard denominator.isFinite, denominator > 0 else { continue }
-            let angle = Float(2 * acos(min(max(abs(simd_dot(x, y)) / denominator, 0), 1)) * 180 / Double.pi)
+            let angle = jointAngle(a[index], b[index])
             if angle > result.0 { result = (angle, index) }
         }
         return result
+    }
+    nonisolated private func jointAngle(_ a: Transform, _ b: Transform) -> Float {
+        let p = a.rotation.vector, q = b.rotation.vector
+        let x = SIMD4<Double>(Double(p.x), Double(p.y), Double(p.z), Double(p.w))
+        let y = SIMD4<Double>(Double(q.x), Double(q.y), Double(q.z), Double(q.w))
+        let denominator = sqrt(simd_dot(x, x) * simd_dot(y, y))
+        guard denominator.isFinite, denominator > 0 else { XCTFail("Invalid native quaternion norm"); return 0 }
+        return Float(2 * acos(min(max(abs(simd_dot(x, y)) / denominator, 0), 1)) * 180 / Double.pi)
     }
     private func countsRow(_ counts: Counts) -> [String: Int] { ["idle": counts.idle, "fast": counts.fastRun, "slow": counts.slowRun, "total": counts.total] }
     private func timing(_ values: [UInt64]) -> [String: Any] {

@@ -47,13 +47,31 @@ enum PitchSceneFactory {
     /// and every POV read the same immutable ball/contact recording.
     private struct NativeBallCache: Component {
         let recording: ReplayNativeBallPhysics.Recording
-        let touchPlayerIDs: Set<String>
+        let slowRunTimelines: [String: ReplaySlowRunTimeline]
+        #if DEBUG
+        let slowRunBuildNanoseconds: UInt64
+        #endif
         let interactions: [String: [ReplayAthleteInteractionCue]]
         let shots: ReplayFootballShotTimeline
 
-        init(recording: ReplayNativeBallPhysics.Recording, players: [PlayerTrack]) {
+        init(recording: ReplayNativeBallPhysics.Recording, players: [PlayerTrack],
+             authoredImpactPlayerID: String?) {
             self.recording = recording
-            touchPlayerIDs = Set(recording.touches.map(\.playerID))
+            let touchPlayerIDs = Set(recording.touches.map(\.playerID))
+            #if DEBUG
+            let slowRunBuildStart = DispatchTime.now().uptimeNanoseconds
+            #endif
+            var timelines: [String: ReplaySlowRunTimeline] = [:]
+            if let start = recording.samples.first?.time, let end = recording.samples.last?.time {
+                for player in players where !player.isGoalkeeper && !touchPlayerIDs.contains(player.id)
+                    && player.id != authoredImpactPlayerID {
+                    timelines[player.id] = ReplaySlowRunTimeline(track: player, duration: end - start, startTime: start)
+                }
+            }
+            slowRunTimelines = timelines
+            #if DEBUG
+            slowRunBuildNanoseconds = DispatchTime.now().uptimeNanoseconds - slowRunBuildStart
+            #endif
             shots = ReplayFootballShotTimeline(touches: recording.touches, players: players)
             interactions = Dictionary(grouping: recording.touches.compactMap { touch in
                 guard let kind = ReplayAthleteInteractionCue.Kind(rawValue: touch.kind.rawValue) else { return nil }
@@ -123,6 +141,14 @@ enum PitchSceneFactory {
 
     static func nativeBallRecordingForTesting(in root: Entity) -> ReplayNativeBallPhysics.Recording? {
         root.components[NativeBallCache.self]?.recording
+    }
+
+    static func slowRunTimelinesForTesting(in root: Entity) -> [String: ReplaySlowRunTimeline] {
+        root.components[NativeBallCache.self]?.slowRunTimelines ?? [:]
+    }
+
+    static func slowRunBuildNanosecondsForTesting(in root: Entity) -> UInt64 {
+        root.components[NativeBallCache.self]?.slowRunBuildNanoseconds ?? 0
     }
     #endif
 
@@ -668,7 +694,8 @@ enum PitchSceneFactory {
         root.name = "match-root-\(scenario.id)"
         if let native = nativeRecording ?? ReplayNativeBallPhysics.cached(track: scenario.ball, players: scenario.players,
                                                        plannedTouches: FootballReferenceScenarios.touches(for: scenario)) {
-            root.components.set(NativeBallCache(recording: native, players: scenario.players))
+            root.components.set(NativeBallCache(recording: native, players: scenario.players,
+                authoredImpactPlayerID: PlayerRagdollCue.authoredDemo(for: scenario)?.playerID))
         } else {
             let ballPlayback = ReplayBallPlaybackMotion.prepared(track: scenario.ball, players: scenario.players)
             root.components.set(BallPlaybackCache(motion: ballPlayback))
@@ -1193,10 +1220,10 @@ enum PitchSceneFactory {
                                              interaction: interaction, presentationPose: motionPresentation,
                                              goalkeeperReadiness: keeperReadiness,
                                              allowsTrackLocomotionSampling: stationaryPose == nil,
-                                             allowsSlowRunSource: allowsSlowRunSource
-                                                && nativeBall.map { !$0.touchPlayerIDs.contains(player.id) } == true
+                                             slowRunWeight: allowsSlowRunSource
                                                 && player.id != authoredImpactPlayerID
-                                                && player.id != ragdollCue?.playerID)
+                                                && player.id != ragdollCue?.playerID
+                                                ? nativeBall?.slowRunTimelines[player.id]?.weight(at: time) ?? 0 : 0)
                 } else {
                     usesNewSkin = false
                 }

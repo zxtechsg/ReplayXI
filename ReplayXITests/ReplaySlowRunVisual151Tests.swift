@@ -33,6 +33,17 @@ final class ReplaySlowRunVisual151Tests: XCTestCase {
         let actor: Transform
         let ball: Transform
     }
+    private struct Peak {
+        let degrees: Float
+        let joint: Int
+        let sample: Int
+    }
+    private let majorJointLeaves: Set<String> = [
+        "Pelvis", "Spine", "Spine1", "Spine2", "Neck", "Head",
+        "L_Clavicle", "R_Clavicle", "L_UpperArm", "R_UpperArm",
+        "L_Forearm", "R_Forearm", "L_Hand", "R_Hand",
+        "L_Thigh", "R_Thigh", "L_Calf", "R_Calf", "L_Foot", "R_Foot", "L_Toe0", "R_Toe0"
+    ]
 
     override func tearDown() {
         PitchSceneFactory.fullSquadSkinsForTesting = false
@@ -54,6 +65,10 @@ final class ReplaySlowRunVisual151Tests: XCTestCase {
         try ReplayStrategyPitchProvider.prewarm(); try ReplayStrategyBallProvider.prewarm()
         XCTAssertTrue(try XCTUnwrap(ReplaySkinnedAthleteProvider.motion).hasSlowRun)
         let windows = try [selectWindow(team: .home, rising: true), selectWindow(team: .away, rising: false)]
+        // Retain the measured raw151 worst windows, not easier timeline extrema.
+        XCTAssertEqual(windows.map { $0.scenario.id }, ["final-81-volley-v2", "city-57-underlap-cutback"])
+        XCTAssertEqual(windows.map { $0.player.id }, ["arg-19", "liv-38"])
+        XCTAssertEqual(windows.map(\.centre), [990, 489])
         let calibration = try await calibrate()
         var cases: [[String: Any]] = [], images: [[String: Any]] = [], pngBytes = 0
         for window in windows {
@@ -81,11 +96,12 @@ final class ReplaySlowRunVisual151Tests: XCTestCase {
             "calibration": ["gamut": calibration.gamut.rawValue, "topFirst": calibration.rawRowsAreTopFirst,
                             "maximumChannelError": calibration.maximumChannelError],
             "scope": "Actual factory default versus explicit fast-only; same actor routes, ball, fixed pitch, camera, lights and grid. Full-squad quality selects actual near/low instances. No forced LOD or substituted source.",
-            "selection": "Largest positive 30Hz policy change among eligible home actors and largest negative among away actors across all five scenes, refined locally at 120Hz; each capture spans 200ms.",
+            "selection": "Frozen raw151 worst windows: largest positive 30Hz raw policy change among eligible home actors and largest negative among away actors, refined at 120Hz. Same 200ms windows; timeline attenuation does not change their selection.",
+            "majorJointScope": majorJointLeaves.sorted(),
             "limits": "Authored animation diagnostic, not recovered match motion, force/contact evidence, headset comfort or device FPS. Sequential pose metrics cover the gaps between stills."]
         let attachment = XCTAttachment(data: try JSONSerialization.data(withJSONObject: receipt, options: [.sortedKeys]),
                                       uniformTypeIdentifier: "public.json")
-        attachment.name = "ReplayXI-SlowRun151-ProductionVisualProof.json"; attachment.lifetime = .keepAlways; add(attachment)
+        attachment.name = "ReplayXI-SlowRun152-ProductionVisualProof.json"; attachment.lifetime = .keepAlways; add(attachment)
     }
 
     private func weight(_ player: PlayerTrack, at time: Double) -> Float {
@@ -137,6 +153,8 @@ final class ReplaySlowRunVisual151Tests: XCTestCase {
         let root = PitchSceneFactory.makeMatchRoot(for: scenario, nativeRecording: recording)
         defer { for child in Array(root.children) { child.removeFromParent() } }
         update(root, scenario: scenario, time: Double(window.frames.lowerBound) / 120, selected: selected, enabled: false)
+        let timeline = PitchSceneFactory.slowRunTimelinesForTesting(in: root)[player.id]
+        XCTAssertNotNil(timeline, "The actual eligible track must have a cached admission timeline")
         let skin = try XCTUnwrap(PitchSceneFactory.skinnedAthletesForTesting(in: root)[player.id])
         XCTAssertEqual(skin.detail, detail)
         let actor = try XCTUnwrap(skin.root.parent), ball = try XCTUnwrap(root.findEntity(named: "ball"))
@@ -171,7 +189,9 @@ final class ReplaySlowRunVisual151Tests: XCTestCase {
                 let expected = player.presentationPose(at: time), nativeBall = recording.pose(at: time)
                 XCTAssertEqual(actor.position, [expected.position.x, 0, expected.position.z])
                 XCTAssertEqual(ball.position, [nativeBall.position.x, max(nativeBall.height, 0.11), nativeBall.position.z])
-                XCTAssertEqual(skin.slowRunWeightForTesting, enabled ? weight(player, at: time) : 0, accuracy: 0.000001)
+                let timelineWeight = timeline?.weight(at: time) ?? 0
+                let rawWeight = weight(player, at: time)
+                XCTAssertEqual(skin.slowRunWeightForTesting, enabled ? timelineWeight : 0, accuracy: 0.000001)
                 let snapshot = Snapshot(frame: frame, weight: skin.slowRunWeightForTesting,
                                         joints: skin.model.jointTransforms, actor: actor.transform, ball: ball.transform)
                 samples[enabled, default: []].append(snapshot)
@@ -179,7 +199,8 @@ final class ReplaySlowRunVisual151Tests: XCTestCase {
                                            skin.contactSurface.paddingMetres - 0.0001)
                 let locomotion = player.locomotion(at: time)
                 rows.append(["frame": frame, "time": time, "variant": enabled ? "shipping" : "fast-only",
-                             "weight": snapshot.weight, "speed": locomotion.speedMetresPerSecond,
+                             "weight": snapshot.weight, "rawPolicyWeight": rawWeight,
+                             "timelineWeight": timelineWeight, "speed": locomotion.speedMetresPerSecond,
                              "turnRate": locomotion.turnRateDegreesPerSecond, "gaitPhase": player.gaitPhase(at: time)])
                 guard window.captures.contains(frame) else { continue }
                 // Keep the full body in frame; do not conceal a pose problem by cropping.
@@ -195,19 +216,20 @@ final class ReplaySlowRunVisual151Tests: XCTestCase {
                 }
                 let allSkins = PitchSceneFactory.skinnedAthletesForTesting(in: root)
                 let joints = allSkins.mapValues { $0.model.jointTransforms }
-                try await render(renderer, output: output, name: "Slow run151 \(player.id)/\(detailName)/\(frame)/\(enabled)")
+                try await render(renderer, output: output, name: "Slow run152 \(player.id)/\(detailName)/\(frame)/\(enabled)")
                 let image = try withExtendedLifetime((renderer, camera, output, root)) { try ReplayRealityRendererAudit.read(texture) }
                 XCTAssertEqual(camera.transform, fixedCamera); XCTAssertEqual([key.transform, fill.transform], fixedLights)
                 XCTAssertEqual(grid.transform, fixedGrid); XCTAssertEqual(root.transform, Transform())
                 XCTAssertEqual(playersRoot.children.map(\.transform), actualActors); XCTAssertEqual(ball.transform, snapshot.ball)
                 for (id, body) in allSkins { XCTAssertEqual(body.model.jointTransforms, joints[id]) }
                 let png = try ReplayRealityRendererAudit.png(image, calibration: calibration)
-                let name = "ReplayXI-SlowRun151-\(edge)-\(player.id)-\(detailName)-f\(frame)-\(enabled ? "shipping" : "fast-only").png"
+                let name = "ReplayXI-SlowRun152-\(edge)-\(player.id)-\(detailName)-f\(frame)-\(enabled ? "shipping" : "fast-only").png"
                 let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
                 attachment.name = name; attachment.lifetime = .keepAlways; add(attachment); bytes += png.count
                 images.append(["attachment": name, "scenario": scenario.id, "player": player.id,
                     "team": player.team.rawValue, "detail": detailName, "edge": edge, "time": time,
-                    "weight": snapshot.weight, "variant": enabled ? "shipping" : "fast-only",
+                    "weight": snapshot.weight, "rawPolicyWeight": rawWeight,
+                    "timelineWeight": timelineWeight, "variant": enabled ? "shipping" : "fast-only",
                     "camera": ReplayArmLOD147Probe.vector(camera.position), "cameraFOV": fov])
             }
         }
@@ -215,8 +237,14 @@ final class ReplaySlowRunVisual151Tests: XCTestCase {
         let maximumWeight = try XCTUnwrap(enabled.map(\.weight).max())
         let minimumWeight = try XCTUnwrap(enabled.map(\.weight).min())
         let variation = maximumWeight - minimumWeight
-        XCTAssertGreaterThan(variation, 0.05, "Capture must show a material real admission change")
+        XCTAssertGreaterThan(maximumWeight, 0, "Report attenuation honestly; do not require the old full-weight pulse")
         XCTAssertGreaterThan(simd_distance(enabled.first!.actor.translation, enabled.last!.actor.translation), 0.05)
+        for index in 1..<enabled.count {
+            XCTAssertEqual(enabled[index].frame - enabled[index - 1].frame, 1)
+            XCTAssertLessThanOrEqual(abs(enabled[index].weight - enabled[index - 1].weight),
+                                    Float(4.0 / 120) + 0.000001,
+                                    "Production admission must respect 4/s at actual 120Hz presentation")
+        }
         for active in [false, true] {
             for saved in try XCTUnwrap(samples[active]).reversed() {
                 update(root, scenario: scenario, time: Double(saved.frame) / 120, selected: selected, enabled: active)
@@ -225,11 +253,20 @@ final class ReplaySlowRunVisual151Tests: XCTestCase {
                 XCTAssertEqual(skin.slowRunWeightForTesting, saved.weight)
             }
         }
+        let names = skin.motion.jointNames
+        let allJoints = Array(names.indices)
+        let majorJoints = names.indices.filter { majorJointLeaves.contains(String(names[$0].split(separator: "/").last!)) }
+        XCTAssertEqual(majorJoints.count, majorJointLeaves.count)
         return (["scenario": scenario.id, "player": player.id, "team": player.team.rawValue,
             "detail": detailName, "edge": edge, "start": Double(window.frames.lowerBound) / 120,
             "end": Double(window.frames.upperBound) / 120, "weightRange": variation,
-            "frames": rows, "fastPeak": peak(control, names: skin.motion.jointNames),
-            "shippingPeak": peak(enabled, names: skin.motion.jointNames), "exactRewind": true], images, bytes)
+            "minimumWeight": minimumWeight, "maximumWeight": maximumWeight,
+            "frames": rows,
+            "fastPeak": pairedPeak(control, other: enabled, names: names, joints: allJoints, variant: "fast-only"),
+            "shippingPeak": pairedPeak(enabled, other: control, names: names, joints: allJoints, variant: "shipping"),
+            "fastMajorLimbPeak": pairedPeak(control, other: enabled, names: names, joints: majorJoints, variant: "fast-only"),
+            "shippingMajorLimbPeak": pairedPeak(enabled, other: control, names: names, joints: majorJoints, variant: "shipping"),
+            "exactRewind": true], images, bytes)
     }
 
     private func update(_ root: Entity, scenario: ReplayScenario, time: Double, selected: String, enabled: Bool) {
@@ -246,18 +283,36 @@ final class ReplaySlowRunVisual151Tests: XCTestCase {
         root.transform = Transform() // Fixed diagnostic pitch, never a player recenter.
     }
 
-    private func peak(_ samples: [Snapshot], names: [String]) -> [String: Any] {
-        var maximum: Float = 0, joint = 0, frame = samples[0].frame, weightRate: Float = 0
+    private func angle(_ samples: [Snapshot], sample: Int, joint: Int) -> Float {
+        let delta = simd_normalize(samples[sample - 1].joints[joint].rotation.inverse
+            * samples[sample].joints[joint].rotation)
+        let result = 2 * atan2(simd_length(delta.imag), abs(delta.real)) * 180 / Float.pi
+        XCTAssertTrue(result.isFinite)
+        return result
+    }
+
+    /// Both values in a peak row are the same joint and exact pair of times.
+    /// Independent whole-window peaks remain separate rows, including fingers.
+    private func pairedPeak(_ samples: [Snapshot], other: [Snapshot], names: [String],
+                            joints: [Int], variant: String) -> [String: Any] {
+        XCTAssertEqual(samples.map(\.frame), other.map(\.frame))
+        var peak = Peak(degrees: 0, joint: joints[0], sample: 1), weightRate: Float = 0
         for index in 1..<samples.count {
             weightRate = max(weightRate, abs(samples[index].weight - samples[index - 1].weight) * 120)
-            for bone in names.indices {
-                let delta = simd_normalize(samples[index - 1].joints[bone].rotation.inverse * samples[index].joints[bone].rotation)
-                let angle = 2 * atan2(simd_length(delta.imag), abs(delta.real)) * 180 / Float.pi
-                XCTAssertTrue(angle.isFinite)
-                if angle > maximum { maximum = angle; joint = bone; frame = samples[index].frame }
+            for bone in joints {
+                let degrees = angle(samples, sample: index, joint: bone)
+                if degrees > peak.degrees { peak = Peak(degrees: degrees, joint: bone, sample: index) }
             }
         }
-        return ["degreesPer120HzStep": maximum, "joint": names[joint], "endingFrame": frame,
+        let comparison = angle(other, sample: peak.sample, joint: peak.joint)
+        return ["degreesPer120HzStep": peak.degrees, "joint": names[peak.joint], "jointIndex": peak.joint,
+                "startingFrame": samples[peak.sample - 1].frame, "endingFrame": samples[peak.sample].frame,
+                "startingTime": Double(samples[peak.sample - 1].frame) / 120,
+                "endingTime": Double(samples[peak.sample].frame) / 120,
+                "peakVariant": variant, "pairedFastDegreesPer120HzStep": variant == "fast-only" ? peak.degrees : comparison,
+                "pairedShippingDegreesPer120HzStep": variant == "shipping" ? peak.degrees : comparison,
+                "weightBefore": samples[peak.sample - 1].weight, "weightAfter": samples[peak.sample].weight,
+                "pairedWeightBefore": other[peak.sample - 1].weight, "pairedWeightAfter": other[peak.sample].weight,
                 "maximumAbsoluteWeightDerivativePerSecond": weightRate]
     }
 
@@ -286,7 +341,7 @@ final class ReplaySlowRunVisual151Tests: XCTestCase {
         let completed = expectation(description: name), flag = SlowRunVisualCompletion151()
         try renderer.updateAndRender(deltaTime: 0, cameraOutput: output, onComplete: { _ in flag.finish(); completed.fulfill() })
         await fulfillment(of: [completed], timeout: 10)
-        guard flag.isComplete else { throw ReplayRealityRendererAudit.Failure.unsupported("Slow run151 frame timed out") }
+        guard flag.isComplete else { throw ReplayRealityRendererAudit.Failure.unsupported("Slow run152 frame timed out") }
     }
 
     private func calibrate() async throws -> ReplayRealityRendererAudit.Calibration {
@@ -303,7 +358,7 @@ final class ReplaySlowRunVisual151Tests: XCTestCase {
         defer { renderer.activeCamera = nil; renderer.entities.removeAll() }; configure(renderer, camera: camera)
         let texture = try ReplayRealityRendererAudit.makeTexture(size: 256)
         let output = try RealityRenderer.CameraOutput(.singleProjection(colorTexture: texture))
-        try await render(renderer, output: output, name: "Slow run151 calibration")
+        try await render(renderer, output: output, name: "Slow run152 calibration")
         let result = try withExtendedLifetime((renderer, camera, output, root)) {
             try ReplayRealityRendererAudit.probe(ReplayRealityRendererAudit.read(texture))
         }

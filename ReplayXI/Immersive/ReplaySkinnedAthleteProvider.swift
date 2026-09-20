@@ -332,7 +332,7 @@ final class ReplaySkinnedAthleteInstance {
                 allowsOffBallPose: Bool = true,
                 goalkeeperReadiness: ReplayGoalkeeperReadiness.Sample? = nil,
                 allowsTrackLocomotionSampling: Bool = false,
-                allowsSlowRunSource: Bool = false) -> Bool {
+                slowRunWeight suppliedSlowRunWeight: Float = 0) -> Bool {
         #if DEBUG
         slowRunWeightForTesting = 0
         #endif
@@ -354,15 +354,15 @@ final class ReplaySkinnedAthleteInstance {
         let movement = stationaryPose == nil
             ? ReplayAthleteMovementIntent.sample(track: track, at: time, presentationPose: presentationPose,
                                                lookTarget: lookTarget, interaction: interaction) : nil
-        // Factory admission protects every touch/impact actor for the entire
-        // track. Defend direct callers too. Reuse the existing travel-vs-facing
-        // measurement, not a speed heuristic that mistakes a backpedal for a jog.
+        // Factory admission is a cold-built absolute-time envelope. Do not
+        // clamp it by the live turn signal: that would restore the sudden
+        // source-pose drop the envelope prevents. Direct callers stay opt-in.
         let slowWeight: Float
-        if allowsSlowRunSource, allowsTrackLocomotionSampling, allowsOffBallPose,
+        if suppliedSlowRunWeight.isFinite, suppliedSlowRunWeight > 0,
+           allowsTrackLocomotionSampling, allowsOffBallPose,
            motion.hasSlowRun, !track.isGoalkeeper, stationaryPose == nil,
-           impact == nil, ballAction == nil, interaction == nil, let movement {
-            slowWeight = ReplaySlowRunAdmission.weight(locomotion: locomotion)
-                * ReplaySlowRunAdmission.directionWeight(localTravelYaw: movement.localTravelYaw)
+           impact == nil, ballAction == nil, interaction == nil, movement != nil {
+            slowWeight = min(suppliedSlowRunWeight, 1)
         } else { slowWeight = 0 }
         #if DEBUG
         slowRunWeightForTesting = slowWeight
