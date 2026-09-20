@@ -41,3 +41,10 @@ Reference evidence and known limits: `IMPROVEMENT_RUN_150.md`. The intermittent 
 - `/private/tmp/replayxi-cycle151-source.xcresult`: 39 passed, zero failures. Includes the eight speed/turn/direction admission tests, ten supplemental decoder/sampler/fallback tests and 21 existing motion/runtime tests. All Swift was frozen during compilation and execution. Supplemental resource is present in the built app.
 - `/private/tmp/replayxi-cycle151-fast-controls.xcresult`: three historical native-control tests passed using that same compiled binary (`test-without-building`). Exact frozen support data and fast/slow A/B remain valid. Unrelated new test/UI source could be edited during this run; none was compiled or read by these tests. Simulator shader-pipeline warnings occurred; a passing test is not a claim of warning-free graphics.
 - The normal app's saved review file still has SHA-256 `952e501de62f36e391a5b471175c883d0deb9e981a5c6cfc04f607c6dc5ded65` before these runs. Full-demo blend/CPU validation and a fresh device build remain pending at this checkpoint.
+
+## Tracked arc warning
+
+- Reproduced a stale pitch-limit warning in the actual rebound study: create an arc from (−30, 0) to (−30, 4) at 0 s, follow Argentina 24, then seek to 7 s. Its displayed endpoints move to (−33, 15.5)/(−33, 19.5); the curve control crosses the touchline, but the old warning still checked its original endpoints. The reverse case also left a stale warning after moving away.
+- The pad now resolves the same view-specific tracked/keyed endpoints as rendering, sampling only its attached players (at most two). Saved marks, curve values and rendering itself are unchanged.
+- `/private/tmp/replayxi-cycle151-arc.xcresult`: 39 passed, zero failures, including four new regressions for entering/leaving the limit, ideal stations versus telemetry, rewind and keyed elevations. An unrelated integration-test file was published as the freeze request arrived and was not included in this build; the next frozen integration build will compile it and repeat the arc checks.
+- Core source checkpoint `b876f11` is verified on the remote. User project/signing changes remain excluded.

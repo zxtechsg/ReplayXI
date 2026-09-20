@@ -21,7 +21,20 @@ struct AnnotationCurveAdjustmentPad: View {
     }
     private var isLimitedByPitch: Bool {
         guard let mark = store.marks.first(where: { $0.id == markID }) else { return false }
-        return curve.isLimitedByPitch(for: mark.sampled(at: store.playhead))
+        return Self.isLimitedByPitch(for: mark, in: store)
+    }
+
+    static func isLimitedByPitch(for mark: CoachMark, in store: ReplayStore) -> Bool {
+        // Match the renderer's view-specific endpoint resolution. Only the
+        // mark's attached players (at most two), not the whole squad, are read.
+        let poses = Dictionary(uniqueKeysWithValues: mark.anchoredPlayerIDs.compactMap { id in
+            store.selectedScenario.player(id: id).map {
+                (id, store.presentedPlayerPose(for: $0, at: store.playhead))
+            }
+        })
+        let presented = mark.resolvingTrackGeometry(in: store.selectedScenario, at: store.playhead,
+                                                     presentedPlayerPoses: poses)
+        return presented.resolvedCurve.isLimitedByPitch(for: presented)
     }
 
     var body: some View {
