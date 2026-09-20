@@ -246,6 +246,8 @@ final class ReplaySkinnedAthleteInstance {
     var disablesCutWeightSmoothingForTesting = false
     var disablesHeaderHandoffForTesting = false
     var disablesOffBallReadyArmsForTesting = false
+    /// Matched original-arm control; body, phase, source and contacts are shared.
+    var disablesArmCutSmoothingForTesting = false
     enum DiagnosticStage: String, CaseIterable {
         case source, footballRetargetAndContact, offBall, look, impact
         case stationarySupport, headerAim, cervical, finalFloor
@@ -256,6 +258,8 @@ final class ReplaySkinnedAthleteInstance {
     var poseStageObserverForTesting: ((DiagnosticStage, ReplaySkinnedAthleteMotion.Pose) -> Void)?
     var authoredPoseObserverForTesting: ((ReplayAthleteLocomotionPose, Float, Float) -> Void)?
     private(set) var slowRunWeightForTesting: Float = 0
+    private(set) var armCutWeightForTesting: Float = 0
+    private(set) var armCutSuppressionForTesting: Float = 0
     #endif
     let root: Entity
     let playerID: String
@@ -332,9 +336,12 @@ final class ReplaySkinnedAthleteInstance {
                 allowsOffBallPose: Bool = true,
                 goalkeeperReadiness: ReplayGoalkeeperReadiness.Sample? = nil,
                 allowsTrackLocomotionSampling: Bool = false,
-                slowRunWeight suppliedSlowRunWeight: Float = 0) -> Bool {
+                slowRunWeight suppliedSlowRunWeight: Float = 0,
+                armCutAdmission: ReplayArmCutTimeline.Admission? = nil) -> Bool {
         #if DEBUG
         slowRunWeightForTesting = 0
+        armCutWeightForTesting = 0
+        armCutSuppressionForTesting = 0
         #endif
         let locomotion = stationaryPose == nil ? suppliedLocomotion : track.stationaryLocomotion
         // Never apply a stale or different player's collision sample. Unsupported
@@ -389,6 +396,27 @@ final class ReplaySkinnedAthleteInstance {
         #endif
         let nativeLocomotion = ReplaySkinnedAthleteCutWeight.sample(source: motion.sourceCommit,
             track: track, at: time, locomotion: locomotion, interaction: interaction, enabled: cutWeightEnabled)
+        var armCut = nativeLocomotion.influence
+        var permitsArmCutEnvelope = cutWeightEnabled && nativeLocomotion.admission > 0
+        #if DEBUG
+        permitsArmCutEnvelope = permitsArmCutEnvelope && !disablesArmCutSmoothingForTesting
+        #endif
+        if permitsArmCutEnvelope,
+           let cap = armCutAdmission?.matchingWeight(sourceCommit: motion.sourceCommit, track: track,
+                                                     at: time, locomotion: locomotion) {
+            // The live min is intentional: sampled caps cannot prove that the
+            // raw curve never dips between knots. No old zero can be activated.
+            // These gates preserve contacts but do not promise a global 4/s
+            // bound on the final arm weight across a live cap or contact fade.
+            let limited = min(armCut, cap)
+            if limited < armCut {
+                armCut += (limited - armCut) * nativeLocomotion.admission
+            }
+        }
+        #if DEBUG
+        armCutWeightForTesting = armCut
+        armCutSuppressionForTesting = nativeLocomotion.influence - armCut
+        #endif
         let ballInfluence = ballAction == nil ? 0
             : ReplaySkinnedAthleteFootballPose.influence(locomotion: locomotion, ballAction: ballAction)
         let influence = max(nativeLocomotion.influence, ballInfluence,
@@ -419,7 +447,7 @@ final class ReplaySkinnedAthleteInstance {
             authoredPoseObserverForTesting?(authored, phaseWeight, influence)
             #endif
             footballPose?.apply(authored, influence: influence,
-                                armInfluence: max(nativeLocomotion.influence,
+                                armInfluence: max(armCut,
                                                   interactionSample?.influence ?? 0, movement?.readiness ?? 0,
                                                   keeper?.armInfluence ?? 0),
                                 motion: motion, to: &pose, interaction: interactionSample,

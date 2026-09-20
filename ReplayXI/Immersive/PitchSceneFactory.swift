@@ -48,8 +48,10 @@ enum PitchSceneFactory {
     private struct NativeBallCache: Component {
         let recording: ReplayNativeBallPhysics.Recording
         let slowRunTimelines: [String: ReplaySlowRunTimeline]
+        let armCutTimelines: [String: ReplayArmCutTimeline]
         #if DEBUG
         let slowRunBuildNanoseconds: UInt64
+        let armCutBuildNanoseconds: UInt64
         #endif
         let interactions: [String: [ReplayAthleteInteractionCue]]
         let shots: ReplayFootballShotTimeline
@@ -81,6 +83,24 @@ enum PitchSceneFactory {
                     outgoingDirectionWorld: touch.outgoingVelocity,
                     headerSupportLeg: touch.headerSupportLeg)
             }, by: \.playerID)
+            // Contact actors remain eligible outside their protected windows.
+            // These tables share the immutable match root, not player-ID-only
+            // global state or individual near/low skin lifetimes.
+            #if DEBUG
+            let armCutBuildStart = DispatchTime.now().uptimeNanoseconds
+            #endif
+            var armTimelines: [String: ReplayArmCutTimeline] = [:]
+            if players.count <= ReplayNativeBallPhysics.maximumPlayers,
+               let start = recording.samples.first?.time, let end = recording.samples.last?.time {
+                for player in players where !player.isGoalkeeper && player.id != authoredImpactPlayerID {
+                    armTimelines[player.id] = ReplayArmCutTimeline(track: player,
+                        interactions: interactions[player.id] ?? [], duration: end - start, startTime: start)
+                }
+            }
+            armCutTimelines = armTimelines
+            #if DEBUG
+            armCutBuildNanoseconds = DispatchTime.now().uptimeNanoseconds - armCutBuildStart
+            #endif
         }
 
         func interaction(for playerID: String, at time: TimeInterval) -> ReplayAthleteInteractionCue? {
@@ -165,6 +185,14 @@ enum PitchSceneFactory {
 
     static func slowRunBuildNanosecondsForTesting(in root: Entity) -> UInt64 {
         root.components[NativeBallCache.self]?.slowRunBuildNanoseconds ?? 0
+    }
+
+    static func armCutTimelinesForTesting(in root: Entity) -> [String: ReplayArmCutTimeline] {
+        root.components[NativeBallCache.self]?.armCutTimelines ?? [:]
+    }
+
+    static func armCutBuildNanosecondsForTesting(in root: Entity) -> UInt64 {
+        root.components[NativeBallCache.self]?.armCutBuildNanoseconds ?? 0
     }
     #endif
 
@@ -1276,7 +1304,12 @@ enum PitchSceneFactory {
                                              slowRunWeight: allowsSlowRunSource
                                                 && player.id != authoredImpactPlayerID
                                                 && player.id != ragdollCue?.playerID
-                                                ? nativeBall?.slowRunTimelines[player.id]?.weight(at: time) ?? 0 : 0)
+                                                ? nativeBall?.slowRunTimelines[player.id]?.weight(at: time) ?? 0 : 0,
+                                             armCutAdmission: stationaryPose == nil
+                                                && player.id != authoredImpactPlayerID
+                                                && player.id != ragdollCue?.playerID
+                                                ? nativeBall?.armCutTimelines[player.id]?.admission(
+                                                    at: time, locomotion: locomotion) : nil)
                 } else {
                     usesNewSkin = false
                 }

@@ -434,7 +434,6 @@ final class ReplayAthleteOffBallVisualTests: XCTestCase {
         let detailName = detail == .near ? "near" : "low"
         let sourceFrames = Array(stride(from: 30, through: 96, by: 2))
         let root = PitchSceneFactory.makeMatchRoot(for: context.scenario, nativeRecording: context.recording)
-        defer { for child in Array(root.children) { child.removeFromParent() } }
         updateSupport149(root, context: context, wearer: wearer, time: 0.25)
         let skin = try XCTUnwrap(PitchSceneFactory.skinnedAthletesForTesting(in: root)[playerID])
         XCTAssertEqual(skin.detail, detail)
