@@ -230,7 +230,8 @@ final class CoachMarkPoseCopySafety156Tests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: url), bytes, file: file, line: line)
     }
 
-    private func fixture(scenarios: [ReplayScenario] = DemoScenarios.all) throws -> (ReplayStore, URL, CoachMark, CoachMark) {
+    private func fixture(scenarios suppliedScenarios: [ReplayScenario]? = nil) throws -> (ReplayStore, URL, CoachMark, CoachMark) {
+        let scenarios = suppliedScenarios ?? DemoScenarios.all
         let url = try makeURL()
         let store = ReplayStore(scenarios: scenarios,
             reviewLibrary: ReplayReviewLibrary(scenarios: scenarios, fileURL: url))

@@ -19,6 +19,18 @@ struct ReplayReviewLibraryView: View {
         case restore(SavedReplayReview)
     }
 
+    #if DEBUG
+    /// Native tests use the real library scroll/header and pending action.
+    static func showingConfirmationForTesting(_ request: ReplayReviewConfirmationRequest) -> Self {
+        var view = Self(close: {})
+        switch request {
+        case .delete(let id): view._action = State(initialValue: .delete(id))
+        case .restore(let review): view._action = State(initialValue: .restore(review))
+        }
+        return view
+    }
+    #endif
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             headerLayout {
@@ -172,23 +184,10 @@ struct ReplayReviewLibraryView: View {
                             || (action == .save && !store.canSaveReview))
                 }
             case .delete(let id):
-                confirmation(
-                    "Delete this saved review?",
-                    detail: "The current replay and last session are kept.",
-                    button: "Delete", destructive: true
-                ) {
-                    if store.deleteSavedReview(id: id) { self.action = nil }
-                }
+                confirmation(.delete(id))
             case .restore(let review):
-                confirmation(
-                    "Load this review?",
-                    detail: "Replaces your current marks and view. Save a copy first to keep them.",
-                    button: "Load paused", destructive: false
-                ) {
-                    let restored = store.restoreReview(review)
-                    if restored { self.action = nil }
-                }
-                .disabled(!store.canRestoreSavedReview)
+                confirmation(.restore(review))
+                    .disabled(!store.canRestoreSavedReview)
             }
         }
         .padding(14)
@@ -196,12 +195,15 @@ struct ReplayReviewLibraryView: View {
         .background(ReplayTheme.cyan.opacity(0.07), in: RoundedRectangle(cornerRadius: 14))
     }
 
-    private func confirmation(
-        _ title: String, detail: String, button: String, destructive: Bool,
-        perform: @escaping () -> Void
-    ) -> some View {
-        ReplayReviewInlineConfirmation(title: title, detail: detail, button: button, destructive: destructive,
-                                       cancel: { action = nil }, confirm: perform)
+    private func confirmation(_ request: ReplayReviewConfirmationRequest) -> some View {
+        let target = request.target(in: store.savedReviews)
+        return ReplayReviewInlineConfirmation(title: request.title, detail: request.detail,
+            button: request.button, destructive: request.isDestructive,
+            target: target.map { ReplayReviewConfirmationIdentity(review: $0, scenarios: store.scenarios) },
+            targetIsUnavailable: target == nil,
+            cancel: { action = nil }, confirm: {
+                if request.confirm(in: store) { action = nil }
+            })
     }
 
     private func commitName(_ action: LibraryAction) {
@@ -226,8 +228,57 @@ struct ReplayReviewLibraryView: View {
     }
 
     private func formattedTime(_ playhead: TimeInterval) -> String {
-        let seconds = Int(playhead)
-        return String(format: "%d:%02d", seconds / 60, seconds % 60)
+        ReplayReviewConfirmationIdentity.formattedPlayhead(playhead)
+    }
+}
+
+/// A delete follows its live UUID (including a later rename). Loading instead
+/// keeps the chosen snapshot, even if Last session advances while confirming.
+enum ReplayReviewConfirmationRequest: Equatable {
+    case delete(UUID)
+    case restore(SavedReplayReview)
+
+    var isDestructive: Bool { if case .delete = self { true } else { false } }
+    var title: String { isDestructive ? "Delete this saved review?" : "Load this review?" }
+    var detail: String {
+        isDestructive ? "The current replay and last session are kept."
+            : "Replaces your current marks and view. Save a copy first to keep them."
+    }
+    var button: String { isDestructive ? "Delete" : "Load paused" }
+
+    func target(in savedReviews: [SavedReplayReview]) -> SavedReplayReview? {
+        switch self {
+        case .delete(let id): savedReviews.first { $0.id == id }
+        case .restore(let review): review
+        }
+    }
+
+    @MainActor
+    @discardableResult
+    func confirm(in store: ReplayStore) -> Bool {
+        switch self {
+        case .delete(let id): store.deleteSavedReview(id: id)
+        case .restore(let review): store.restoreReview(review)
+        }
+    }
+}
+
+struct ReplayReviewConfirmationIdentity: Equatable {
+    let reviewID: UUID
+    let name: String
+    let scenarioTitle: String
+    let playheadLabel: String
+    var metadata: String { "\(scenarioTitle) · \(playheadLabel)" }
+
+    init(review: SavedReplayReview, scenarios: [ReplayScenario]) {
+        reviewID = review.id
+        name = review.name
+        scenarioTitle = scenarios.first { $0.id == review.state.scenarioID }?.title ?? "Replay"
+        playheadLabel = Self.formattedPlayhead(review.state.playhead)
+    }
+
+    static func formattedPlayhead(_ playhead: TimeInterval) -> String {
+        AnnotationTimestamp.display(playhead, fractionalDigits: 2)
     }
 }
 
@@ -260,6 +311,8 @@ struct ReplayReviewInlineConfirmation: View {
     let detail: String
     let button: String
     let destructive: Bool
+    var target: ReplayReviewConfirmationIdentity? = nil
+    var targetIsUnavailable = false
     let cancel: () -> Void
     let confirm: () -> Void
 
@@ -267,12 +320,27 @@ struct ReplayReviewInlineConfirmation: View {
         VStack(alignment: .leading, spacing: 12) {
             Text(title).font(.headline)
                 .fixedSize(horizontal: false, vertical: true)
+            if let target {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(target.name).font(.headline)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(target.metadata).font(.subheadline).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .combine)
+            } else if targetIsUnavailable {
+                Text("This saved review is no longer available.")
+                    .font(.subheadline).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Text(detail).font(.subheadline).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             ReplayReviewActionButtons {
                 Button("Cancel", action: cancel).frame(minHeight: 60)
                 Button(button, role: destructive ? .destructive : nil, action: confirm)
                     .frame(minHeight: 60)
+                    .disabled(targetIsUnavailable)
             }
         }
     }

@@ -164,10 +164,10 @@ final class CoachMarkStableArc155Tests: XCTestCase {
         }
     }
 
-    private func mark(start: PitchPoint = .zero, end: PitchPoint,
+    private func mark(start: PitchPoint? = nil, end: PitchPoint,
                       startElevation: Float = 0, endElevation: Float,
                       curve: CoachMarkCurve) -> CoachMark {
-        CoachMark(kind: .arc, start: start, end: end,
+        CoachMark(kind: .arc, start: start ?? .zero, end: end,
                   startElevation: startElevation, endElevation: endElevation,
                   curve: curve, label: "Stable arc math")
     }

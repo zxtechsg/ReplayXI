@@ -1,5 +1,8 @@
 import RealityKit
 import UIKit
+#if DEBUG
+import Dispatch
+#endif
 
 /// Lightweight spatial identity used by Match Playback.
 ///
@@ -29,6 +32,17 @@ enum PlaybackSpatialLabels {
     }
     private(set) static var textCenteringWork = TextCenteringWork()
     static func resetTextCenteringWorkForTesting() { textCenteringWork = TextCenteringWork() }
+    /// Direct player-tag box generation requests only. Elapsed CPU includes
+    /// clock overhead; neither field reports native allocations or frame rate.
+    struct PlayerLabelCollisionWork: Codable, Equatable {
+        var generationCalls = 0
+        var generationNanoseconds: UInt64 = 0
+    }
+    private(set) static var playerLabelCollisionWork = PlayerLabelCollisionWork()
+    static func resetPlayerLabelCollisionWorkForTesting() {
+        // Reset observations only; the immutable shared shape stays alive.
+        playerLabelCollisionWork = PlayerLabelCollisionWork()
+    }
     #endif
     static let firstPersonVisibleLabelLimit = 4
     static let firstPersonVisibleAnnotationLimit = 2
@@ -42,6 +56,20 @@ enum PlaybackSpatialLabels {
     // the floating plate there prevents a tag from covering the athlete's face
     // or the ball during a first-person decision freeze.
     static let firstPersonMinimumLabelDistance: Float = 2.25
+
+    /// Every player tag has the same local hit box. Share its immutable shape;
+    /// collision components and entity transforms remain independently owned.
+    private static let playerLabelTargetShape: ShapeResource = {
+        #if DEBUG
+        let start = DispatchTime.now().uptimeNanoseconds
+        #endif
+        let shape = ShapeResource.generateBox(size: [1.02, 0.40, 0.10])
+        #if DEBUG
+        playerLabelCollisionWork.generationCalls &+= 1
+        playerLabelCollisionWork.generationNanoseconds &+= DispatchTime.now().uptimeNanoseconds - start
+        #endif
+        return shape
+    }()
 
     private static let playerBoardMesh = MeshResource.generateBox(
         size: [0.94, 0.30, 0.026],
@@ -366,7 +394,7 @@ enum PlaybackSpatialLabels {
         root.components.set(InputTargetComponent(allowedInputTypes: .all))
         root.components.set(
             CollisionComponent(
-                shapes: [.generateBox(size: [1.02, 0.40, 0.10])],
+                shapes: [playerLabelTargetShape],
                 isStatic: false
             )
         )
