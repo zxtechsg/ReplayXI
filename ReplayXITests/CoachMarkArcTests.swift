@@ -59,7 +59,8 @@ final class CoachMarkArcTests: XCTestCase {
         }
         XCTAssertTrue(store.commitCoachMarkCurvePreview(id: original.id, gestureID: token))
         let edited = try XCTUnwrap(store.marks.first(where: { $0.id == original.id }))
-        XCTAssertEqual(edited.curve, .init(bend: -3, lift: 2))
+        XCTAssertEqual(edited.curve, .init(bend: -3, lift: 2,
+            bendBearingDegrees: original.resolvedCurve.bendBearingDegrees))
         XCTAssertTrue(store.undoAnnotationEdit())
         XCTAssertEqual(store.marks.first(where: { $0.id == original.id }), original)
         XCTAssertTrue(store.redoAnnotationEdit())
@@ -169,7 +170,9 @@ final class CoachMarkArcTests: XCTestCase {
         XCTAssertTrue(store.previewCoachMarkCurve(id: mark.id, gestureID: token, curve: adjusted))
         XCTAssertTrue(store.commitCoachMarkCurvePreview(id: mark.id, gestureID: token))
         let restored = try JSONDecoder().decode(SavedReplayState.self, from: JSONEncoder().encode(store.makeSavedReviewState()))
-        XCTAssertEqual(restored.marks.first(where: { $0.id == mark.id })?.resolvedCurve, adjusted)
+        var expected = adjusted
+        expected.bendBearingDegrees = mark.resolvedCurve.bendBearingDegrees
+        XCTAssertEqual(restored.marks.first(where: { $0.id == mark.id })?.resolvedCurve, expected)
         XCTAssertTrue(store.undoAnnotationEdit())
         XCTAssertEqual(store.marks.first(where: { $0.id == mark.id }), mark)
     }

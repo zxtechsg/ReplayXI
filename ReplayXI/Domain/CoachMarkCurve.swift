@@ -9,25 +9,31 @@ struct CoachMarkCurve: Codable, Hashable, Sendable {
     /// Rotation about the start-to-end axis, in degrees. Positive angles lift
     /// an ordinary pitch-level bend. Zero is the exact pre-rotation geometry.
     var rollDegrees: Float
+    /// Opt-in pitch-space bend direction, measured from +X towards +Z.
+    /// Nil keeps the original chord-relative horizontal basis exactly.
+    var bendBearingDegrees: Float?
 
     static let maximumBend: Float = 12
     static let maximumLift: Float = 4
     static let maximumRollDegrees: Float = 180
     static let segmentCount = 32
 
-    init(bend: Float, lift: Float, rollDegrees: Float = 0) {
+    init(bend: Float, lift: Float, rollDegrees: Float = 0,
+         bendBearingDegrees: Float? = nil) {
         self.bend = bend
         self.lift = lift
         self.rollDegrees = rollDegrees
+        self.bendBearingDegrees = bendBearingDegrees
     }
 
-    private enum CodingKeys: String, CodingKey { case bend, lift, rollDegrees }
+    private enum CodingKeys: String, CodingKey { case bend, lift, rollDegrees, bendBearingDegrees }
 
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         bend = try container.decode(Float.self, forKey: .bend)
         lift = try container.decode(Float.self, forKey: .lift)
         rollDegrees = try container.decodeIfPresent(Float.self, forKey: .rollDegrees) ?? 0
+        bendBearingDegrees = try container.decodeIfPresent(Float.self, forKey: .bendBearingDegrees)
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -35,6 +41,7 @@ struct CoachMarkCurve: Codable, Hashable, Sendable {
         try container.encode(bend, forKey: .bend)
         try container.encode(lift, forKey: .lift)
         if rollDegrees != 0 { try container.encode(rollDegrees, forKey: .rollDegrees) }
+        try container.encodeIfPresent(bendBearingDegrees, forKey: .bendBearingDegrees)
     }
 
     var isValid: Bool {
@@ -42,17 +49,35 @@ struct CoachMarkCurve: Codable, Hashable, Sendable {
             && abs(bend) <= Self.maximumBend
             && (0...Self.maximumLift).contains(lift)
             && abs(rollDegrees) <= Self.maximumRollDegrees
+            && (bendBearingDegrees.map { $0.isFinite && (-180...180).contains($0) } ?? true)
     }
 
     static func initial(start: PitchPoint, end: PitchPoint) -> Self {
         Self(bend: min(max(ReplayGeometry.distance(start, end) * 0.18, 0.6), 6), lift: 0)
     }
 
+    /// Capture the legacy horizontal basis once, before editing endpoints.
+    /// A vertical legacy chord has no effective bend; preserve that geometry
+    /// while choosing +Z as the direction for a subsequent bend adjustment.
+    func stabilized(start: PitchPoint, end: PitchPoint) -> Self {
+        guard bendBearingDegrees == nil else { return self }
+        let dx = end.x - start.x, dz = end.z - start.z
+        let length = hypot(dx, dz)
+        guard length.isFinite else { return self }
+        return Self(bend: bend * (length / max(length, 0.0001)), lift: lift,
+                    rollDegrees: rollDegrees,
+                    bendBearingDegrees: length > 0 ? atan2(dx, -dz) * 180 / .pi : 90)
+    }
+
     func clamped() -> Self {
         Self(bend: bend.isFinite ? min(max(bend, -Self.maximumBend), Self.maximumBend) : 0,
              lift: lift.isFinite ? min(max(lift, 0), Self.maximumLift) : 0,
              rollDegrees: rollDegrees.isFinite
-                ? min(max(rollDegrees, -Self.maximumRollDegrees), Self.maximumRollDegrees) : 0)
+                ? min(max(rollDegrees, -Self.maximumRollDegrees), Self.maximumRollDegrees) : 0,
+             // Do not turn malformed framed input into a valid legacy curve.
+             // Authored bearings are normalized by atan2; validation rejects
+             // malformed persisted/remote values rather than changing them.
+             bendBearingDegrees: bendBearingDegrees)
     }
 
     /// Midpoint displacement before pitch/floor clipping, in metres. Scaling
@@ -64,7 +89,8 @@ struct CoachMarkCurve: Codable, Hashable, Sendable {
         let safe = clamped()
         if amountDelta == 0 {
             return Self(bend: safe.bend, lift: safe.lift,
-                        rollDegrees: safe.rollDegrees + angleDelta).clamped()
+                        rollDegrees: safe.rollDegrees + angleDelta,
+                        bendBearingDegrees: safe.bendBearingDegrees).clamped()
         }
         let length = safe.amount
         let direction = length > 0.0001
@@ -73,7 +99,8 @@ struct CoachMarkCurve: Codable, Hashable, Sendable {
         let liftLimit = direction.y > 0.0001 ? Self.maximumLift / direction.y : .infinity
         let target = min(max(length + amountDelta, 0), min(bendLimit, liftLimit))
         return Self(bend: direction.x * target, lift: direction.y * target,
-                    rollDegrees: safe.rollDegrees + angleDelta).clamped()
+                    rollDegrees: safe.rollDegrees + angleDelta,
+                    bendBearingDegrees: safe.bendBearingDegrees).clamped()
     }
 
     func controlPoint(for mark: CoachMark) -> SIMD3<Float> {
@@ -100,8 +127,16 @@ struct CoachMarkCurve: Codable, Hashable, Sendable {
         let midpoint = SIMD3<Float>((mark.start.x + mark.end.x) * 0.5,
             (mark.resolvedStartElevation + mark.resolvedEndElevation) * 0.5,
             (mark.start.z + mark.end.z) * 0.5)
-        var offset = SIMD3<Float>(-dz / length * safe.bend * 2,
+        var offset: SIMD3<Float>
+        if let bearing = safe.bendBearingDegrees {
+            let radians = bearing * .pi / 180
+            offset = SIMD3<Float>(cos(radians) * safe.bend * 2,
+                                  safe.lift * 2, sin(radians) * safe.bend * 2)
+        } else {
+            // Keep the exact legacy arithmetic, including tiny/vertical chords.
+            offset = SIMD3<Float>(-dz / length * safe.bend * 2,
                                   safe.lift * 2, dx / length * safe.bend * 2)
+        }
         if safe.rollDegrees != 0 {
             let chord = SIMD3<Float>(dx, mark.resolvedEndElevation - mark.resolvedStartElevation, dz)
             // A vertical or coincident pair still has a stable axis. Ordinary

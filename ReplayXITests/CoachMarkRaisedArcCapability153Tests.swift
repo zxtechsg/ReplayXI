@@ -3,11 +3,11 @@ import simd
 import XCTest
 @testable import ReplayXI
 
-/// Passing baseline receipts for the current capability gap, not desired
-/// behaviour. Replace the rejection expectations only after an agreed fix.
+/// Run153 documented the authoring gap. Run155 accepts raised edits while
+/// retaining the exact legacy save/geometry cases below.
 @MainActor
 final class CoachMarkRaisedArcCapability153Tests: XCTestCase {
-    func testBaselineRaisedArcRejectsShortPitchSpanAcrossExistingEditingAPIs() throws {
+    func testRaisedArcAcceptsShortPitchSpanAcrossExistingEditingAPIs155() throws {
         let store = ReplayStore()
         store.beginDrawing(.arc)
         XCTAssertNil(store.registerPitchTap(.init(x: 26, z: 30)))
@@ -20,9 +20,6 @@ final class CoachMarkRaisedArcCapability153Tests: XCTestCase {
         XCTAssertEqual(raised.resolvedEndElevation, 2)
         store.setPlaying(true, broadcast: false)
         let saved = store.makeSavedReviewState(), marks = store.marks
-        let undoTitle = store.annotationUndoTitle
-        var broadcasts = 0
-        store.onBroadcastSnapshot = { _ in broadcasts += 1 }
 
         let destination = PitchPoint(x: 26.75, z: 30)
         let horizontalLength = ReplayGeometry.distance(raised.start, destination)
@@ -30,23 +27,34 @@ final class CoachMarkRaisedArcCapability153Tests: XCTestCase {
         XCTAssertEqual(horizontalLength, 0.75)
         XCTAssertEqual(spatialLength, sqrt(Float(4.5625)), accuracy: 0.000001)
         XCTAssertGreaterThan(spatialLength, CoachMarkGeometryPolicy.minimumDirectionalLength)
-        XCTAssertFalse(store.nudgeCoachMarkEndpoint(id: raised.id, endpoint: .end, by: .init(x: -0.25, z: 0)))
-        XCTAssertFalse(store.updateCoachMarkGeometry(id: raised.id, start: raised.start,
-                                                     end: destination, broadcast: false))
-        XCTAssertNil(store.previewCoachMarkEndpoint(id: raised.id, endpoint: .end,
-            gestureID: UUID(), cumulativeDelta: .init(x: -0.25, z: 0)))
-
+        XCTAssertTrue(store.nudgeCoachMarkEndpoint(id: raised.id, endpoint: .end, by: .init(x: -0.25, z: 0)))
+        XCTAssertEqual(store.marks.first { $0.id == raised.id }?.end, destination)
+        XCTAssertFalse(store.isPlaying)
+        XCTAssertTrue(store.undoAnnotationEdit())
         XCTAssertEqual(store.marks, marks)
-        XCTAssertEqual(store.makeSavedReviewState(), saved)
-        XCTAssertEqual(store.annotationUndoTitle, undoTitle)
-        XCTAssertTrue(store.isPlaying)
+
+        XCTAssertTrue(store.updateCoachMarkGeometry(id: raised.id, start: raised.start,
+                                                    end: destination, broadcast: false))
+        XCTAssertEqual(store.marks.first { $0.id == raised.id }?.end, destination)
+        XCTAssertEqual(store.makeSavedReviewState().marks, saved.marks, "Preview keeps the committed save geometry")
+        XCTAssertTrue(store.cancelCoachMarkGeometryPreview(id: raised.id))
+        XCTAssertEqual(store.marks, marks)
+
+        let token = UUID()
+        store.setPlaying(true, broadcast: false)
+        XCTAssertNotNil(store.previewCoachMarkEndpoint(id: raised.id, endpoint: .end,
+            gestureID: token, cumulativeDelta: .init(x: -0.25, z: 0)))
+        XCTAssertEqual(store.marks.first { $0.id == raised.id }?.end, destination)
+        XCTAssertEqual(store.makeSavedReviewState().marks, saved.marks)
+        XCTAssertTrue(store.cancelCoachMarkEndpointPreview(id: raised.id, gestureID: token))
+        XCTAssertEqual(store.marks, marks)
+        XCTAssertTrue(store.isPlaying, "Cancelled local joystick restores transport")
         XCTAssertFalse(store.hasActiveCoachMarkGeometryPreview)
-        XCTAssertEqual(broadcasts, 0)
         let receipt: [String: Any] = ["horizontalMetres": horizontalLength,
             "spatialMetres": spatialLength, "minimumMetres": CoachMarkGeometryPolicy.minimumDirectionalLength,
-            "nudgeAccepted": false, "directPreviewAccepted": false, "joystickPreviewAccepted": false,
-            "savedStateAndPlaybackUnchanged": true]
-        try attach(receipt, name: "ReplayXI-RaisedArc153-CurrentEditRejection.json")
+            "nudgeAccepted": true, "directPreviewAccepted": true, "joystickPreviewAccepted": true,
+            "undoAndCancellationRestoreGeometry": true]
+        try attach(receipt, name: "ReplayXI-RaisedArc155-EditAcceptance.json")
     }
 
     func testBaselineShortRaisedAndVerticalCurvesAreAlreadyAcceptedByReviewAndKeyValidators() throws {

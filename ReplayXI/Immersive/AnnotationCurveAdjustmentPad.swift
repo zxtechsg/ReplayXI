@@ -17,7 +17,12 @@ struct AnnotationCurveAdjustmentPad: View {
         store.marks.first(where: { $0.id == markID })?.keyframeCapacityBlockReason(at: store.playhead)
     }
     private var curve: CoachMarkCurve {
-        store.marks.first(where: { $0.id == markID })?.sampled(at: store.playhead).resolvedCurve ?? CoachMarkCurve(bend: 0, lift: 0)
+        guard let mark = store.marks.first(where: { $0.id == markID }) else {
+            return CoachMarkCurve(bend: 0, lift: 0)
+        }
+        // Match the joystick's effective edit values. Legacy vertical arcs
+        // may store a bend whose old horizontal basis contributes no offset.
+        return store.editableCoachMarkCurve(mark, at: store.playhead)
     }
     private var isLimitedByPitch: Bool {
         guard let mark = store.marks.first(where: { $0.id == markID }) else { return false }

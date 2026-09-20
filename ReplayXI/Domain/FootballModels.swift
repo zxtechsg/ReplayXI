@@ -1070,6 +1070,24 @@ enum CoachMarkGeometryPolicy {
         return ReplayGeometry.distance(start, end) >= minimum
     }
 
+    /// Only explicitly framed arcs opt into a spatial editing-length gate.
+    /// Legacy authoring and saved-review validation keep their existing rules.
+    static func acceptsEditing(kind: CoachMarkKind, start: PitchPoint, end: PitchPoint,
+                               startElevation: Float? = nil, endElevation: Float? = nil,
+                               curve: CoachMarkCurve? = nil) -> Bool {
+        guard kind == .arc, let curve, curve.bendBearingDegrees != nil else {
+            return accepts(kind: kind, start: start, end: end)
+        }
+        guard curve.isValid, accepts(elevation: startElevation), accepts(elevation: endElevation),
+              start.x.isFinite, start.z.isFinite, end.x.isFinite, end.z.isFinite else { return false }
+        let chord = SIMD3<Double>(Double(end.x) - Double(start.x),
+            Double(endElevation ?? 0) - Double(startElevation ?? 0),
+            Double(end.z) - Double(start.z))
+        let squaredLength = chord.x * chord.x + chord.y * chord.y + chord.z * chord.z
+        let minimum = Double(minimumDirectionalLength)
+        return squaredLength.isFinite && squaredLength >= minimum * minimum
+    }
+
     static func accepts(elevation: Float?) -> Bool {
         guard let elevation else { return true }
         return elevation.isFinite && (0...maximumElevation).contains(elevation)

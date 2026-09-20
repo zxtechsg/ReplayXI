@@ -1,4 +1,5 @@
 import Foundation
+import simd
 
 struct CoachMarkKeyframe: Codable, Hashable, Sendable {
     var time: TimeInterval
@@ -83,11 +84,38 @@ extension CoachMark {
         }
         var resolvedCurve: CoachMarkCurve?
         if let x = a.curve, let y = b.curve {
-            resolvedCurve = CoachMarkCurve(bend: mix(x.bend, y.bend), lift: mix(x.lift, y.lift),
-                rollDegrees: ReplayGeometry.interpolateAngle(from: x.rollDegrees, to: y.rollDegrees, fraction: t)
-                    .truncatingRemainder(dividingBy: 360))
-            if let angle = resolvedCurve?.rollDegrees, angle > 180 { resolvedCurve?.rollDegrees -= 360 }
-            if let angle = resolvedCurve?.rollDegrees, angle < -180 { resolvedCurve?.rollDegrees += 360 }
+            if x.bendBearingDegrees == nil && y.bendBearingDegrees == nil {
+                // Saved legacy intervals keep the original arithmetic/order,
+                // including their current-chord basis and roll tie behavior.
+                resolvedCurve = CoachMarkCurve(bend: mix(x.bend, y.bend), lift: mix(x.lift, y.lift),
+                    rollDegrees: ReplayGeometry.interpolateAngle(from: x.rollDegrees, to: y.rollDegrees, fraction: t)
+                        .truncatingRemainder(dividingBy: 360))
+                if let angle = resolvedCurve?.rollDegrees, angle > 180 { resolvedCurve?.rollDegrees -= 360 }
+                if let angle = resolvedCurve?.rollDegrees, angle < -180 { resolvedCurve?.rollDegrees += 360 }
+            } else if t == 0 {
+                resolvedCurve = x
+            } else if t == 1 {
+                resolvedCurve = y
+            } else {
+                // Each legacy endpoint contributes its own authored frame;
+                // using the sampled chord here would reintroduce the flip.
+                let startCurve = x.stabilized(start: a.start, end: a.end)
+                let endCurve = y.stabilized(start: b.start, end: b.end)
+                guard let startBearing = startCurve.bendBearingDegrees,
+                      let endBearing = endCurve.bendBearingDegrees else { return self }
+                var delta = (endBearing - startBearing).truncatingRemainder(dividingBy: 360)
+                if delta > 180 { delta -= 360 }
+                if delta <= -180 { delta += 360 } // Exact antipodes always take +180.
+                var bearing = (startBearing + delta * t).truncatingRemainder(dividingBy: 360)
+                if bearing > 180 { bearing -= 360 }
+                if bearing < -180 { bearing += 360 }
+                resolvedCurve = CoachMarkCurve(bend: mix(startCurve.bend, endCurve.bend),
+                    lift: mix(startCurve.lift, endCurve.lift),
+                    rollDegrees: ReplayGeometry.interpolateAngle(from: x.rollDegrees, to: y.rollDegrees, fraction: t)
+                        .truncatingRemainder(dividingBy: 360), bendBearingDegrees: bearing)
+                if let angle = resolvedCurve?.rollDegrees, angle > 180 { resolvedCurve?.rollDegrees -= 360 }
+                if let angle = resolvedCurve?.rollDegrees, angle < -180 { resolvedCurve?.rollDegrees += 360 }
+            }
         }
         return CoachMark(id: id, kind: kind, start: point(a.start, b.start), end: point(a.end, b.end),
             startElevation: mix(a.startElevation, b.startElevation), endElevation: mix(a.endElevation, b.endElevation),
@@ -121,6 +149,35 @@ extension CoachMark {
                   kind != .space || abs(frame.startElevation - frame.endElevation) <= 0.001,
                   kind == .arc ? (frame.curve?.isValid ?? false) : frame.curve == nil else { return false }
             previous = frame.time
+        }
+        return hasSafeArcKeyframeIntervals
+    }
+
+    /// A linear endpoint interpolation can collapse between otherwise valid
+    /// keys. Check the exact quadratic minimum of |D0 + t(D1-D0)|², not a
+    /// finite sampling grid. Legacy-only intervals retain their saved behavior.
+    var hasSafeArcKeyframeIntervals: Bool {
+        guard kind == .arc, let frames = keyframes, !frames.isEmpty else { return true }
+        let minimum = Double(CoachMarkGeometryPolicy.minimumDirectionalLength)
+        func chord(_ frame: CoachMarkKeyframe) -> SIMD3<Double> {
+            .init(Double(frame.end.x) - Double(frame.start.x),
+                  Double(frame.endElevation) - Double(frame.startElevation),
+                  Double(frame.end.z) - Double(frame.start.z))
+        }
+        func isSafe(_ a: CoachMarkKeyframe, _ b: CoachMarkKeyframe) -> Bool {
+            let d = chord(a), v = chord(b) - d
+            let speedSquared = simd_length_squared(v)
+            guard simd_length_squared(d).isFinite, speedSquared.isFinite else { return false }
+            let t = speedSquared > 0 ? min(max(-simd_dot(d, v) / speedSquared, 0), 1) : 0
+            return simd_length_squared(d + t * v) >= minimum * minimum
+        }
+        // A lone framed key holds forever and still needs a usable roll axis.
+        for frame in frames where frame.curve?.bendBearingDegrees != nil {
+            guard isSafe(frame, frame) else { return false }
+        }
+        for (a, b) in zip(frames, frames.dropFirst())
+            where a.curve?.bendBearingDegrees != nil || b.curve?.bendBearingDegrees != nil {
+            guard isSafe(a, b) else { return false }
         }
         return true
     }

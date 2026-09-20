@@ -572,6 +572,16 @@ final class ReplayStore {
         )
     }
 
+    /// A legacy arc acquires its fixed bend direction from the geometry the
+    /// coach can see, before any endpoint or curve control changes it.
+    func editableCoachMarkCurve(_ mark: CoachMark, at time: TimeInterval) -> CoachMarkCurve {
+        let pose = mark.sampled(at: time)
+        if let curve = pose.curve, curve.bendBearingDegrees != nil { return curve }
+        let geometry = presentedCoachMarkGeometry(mark, at: time)
+        let curve = pose.curve ?? .initial(start: geometry.start, end: geometry.end)
+        return curve.stabilized(start: geometry.start, end: geometry.end)
+    }
+
     var activePerspectiveIndex: Int {
         selectedScenario.players.firstIndex { $0.id == activePerspectiveID } ?? 0
     }
@@ -1048,7 +1058,8 @@ final class ReplayStore {
             kind: selectedTool,
             start: start,
             end: point,
-            curve: selectedTool == .arc ? .initial(start: start, end: point) : nil,
+            curve: selectedTool == .arc
+                ? .initial(start: start, end: point).stabilized(start: start, end: point) : nil,
             label: label,
             revealTime: playhead,
             hideTime: defaultCoachMarkHideTime,
@@ -1146,7 +1157,8 @@ final class ReplayStore {
             kind: selectedTool,
             start: focus,
             end: destination,
-            curve: selectedTool == .arc ? .initial(start: focus, end: destination) : nil,
+            curve: selectedTool == .arc
+                ? .initial(start: focus, end: destination).stabilized(start: focus, end: destination) : nil,
             label: selectedTool == .pass ? "Open channel" : "Next movement",
             revealTime: playhead,
             hideTime: defaultCoachMarkHideTime,
@@ -1299,7 +1311,8 @@ final class ReplayStore {
             hideTime: windowStart == nil ? mark.hideTime : windowEnd, author: mark.author,
             playerID: mark.playerID, startTrackAnchor: mark.startTrackAnchor,
             endTrackAnchor: mark.endTrackAnchor, keyframes: frames)
-        guard replacement != mark, isValidSharedMark(replacement, for: selectedScenario) else { return false }
+        guard allowsSafeArcKeyframeIntervals(replacement),
+              replacement != mark, isValidSharedMark(replacement, for: selectedScenario) else { return false }
         marks[index] = replacement
         isPlaying = false
         statusMessage = "Annotation timing updated"
@@ -1340,7 +1353,8 @@ final class ReplayStore {
               marks[index].kind != .playerLabel, !marks[index].followsPlayerTracks else { return false }
         guard allowsCoachMarkPoseRecording(marks[index]) else { return false }
         let replacement = marks[index].sampled(at: playhead).recordingPose(at: playhead)
-        guard replacement != marks[index], isValidSharedMark(replacement, for: selectedScenario) else { return false }
+        guard allowsSafeArcKeyframeIntervals(replacement),
+              replacement != marks[index], isValidSharedMark(replacement, for: selectedScenario) else { return false }
         marks[index] = replacement
         isPlaying = false
         statusMessage = "Pose saved — seek, then adjust to add another keyframe"
@@ -1358,6 +1372,8 @@ final class ReplayStore {
         var replacement = marks[index].sampled(at: playhead)
         var remaining = frames; remaining.remove(at: frameIndex)
         replacement.keyframes = remaining.isEmpty ? nil : remaining
+        guard allowsSafeArcKeyframeIntervals(replacement),
+              isValidSharedMark(replacement, for: selectedScenario) else { return false }
         marks[index] = replacement
         isPlaying = false
         statusMessage = "Keyframe removed"
@@ -1381,7 +1397,8 @@ final class ReplayStore {
         }
         frames[frameIndex].time = destination
         replacement.keyframes = frames.sorted { $0.time < $1.time }
-        guard isValidSharedMark(replacement, for: selectedScenario) else { return false }
+        guard allowsSafeArcKeyframeIntervals(replacement),
+              isValidSharedMark(replacement, for: selectedScenario) else { return false }
         marks[index] = replacement
         isPlaying = false
         statusMessage = "Position key moved"
@@ -1746,6 +1763,21 @@ final class ReplayStore {
             return false
         }
         let mark = marks[index]
+        let original = pendingCoachMarkGeometryBaselines[id].map {
+            markRestoringGeometry(mark, from: $0)
+        } ?? mark
+        if isUnchangedArcGeometry(original, start: start, end: end, curve: curve) {
+            if pendingCoachMarkGeometryBaselines[id] == nil { return false }
+            if broadcast {
+                rollbackCoachMarkGeometryPreview(id: id, index: index)
+                statusMessage = "Annotation did not change"
+                return false
+            }
+            // Keep the gesture alive at its origin, but restore the exact
+            // legacy value rather than committing a metadata-only migration.
+            marks[index] = original
+            return true
+        }
         guard allowsCoachMarkPoseRecording(mark) else { return false }
         let replacement = markReplacingGeometry(
             mark,
@@ -1754,15 +1786,17 @@ final class ReplayStore {
             curve: curve,
             resolvingTrackOffsetsAt: playhead
         )
-        guard isValidSharedMark(replacement, for: selectedScenario) else {
+        guard allowsSafeArcKeyframeIntervals(replacement) else {
             if broadcast { rollbackCoachMarkGeometryPreview(id: id, index: index) }
-            if broadcast { statusMessage = "Keep the annotation on the pitch" }
             return false
         }
-        guard CoachMarkGeometryPolicy.accepts(
+        guard CoachMarkGeometryPolicy.acceptsEditing(
             kind: mark.kind,
             start: start,
-            end: end
+            end: end,
+            startElevation: replacement.startElevation,
+            endElevation: replacement.endElevation,
+            curve: replacement.curve
         ) else {
             if broadcast { rollbackCoachMarkGeometryPreview(id: id, index: index) }
             if broadcast {
@@ -1770,6 +1804,11 @@ final class ReplayStore {
                     ? "Keep the space at least 1.1 metres wide"
                     : "Keep the annotation at least 0.8 metres long"
             }
+            return false
+        }
+        guard isValidSharedMark(replacement, for: selectedScenario) else {
+            if broadcast { rollbackCoachMarkGeometryPreview(id: id, index: index) }
+            if broadcast { statusMessage = "Keep the annotation on the pitch" }
             return false
         }
 
@@ -1905,7 +1944,7 @@ final class ReplayStore {
               let mark = marks.first(where: { $0.id == id }), mark.kind == .arc else { return false }
         let resolved = presentedCoachMarkGeometry(mark, at: playhead)
         let accepted = updateCoachMarkGeometry(id: id, start: resolved.start, end: resolved.end,
-                                               curve: mark.sampled(at: playhead).resolvedCurve, broadcast: true)
+                                               curve: editableCoachMarkCurve(mark, at: playhead), broadcast: true)
         finishCoachMarkCurveGesture(id: id, gestureID: gestureID)
         return accepted
     }
@@ -1923,10 +1962,12 @@ final class ReplayStore {
         guard allowsMutationOutsideEndpointPreview(), !isDrawing,
               bendDelta.isFinite, liftDelta.isFinite,
               let mark = marks.first(where: { $0.id == id }), mark.kind == .arc else { return false }
-        let curve = CoachMarkCurve(bend: mark.sampled(at: playhead).resolvedCurve.bend + bendDelta,
-                                   lift: mark.sampled(at: playhead).resolvedCurve.lift + liftDelta,
-                                   rollDegrees: mark.sampled(at: playhead).resolvedCurve.rollDegrees).clamped()
-        guard curve != mark.sampled(at: playhead).resolvedCurve else { return false }
+        let baseline = editableCoachMarkCurve(mark, at: playhead)
+        var curve = baseline
+        curve.bend += bendDelta
+        curve.lift += liftDelta
+        curve = curve.clamped()
+        guard curve != baseline else { return false }
         let resolved = presentedCoachMarkGeometry(mark, at: playhead)
         return updateCoachMarkGeometry(id: id, start: resolved.start, end: resolved.end, curve: curve)
     }
@@ -2007,10 +2048,14 @@ final class ReplayStore {
             statusMessage = "Annotation did not move"
             return false
         }
-        guard CoachMarkGeometryPolicy.accepts(
+        let pose = mark.sampled(at: playhead)
+        guard CoachMarkGeometryPolicy.acceptsEditing(
             kind: mark.kind,
             start: start,
-            end: end
+            end: end,
+            startElevation: pose.startElevation,
+            endElevation: pose.endElevation,
+            curve: mark.kind == .arc ? editableCoachMarkCurve(mark, at: playhead) : pose.curve
         ) else {
             statusMessage = "Keep the annotation large enough to read"
             return false
@@ -2023,6 +2068,7 @@ final class ReplayStore {
             end: end,
             resolvingTrackOffsetsAt: playhead
         )
+        guard allowsSafeArcKeyframeIntervals(replacement) else { return false }
         guard isValidSharedMark(replacement, for: selectedScenario) else {
             statusMessage = "Keep the annotation on the pitch"
             return false
@@ -2098,7 +2144,7 @@ final class ReplayStore {
             end: pose.end,
             startElevation: start > 0.001 ? start : nil,
             endElevation: end > 0.001 ? end : nil,
-            curve: pose.curve,
+            curve: mark.kind == .arc ? editableCoachMarkCurve(mark, at: playhead) : pose.curve,
             label: mark.label,
             revealTime: mark.revealTime,
             hideTime: mark.hideTime,
@@ -2109,6 +2155,15 @@ final class ReplayStore {
             keyframes: mark.keyframes
         )
         if mark.hasKeyframes { replacement = replacement.recordingPose(at: playhead) }
+        guard allowsSafeArcKeyframeIntervals(replacement) else { return false }
+        let resolved = presentedCoachMarkGeometry(mark, at: playhead)
+        guard mark.kind != .arc || CoachMarkGeometryPolicy.acceptsEditing(kind: mark.kind,
+            start: resolved.start, end: resolved.end,
+            startElevation: replacement.startElevation, endElevation: replacement.endElevation,
+            curve: replacement.curve) else {
+            statusMessage = "Keep the annotation large enough to read"
+            return false
+        }
         guard isValidSharedMark(replacement, for: selectedScenario) else {
             statusMessage = "Keep the annotation within four metres of the pitch"
             return false
@@ -2238,10 +2293,14 @@ final class ReplayStore {
             )
         }
 
-        guard CoachMarkGeometryPolicy.accepts(
+        let pose = mark.sampled(at: playhead)
+        guard CoachMarkGeometryPolicy.acceptsEditing(
             kind: mark.kind,
             start: start,
-            end: end
+            end: end,
+            startElevation: pose.startElevation,
+            endElevation: pose.endElevation,
+            curve: mark.kind == .arc ? editableCoachMarkCurve(mark, at: playhead) : pose.curve
         ) else {
             invalidateCoachMarkEndpointPreview(id: id)
             statusMessage = "Keep the annotation large enough to read"
@@ -2258,6 +2317,10 @@ final class ReplayStore {
             end: end,
             resolvingTrackOffsetsAt: playhead
         )
+        guard allowsSafeArcKeyframeIntervals(replacement) else {
+            invalidateCoachMarkEndpointPreview(id: id)
+            return nil
+        }
         guard isValidSharedMark(replacement, for: selectedScenario) else {
             invalidateCoachMarkEndpointPreview(id: id)
             statusMessage = "Keep the annotation on the pitch"
@@ -2360,10 +2423,14 @@ final class ReplayStore {
 
         let mark = marks[index]
         let resolved = presentedCoachMarkGeometry(mark, at: playhead)
-        guard CoachMarkGeometryPolicy.accepts(
+        let pose = mark.sampled(at: playhead)
+        guard CoachMarkGeometryPolicy.acceptsEditing(
             kind: mark.kind,
             start: resolved.start,
-            end: resolved.end
+            end: resolved.end,
+            startElevation: pose.startElevation,
+            endElevation: pose.endElevation,
+            curve: pose.curve
         ), isValidSharedMark(mark, for: selectedScenario) else {
             marks[index] = markRestoringGeometry(mark, from: baseline)
             restorePlaybackAfterCancelledEndpointPreview(preview)
@@ -3086,6 +3153,12 @@ final class ReplayStore {
         let hasValidElevation = CoachMarkGeometryPolicy.accepts(
             elevation: mark.startElevation
         ) && CoachMarkGeometryPolicy.accepts(elevation: mark.endElevation)
+        // Preserve permissive legacy payloads. Newly framed arcs must have a
+        // readable 3D chord, including their stored fallback when tracked.
+        let hasValidFramedArc = mark.kind != .arc || mark.curve?.bendBearingDegrees == nil
+            || CoachMarkGeometryPolicy.acceptsEditing(kind: mark.kind,
+                start: mark.start, end: mark.end, startElevation: mark.startElevation,
+                endElevation: mark.endElevation, curve: mark.curve)
         // A zone is rendered as one horizontal tactical plane and exposes one
         // whole-zone height control. Reject a peer payload that would place its
         // two handles on different planes from that ring.
@@ -3128,6 +3201,7 @@ final class ReplayStore {
         guard hasFiniteBoundedGeometry,
               mark.hasValidKeyframes(duration: scenario.duration),
               hasValidElevation,
+              hasValidFramedArc,
               mark.kind == .arc ? (mark.curve?.isValid ?? true) : mark.curve == nil,
               hasCoherentZoneElevation,
               hasValidTrackAnchors,
@@ -3193,6 +3267,25 @@ final class ReplayStore {
         return false
     }
 
+    private func allowsSafeArcKeyframeIntervals(_ mark: CoachMark) -> Bool {
+        guard mark.hasSafeArcKeyframeIntervals else {
+            statusMessage = "Add a position key between these poses"
+            return false
+        }
+        return true
+    }
+
+    private func isUnchangedArcGeometry(_ mark: CoachMark, start: PitchPoint,
+                                        end: PitchPoint, curve: CoachMarkCurve?) -> Bool {
+        guard mark.kind == .arc else { return false }
+        let geometry = presentedCoachMarkGeometry(mark, at: playhead)
+        guard start == geometry.start, end == geometry.end else { return false }
+        let presentedCurve = mark.sampled(at: playhead).curve
+            ?? .initial(start: geometry.start, end: geometry.end)
+        return curve == nil || curve == presentedCurve
+            || curve == editableCoachMarkCurve(mark, at: playhead)
+    }
+
     private func markReplacingGeometry(
         _ mark: CoachMark,
         start: PitchPoint,
@@ -3216,7 +3309,22 @@ final class ReplayStore {
             )
         }
 
-        let posed = mark.sampled(at: time ?? playhead)
+        let editTime = time ?? playhead
+        let posed = mark.sampled(at: editTime)
+        let original = pendingCoachMarkGeometryBaselines[mark.id].map {
+            markRestoringGeometry(mark, from: $0)
+        } ?? mark
+        if isUnchangedArcGeometry(original, start: start, end: end, curve: curve) { return original }
+        var editedCurve = curve ?? posed.curve
+        if mark.kind == .arc {
+            let baseline = editableCoachMarkCurve(mark, at: editTime)
+            editedCurve = curve ?? baseline
+            // Legacy callers may supply only bend/lift/roll. They still edit
+            // the pre-move basis, never the candidate endpoint direction.
+            if editedCurve?.bendBearingDegrees == nil {
+                editedCurve?.bendBearingDegrees = baseline.bendBearingDegrees
+            }
+        }
         let replacement = CoachMark(
             id: mark.id,
             kind: mark.kind,
@@ -3224,7 +3332,7 @@ final class ReplayStore {
             end: end,
             startElevation: posed.startElevation,
             endElevation: posed.endElevation,
-            curve: curve ?? posed.curve,
+            curve: editedCurve,
             label: mark.label,
             revealTime: mark.revealTime,
             hideTime: mark.hideTime,

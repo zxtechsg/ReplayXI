@@ -84,6 +84,7 @@ final class ReplayReviewLibrary {
     private struct NamedReviewEncodingCache {
         let reviews: [SavedReplayReview]
         let range: Range<Int>
+        let hasFramedCurves: Bool
     }
 
     private struct EncodedDocument {
@@ -223,8 +224,8 @@ final class ReplayReviewLibrary {
         struct Header: Decodable { let version: Int }
         let decoder = JSONDecoder()
         let header = try decoder.decode(Header.self, from: data)
-        guard header.version <= 1 else { throw LibraryError.newerVersion }
-        guard header.version == 1 else { throw LibraryError.invalidDocument }
+        guard header.version <= 2 else { throw LibraryError.newerVersion }
+        guard header.version == 1 || header.version == 2 else { throw LibraryError.invalidDocument }
         let document = try decoder.decode(Document.self, from: data)
         let reviews = document.savedReviews + (document.autosavedReview.map { [$0] } ?? [])
         guard document.savedReviews.count <= Self.maximumSavedReviews,
@@ -314,7 +315,14 @@ final class ReplayReviewLibrary {
 
     private func persist(reviews: [SavedReplayReview], autosave: SavedReplayReview?, message: String) -> Bool {
         guard !isReadOnly else { return false }
-        let document = Document(version: 1, savedReviews: reviews, autosavedReview: autosave)
+        let namedHasFrames: Bool
+        if let cache = namedReviewEncodingCache, cache.reviews == reviews {
+            namedHasFrames = cache.hasFramedCurves
+        } else {
+            namedHasFrames = reviews.contains { Self.hasFramedCurves(in: $0.state) }
+        }
+        let needsVersion2 = namedHasFrames || autosave.map { Self.hasFramedCurves(in: $0.state) } == true
+        let document = Document(version: needsVersion2 ? 2 : 1, savedReviews: reviews, autosavedReview: autosave)
         do {
             let encoded = try encode(document)
             let data = encoded.data
@@ -335,13 +343,22 @@ final class ReplayReviewLibrary {
             }
             adopt(document, data: data)
             namedReviewEncodingCache = NamedReviewEncodingCache(
-                reviews: document.savedReviews, range: encoded.namedReviewRange
+                reviews: document.savedReviews, range: encoded.namedReviewRange, hasFramedCurves: namedHasFrames
             )
             status = message
             return true
         } catch {
             status = "Save failed. Check device storage."
             return false
+        }
+    }
+
+    private static func hasFramedCurves(in state: SavedReplayState) -> Bool {
+        state.marksByScenario.values.contains { marks in
+            marks.contains { mark in
+                mark.curve?.bendBearingDegrees != nil
+                    || mark.keyframes?.contains { $0.curve?.bendBearingDegrees != nil } == true
+            }
         }
     }
 
@@ -370,7 +387,7 @@ final class ReplayReviewLibrary {
         let autosave = try document.autosavedReview.map { try encoder.encode($0) }
         var data = Data()
         data.reserveCapacity(namedReviews.count + (autosave?.count ?? 0) + 64)
-        // Fixed schema-v1 field names in JSONEncoder.sortedKeys order. Every
+        // Shared schema-v1/v2 field names in JSONEncoder.sortedKeys order. Every
         // dynamic value is an independently encoded JSON fragment; strings,
         // escaping, Float/Date formats and nested key ordering stay native.
         data.append(contentsOf: "{".utf8)

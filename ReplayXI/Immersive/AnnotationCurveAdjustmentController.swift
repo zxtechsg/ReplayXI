@@ -17,9 +17,12 @@ final class AnnotationCurveAdjustmentController {
 
         func adjusted(_ curve: CoachMarkCurve, horizontal: Float, vertical: Float) -> CoachMarkCurve {
             switch self {
-            case .shape: curve.adjusting(amountDelta: horizontal, angleDelta: vertical)
-            case .offset: CoachMarkCurve(bend: curve.bend + horizontal, lift: curve.lift + vertical,
-                                        rollDegrees: curve.rollDegrees).clamped()
+            case .shape: return curve.adjusting(amountDelta: horizontal, angleDelta: vertical)
+            case .offset:
+                var adjusted = curve
+                adjusted.bend += horizontal
+                adjusted.lift += vertical
+                return adjusted.clamped()
             }
         }
     }
@@ -61,7 +64,7 @@ final class AnnotationCurveAdjustmentController {
             return false
         }
         sample = AnnotationJoystickMath.sample(for: translation)
-        let baseline = transaction?.baseline ?? mark.sampled(at: store.playhead).resolvedCurve
+        let baseline = transaction?.baseline ?? store.editableCoachMarkCurve(mark, at: store.playhead)
         let precision = AnnotationCurveAdjustmentPrecision(fine: fine)
         let curve = mode.adjusted(baseline, horizontal: Float(sample.steps.x) * precision.distanceStep,
                                   vertical: -Float(sample.steps.y) * precision.verticalStep(isAngle: mode == .shape))
@@ -116,7 +119,7 @@ final class AnnotationCurveAdjustmentController {
         guard !isActive, store.canChangePlaybackView,
               let mark = store.marks.first(where: { $0.id == markID }), mark.kind == .arc,
               mark.canRecordPose(at: store.playhead) else { return false }
-        let curve = mark.sampled(at: store.playhead).resolvedCurve
+        let curve = store.editableCoachMarkCurve(mark, at: store.playhead)
         return Mode.offset.adjusted(curve, horizontal: bend, vertical: lift) != curve
     }
 
@@ -133,7 +136,8 @@ final class AnnotationCurveAdjustmentController {
         guard horizontal.isFinite, vertical.isFinite, !isActive, store.canChangePlaybackView,
               let mark = store.marks.first(where: { $0.id == markID }), mark.kind == .arc,
               mark.canRecordPose(at: store.playhead) else { return false }
-        return mode.adjusted(mark.sampled(at: store.playhead).resolvedCurve, horizontal: horizontal, vertical: vertical) != mark.sampled(at: store.playhead).resolvedCurve
+        let curve = store.editableCoachMarkCurve(mark, at: store.playhead)
+        return mode.adjusted(curve, horizontal: horizontal, vertical: vertical) != curve
     }
 
     /// Atomic buttons and accessibility actions use the same owned Store path
@@ -144,7 +148,8 @@ final class AnnotationCurveAdjustmentController {
         guard canAdjust(in: store, markID: markID, mode: mode, horizontal: horizontal, vertical: vertical),
               let mark = store.marks.first(where: { $0.id == markID }) else { return false }
         let token = UUID()
-        let curve = mode.adjusted(mark.sampled(at: store.playhead).resolvedCurve, horizontal: horizontal, vertical: vertical)
+        let curve = mode.adjusted(store.editableCoachMarkCurve(mark, at: store.playhead),
+                                  horizontal: horizontal, vertical: vertical)
         guard store.previewCoachMarkCurve(id: markID, gestureID: token, curve: curve) else { return false }
         guard store.commitCoachMarkCurvePreview(id: markID, gestureID: token) else {
             _ = store.cancelCoachMarkCurvePreview(id: markID, gestureID: token)
