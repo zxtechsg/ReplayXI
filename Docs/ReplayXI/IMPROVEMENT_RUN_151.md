@@ -1,6 +1,6 @@
 # Run 151 — bounded slow-run integration plan
 
-Status: candidate implemented; validation pending. Run 150's native A/B is promising for two gently accelerating outfield players, not a global contact or speed-transition validation.
+Status: raw admission candidate rejected for sharp-turn transitions; temporal refinement pending. Arc-warning fix passed. Run 150's native A/B was promising for two gently accelerating outfield players, not a global contact or speed-transition validation.
 
 ## Scope
 
@@ -48,3 +48,12 @@ Reference evidence and known limits: `IMPROVEMENT_RUN_150.md`. The intermittent 
 - The pad now resolves the same view-specific tracked/keyed endpoints as rendering, sampling only its attached players (at most two). Saved marks, curve values and rendering itself are unchanged.
 - `/private/tmp/replayxi-cycle151-arc.xcresult`: 39 passed, zero failures, including four new regressions for entering/leaving the limit, ideal stations versus telemetry, rewind and keyed elevations. An unrelated integration-test file was published as the freeze request arrived and was not included in this build; the next frozen integration build will compile it and repeat the arc checks.
 - Core source checkpoint `b876f11` is verified on the remote. User project/signing changes remain excluded.
+
+## Full-demo evidence and rejected transition
+
+- `/private/tmp/replayxi-cycle151-integration.xcresult`: six tests passed (four repeated arc regressions plus two native integration tests), with all Swift frozen. Ten team-focused cases cover all five demos; both teams and both skin detail levels actually receive positive weights. Protected actors, ball/actor transforms, sample counts, bone/floor bounds and exact rewind pass. Receipt: `/private/tmp/replayxi-cycle151-integration-captures/77B89EED-6B72-4955-8CC1-F745233CA9A5.json`.
+- A passing diagnostic does **not** approve the motion. Liverpool 38's raw turn metric opens a roughly 100 ms source pulse in the underlap study. At 4.0667→4.075 s, weight drops 0.9828→0.3886 (−71.30/s). Liverpool 2 also changes +56.04/s near 2.8917 s in the overlap study. Broad scalar thresholds alone do not bound changes over time.
+- Unpaced Debug full-squad factory median CPU is roughly 11.30–12.38 ms fast-only and 11.67–13.29 ms enabled across the ten cases; this is not optimized device performance or FPS. Dense source interpolation adds measurable cost; future cold table preparation must be measured separately.
+- `/private/tmp/replayxi-cycle151-visual.xcresult`: the native capture test passed, preserving actual actors, ball, cameras, joints through renders and reverse seeks. 24 original 512 px PNGs, 1,300,660 bytes. Receipt: `/private/tmp/replayxi-cycle151-visual-captures/94F8B910-6043-4B89-A2B7-8BC08F6C7D06.json`. Root inspected four near-detail midpoint images.
+- Same-player, same-window maximum local joint step at 120 Hz: Argentina 19, volley 8.15–8.35 s, fast 7.56° versus candidate 16.30°; Liverpool 38, underlap 3.975–4.175 s, fast 4.90° versus candidate 30.37°. Candidate maxima are finger joints, **not** a measured 30° leg or torso jump. Still images alone cannot establish smoothness; the measured source pulse is rejected despite the tests passing.
+- Next: an absolute-time, cold-built, rate-limited admission envelope. No previous-frame smoother, route/ball change or live raw clamp. Preserve this raw-candidate evidence and compare the refined source at these same windows. No final device build or normal demo launch has been claimed for this candidate.
