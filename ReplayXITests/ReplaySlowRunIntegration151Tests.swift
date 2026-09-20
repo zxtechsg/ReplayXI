@@ -37,6 +37,15 @@ final class ReplaySlowRunIntegration151Tests: XCTestCase {
         let ball: Transform
         let bodies: [String: Body]
     }
+    private struct InitialGraph: Equatable {
+        let rootChildren: [String]
+        let players: [String]
+        let labels: [String]
+        let counts: [String: Int]
+        var row: [String: Any] {
+            ["rootChildren": rootChildren, "players": players, "labels": labels, "counts": counts]
+        }
+    }
     private struct Peak {
         var value: Float = 0
         var player = ""
@@ -78,7 +87,7 @@ final class ReplaySlowRunIntegration151Tests: XCTestCase {
                 .union(PlayerRagdollCue.authoredDemo(for: scenario).map { [$0.playerID] } ?? [])
             let eligible = scenario.players.filter { !protected.contains($0.id) }
             let scans = Dictionary(uniqueKeysWithValues: eligible.map { ($0.id, scan($0, duration: scenario.duration)) })
-            for team in FootballTeam.allCases {
+            for (teamIndex, team) in FootballTeam.allCases.enumerated() {
                 // Focus the strongest real candidate on each team. No synthetic
                 // trajectory or imposed speed is used to manufacture admission.
                 let focus = try XCTUnwrap(eligible.filter { $0.team == team }.sorted { a, b in
@@ -86,7 +95,8 @@ final class ReplaySlowRunIntegration151Tests: XCTestCase {
                     return lhs == rhs ? a.id < b.id : lhs > rhs
                 }.first)
                 let plan = makePlan(focus, scan: scans[focus.id]!, scenario: scenario, recording: recording)
-                let result = try measure(scenario, recording: recording, focus: focus, plan: plan, protected: protected)
+                let result = try measure(scenario, recording: recording, focus: focus, plan: plan, protected: protected,
+                    rootOrdinalInScenario: teamIndex * 2 + 1, rootOrdinalInTest: rows.count * 2 + 1)
                 rows.append(result.row); coverage.formUnion(result.coverage); positiveCoverage.formUnion(result.positive)
             }
             XCTAssertEqual(scenario.players, sourcePlayers); XCTAssertEqual(scenario.ball, sourceBall)
@@ -103,9 +113,9 @@ final class ReplaySlowRunIntegration151Tests: XCTestCase {
             "hasSlowRun": ReplaySkinnedAthleteProvider.motion?.hasSlowRun == true,
             "slowSHA256": ReplaySkinnedAthleteProvider.slowRunSHA256,
             "temporalSlopeLimitPerSecond": 4,
-            "scope": "152 prepared admission: five native recordings, each team selected as near; remaining native actors low. Enabled/disabled Full squad roots share sampling history. Cold root construction and inner timeline preparation are separate from warm Factory.update CPU timings, which alternate A/B order without assertions/readback/rendering inside the interval.",
+            "scope": "153 cold-stage profile retains 152 prepared admission metrics: five native recordings, each team selected as near; remaining native actors low. The same 20 enabled/disabled Full squad roots provide eight DEBUG cold-build stages; both controls prepare timelines. Root construction and nested timeline preparation are separate from warm Factory.update CPU timings, which alternate A/B order without assertions/readback/rendering inside the interval.",
             "limits": "No rendering or hardware FPS claim. Floor clearance is geometry, not measured contact. Missing raw-track boundary crossings/positive cells are reported. Raw admission remains diagnostic; the prepared timeline is authoritative. Local joint steps are measured at gaps no larger than 1/120 s, not declared discontinuities."]
-        try attach(report, name: "ReplayXI-SlowRun152-FiveDemoIntegration.json")
+        try attach(report, name: "ReplayXI-SlowRun153-FiveDemoIntegration.json")
     }
 
     func testActualReboundPOVNonNativeStationaryAndWholeTrackImpactGuards151() async throws {
@@ -166,7 +176,7 @@ final class ReplaySlowRunIntegration151Tests: XCTestCase {
                          "explicitImpactIsTestCue": impact != nil])
         }
         try attach(["cases": rows, "scope": "Actual rebound paths/ball, two wearer origins; nonnative and ideal-view fast-only guards; one explicit test impact cue excludes its subject before/during/after the cue."],
-                   name: "ReplayXI-SlowRun152-FactoryGuards.json")
+                   name: "ReplayXI-SlowRun153-FactoryGuards.json")
     }
 
     private func prepare() throws {
@@ -241,7 +251,8 @@ final class ReplaySlowRunIntegration151Tests: XCTestCase {
     }
 
     private func measure(_ scenario: ReplayScenario, recording: ReplayNativeBallPhysics.Recording,
-                         focus: PlayerTrack, plan: Plan, protected: Set<String>) throws
+                         focus: PlayerTrack, plan: Plan, protected: Set<String>,
+                         rootOrdinalInScenario: Int, rootOrdinalInTest: Int) throws
         -> (row: [String: Any], coverage: Set<String>, positive: Set<String>) {
         let fastStart = DispatchTime.now().uptimeNanoseconds
         let fast = PitchSceneFactory.makeMatchRoot(for: scenario, nativeRecording: recording)
@@ -257,10 +268,27 @@ final class ReplaySlowRunIntegration151Tests: XCTestCase {
         for (id, timeline) in timelines {
             XCTAssertTrue(timeline.knotsForTesting == fastTimelines[id]?.knotsForTesting, "Deterministic cold preparation \(id)")
         }
-        let coldFast = timelineMetrics(fast, constructionNanoseconds: fastConstruction)
-        let coldEnabled = timelineMetrics(enabled, constructionNanoseconds: enabledConstruction)
+        var coldFast = timelineMetrics(fast, constructionNanoseconds: fastConstruction)
+        var coldEnabled = timelineMetrics(enabled, constructionNanoseconds: enabledConstruction)
         let fastBuildNS = PitchSceneFactory.slowRunBuildNanosecondsForTesting(in: fast)
         let enabledBuildNS = PitchSceneFactory.slowRunBuildNanosecondsForTesting(in: enabled)
+        let fastStages = try XCTUnwrap(PitchSceneFactory.matchRootBuildForTesting(in: fast))
+        let enabledStages = try XCTUnwrap(PitchSceneFactory.matchRootBuildForTesting(in: enabled))
+        coldFast["rootBuild"] = rootBuildRow(fastStages, externalNanoseconds: fastConstruction,
+            timelineNanoseconds: fastBuildNS, ordinalInScenario: rootOrdinalInScenario, ordinalInTest: rootOrdinalInTest)
+        coldEnabled["rootBuild"] = rootBuildRow(enabledStages, externalNanoseconds: enabledConstruction,
+            timelineNanoseconds: enabledBuildNS, ordinalInScenario: rootOrdinalInScenario + 1, ordinalInTest: rootOrdinalInTest + 1)
+        // The census is outside every timed region and stores no entity/mesh
+        // references that could extend a root's lifetime into a later case.
+        let initialFast = try initialGraph(fast, scenario: scenario, diagnosesMeshIdentity: rootOrdinalInTest == 1)
+        let initialEnabled = try initialGraph(enabled, scenario: scenario, diagnosesMeshIdentity: rootOrdinalInTest == 1)
+        XCTAssertTrue(initialFast.graph == initialEnabled.graph,
+            "Cold paired hierarchy/resources \(scenario.id)/\(focus.id): fast=\(initialFast.graph.counts), enabled=\(initialEnabled.graph.counts)")
+        coldFast["initialGraph"] = initialFast.graph.row; coldEnabled["initialGraph"] = initialEnabled.graph.row
+        if rootOrdinalInTest == 1 {
+            coldFast["meshIdentityDiagnostic"] = initialFast.diagnostic
+            coldEnabled["meshIdentityDiagnostic"] = initialEnabled.diagnostic
+        }
         for _ in 0..<2 {
             _ = update(fast, scenario, time: plan.times[0], perspective: focus.id, enabled: false)
             _ = update(enabled, scenario, time: plan.times[0], perspective: focus.id, enabled: true)
@@ -350,6 +378,8 @@ final class ReplaySlowRunIntegration151Tests: XCTestCase {
         }
         XCTAssertEqual(PitchSceneFactory.slowRunBuildNanosecondsForTesting(in: fast), fastBuildNS)
         XCTAssertEqual(PitchSceneFactory.slowRunBuildNanosecondsForTesting(in: enabled), enabledBuildNS)
+        XCTAssertEqual(PitchSceneFactory.matchRootBuildForTesting(in: fast), fastStages)
+        XCTAssertEqual(PitchSceneFactory.matchRootBuildForTesting(in: enabled), enabledStages)
         return (["scenario": scenario.id, "focus": focus.id, "focusTeam": focus.team.rawValue,
             "frames": rows, "sampleCount": plan.times.count, "sampledBoundaries": plan.boundaries,
             "missingBoundaries": plan.missing, "protectedIDs": protected.sorted(), "changedPositivePoses": changed,
@@ -377,7 +407,7 @@ final class ReplaySlowRunIntegration151Tests: XCTestCase {
 
     private func timelineMetrics(_ root: Entity, constructionNanoseconds: UInt64) -> [String: Any] {
         let timelines = PitchSceneFactory.slowRunTimelinesForTesting(in: root)
-        var knots = 0, samples = 0, bytes = 0
+        var knots = 0, samples = 0, evaluated = 0, skipped = 0, bytes = 0
         var rows: [[String: Any]] = []
         for id in timelines.keys.sorted() {
             let timeline = timelines[id]!, metrics = timeline.metricsForTesting
@@ -385,18 +415,125 @@ final class ReplaySlowRunIntegration151Tests: XCTestCase {
             if cells > 1, timeline.startTime + Double(cells - 1) / ReplaySlowRunTimeline.sampleRate >= timeline.endTime { cells -= 1 }
             XCTAssertEqual(metrics.knotCount, cells + 1)
             XCTAssertEqual(metrics.rawSampleCount, (metrics.knotCount - 1) * 2 + 1)
+            XCTAssertEqual(metrics.evaluatedRawSampleCount + metrics.skippedMidpointCount, metrics.rawSampleCount)
+            XCTAssertGreaterThanOrEqual(metrics.evaluatedRawSampleCount, metrics.knotCount)
+            XCTAssertGreaterThanOrEqual(metrics.skippedMidpointCount, 0)
             XCTAssertEqual(metrics.storageBytes, metrics.knotCount * MemoryLayout<Float>.stride)
             XCTAssertTrue(timeline.knotsForTesting.allSatisfy { $0.isFinite && (0...1).contains($0) })
             knots += metrics.knotCount; samples += metrics.rawSampleCount; bytes += metrics.storageBytes
+            evaluated += metrics.evaluatedRawSampleCount; skipped += metrics.skippedMidpointCount
             rows.append(["player": id, "startTime": timeline.startTime, "endTime": timeline.endTime,
                          "duration": timeline.duration, "knotCount": metrics.knotCount,
-                         "rawSampleCount": metrics.rawSampleCount, "storageBytes": metrics.storageBytes])
+                         "rawSampleCount": metrics.rawSampleCount, "evaluatedRawSampleCount": metrics.evaluatedRawSampleCount,
+                         "skippedMidpointCount": metrics.skippedMidpointCount, "storageBytes": metrics.storageBytes])
         }
         return ["rootConstructionNanoseconds": constructionNanoseconds,
             "timelineBuildNanoseconds": PitchSceneFactory.slowRunBuildNanosecondsForTesting(in: root),
             "timelineCount": timelines.count, "knotCount": knots, "rawSampleCount": samples,
+            "evaluatedRawSampleCount": evaluated, "skippedMidpointCount": skipped,
             "storedWeightBytes": bytes, "players": rows,
-            "scope": "Cold per-root preparation after shared asset/physics prewarm; root construction includes graph work. Weight payload excludes array/dictionary/allocator overhead. Raw samples count policy requests, not expensive movement-intent evaluations. Separate from warm update timings."]
+            "scope": "Cold per-root preparation after shared asset/physics prewarm; root construction includes graph work. Both fast and enabled roots prepare timelines, not a historical cold baseline. Weight payload excludes array/dictionary/allocator overhead. rawSampleCount is the logical knot/midpoint grid, evaluatedRawSampleCount is actual policy calls, neither counts expensive movement-intent evaluations. Separate from warm update timings."]
+    }
+
+    private func rootBuildRow(_ metrics: PitchSceneFactory.MatchRootBuildMetrics, externalNanoseconds: UInt64,
+                              timelineNanoseconds: UInt64, ordinalInScenario: Int, ordinalInTest: Int) -> [String: Any] {
+        let expectedStages = ["playbackCache", "pitchAndWorld", "playerPlaceholders", "labelsAndSelection",
+                              "ballVisuals", "annotationScaffold", "formationAndTactics", "annotationSurfaceAndIndex"]
+        XCTAssertEqual(metrics.stages.map(\.name), expectedStages)
+        XCTAssertEqual(Set(metrics.stages.map(\.name)).count, expectedStages.count)
+        let sum = metrics.stages.reduce(UInt64(0)) { $0 + $1.nanoseconds }
+        XCTAssertEqual(sum, metrics.totalNanoseconds)
+        XCTAssertLessThanOrEqual(metrics.totalNanoseconds, externalNanoseconds)
+        let playback = metrics.stages.first { $0.name == "playbackCache" }?.nanoseconds ?? 0
+        XCTAssertLessThanOrEqual(timelineNanoseconds, playback)
+        let denominator = Double(max(metrics.totalNanoseconds, 1))
+        let stages: [[String: Any]] = metrics.stages.enumerated().map { index, stage in
+            ["ordinal": index + 1, "stage": stage.name, "nanoseconds": stage.nanoseconds,
+             "sharePercent": 100 * Double(stage.nanoseconds) / denominator]
+        }
+        let dominant = metrics.stages.max { $0.nanoseconds < $1.nanoseconds }
+        return ["stages": stages, "instrumentedTotalNanoseconds": metrics.totalNanoseconds,
+            "stageSumNanoseconds": sum, "rootOrdinalInScenario": ordinalInScenario, "rootOrdinalInTest": ordinalInTest,
+            "firstRootForScenarioInTest": ordinalInScenario == 1, "firstRootInTest": ordinalInTest == 1,
+            "externalRemainderNanoseconds": externalNanoseconds >= metrics.totalNanoseconds ? externalNanoseconds - metrics.totalNanoseconds : 0,
+            "playbackExcludingTimelineNanoseconds": playback >= timelineNanoseconds ? playback - timelineNanoseconds : 0,
+            "nestedTimelineSharePercent": 100 * Double(timelineNanoseconds) / denominator,
+            "dominantStage": dominant?.name ?? "none", "dominantStageNanoseconds": dominant?.nanoseconds ?? 0,
+            "scope": "Consecutive DEBUG checkpoints include clock overhead. Final metrics attachment/function exit belong to the external remainder. Timeline preparation is nested within playbackCache; do not add it twice. First/repeat ordinals refer only to this test, not a fresh process or cold assets. No renderer, FPS or timing pass threshold."]
+    }
+
+    private func initialGraph(_ root: Entity, scenario: ReplayScenario, diagnosesMeshIdentity: Bool)
+        throws -> (graph: InitialGraph, diagnostic: [String: Any]) {
+        let players = try XCTUnwrap(root.findEntity(named: "players-root"))
+        let labels = try XCTUnwrap(root.findEntity(named: "player-labels-root"))
+        let rootChildren = root.children.map(\.name).sorted()
+        let playerNames = players.children.map(\.name).sorted(), labelNames = labels.children.map(\.name).sorted()
+        XCTAssertEqual(playerNames, scenario.players.map { "player-\($0.id)" }.sorted())
+        XCTAssertEqual(labelNames, scenario.players.map { "player-label-\($0.id)" }.sorted())
+        let required: Set<String> = ["pitch", "players-root", "player-labels-root", "ball", "ball-shadow",
+                                     "ball-emphasis", "marks-root", "targets-root", "lanes-root", "annotation-surface"]
+        XCTAssertTrue(required.isSubset(of: Set(rootChildren)))
+        XCTAssertTrue(PitchSceneFactory.skinnedAthletesForTesting(in: root).isEmpty, "Native rigs remain lazy")
+        XCTAssertEqual(PitchSceneFactory.playerSceneCacheDiagnostics(for: root).indexedPlayers, scenario.players.count)
+        // First pair only: reproduce the original non-retaining census before
+        // retaining any mesh wrappers. This diagnoses, rather than assumes,
+        // address reuse or a legitimate cold/warm sharing difference.
+        var legacyMeshes = Set<ObjectIdentifier>()
+        if diagnosesMeshIdentity {
+            var pending = [root]
+            while let entity = pending.popLast() {
+                if let model = entity.components[ModelComponent.self] { legacyMeshes.insert(ObjectIdentifier(model.mesh)) }
+                pending.append(contentsOf: entity.children)
+            }
+        }
+        var counts = ["entities": 0, "models": 0, "materialSlots": 0, "tableMarkers": 0, "detailedRigs": 0]
+        // Match the existing native cost census: ObjectIdentifier alone does
+        // not keep a public resource wrapper alive for a sharing census.
+        var meshes: [ObjectIdentifier: MeshResource] = [:]
+        var meshByPath: [String: MeshResource] = [:], groups: [ObjectIdentifier: [String]] = [:]
+        var pending: [(Entity, String)] = [(root, root.name)]
+        while let (entity, path) = pending.popLast() {
+            counts["entities", default: 0] += 1
+            if entity.name == "table-marker" { counts["tableMarkers", default: 0] += 1 }
+            if entity.name == "full-rig" { counts["detailedRigs", default: 0] += 1 }
+            if let model = entity.components[ModelComponent.self] {
+                counts["models", default: 0] += 1
+                counts["materialSlots", default: 0] += model.materials.count
+                let mesh = model.mesh, id = ObjectIdentifier(mesh)
+                meshes[id] = mesh
+                if diagnosesMeshIdentity {
+                    meshByPath[path] = mesh; groups[id, default: []].append(path)
+                }
+            }
+            for (index, child) in entity.children.enumerated() { pending.append((child, "\(path)/\(index):\(child.name)")) }
+        }
+        counts["uniqueMeshResources"] = meshes.count
+        XCTAssertEqual(counts["tableMarkers"], scenario.players.count)
+        XCTAssertEqual(counts["detailedRigs"], 0)
+        var diagnostic: [String: Any] = [:]
+        if diagnosesMeshIdentity {
+            // Keep the first bank alive throughout this second same-root read.
+            // A changed identity here is an accessor/census assumption, not an
+            // animation update or resource rebuild: no scene write intervenes.
+            var repeatMeshes: [ObjectIdentifier: MeshResource] = [:], identityChanges: [String] = []
+            pending = [(root, root.name)]
+            while let (entity, path) = pending.popLast() {
+                if let model = entity.components[ModelComponent.self] {
+                    let mesh = model.mesh; repeatMeshes[ObjectIdentifier(mesh)] = mesh
+                    if meshByPath[path] !== mesh { identityChanges.append(path) }
+                }
+                for (index, child) in entity.children.enumerated() { pending.append((child, "\(path)/\(index):\(child.name)")) }
+            }
+            XCTAssertTrue(identityChanges.isEmpty, "Same-root mesh getter changed retained identity: \(identityChanges.prefix(6))")
+            XCTAssertEqual(Set(repeatMeshes.keys), Set(meshes.keys), "Retained same-root census must be stable")
+            diagnostic = ["legacyNonretainingMeshCount": legacyMeshes.count, "retainedMeshCount": meshes.count,
+                "retainedRepeatMeshCount": repeatMeshes.count, "changedIdentityPaths": identityChanges.sorted(),
+                "sharingGroups": groups.values.map { $0.sorted() }.sorted { $0[0] < $1[0] },
+                "scope": "First pair only, untimed. Strong public MeshResource refs prevent wrapper-address recycling. Sharing groups are exact hierarchy paths, not GPU allocation or byte counts. Cross-root count guard remains strict pending this diagnostic."]
+        }
+        return withExtendedLifetime(meshes) {
+            (.init(rootChildren: rootChildren, players: playerNames, labels: labelNames, counts: counts), diagnostic)
+        }
     }
 
     private func regressionPair(_ scenarioID: String) -> (id: String, joint: Int, start: Double, end: Double)? {

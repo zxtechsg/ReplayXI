@@ -18,14 +18,21 @@ struct ReplaySlowRunTimeline: Sendable {
     private let weights: [Float]
     #if DEBUG
     private let rawSampleCount: Int
+    private let evaluatedRawSampleCount: Int
     struct Metrics: Equatable {
         let knotCount: Int
+        /// Logical knot + midpoint grid size, including provably excluded cells.
         let rawSampleCount: Int
+        /// Actual policy evaluations; excluded-cell midpoints need no evaluation.
+        let evaluatedRawSampleCount: Int
+        let skippedMidpointCount: Int
         /// Weight payload only, not Array/object/allocator overhead.
         let storageBytes: Int
     }
     var metricsForTesting: Metrics {
         .init(knotCount: weights.count, rawSampleCount: rawSampleCount,
+              evaluatedRawSampleCount: evaluatedRawSampleCount,
+              skippedMidpointCount: rawSampleCount - evaluatedRawSampleCount,
               storageBytes: weights.count * MemoryLayout<Float>.stride)
     }
     var knotsForTesting: [Float] { weights }
@@ -38,25 +45,34 @@ struct ReplaySlowRunTimeline: Sendable {
             caps.append(Self.rawWeight(track: track, at: Self.time(index, duration: duration, startTime: startTime)))
         }
         var zeroCells = [Bool](); zeroCells.reserveCapacity(cells)
+        var evaluatedRawSampleCount = cells + 1
         for index in 0..<cells {
+            // The full cell is already excluded by either zero endpoint.
+            // Skipping its midpoint preserves the exact original caps/flags.
+            if caps[index] == 0 || caps[index + 1] == 0 {
+                zeroCells.append(true)
+                continue
+            }
             let midpoint = (Self.time(index, duration: duration, startTime: startTime)
                 + Self.time(index + 1, duration: duration, startTime: startTime)) * 0.5
             let middle = Self.rawWeight(track: track, at: midpoint)
-            zeroCells.append(caps[index] == 0 || middle == 0 || caps[index + 1] == 0)
+            evaluatedRawSampleCount += 1
+            zeroCells.append(middle == 0)
         }
         self.init(duration: duration, knotCaps: caps, zeroCells: zeroCells,
-                  startTime: startTime, rawSampleCount: cells * 2 + 1)
+                  startTime: startTime, rawSampleCount: cells * 2 + 1,
+                  evaluatedRawSampleCount: evaluatedRawSampleCount)
     }
 
     /// Pure envelope construction. Invalid caps fail closed at their knot and
     /// both touching cells. Cell flags protect the complete linear interval.
     init?(duration: TimeInterval, knotCaps: [Float], zeroCells: [Bool], startTime: TimeInterval = 0) {
         self.init(duration: duration, knotCaps: knotCaps, zeroCells: zeroCells,
-                  startTime: startTime, rawSampleCount: 0)
+                  startTime: startTime, rawSampleCount: 0, evaluatedRawSampleCount: 0)
     }
 
     private init?(duration: TimeInterval, knotCaps: [Float], zeroCells: [Bool],
-                  startTime: TimeInterval, rawSampleCount: Int) {
+                  startTime: TimeInterval, rawSampleCount: Int, evaluatedRawSampleCount: Int) {
         guard let cells = Self.cellCount(duration: duration, startTime: startTime),
               knotCaps.count == cells + 1, zeroCells.count == cells else { return nil }
         var bounded = knotCaps.map { $0.isFinite && (0...1).contains($0) ? $0 : 0 }
@@ -86,6 +102,7 @@ struct ReplaySlowRunTimeline: Sendable {
         self.weights = bounded
         #if DEBUG
         self.rawSampleCount = rawSampleCount
+        self.evaluatedRawSampleCount = evaluatedRawSampleCount
         #endif
     }
 

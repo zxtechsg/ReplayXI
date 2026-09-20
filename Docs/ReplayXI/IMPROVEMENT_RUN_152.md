@@ -1,6 +1,6 @@
 # Run 152 — time-bounded jog admission
 
-Status: targeted native, dense-policy and optimized checks passed; unsigned device Release build passed. Full regression is still running after one native cleanup crash/restart; not yet launched as the working demo.
+Status: targeted native, dense-policy and optimized checks passed; unsigned device Release build passed. Full regression failed with one native cleanup crash: 1,531 passed, 2 skipped, 1 failed. Not launched as the working demo.
 
 ## Reason
 
@@ -41,8 +41,9 @@ Run 151's raw speed/turn/yaw policy passes its scalar continuity tests, but actu
 - The table is a lower envelope at sampled knots/known zero cells only. At arbitrary nonzero-policy times it may exceed the raw cap slightly; no continuous lower-envelope or final joint-velocity guarantee is claimed. Brief pulses are intentionally attenuated.
 - The earlier intermittent native cleanup crash is unresolved. Passing this run alone cannot establish a fix. No hands-on headset/gesture verification while the Mac is locked.
 
-## Full-run investigation (in progress)
+## Full-run investigation
 
-- `/private/tmp/replayxi-cycle152-full27.xcresult` is still running. PID 87990 crashed during `ReplayAthleteOffBallVisualTests.testActualReboundBootMotionFixedCameraNearLow149`; Xcode restarted the test host. This is a failure, not a clean regression result.
+- `/private/tmp/replayxi-cycle152-full27.xcresult`: 1,534 total, 1,531 passed, 2 intentional skips, 1 crash failure. PID 87990 crashed during `ReplayAthleteOffBallVisualTests.testActualReboundBootMotionFixedCameraNearLow149`; Xcode restarted the host and the remaining tests passed. This is a failure, not a clean regression result. Post-run simulator diagnostic collection added roughly ten minutes; the xcodebuild sample identified its diagnostic semaphore wait, not an ongoing test hang.
 - Crash report: `/Users/zx/Library/Logs/DiagnosticReports/ReplayXI-2026-09-20-083948.ips`. The main-thread stack starts at `weak_clear_no_lock`, then destroys a CoreRE transform/entity and a Swift array inside `captureSupport149`. Unlike the earlier physics-world cleanup stack, this one identifies a visual-test ownership scope. Root cause remains unproven; no preceding unknown-weak warning was found.
 - Device Release build: `/private/tmp/replayxi-cycle152-release.log`, successful. Only the unused AppIntents metadata extraction warning was reported. This does not exercise simulator cleanup or prove physical-device behavior.
+- Symbolication against exact test UUID `10BA528A-2350-3BB5-9136-A2741D2B0A19` identifies the root cleanup defer: releasing the detached `Array(root.children)` snapshot after the renderer detach defer. This identifies the ownership scope, not which descendant was corrupted or when. Run153 uses the unchanged compiled152 binary for a bounded debugger reproduction.

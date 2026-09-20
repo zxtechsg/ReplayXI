@@ -105,6 +105,22 @@ enum PitchSceneFactory {
     private(set) static var proceduralVisibilityNodeVisits = 0
     private(set) static var proceduralVisibilityModelWrites = 0
 
+    /// Eight cold-build checkpoints only. Values stay with their root without
+    /// retaining scene objects; Release has neither these clocks nor storage.
+    /// Stage totals include clock overhead, not the final metric attachment.
+    struct MatchRootBuildMetrics: Component, Equatable {
+        struct Stage: Equatable {
+            let name: String
+            let nanoseconds: UInt64
+        }
+        let stages: [Stage]
+        let totalNanoseconds: UInt64
+    }
+
+    static func matchRootBuildForTesting(in root: Entity) -> MatchRootBuildMetrics? {
+        root.components[MatchRootBuildMetrics.self]
+    }
+
     /// Bounded diagnostic counters only; Release does not time or count the
     /// annotation path. Elapsed values include instrumentation and are not FPS.
     struct AnnotationSceneWorkCounters: Codable, Equatable {
@@ -690,6 +706,9 @@ enum PitchSceneFactory {
 
     static func makeMatchRoot(for scenario: ReplayScenario,
                               nativeRecording: ReplayNativeBallPhysics.Recording? = nil) -> Entity {
+        #if DEBUG
+        let buildStart = DispatchTime.now().uptimeNanoseconds
+        #endif
         let root = Entity()
         root.name = "match-root-\(scenario.id)"
         if let native = nativeRecording ?? ReplayNativeBallPhysics.cached(track: scenario.ball, players: scenario.players,
@@ -701,6 +720,9 @@ enum PitchSceneFactory {
             root.components.set(BallPlaybackCache(motion: ballPlayback))
             root.components.set(BallRollingCache(motion: ballPlayback.rolling))
         }
+        #if DEBUG
+        let playbackCacheEnd = DispatchTime.now().uptimeNanoseconds
+        #endif
 
         let pitch = makePitch()
         pitch.name = "pitch"
@@ -709,6 +731,9 @@ enum PitchSceneFactory {
         if scenario.kind == .realWorldReplay && !FootballReferenceScenarios.contains(scenario) {
             root.addChild(ReplayWorldPreviewFactory.make())
         }
+        #if DEBUG
+        let pitchAndWorldEnd = DispatchTime.now().uptimeNanoseconds
+        #endif
 
         let playersRoot = Entity()
         playersRoot.name = "players-root"
@@ -725,6 +750,9 @@ enum PitchSceneFactory {
             }
         }
         root.addChild(playersRoot)
+        #if DEBUG
+        let playerPlaceholdersEnd = DispatchTime.now().uptimeNanoseconds
+        #endif
         root.addChild(PlaybackSpatialLabels.makePlayerLabels(for: scenario))
 
         // One shared overlay replaces 22 dormant copies. It follows the
@@ -732,6 +760,9 @@ enum PitchSceneFactory {
         // from the wearer's head-tracked free look.
         root.addChild(makeRecordedFacingIndicator())
         root.addChild(makeSelectionHalo())
+        #if DEBUG
+        let labelsAndSelectionEnd = DispatchTime.now().uptimeNanoseconds
+        #endif
 
         root.addChild(makeMatchBall())
 
@@ -758,6 +789,9 @@ enum PitchSceneFactory {
         )
         ballEmphasis.name = "ball-emphasis"
         root.addChild(ballEmphasis)
+        #if DEBUG
+        let ballVisualsEnd = DispatchTime.now().uptimeNanoseconds
+        #endif
 
         let marksRoot = Entity()
         marksRoot.name = "marks-root"
@@ -765,6 +799,9 @@ enum PitchSceneFactory {
         root.addChild(AnnotationSceneAffordance.makeSelectionRoot())
         root.addChild(makeAnnotationDraftRoot())
         root.addChild(DecisionOptionSceneOverlay.makeRoot())
+        #if DEBUG
+        let annotationScaffoldEnd = DispatchTime.now().uptimeNanoseconds
+        #endif
 
         let targetsRoot = Entity()
         targetsRoot.name = "targets-root"
@@ -779,6 +816,9 @@ enum PitchSceneFactory {
         let lanesRoot = makeLaneRoot()
         lanesRoot.name = "lanes-root"
         root.addChild(lanesRoot)
+        #if DEBUG
+        let formationAndTacticsEnd = DispatchTime.now().uptimeNanoseconds
+        #endif
 
         // Collision-only: a nearly transparent ModelEntity can still render as an
         // opaque slab on some RealityKit/simulator combinations.
@@ -802,6 +842,19 @@ enum PitchSceneFactory {
         for binding in initialAthleteBindings {
             sceneCache?.retainAthleteBinding(binding)
         }
+        #if DEBUG
+        let annotationSurfaceAndIndexEnd = DispatchTime.now().uptimeNanoseconds
+        root.components.set(MatchRootBuildMetrics(stages: [
+            .init(name: "playbackCache", nanoseconds: playbackCacheEnd - buildStart),
+            .init(name: "pitchAndWorld", nanoseconds: pitchAndWorldEnd - playbackCacheEnd),
+            .init(name: "playerPlaceholders", nanoseconds: playerPlaceholdersEnd - pitchAndWorldEnd),
+            .init(name: "labelsAndSelection", nanoseconds: labelsAndSelectionEnd - playerPlaceholdersEnd),
+            .init(name: "ballVisuals", nanoseconds: ballVisualsEnd - labelsAndSelectionEnd),
+            .init(name: "annotationScaffold", nanoseconds: annotationScaffoldEnd - ballVisualsEnd),
+            .init(name: "formationAndTactics", nanoseconds: formationAndTacticsEnd - annotationScaffoldEnd),
+            .init(name: "annotationSurfaceAndIndex", nanoseconds: annotationSurfaceAndIndexEnd - formationAndTacticsEnd),
+        ], totalNanoseconds: annotationSurfaceAndIndexEnd - buildStart))
+        #endif
         return root
     }
 
