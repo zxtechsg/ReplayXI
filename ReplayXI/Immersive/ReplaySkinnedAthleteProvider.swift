@@ -23,6 +23,7 @@ enum ReplaySkinnedAthleteProvider {
     static let maximumConcurrentInstances = ReplayPlayerDetail.balanced.maximumSkinnedPlayers
     static let assetSHA256 = "7cfb694888f111928643e8aca7041d21925f5d55f3f5adbd353a972ca255e772"
     static let motionSHA256 = "d30a7379b81a4b0ea3fef5ebd20ad101911ab4fd521a5be1f6c00c0804f59ce4"
+    static let slowRunSHA256 = "865b7d45ce021731adb8b80febb89c39d5f71a42f284af10be3a601cad33890e"
     static let contactSurfaceSHA256 = "71eb134afa27eac0c23500afbd038dd11594a2b5ad30a5a178b303305a49c3ca"
     static let lowAssetSHA256 = "cd8a496a1f89166cf819177c8b959246d130f64ea5dfbd86910488b1dbe849ac"
     static let lowContactSurfaceSHA256 = "76e9cfe574345931ca945495f41a0e2fe872a182d8db4f7e3078a8baa4acf7b1"
@@ -58,7 +59,10 @@ enum ReplaySkinnedAthleteProvider {
         let modelURL = try resource("ReplayXIRocketboxAthlete", "usdz", bundle)
         _ = try checkedData(modelURL, expected: assetSHA256)
         let motionURL = try resource("ReplayXIRocketboxMotion", "json", bundle)
-        let preparedMotion = try ReplaySkinnedAthleteMotion(data: checkedData(motionURL, expected: motionSHA256))
+        let baseMotion = try ReplaySkinnedAthleteMotion(data: checkedData(motionURL, expected: motionSHA256))
+        let slowRunData = try? Data(contentsOf: resource("ReplayXIRocketboxSlowRun", "json", bundle),
+                                    options: .mappedIfSafe)
+        let preparedMotion = addingOptionalSlowRun(to: baseMotion, data: slowRunData)
         let contactURL = try resource("ReplayXIRocketboxContactSurface", "json", bundle)
         let preparedContactSurface = try ReplaySkinnedAthleteContactSurface(
             data: checkedData(contactURL, expected: contactSurfaceSHA256), motion: preparedMotion,
@@ -203,6 +207,17 @@ enum ReplaySkinnedAthleteProvider {
         return data
     }
 
+    /// A missing or incompatible supplemental gait must not disable the verified
+    /// base rig. This cold-path validation never runs during playback or a seek.
+    static func addingOptionalSlowRun(to base: ReplaySkinnedAthleteMotion,
+                                      data: Data?) -> ReplaySkinnedAthleteMotion {
+        guard let data, data.count <= ReplaySkinnedAthleteMotion.maximumSlowRunPayloadBytes,
+              SHA256.hash(data: data).map({ String(format: "%02x", $0) }).joined() == slowRunSHA256,
+              let extended = try? base.addingSlowRun(data: data, baseMotionSHA256: motionSHA256)
+        else { return base }
+        return extended
+    }
+
     #if DEBUG
     static func resetForTesting() {
         template = nil; motion = nil; contactSurface = nil; bootMarkers = nil; kits = []
@@ -240,6 +255,7 @@ final class ReplaySkinnedAthleteInstance {
     /// No observer/storage or extra hierarchy work exists in Release builds.
     var poseStageObserverForTesting: ((DiagnosticStage, ReplaySkinnedAthleteMotion.Pose) -> Void)?
     var authoredPoseObserverForTesting: ((ReplayAthleteLocomotionPose, Float, Float) -> Void)?
+    private(set) var slowRunWeightForTesting: Float = 0
     #endif
     let root: Entity
     let playerID: String
@@ -315,7 +331,11 @@ final class ReplaySkinnedAthleteInstance {
                 presentationPose: PlayerPose? = nil,
                 allowsOffBallPose: Bool = true,
                 goalkeeperReadiness: ReplayGoalkeeperReadiness.Sample? = nil,
-                allowsTrackLocomotionSampling: Bool = false) -> Bool {
+                allowsTrackLocomotionSampling: Bool = false,
+                allowsSlowRunSource: Bool = false) -> Bool {
+        #if DEBUG
+        slowRunWeightForTesting = 0
+        #endif
         let locomotion = stationaryPose == nil ? suppliedLocomotion : track.stationaryLocomotion
         // Never apply a stale or different player's collision sample. Unsupported
         // assets still fail soft to the procedural body rather than disappear.
@@ -331,8 +351,25 @@ final class ReplaySkinnedAthleteInstance {
         // has a deep elbow fold that looks like sprinting when moving slowly.
         let effort = locomotion.effort
         let upperBodyEffort = effort * min(max(locomotion.speedMetresPerSecond / 2.4, 0), 1)
+        let movement = stationaryPose == nil
+            ? ReplayAthleteMovementIntent.sample(track: track, at: time, presentationPose: presentationPose,
+                                               lookTarget: lookTarget, interaction: interaction) : nil
+        // Factory admission protects every touch/impact actor for the entire
+        // track. Defend direct callers too. Reuse the existing travel-vs-facing
+        // measurement, not a speed heuristic that mistakes a backpedal for a jog.
+        let slowWeight: Float
+        if allowsSlowRunSource, allowsTrackLocomotionSampling, allowsOffBallPose,
+           motion.hasSlowRun, !track.isGoalkeeper, stationaryPose == nil,
+           impact == nil, ballAction == nil, interaction == nil, let movement {
+            slowWeight = ReplaySlowRunAdmission.weight(locomotion: locomotion)
+                * ReplaySlowRunAdmission.directionWeight(localTravelYaw: movement.localTravelYaw)
+        } else { slowWeight = 0 }
+        #if DEBUG
+        slowRunWeightForTesting = slowWeight
+        #endif
         motion.sample(time: time, locomotionEffort: upperBodyEffort,
-                      gaitPhase: gaitPhase, rebuildingModelSpace: false, into: &pose)
+                      gaitPhase: gaitPhase, slowRunWeight: slowWeight,
+                      rebuildingModelSpace: false, into: &pose)
         #if DEBUG
         poseStageObserverForTesting?(.source, pose)
         #endif
@@ -343,9 +380,6 @@ final class ReplaySkinnedAthleteInstance {
         let keeper = track.isGoalkeeper && stationaryPose == nil && impact == nil
             ? ReplayGoalkeeperReadiness.limited(goalkeeperReadiness,
                 actionInfluence: max(interactionSample?.influence ?? 0, ballAction?.influence ?? 0)) : nil
-        let movement = stationaryPose == nil
-            ? ReplayAthleteMovementIntent.sample(track: track, at: time, presentationPose: presentationPose,
-                                               lookTarget: lookTarget, interaction: interaction) : nil
         var phaseEnabled = allowsOffBallPose && stationaryPose == nil && impact == nil && ballAction == nil
         #if DEBUG
         phaseEnabled = phaseEnabled && !disablesCutPhaseAlignmentForTesting

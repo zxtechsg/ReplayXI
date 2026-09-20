@@ -348,9 +348,10 @@ final class ReplaySlowRunAB150Tests: XCTestCase {
     }
 
     private func update(_ root: Entity, context: Probe.Context, wearer: String, frame: Int) {
+        // This historical A/B intentionally compares against the fast source.
         PitchSceneFactory.update(root: root, scenario: context.scenario, time: Double(frame) / 120, viewMode: .firstPerson,
             perspectiveID: wearer, marks: context.scenario.coachMarks, showsLaneLens: false, isDrawing: false,
-            positionalOriginTransform: nil, playerDetail: .fullSquad)
+            positionalOriginTransform: nil, playerDetail: .fullSquad, allowsSlowRunSource: false)
         root.transform = Transform() // Fixed diagnostic pitch, not the wearer's camera.
     }
     private func modelToPitch(_ skin: Skin, actor: Entity) throws -> (matrix: simd_float4x4, transforms: [Transform]) {

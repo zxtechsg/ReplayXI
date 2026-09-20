@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import simd
 
@@ -6,6 +7,8 @@ import simd
 struct ReplaySkinnedAthleteMotion: Sendable {
     static let expectedJointCount = 80
     static let maximumPayloadBytes = 4 * 1_024 * 1_024
+    static let maximumSlowRunPayloadBytes = 512 * 1_024
+    private static let slowRunSourceSHA256 = "56af7ac64b05653d40f64205b58b2bf915646ee70dd6e2a68bc4536d71f07c1c"
 
     enum ClipID: String, CaseIterable, Sendable { case idle, run }
     enum DecodeError: Error, Equatable { case invalid(String) }
@@ -74,6 +77,32 @@ struct ReplaySkinnedAthleteMotion: Sendable {
 
     private let idle: Clip
     private let run: Clip
+    private let basePayloadSHA256: String
+    private var slowRun: Clip?
+    var hasSlowRun: Bool { slowRun != nil }
+
+    #if DEBUG
+    struct ClipSampleCounts: Equatable, Sendable {
+        var idle = 0
+        var fastRun = 0
+        var slowRun = 0
+        var total: Int { idle + fastRun + slowRun }
+    }
+    /// Sampling is also valid outside MainActor. Protect DEBUG-only counters
+    /// without weakening the immutable motion object's Sendable contract.
+    private final class SampleCounter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = ClipSampleCounts()
+        func add(idle: Int = 0, fast: Int = 0, slow: Int = 0) {
+            lock.withLock { value.idle += idle; value.fastRun += fast; value.slowRun += slow }
+        }
+        func reset() { lock.withLock { value = ClipSampleCounts() } }
+        var snapshot: ClipSampleCounts { lock.withLock { value } }
+    }
+    private static let sampleCounter = SampleCounter()
+    static var clipSampleCountsForTesting: ClipSampleCounts { sampleCounter.snapshot }
+    static func resetClipSampleCountsForTesting() { sampleCounter.reset() }
+    #endif
 
     init(data: Data) throws {
         guard data.count <= Self.maximumPayloadBytes else {
@@ -173,40 +202,7 @@ struct ReplaySkinnedAthleteMotion: Sendable {
               Set(document.clips.map(\.id)) == Set(ClipID.allCases.map(\.rawValue)) else {
             throw DecodeError.invalid("Expected one idle clip and one run clip")
         }
-        let decodedClips = try document.clips.map { raw -> (String, Clip) in
-            guard raw.durationSeconds.isFinite, (0.05...20).contains(raw.durationSeconds),
-                  raw.fps.isFinite, (1...120).contains(raw.fps),
-                  (2...2_401).contains(raw.frames.count),
-                  abs(raw.frames[0].time) <= 0.000_001,
-                  abs(raw.frames[raw.frames.count - 1].time - raw.durationSeconds) <= 0.000_01 else {
-                throw DecodeError.invalid("Invalid clip timing")
-            }
-            var previousTime = -Double.infinity
-            var frames: [Frame] = []
-            frames.reserveCapacity(raw.frames.count)
-            for frame in raw.frames {
-                guard frame.time.isFinite, frame.time >= 0,
-                      frame.time <= raw.durationSeconds + 0.000_01,
-                      frame.time > previousTime,
-                      frame.translations.count == Self.expectedJointCount,
-                      frame.rotations.count == Self.expectedJointCount,
-                      frame.scales.count == Self.expectedJointCount else {
-                    throw DecodeError.invalid("Invalid frame order or joint count")
-                }
-                let translations = try frame.translations.map { try Self.vector($0, bound: 5) }
-                guard abs(translations[0].x) < 0.001, abs(translations[0].z) < 0.001 else {
-                    throw DecodeError.invalid("Source root travel must be removed")
-                }
-                frames.append(Frame(
-                    time: frame.time,
-                    translations: translations,
-                    rotations: try frame.rotations.map { try Self.quaternion($0) },
-                    scales: try frame.scales.map { try Self.scale($0) }
-                ))
-                previousTime = frame.time
-            }
-            return (raw.id, Clip(duration: raw.durationSeconds, frames: frames))
-        }
+        let decodedClips = try document.clips.map { ($0.id, try Self.decodeClip($0)) }
         let clips = Dictionary(uniqueKeysWithValues: decodedClips)
         guard let idle = clips[ClipID.idle.rawValue], let run = clips[ClipID.run.rawValue] else {
             throw DecodeError.invalid("Missing clip")
@@ -224,10 +220,72 @@ struct ReplaySkinnedAthleteMotion: Sendable {
         self.footContacts = contacts
         self.idle = idle
         self.run = run
+        self.basePayloadSHA256 = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        self.slowRun = nil
         var pose = Pose(translations: translations, rotations: rotations, scales: scales,
                         modelSpaceTransforms: Array(repeating: matrix_identity_float4x4, count: decodedJoints.count))
         Self.rebuildHierarchy(joints: decodedJoints, pose: &pose)
         self.restPose = pose
+    }
+
+    /// Optional immutable extension. The base digest binds the 80-frame-slot
+    /// order and rest rig without duplicating either in the supplemental file.
+    /// A failed decode leaves the original motion fully usable. The caller also
+    /// checks the packaged asset digest before this validation during prewarm.
+    func addingSlowRun(data: Data, baseMotionSHA256: String) throws -> Self {
+        guard data.count <= Self.maximumSlowRunPayloadBytes else {
+            throw DecodeError.invalid("Slow run payload exceeds 512 KB")
+        }
+        let document = try JSONDecoder().decode(SlowRunDocument.self, from: data)
+        guard document.schemaVersion == 1,
+              document.baseMotionSHA256 == baseMotionSHA256,
+              baseMotionSHA256 == basePayloadSHA256,
+              document.sourceCommit == sourceCommit,
+              document.sourceClipSHA256 == Self.slowRunSourceSHA256,
+              document.jointCount == Self.expectedJointCount,
+              document.units == "metres", document.phaseOffsetRadians == 0,
+              document.clip.id == ClipID.run.rawValue else {
+            throw DecodeError.invalid("Slow run source or base motion binding mismatch")
+        }
+        let clip = try Self.decodeClip(document.clip)
+        var result = self
+        result.slowRun = clip
+        return result
+    }
+
+    private static func decodeClip(_ raw: RawClip) throws -> Clip {
+        guard raw.durationSeconds.isFinite, (0.05...20).contains(raw.durationSeconds),
+              raw.fps.isFinite, (1...120).contains(raw.fps),
+              (2...2_401).contains(raw.frames.count),
+              abs(raw.frames[0].time) <= 0.000_001,
+              abs(raw.frames[raw.frames.count - 1].time - raw.durationSeconds) <= 0.000_01 else {
+            throw DecodeError.invalid("Invalid clip timing")
+        }
+        var previousTime = -Double.infinity
+        var frames: [Frame] = []
+        frames.reserveCapacity(raw.frames.count)
+        for frame in raw.frames {
+            guard frame.time.isFinite, frame.time >= 0,
+                  frame.time <= raw.durationSeconds + 0.000_01,
+                  frame.time > previousTime,
+                  frame.translations.count == Self.expectedJointCount,
+                  frame.rotations.count == Self.expectedJointCount,
+                  frame.scales.count == Self.expectedJointCount else {
+                throw DecodeError.invalid("Invalid frame order or joint count")
+            }
+            let translations = try frame.translations.map { try Self.vector($0, bound: 5) }
+            guard abs(translations[0].x) < 0.001, abs(translations[0].z) < 0.001 else {
+                throw DecodeError.invalid("Source root travel must be removed")
+            }
+            frames.append(Frame(
+                time: frame.time,
+                translations: translations,
+                rotations: try frame.rotations.map { try Self.quaternion($0) },
+                scales: try frame.scales.map { try Self.scale($0) }
+            ))
+            previousTime = frame.time
+        }
+        return Clip(duration: raw.durationSeconds, frames: frames)
     }
 
     func duration(of clip: ClipID) -> TimeInterval { clip == .idle ? idle.duration : run.duration }
@@ -242,6 +300,14 @@ struct ReplaySkinnedAthleteMotion: Sendable {
     ) {
         ensureBuffer(&pose)
         let selected = clip == .idle ? idle : run
+        #if DEBUG
+        Self.sampleCounter.add(idle: clip == .idle ? 1 : 0, fast: clip == .run ? 1 : 0)
+        #endif
+        writeSample(selected, at: time, looping: looping, rebuildingModelSpace: rebuildingModelSpace, into: &pose)
+    }
+
+    private func writeSample(_ selected: Clip, at time: TimeInterval, looping: Bool,
+                             rebuildingModelSpace: Bool, into pose: inout Pose) {
         let span = Self.span(in: selected, time: time, looping: looping)
         let first = selected.frames[span.lower]
         let second = selected.frames[span.upper]
@@ -257,6 +323,7 @@ struct ReplaySkinnedAthleteMotion: Sendable {
     /// even when seeking backwards; playback speed never advances a hidden clock.
     func sample(
         time: TimeInterval, locomotionEffort: Float, gaitPhase: Float,
+        slowRunWeight: Float = 0,
         rebuildingModelSpace: Bool = true, into pose: inout Pose
     ) {
         ensureBuffer(&pose)
@@ -271,6 +338,12 @@ struct ReplaySkinnedAthleteMotion: Sendable {
             sample(clip: .idle, at: time, rebuildingModelSpace: rebuildingModelSpace, into: &pose)
             return
         }
+        let slowWeight = slowRunWeight.isFinite ? min(max(slowRunWeight, 0), 1) : 0
+        if slowWeight > 0, let slowRun {
+            sampleWithSlowRun(slowRun, time: time, phase: phase, runWeight: runWeight,
+                              slowWeight: slowWeight, rebuildingModelSpace: rebuildingModelSpace, into: &pose)
+            return
+        }
         if runWeight >= 1 {
             sample(clip: .run, at: runTime, rebuildingModelSpace: rebuildingModelSpace, into: &pose)
             return
@@ -279,6 +352,9 @@ struct ReplaySkinnedAthleteMotion: Sendable {
         let runSpan = Self.span(in: run, time: runTime, looping: true)
         let idleStart = idle.frames[idleSpan.lower], idleEnd = idle.frames[idleSpan.upper]
         let runStart = run.frames[runSpan.lower], runEnd = run.frames[runSpan.upper]
+        #if DEBUG
+        Self.sampleCounter.add(idle: 1, fast: 1)
+        #endif
         for index in joints.indices {
             let idleTranslation = Self.lerp(idleStart.translations[index], idleEnd.translations[index], idleSpan.weight)
             let runTranslation = Self.lerp(runStart.translations[index], runEnd.translations[index], runSpan.weight)
@@ -289,6 +365,57 @@ struct ReplaySkinnedAthleteMotion: Sendable {
             pose.translations[index] = Self.lerp(idleTranslation, runTranslation, runWeight)
             pose.rotations[index] = Self.shortestSlerp(idleRotation, runRotation, runWeight)
             pose.scales[index] = Self.lerp(idleScale, runScale, runWeight)
+        }
+        if rebuildingModelSpace { Self.rebuildHierarchy(joints: joints, pose: &pose) }
+    }
+
+    /// Blend intact full-body run poses, then the existing idle contribution.
+    /// No second Pose, array allocation, hierarchy pass or phase adjustment.
+    /// Only triple overlap reads three clips; zero-weight clips are not sampled.
+    private func sampleWithSlowRun(_ slow: Clip, time: TimeInterval, phase: Double,
+                                   runWeight: Float, slowWeight: Float,
+                                   rebuildingModelSpace: Bool, into pose: inout Pose) {
+        let fraction = Self.wrapped(phase, duration: 2 * .pi) / (2 * .pi)
+        let slowTime = fraction * slow.duration
+        if runWeight >= 1, slowWeight >= 1 {
+            #if DEBUG
+            Self.sampleCounter.add(slow: 1)
+            #endif
+            writeSample(slow, at: slowTime, looping: true, rebuildingModelSpace: rebuildingModelSpace, into: &pose)
+            return
+        }
+        let slowSpan = Self.span(in: slow, time: slowTime, looping: true)
+        let fastSpan = slowWeight < 1 ? Self.span(in: run, time: fraction * run.duration, looping: true) : nil
+        let idleSpan = runWeight < 1 ? Self.span(in: idle, time: time, looping: true) : nil
+        let slowStart = slow.frames[slowSpan.lower], slowEnd = slow.frames[slowSpan.upper]
+        #if DEBUG
+        Self.sampleCounter.add(idle: idleSpan == nil ? 0 : 1, fast: fastSpan == nil ? 0 : 1, slow: 1)
+        #endif
+        for index in joints.indices {
+            var translation = Self.lerp(slowStart.translations[index], slowEnd.translations[index], slowSpan.weight)
+            var rotation = Self.shortestSlerp(slowStart.rotations[index], slowEnd.rotations[index], slowSpan.weight)
+            var scale = Self.lerp(slowStart.scales[index], slowEnd.scales[index], slowSpan.weight)
+            if let fastSpan {
+                let first = run.frames[fastSpan.lower], second = run.frames[fastSpan.upper]
+                let fastTranslation = Self.lerp(first.translations[index], second.translations[index], fastSpan.weight)
+                let fastRotation = Self.shortestSlerp(first.rotations[index], second.rotations[index], fastSpan.weight)
+                let fastScale = Self.lerp(first.scales[index], second.scales[index], fastSpan.weight)
+                translation = Self.lerp(fastTranslation, translation, slowWeight)
+                rotation = Self.shortestSlerp(fastRotation, rotation, slowWeight)
+                scale = Self.lerp(fastScale, scale, slowWeight)
+            }
+            if let idleSpan {
+                let first = idle.frames[idleSpan.lower], second = idle.frames[idleSpan.upper]
+                let idleTranslation = Self.lerp(first.translations[index], second.translations[index], idleSpan.weight)
+                let idleRotation = Self.shortestSlerp(first.rotations[index], second.rotations[index], idleSpan.weight)
+                let idleScale = Self.lerp(first.scales[index], second.scales[index], idleSpan.weight)
+                translation = Self.lerp(idleTranslation, translation, runWeight)
+                rotation = Self.shortestSlerp(idleRotation, rotation, runWeight)
+                scale = Self.lerp(idleScale, scale, runWeight)
+            }
+            pose.translations[index] = translation
+            pose.rotations[index] = rotation
+            pose.scales[index] = scale
         }
         if rebuildingModelSpace { Self.rebuildHierarchy(joints: joints, pose: &pose) }
     }
@@ -390,6 +517,16 @@ struct ReplaySkinnedAthleteMotion: Sendable {
         let geometry: RawGeometry
         let numberAnchors: RawNumberAnchors
         let footContacts: [String: RawFootContact]?
+    }
+    private struct SlowRunDocument: Decodable {
+        let schemaVersion: Int
+        let baseMotionSHA256: String
+        let sourceCommit: String
+        let sourceClipSHA256: String
+        let jointCount: Int
+        let units: String
+        let phaseOffsetRadians: Float
+        let clip: RawClip
     }
     private struct RawJoint: Decodable {
         let name: String

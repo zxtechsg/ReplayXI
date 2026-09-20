@@ -564,9 +564,10 @@ final class ReplayAthleteOffBallVisualTests: XCTestCase {
 
     private func updateSupport149(_ root: Entity, context: ReplayArmLOD147Probe.Context,
                                   wearer: String, time: Double) {
+        // Preserve the recorded run-149/150 fast-source diagnostic control.
         PitchSceneFactory.update(root: root, scenario: context.scenario, time: time, viewMode: .firstPerson,
             perspectiveID: wearer, marks: context.scenario.coachMarks, showsLaneLens: false, isDrawing: false,
-            positionalOriginTransform: nil, playerDetail: .fullSquad)
+            positionalOriginTransform: nil, playerDetail: .fullSquad, allowsSlowRunSource: false)
     }
 
     private func supportGrid149(centre: SIMD3<Float>) -> Entity {

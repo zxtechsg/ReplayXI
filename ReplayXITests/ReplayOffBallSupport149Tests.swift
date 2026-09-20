@@ -419,7 +419,7 @@ final class ReplayOffBallSupport149Tests: XCTestCase {
     private func update(_ root: Entity, _ scenario: ReplayScenario, wearer: String, time: Double) {
         PitchSceneFactory.update(root: root, scenario: scenario, time: time, viewMode: .firstPerson,
             perspectiveID: wearer, marks: scenario.coachMarks, showsLaneLens: false, isDrawing: false,
-            positionalOriginTransform: nil, playerDetail: .fullSquad)
+            positionalOriginTransform: nil, playerDetail: .fullSquad, allowsSlowRunSource: false)
     }
     private func vector(_ p: SIMD3<Float>) -> [Float] { [p.x, p.y, p.z] }
     private func centroid(_ points: [SIMD3<Float>]) -> SIMD3<Float> { points.reduce(.zero, +) / Float(points.count) }

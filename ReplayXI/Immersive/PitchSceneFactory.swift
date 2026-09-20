@@ -47,11 +47,13 @@ enum PitchSceneFactory {
     /// and every POV read the same immutable ball/contact recording.
     private struct NativeBallCache: Component {
         let recording: ReplayNativeBallPhysics.Recording
+        let touchPlayerIDs: Set<String>
         let interactions: [String: [ReplayAthleteInteractionCue]]
         let shots: ReplayFootballShotTimeline
 
         init(recording: ReplayNativeBallPhysics.Recording, players: [PlayerTrack]) {
             self.recording = recording
+            touchPlayerIDs = Set(recording.touches.map(\.playerID))
             shots = ReplayFootballShotTimeline(touches: recording.touches, players: players)
             interactions = Dictionary(grouping: recording.touches.compactMap { touch in
                 guard let kind = ReplayAthleteInteractionCue.Kind(rawValue: touch.kind.rawValue) else { return nil }
@@ -797,7 +799,8 @@ enum PitchSceneFactory {
         showsIdealBranch: Bool = false,
         ragdollCue: PlayerRagdollCue? = nil,
         emphasizesBall: Bool = true,
-        playerDetail: ReplayPlayerDetail = .balanced
+        playerDetail: ReplayPlayerDetail = .balanced,
+        allowsSlowRunSource: Bool = true
     ) {
         let effectiveTriangleMode: TriangleLockMode =
             triangleLockMode == .place && isTrianglePlacementReady ? .place : .visualise
@@ -809,6 +812,9 @@ enum PitchSceneFactory {
             impactCue: ragdollCue
         )
         let resolvedRagdollCue = playerPresentation.impactCue
+        // Whole-track exclusions avoid a source-pose jump when an action cue
+        // enters/leaves its preparation window or the viewer changes POV.
+        let authoredImpactPlayerID = PlayerRagdollCue.authoredDemo(for: scenario)?.playerID
         // Endpoint handles must be the sole acquisition targets during direct
         // geometry editing. Player capsules and floating number tags may share
         // the same pitch coordinate as a player-origin run, so suspend those
@@ -1186,7 +1192,11 @@ enum PitchSceneFactory {
                                              impact: impactSample, stationaryPose: stationaryPose,
                                              interaction: interaction, presentationPose: motionPresentation,
                                              goalkeeperReadiness: keeperReadiness,
-                                             allowsTrackLocomotionSampling: stationaryPose == nil)
+                                             allowsTrackLocomotionSampling: stationaryPose == nil,
+                                             allowsSlowRunSource: allowsSlowRunSource
+                                                && nativeBall.map { !$0.touchPlayerIDs.contains(player.id) } == true
+                                                && player.id != authoredImpactPlayerID
+                                                && player.id != ragdollCue?.playerID)
                 } else {
                     usesNewSkin = false
                 }
