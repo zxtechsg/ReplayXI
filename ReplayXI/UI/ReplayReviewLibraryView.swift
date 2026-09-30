@@ -29,6 +29,15 @@ struct ReplayReviewLibraryView: View {
         }
         return view
     }
+
+    static func namingForTesting(_ name: String, reviewID: UUID? = nil,
+                                 state: SavedReplayState? = nil) -> Self {
+        var view = Self(close: {})
+        view._action = State(initialValue: reviewID.map(LibraryAction.rename) ?? .save)
+        view._reviewName = State(initialValue: name)
+        view._pendingSaveState = State(initialValue: state)
+        return view
+    }
     #endif
 
     var body: some View {
@@ -171,17 +180,21 @@ struct ReplayReviewLibraryView: View {
                 TextField("Review name", text: $reviewName)
                     .textFieldStyle(.roundedBorder)
                     .font(.body)
-                    .onChange(of: reviewName) { _, value in
-                        reviewName = String(value.prefix(ReplayReviewLibrary.maximumNameLength))
-                    }
+                    .submitLabel(.done)
                     .onSubmit { commitName(action) }
                     .accessibilityLabel("Review name")
+                    .accessibilityHint(nameBlockReason(for: action) ?? "Ready to save")
+                if let reason = nameBlockReason(for: action) {
+                    Text(reason)
+                        .font(.subheadline).foregroundStyle(ReplayTheme.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("review-name-validation")
+                }
                 ReplayReviewActionButtons {
                     Button("Cancel") { self.action = nil }.frame(minHeight: 60)
                     Button("Save") { commitName(action) }
                         .frame(minHeight: 60)
-                        .disabled(reviewName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                            || (action == .save && !store.canSaveReview))
+                        .disabled(nameBlockReason(for: action) != nil)
                 }
             case .delete(let id):
                 confirmation(.delete(id))
@@ -207,6 +220,9 @@ struct ReplayReviewLibraryView: View {
     }
 
     private func commitName(_ action: LibraryAction) {
+        // A keyboard submission can bypass a disabled button. Recheck both
+        // input and the live library before writing the captured moment.
+        guard nameBlockReason(for: action) == nil else { return }
         let succeeded: Bool
         switch action {
         case .save: succeeded = store.saveReview(named: reviewName, state: pendingSaveState)
@@ -219,6 +235,16 @@ struct ReplayReviewLibraryView: View {
         }
     }
 
+    private func nameBlockReason(for action: LibraryAction) -> String? {
+        let reviewID: UUID?
+        switch action {
+        case .save: reviewID = nil
+        case .rename(let id): reviewID = id
+        default: return "Choose a review to name."
+        }
+        return ReplayReviewNameEditPolicy.blockReason(name: reviewName, renaming: reviewID, in: store)
+    }
+
     private func summary(_ review: SavedReplayReview) -> String {
         let scenario = store.scenarios.first { $0.id == review.state.scenarioID }
         let time = formattedTime(review.state.playhead)
@@ -229,6 +255,21 @@ struct ReplayReviewLibraryView: View {
 
     private func formattedTime(_ playhead: TimeInterval) -> String {
         ReplayReviewConfirmationIdentity.formattedPlayhead(playhead)
+    }
+}
+
+@MainActor
+enum ReplayReviewNameEditPolicy {
+    static func blockReason(name: String, renaming reviewID: UUID?, in store: ReplayStore) -> String? {
+        if let reviewID {
+            if store.reviewLibrary.isReadOnly { return store.reviewLibrary.status }
+            guard store.savedReviews.contains(where: { $0.id == reviewID }) else {
+                return "This saved review is no longer available."
+            }
+        } else if let reason = store.reviewSaveBlockReason {
+            return reason
+        }
+        return ReplayReviewLibrary.nameValidationMessage(name)
     }
 }
 

@@ -16,6 +16,8 @@ enum PlaybackSpatialLabels {
     struct UpdateWork: Codable, Equatable {
         var updateCalls = 0
         var visitedPlayerLabels = 0
+        var playerLabelIndexedLookups = 0
+        var playerLabelFallbackInspections = 0
         var transformWrites = 0
         var stylePropertyWrites = 0
         var visibilityWrites = 0
@@ -90,6 +92,9 @@ enum PlaybackSpatialLabels {
     private struct AnnotationCardMetrics: Component {
         let boardWidth: Float
     }
+    private struct PlayerLabelIndices: Component {
+        let childIndexByName: [String: Int]
+    }
     /// Fixed player identities benefit from mesh reuse, but arbitrary coach
     /// text must not acquire an unbounded process-wide lifetime.
     static let maximumCachedTextMeshes = 64
@@ -114,9 +119,13 @@ enum PlaybackSpatialLabels {
     static func makePlayerLabels(for scenario: ReplayScenario) -> Entity {
         let root = Entity()
         root.name = "player-labels-root"
-        for player in scenario.players {
+        var childIndexByName: [String: Int] = [:]
+        childIndexByName.reserveCapacity(scenario.players.count)
+        for (index, player) in scenario.players.enumerated() {
             root.addChild(makePlayerLabel(for: player))
+            childIndexByName["player-label-\(player.id)"] = index
         }
+        root.components[PlayerLabelIndices.self] = PlayerLabelIndices(childIndexByName: childIndexByName)
         return root
     }
 
@@ -151,6 +160,7 @@ enum PlaybackSpatialLabels {
                 firstPersonVisiblePlayerIDs: nil
             )
             : nil
+        let labelIndices = labelsRoot.components[PlayerLabelIndices.self]?.childIndexByName
         let observer = observerPoint(
             scenario: scenario,
             posesByPlayerID: posesByPlayerID,
@@ -163,9 +173,24 @@ enum PlaybackSpatialLabels {
         let defaultLabelHeight: Float = 2.16
 
         for player in scenario.players {
-            guard let label = labelsRoot.children.first(where: {
-                $0.name == "player-label-\(player.id)"
-            }) else { continue }
+            let labelName = "player-label-\(player.id)"
+            let indexedLabel: Entity? = if let index = labelIndices?[labelName],
+                labelsRoot.children.indices.contains(index),
+                labelsRoot.children[index].name == labelName {
+                labelsRoot.children[index]
+            } else {
+                nil
+            }
+            #if DEBUG
+            if indexedLabel != nil { updateWork.playerLabelIndexedLookups &+= 1 }
+            #endif
+            let label = indexedLabel ?? labelsRoot.children.first(where: { child in
+                #if DEBUG
+                updateWork.playerLabelFallbackInspections &+= 1
+                #endif
+                return child.name == labelName
+            })
+            guard let label else { continue }
             #if DEBUG
             updateWork.visitedPlayerLabels &+= 1
             #endif

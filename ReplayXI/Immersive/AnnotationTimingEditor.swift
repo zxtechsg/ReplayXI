@@ -329,11 +329,22 @@ struct AnnotationTimingEditor: View {
             && !(mark.keyframes ?? []).contains { abs($0.time - store.playhead) < CoachMark.keyframeTimeTolerance }
     }
     private func keyframeHint(_ mark: CoachMark) -> String {
-        if positionDraft.isDirty { return "Move or reset this position time before switching." }
-        if isDirty { return "Apply or reset In/Out before adjusting shape." }
+        Self.keyframeHint(for: mark, at: store.playhead,
+            windowIsDirty: isDirty, positionIsDirty: positionDraft.isDirty)
+    }
+
+    static func keyframeHint(for mark: CoachMark, at time: TimeInterval,
+                             windowIsDirty: Bool, positionIsDirty: Bool) -> String {
+        if positionIsDirty { return "Move or reset this position time before switching." }
+        if windowIsDirty { return "Apply or reset In/Out before adjusting shape." }
         if mark.followsPlayerTracks { return "Switch to Fixed before adding position keys." }
-        if let reason = mark.keyframeCapacityBlockReason(at: store.playhead) { return reason }
-        if (mark.keyframes?.count ?? 0) >= CoachMark.maximumKeyframes { return "64 keys saved. Adjust this position, or delete a key." }
+        if (mark.keyframes?.count ?? 0) >= CoachMark.maximumKeyframes {
+            return "64 keys saved. Adjust an existing position, or delete a key."
+        }
+        if (mark.keyframes ?? []).contains(where: { abs($0.time - time) < CoachMark.keyframeTimeTolerance }) {
+            return "A position is already saved at this time. Adjust shape to update it, or seek to add another."
+        }
+        if let reason = mark.keyframeCapacityBlockReason(at: time) { return reason }
         if !mark.hasKeyframes { return "Add here, seek, then adjust the shape to animate it." }
         return "Tap a timestamp to preview or move it. Seek + Adjust shape saves a new position."
     }

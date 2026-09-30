@@ -210,11 +210,21 @@ final class ReplayReviewLibrary {
         )
     }
 
-    private static func validName(_ raw: String) -> String? {
+    /// Shared by inline editing and persistence: do not silently truncate a
+    /// pasted name or enable a Save button for input the library will reject.
+    static func nameValidationMessage(_ raw: String) -> String? {
         let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty, name.count <= maximumNameLength,
-              !name.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else { return nil }
-        return name
+        if name.isEmpty { return "Enter a review name." }
+        if name.count > maximumNameLength { return "Use \(maximumNameLength) characters or fewer." }
+        if name.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) {
+            return "Remove line breaks and control characters."
+        }
+        return nil
+    }
+
+    private static func validName(_ raw: String) -> String? {
+        guard nameValidationMessage(raw) == nil else { return nil }
+        return raw.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func decode(_ data: Data) throws -> Document {
