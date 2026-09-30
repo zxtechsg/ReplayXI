@@ -15,6 +15,11 @@ import bpy
 import numpy as np
 from mathutils import Vector
 
+MAX_TRIANGLES = 8_000
+MAX_USDZ_BYTES = 1_500_000
+NET_CORD_SPANS = 3
+NET_CORD_SIDES = 3
+
 
 class Mesh:
     def __init__(self):
@@ -62,9 +67,14 @@ class Mesh:
             self.face([b + offset for offset in offsets], material)
 
     def cord(self, start, end, sag=(0, 0, 0)):
-        midpoint = (Vector(start) + Vector(end)) / 2 + Vector(sag)
-        self.tube(start, midpoint, 0.0045, material=1, sides=4)
-        self.tube(midpoint, end, 0.0045, material=1, sides=4)
+        # Three shallow spans preserve a soft net curve within the runtime budget.
+        start, end, sag = Vector(start), Vector(end), Vector(sag)
+        previous = start
+        for step in range(1, NET_CORD_SPANS + 1):
+            t = step / NET_CORD_SPANS
+            point = start.lerp(end, t) + sag * math.sin(math.pi * t)
+            self.tube(previous, point, 0.0035, material=1, sides=NET_CORD_SIDES)
+            previous = point
 
     def object(self, name, scene, materials):
         data = bpy.data.meshes.new(name + "Mesh")
@@ -151,13 +161,18 @@ def build(output):
     scene.unit_settings.scale_length = 1
 
     rng = np.random.default_rng(39017)
-    grain = rng.uniform(0.76, 1.16, (512, 512)).astype(np.float32)
-    # Directional grain suggests trimmed blades; no heavy geometry/alpha cards.
-    grain = (grain + np.roll(grain, 1, axis=0) + np.roll(grain, 2, axis=0)) / 3
+    raw = rng.normal(0, 1, (512, 512)).astype(np.float32)
+    # Fine, directional blade variation with a restrained broad field variation.
+    # The subtle mowing bands sit across the grain and repeat cleanly every 2 m.
+    blade = sum(np.roll(raw, shift, axis=1) for shift in (-3, -2, -1, 0, 1, 2, 3)) / 7
+    broad = sum(np.roll(blade, shift, axis=0) for shift in (-5, -3, 0, 3, 5)) / 5
+    across = np.arange(512, dtype=np.float32)[:, None]
+    mow = np.cos(across * math.tau * 10 / 512)  # 0.20 m bands at 2 m repeat.
+    grain = np.clip(1 + 0.035 * blade + 0.018 * broad + 0.012 * mow, 0.90, 1.10)
     grass = [turf_material("TurfLight", (0.18, 0.34, 0.13), grain, output),
              turf_material("TurfDark", (0.145, 0.285, 0.10), grain, output)]
     white = material("WarmWhitePaintAndFrame", (0.93, 0.94, 0.88), 0.68)
-    net = material("WovenGoalNet", (0.60, 0.65, 0.60), 0.92)
+    net = material("WovenGoalNet", (0.68, 0.71, 0.67), 0.94)
 
     turf = Mesh()
     for stripe in range(20):
@@ -206,14 +221,16 @@ def build(output):
                           export_animation=False, export_materials=True,
                           generate_preview_surface=True)
     triangles = sum(sum(len(face.vertices) - 2 for face in obj.data.polygons) for obj in objects)
-    assert triangles < 16000, triangles
-    assert package.stat().st_size < 4_000_000
+    assert triangles < MAX_TRIANGLES, triangles
+    assert package.stat().st_size < MAX_USDZ_BYTES
     report = {"schemaVersion": 1, "provenance": "Original Blender geometry and procedural turf",
               "pitchDimensionsMetres": [68, 105], "insideGoalWidthMetres": 7.32,
               "undersideCrossbarHeightMetres": 2.44, "meshCount": 2,
               "materialCount": 4, "triangleCount": triangles,
               "textureCount": 2, "textureResolution": [512, 512],
-              "textureRepeatMetres": 2, "assetBytes": package.stat().st_size,
+              "textureRepeatMetres": 2, "netCordSegments": NET_CORD_SPANS,
+              "netCordSides": NET_CORD_SIDES,
+              "assetBytes": package.stat().st_size,
               "sha256": hashlib.sha256(package.read_bytes()).hexdigest(),
               "dimensionsSource": "https://www.theifab.com/laws/latest/the-field-of-play/"}
     (output / "ReplayXIStrategyPitch.json").write_text(json.dumps(report, indent=2) + "\n")

@@ -9,7 +9,7 @@ import UIKit
 @MainActor
 enum ReplayStrategyPitchProvider {
     struct Admission: Component {}
-    static let assetSHA256 = "ad824e7a8d88d77ef330658000284d43a53dd691ddea62d4719a634b39a16de5"
+    static let assetSHA256 = "982ca747a1ac9eddde558ad3af470119256f5b261d3e666818aaa3c108da0197"
     static let triangleBudget = 8_000
     private static var template: Entity?
     static var isPrewarmed: Bool { template != nil }

@@ -181,6 +181,7 @@ struct AnnotationTimingEditor: View {
                 } label: { Label("Add here", systemImage: "plus.diamond") }
                 .disabled(!canEdit || !canCapture(mark))
                 .accessibilityLabel("Add position key at \(AnnotationTimestamp.display(store.playhead))")
+                .accessibilityHint(keyframeHint(mark))
                 Text(AnnotationTimestamp.display(store.playhead)).monospacedDigit()
                     .accessibilityLabel("Playhead \(AnnotationTimestamp.display(store.playhead))")
             }
@@ -324,7 +325,7 @@ struct AnnotationTimingEditor: View {
         _ = store.retimeCoachMark(id: markID, to: mark.revealTime + delta)
     }
     private func canCapture(_ mark: CoachMark) -> Bool {
-        !positionDraft.isDirty && !mark.followsPlayerTracks && (mark.keyframes?.count ?? 0) < CoachMark.maximumKeyframes
+        canLeaveEditor && !mark.followsPlayerTracks && (mark.keyframes?.count ?? 0) < CoachMark.maximumKeyframes
             && !(mark.keyframes ?? []).contains { abs($0.time - store.playhead) < CoachMark.keyframeTimeTolerance }
     }
     private func keyframeHint(_ mark: CoachMark) -> String {

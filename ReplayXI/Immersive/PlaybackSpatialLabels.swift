@@ -170,21 +170,23 @@ enum PlaybackSpatialLabels {
             updateWork.visitedPlayerLabels &+= 1
             #endif
             setInputEnabled(acceptsInput, on: label)
+            // POV admission and tag size/height use the same range. Compute it
+            // once for eligible IDs; hidden teammates need no distance work.
+            let isFirstPersonCandidate = viewMode == .firstPerson
+                && player.id != perspectiveID
+                && (firstPersonVisiblePlayerIDs?.contains(player.id)
+                    ?? fallbackFirstPersonIDs?.contains(player.id)
+                    ?? false)
+            let candidatePose = isFirstPersonCandidate ? posesByPlayerID[player.id] : nil
+            let firstPersonDistance = isFirstPersonCandidate
+                ? candidatePose.map { ReplayGeometry.distance(observer, $0.position) }
+                : nil
             let passesBaseFilter: Bool = switch viewMode {
             case .firstPerson:
-                if player.id == perspectiveID {
-                    false
-                } else if let pose = posesByPlayerID[player.id] {
-                    (firstPersonVisiblePlayerIDs?.contains(player.id)
-                        ?? fallbackFirstPersonIDs?.contains(player.id)
-                        ?? false)
-                        && ReplayGeometry.distance(observer, pose.position)
-                            >= firstPersonMinimumLabelDistance
-                        && ReplayGeometry.distance(observer, pose.position)
-                            <= firstPersonMaximumLabelDistance
-                } else {
-                    false
-                }
+                firstPersonDistance.map {
+                    $0 >= firstPersonMinimumLabelDistance
+                        && $0 <= firstPersonMaximumLabelDistance
+                } ?? false
             case .tacticalTable, .touchline, .positional:
                 enabledPlayerIDs?.contains(player.id) ?? true
             }
@@ -192,11 +194,12 @@ enum PlaybackSpatialLabels {
                 || focusedPlayerIDs?.contains(player.id) != false
             let isVisible = passesBaseFilter && passesFocusFilter
             setVisibility(isVisible, on: label)
-            guard isVisible, let pose = posesByPlayerID[player.id] else { continue }
+            guard isVisible,
+                  let pose = candidatePose ?? posesByPlayerID[player.id] else { continue }
 
             let dx = observer.x - pose.position.x
             let dz = observer.z - pose.position.z
-            let distance = ReplayGeometry.distance(observer, pose.position)
+            let distance = firstPersonDistance ?? ReplayGeometry.distance(observer, pose.position)
             let resolvedScale: Float = switch viewMode {
             case .firstPerson:
                 firstPersonLabelScale(forDistance: distance)

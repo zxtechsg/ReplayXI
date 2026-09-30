@@ -25,14 +25,18 @@ club branding, player likenesses, third-party photos or third-party textures.
 - Goal interior: 7.32 m wide, 2.44 m below the crossbar. Markings include goal
   areas, penalty areas/arcs/spots, centre circle/spot and corner arcs.
   Dimensions reference [IFAB Law 1](https://www.theifab.com/laws/latest/the-field-of-play/).
-- 2 static meshes, 4 material slots, 7,234 triangles; no animation or physics.
+- 2 static meshes, 4 material slots, 7,926 triangles; no animation or physics.
 - 2 original 512 x 512 turf textures repeat every 2 m; no grass alpha cards.
-- USDZ: 1,126,057 bytes. Runtime imports once before room entry and clones
+- USDZ: 951,366 bytes. Runtime imports once before room entry and clones
   shared mesh/texture resources. The procedural pitch remains a fallback.
-- Reviewed v2 SHA-256:
-  `ad824e7a8d88d77ef330658000284d43a53dd691ddea62d4719a634b39a16de5`.
+- Reviewed run160 SHA-256:
+  `982ca747a1ac9eddde558ad3af470119256f5b261d3e666818aaa3c108da0197`.
 
 Editable Blender file, previews and report:
-`.codex-derived/ReplayXI-StrategyPitch39-v2/`.
+`.codex-derived/replayxi-pitch160/final/`.
 v1 lacked the grass apron and was not integrated. The importer preserves the
 USD root's Z-up to Y-up conversion when flattening the two meshes.
+Run160 adds restrained directional turf grain and three-span curved net cords.
+Three-sided cord cross sections keep the runtime's existing 8,000-triangle and
+1.5 MB admission limits. Relative to v2, triangles increase by 692 while the
+packaged asset is 174,691 bytes smaller; this is not an FPS improvement claim.

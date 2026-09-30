@@ -11,7 +11,7 @@ final class ReplayStrategyPitchTests: XCTestCase {
         let models = ReplayStrategyPitchProvider.models(in: pitch)
         XCTAssertEqual(models.count, 2)
         XCTAssertEqual(models.compactMap { $0.model?.materials.count }.reduce(0, +), 4)
-        XCTAssertEqual(ReplayStrategyPitchProvider.triangleCount(in: pitch), 7_234)
+        XCTAssertEqual(ReplayStrategyPitchProvider.triangleCount(in: pitch), 7_926)
         let bounds = pitch.visualBounds(relativeTo: pitch)
         XCTAssertEqual(bounds.extents.x, 72, accuracy: 0.02)
         XCTAssertEqual(bounds.extents.z, 111, accuracy: 0.02)
