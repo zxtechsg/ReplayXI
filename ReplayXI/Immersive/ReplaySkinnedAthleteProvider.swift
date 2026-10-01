@@ -584,9 +584,9 @@ final class ReplaySkinnedAthleteInstance {
         let parentRotation = parent < 0 ? simd_quatf(real: 1, imag: .zero)
             : simd_quatf(pose.modelSpaceTransforms[parent])
         pose.rotations[headIndex] = simd_normalize(parentRotation.inverse * chestDelta * limited * restHeadRotation)
-        // Only a bounded cervical correction needs this extra fixed-joint
-        // rebuild. Roots, arms, legs, translations and bone lengths are intact.
-        motion.rebuildModelSpaceTransforms(in: &pose)
+        // Only the head branch changed. Keep the current torso/limb matrices
+        // instead of rebuilding every joint for a bounded gaze correction.
+        motion.rebuildHeadModelSpaceTransforms(in: &pose)
     }
 
     private func applyLook(_ look: ReplayAthleteLookPose) {

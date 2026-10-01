@@ -83,6 +83,9 @@ struct ReplaySkinnedAthleteMotion: Sendable {
     let joints: [Joint]
     let jointNames: [String]
     let semanticJointIndices: [String: Int]
+    /// Parent-first head branch, prepared once for the final gaze correction.
+    /// Other branches are already current and must not be rebuilt per correction.
+    let headSubtreeJointIndices: [Int]
     let numberAnchors: NumberAnchors
     let footContacts: [String: FootContact]
     let geometry: Geometry
@@ -226,6 +229,15 @@ struct ReplaySkinnedAthleteMotion: Sendable {
         self.joints = decodedJoints
         self.jointNames = decodedJoints.map(\.name)
         self.semanticJointIndices = semantics
+        let headIndex = semantics["head"]!
+        self.headSubtreeJointIndices = decodedJoints.indices.filter { index in
+            var cursor = index
+            while cursor >= 0 {
+                if cursor == headIndex { return true }
+                cursor = decodedJoints[cursor].parentIndex
+            }
+            return false
+        }
         self.geometry = Geometry(nominalHeight: document.geometry.nominalHeight, restMinY: document.geometry.restMinY)
         self.numberAnchors = NumberAnchors(
             jointIndex: numberIndex,
@@ -445,6 +457,22 @@ struct ReplaySkinnedAthleteMotion: Sendable {
         Self.rebuildHierarchy(joints: joints, pose: &pose)
     }
 
+    /// The hierarchy must be current before changing the head's local rotation.
+    /// Updating this cached branch leaves chest, limbs and jersey anchors intact.
+    /// Invalid buffers take the same safe full-reset path as a full rebuild.
+    @discardableResult
+    func rebuildHeadModelSpaceTransforms(in pose: inout Pose) -> Int {
+        guard pose.translations.count == joints.count, pose.rotations.count == joints.count,
+              pose.scales.count == joints.count, pose.modelSpaceTransforms.count == joints.count else {
+            rebuildModelSpaceTransforms(in: &pose)
+            return joints.count
+        }
+        for index in headSubtreeJointIndices {
+            Self.rebuildJoint(index, joints: joints, pose: &pose)
+        }
+        return headSubtreeJointIndices.count
+    }
+
     private func ensureBuffer(_ pose: inout Pose) {
         if pose.translations.count != joints.count || pose.rotations.count != joints.count
             || pose.scales.count != joints.count || pose.modelSpaceTransforms.count != joints.count {
@@ -454,14 +482,18 @@ struct ReplaySkinnedAthleteMotion: Sendable {
 
     private static func rebuildHierarchy(joints: [Joint], pose: inout Pose) {
         for index in joints.indices {
-            var local = simd_float4x4(pose.rotations[index])
-            local.columns.0 *= pose.scales[index].x
-            local.columns.1 *= pose.scales[index].y
-            local.columns.2 *= pose.scales[index].z
-            local.columns.3 = SIMD4<Float>(pose.translations[index], 1)
-            let parent = joints[index].parentIndex
-            pose.modelSpaceTransforms[index] = parent < 0 ? local : pose.modelSpaceTransforms[parent] * local
+            rebuildJoint(index, joints: joints, pose: &pose)
         }
+    }
+
+    private static func rebuildJoint(_ index: Int, joints: [Joint], pose: inout Pose) {
+        var local = simd_float4x4(pose.rotations[index])
+        local.columns.0 *= pose.scales[index].x
+        local.columns.1 *= pose.scales[index].y
+        local.columns.2 *= pose.scales[index].z
+        local.columns.3 = SIMD4<Float>(pose.translations[index], 1)
+        let parent = joints[index].parentIndex
+        pose.modelSpaceTransforms[index] = parent < 0 ? local : pose.modelSpaceTransforms[parent] * local
     }
 
     private static func span(in clip: Clip, time: TimeInterval, looping: Bool) -> SampleSpan {
