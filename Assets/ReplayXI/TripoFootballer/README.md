@@ -9,7 +9,8 @@ this record does not claim unrestricted redistribution or commercial rights.
 - Smart Mesh P2.0; one free trial; requested quad / 8,000 faces.
 - Texture: 20 credits. Humanoid / Mixamo auto-rig: 20 credits.
 - [Credit ledger](../../../Docs/ReplayXI/TRIPO_CREDIT_LEDGER.json): 40 spent;
-  3,105 remaining from 3,145. No purchase, upgrade or subscription.
+  3,050 last observed, from 3,145; 55 of the decrease is not from our jobs.
+  No purchase, upgrade or subscription.
 - Both GLBs retain the source 4K texture. Rigged export includes the skeleton.
 
 | File | SHA-256 |
@@ -27,6 +28,10 @@ an 80-joint skeleton, two material sections, exact vertex/contact data and
 asset hashes. The first nearest-surface weight transfer failed visual QA
 (arms/sleeves). Its finite normalized weights did **not** establish good motion.
 Auto-rig retargeting is a separate offline candidate and needs its own review.
+The downloaded auto-rig GLB omits joint rest transforms. Its repaired retarget
+also failed arm/sleeve visual QA. Neither candidate is approved for runtime.
+Chrome blocked the Blender FBX ZIP export; that file has been requested from
+the user as the next input to assess.
 
 Before adoption: retarget idle/run/kick/head poses, inspect sleeve and hip
 deformation, build near/far detail, regenerate number/contact surfaces, verify

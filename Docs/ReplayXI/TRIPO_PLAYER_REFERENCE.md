@@ -7,7 +7,8 @@ Tripo, not a new mesh, rig, motion clip or production player replacement.
 
 On 1 October the user completed login in Chrome. One Smart Mesh P2.0 free-trial
 mesh, one 20-credit texture job and one 20-credit humanoid auto-rig completed.
-Starting balance: 3,145; latest verified balance: 3,105. Maximum spend: 2,201;
+Starting balance: 3,145; latest verified balance: 3,050. Our spend: 40; another
+55-credit balance decrease is unattributed on this shared account. Maximum spend: 2,201;
 minimum reserve: 944.
 See [credit ledger](TRIPO_CREDIT_LEDGER.json). No credentials or codes are saved here.
 
@@ -22,6 +23,8 @@ outside the app bundle. It has been inspected from front, back and side in Blend
 It is still an offline candidate, not a runtime replacement. Next: validate
 skin deformation, make team colours,
 build near/low detail and contact data, then verify native import and performance.
+The auto-rig GLB failed movement QA. A Blender-specific FBX export is requested
+from the user after Chrome blocked the ZIP download. See [run163](IMPROVEMENT_RUN_163.md).
 
 ## Exact image-generation prompt
 

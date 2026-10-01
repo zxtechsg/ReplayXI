@@ -34,9 +34,14 @@ def main():
         raise ValueError("Input must exist; output must be a NEW derived directory")
     before = digest(source)
     bpy.ops.wm.open_mainfile(filepath=str(source), load_ui=False)
-    rig = next(obj for obj in bpy.data.objects if obj.type == "ARMATURE" and len(obj.data.bones) == 80)
-    candidate = [obj for obj in bpy.data.objects if obj.type == "MESH" and obj.name.startswith("ReplayXI_Tripo_Candidate_")]
-    if not candidate or not rig.animation_data:
+    candidate = [obj for obj in bpy.data.objects if obj.type == "MESH" and
+                 obj.name.startswith(("ReplayXI_Tripo_Candidate_", "ReplayXI_Tripo_AutoRig_Candidate"))]
+    rigs = {modifier.object for obj in candidate for modifier in obj.modifiers
+            if modifier.type == "ARMATURE" and modifier.object is not None}
+    if not candidate or len(rigs) != 1:
+        raise ValueError("Expected one armature bound to the candidate meshes")
+    rig = next(iter(rigs))
+    if len(rig.data.bones) not in (52, 80) or not rig.animation_data:
         raise ValueError("Candidate mesh or rig actions missing")
     for obj in bpy.data.objects:
         if obj.type == "MESH":
@@ -75,7 +80,9 @@ def main():
         lamp.data.shape = "DISK"
         lamp.data.size = 3
     actions = {}
-    for name in ("ReplayXI_Idle.001", "ReplayXI_Run_InPlace.001"):
+    names = ("ReplayXI_Tripo_AutoRig_Idle", "ReplayXI_Tripo_AutoRig_Run") if len(rig.data.bones) == 52 else (
+        "ReplayXI_Idle.001", "ReplayXI_Run_InPlace.001")
+    for name in names:
         action = bpy.data.actions.get(name)
         if action is None:
             raise ValueError(f"Missing candidate action: {name}")

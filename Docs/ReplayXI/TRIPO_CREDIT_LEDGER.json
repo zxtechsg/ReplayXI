@@ -42,9 +42,12 @@
       "balanceAfterSubmission": 3105,
       "status": "completed; skeleton-enabled GLB exported for Blender retarget tests",
       "export": "../../Assets/ReplayXI/TripoFootballer/ReplayXI_Footballer_P2_Rigged.glb",
-      "exportSHA256": "132f0c84715f9337ef98366fe7edbb00db9c72fd6d2530bff8ea863d712a4b34"
+      "exportSHA256": "132f0c84715f9337ef98366fe7edbb00db9c72fd6d2530bff8ea863d712a4b34",
+      "knownIssue": "GLB omits joint rest transforms; Blender movement QA failed. Not runtime ready. Blender FBX export was blocked by Chrome and requested from the user."
     }
   ],
   "verifiedCreditsSpent": 40,
-  "latestObservedBalance": 3105
+  "latestObservedBalance": 3050,
+  "unattributedBalanceDecrease": 55,
+  "balanceNote": "Balance fell a further 55 after our 40-credit jobs. This is a shared account; no additional paid job was submitted by this task. Recheck live balance before further spending."
 }
