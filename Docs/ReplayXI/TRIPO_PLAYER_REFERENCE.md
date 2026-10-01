@@ -5,21 +5,23 @@ Generated once with the built-in image-generation tool, inspected for a complete
 body, separated limbs, blank kit and neutral A-pose. This is a 2D input for
 Tripo, not a new mesh, rig, motion clip or production player replacement.
 
-Tripo's password login rejected the supplied credentials. Its email-code login
-sent one verification code to the requested account. The browser awaits that
-code; no resend or paid generation task was submitted. Tripo spend remains 0;
-balance is unknown. The 70% maximum / 30% reserve policy is recorded in
-[run160](IMPROVEMENT_RUN_160.md). No credentials or codes are saved here.
+On 1 October the user completed login in Chrome. One Smart Mesh P2.0 free-trial
+mesh, one 20-credit texture job and one 20-credit humanoid auto-rig completed.
+Starting balance: 3,145; latest verified balance: 3,105. Maximum spend: 2,201;
+minimum reserve: 944.
+See [credit ledger](TRIPO_CREDIT_LEDGER.json). No credentials or codes are saved here.
 
 The existing canonical 80-bone GLB was imported through Blender MCP into a
 separate `ReplayXI Player Upgrade Reference` scene and placed in rest pose.
 The prior pitch and startup scenes were preserved. This is the comparison rig
 for checking the incoming generated mesh, not completed retargeting.
 
-Next: authenticate, record balance and quoted job cost, generate one textured
-mesh from this image, inspect all sides, then rig/retarget and validate skin
-weights, foot contacts, head motion, kit recolouring and near/low detail before
-changing the app's accepted asset hashes. Avoid purchasing credits or upgrades.
+The exported textured GLB is backed up in
+[authoring assets](../../Assets/ReplayXI/TripoFootballer/ReplayXI_Footballer_P2_Source.glb),
+outside the app bundle. It has been inspected from front, back and side in Blender.
+It is still an offline candidate, not a runtime replacement. Next: validate
+skin deformation, make team colours,
+build near/low detail and contact data, then verify native import and performance.
 
 ## Exact image-generation prompt
 

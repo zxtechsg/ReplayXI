@@ -1,0 +1,50 @@
+{
+  "date": "2026-10-01",
+  "startingBalance": 3145,
+  "maximumCumulativeSpend": 2201,
+  "minimumRemainingBalance": 944,
+  "policy": "Recheck the live shared balance and quoted cost before every job. No purchases, upgrades, or unpriced jobs. Use at most 70% of the starting credits, preserving at least 30% even if other users spend meanwhile.",
+  "jobs": [
+    {
+      "purpose": "One neutral footballer geometry candidate",
+      "model": "Smart Mesh P2.0",
+      "reference": "AssetReferences/footballer-a-pose-v1.png",
+      "requestedTopology": "quad",
+      "requestedPolycount": 8000,
+      "count": 1,
+      "privacy": "Private",
+      "quotedCredits": 0,
+      "trialUse": 1,
+      "assetID": "7b99bd29-c5db-4c97-8bf4-067618bdeb27",
+      "reportedFaces": 9388,
+      "reportedVertices": 8820,
+      "status": "geometry completed; one free trial used, one remains"
+    },
+    {
+      "purpose": "Texture the inspected footballer geometry",
+      "assetID": "7b99bd29-c5db-4c97-8bf4-067618bdeb27",
+      "quotedCredits": 20,
+      "balanceBefore": 3145,
+      "balanceAfterSubmission": 3125,
+      "status": "completed; textured GLB exported and inspected in Blender",
+      "export": "../../Assets/ReplayXI/TripoFootballer/ReplayXI_Footballer_P2_Source.glb",
+      "exportSHA256": "e4fbdbcf98c631d283733ff9f339dd2bf01877bf8ab81756b6fe274a25c10eb5",
+      "exportTextureSize": 4096,
+      "importedTriangles": 17082,
+      "importedVerticesIncludingUVSeams": 16702
+    },
+    {
+      "purpose": "Auto-rig the same textured candidate after the canonical nearest-weight transfer failed visual QA",
+      "assetID": "7b99bd29-c5db-4c97-8bf4-067618bdeb27",
+      "preset": "Humanoid / Mixamo",
+      "quotedCredits": 20,
+      "balanceBefore": 3125,
+      "balanceAfterSubmission": 3105,
+      "status": "completed; skeleton-enabled GLB exported for Blender retarget tests",
+      "export": "../../Assets/ReplayXI/TripoFootballer/ReplayXI_Footballer_P2_Rigged.glb",
+      "exportSHA256": "132f0c84715f9337ef98366fe7edbb00db9c72fd6d2530bff8ea863d712a4b34"
+    }
+  ],
+  "verifiedCreditsSpent": 40,
+  "latestObservedBalance": 3105
+}
