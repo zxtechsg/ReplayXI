@@ -35,13 +35,14 @@ def main():
     before = digest(source)
     bpy.ops.wm.open_mainfile(filepath=str(source), load_ui=False)
     candidate = [obj for obj in bpy.data.objects if obj.type == "MESH" and
-                 obj.name.startswith(("ReplayXI_Tripo_Candidate_", "ReplayXI_Tripo_AutoRig_Candidate"))]
+                 obj.name.startswith(("ReplayXI_Tripo_Candidate_", "ReplayXI_Tripo_AutoRig_Candidate",
+                                      "ReplayXI_Tripo_FBX_Candidate"))]
     rigs = {modifier.object for obj in candidate for modifier in obj.modifiers
             if modifier.type == "ARMATURE" and modifier.object is not None}
     if not candidate or len(rigs) != 1:
         raise ValueError("Expected one armature bound to the candidate meshes")
     rig = next(iter(rigs))
-    if len(rig.data.bones) not in (52, 80) or not rig.animation_data:
+    if len(rig.data.bones) not in (52, 65, 80) or not rig.animation_data:
         raise ValueError("Candidate mesh or rig actions missing")
     for obj in bpy.data.objects:
         if obj.type == "MESH":
@@ -68,7 +69,7 @@ def main():
     camera = bpy.data.objects.new("Tripo_QA_Camera", camera_data)
     scene.collection.objects.link(camera)
     camera_data.type = "ORTHO"
-    camera_data.ortho_scale = 2.18
+    camera_data.ortho_scale = 1.25 if len(rig.data.bones) == 65 else 2.18
     scene.camera = camera
     for name, location, energy in (("Key", (-3, -3, 5), 500), ("Fill", (3, -2, 3), 250),
                                    ("Rim", (1, 3, 4), 350)):
@@ -80,8 +81,9 @@ def main():
         lamp.data.shape = "DISK"
         lamp.data.size = 3
     actions = {}
-    names = ("ReplayXI_Tripo_AutoRig_Idle", "ReplayXI_Tripo_AutoRig_Run") if len(rig.data.bones) == 52 else (
-        "ReplayXI_Idle.001", "ReplayXI_Run_InPlace.001")
+    names = ("ReplayXI_Tripo_FBX_Idle", "ReplayXI_Tripo_FBX_Run") if len(rig.data.bones) == 65 else (
+        ("ReplayXI_Tripo_AutoRig_Idle", "ReplayXI_Tripo_AutoRig_Run") if len(rig.data.bones) == 52 else
+        ("ReplayXI_Idle.001", "ReplayXI_Run_InPlace.001"))
     for name in names:
         action = bpy.data.actions.get(name)
         if action is None:
@@ -89,15 +91,16 @@ def main():
         actions["idle" if "Idle" in name else "run"] = action
     output.mkdir(parents=True)
     images = []
+    target_z = .50 if len(rig.data.bones) == 65 else .90
     for clip, frame in (("rest", 1), ("idle", 1), ("run", 1),
                         ("run", 5), ("run", 10), ("run", 14)):
         rig.data.pose_position = "REST" if clip == "rest" else "POSE"
         if clip != "rest":
             rig.animation_data.action = actions[clip]
         scene.frame_set(frame)
-        for view, position in (("front", (0, -4.4, 1.0)), ("side", (4.4, 0, 1.0))):
+        for view, position in (("front", (0, -4.4, target_z)), ("side", (4.4, 0, target_z))):
             camera.location = position
-            camera.rotation_euler = (Vector((0, 0, .90)) - camera.location).to_track_quat("-Z", "Y").to_euler()
+            camera.rotation_euler = (Vector((0, 0, target_z)) - camera.location).to_track_quat("-Z", "Y").to_euler()
             filename = f"{clip}-{frame:02d}-{view}.png"
             scene.render.filepath = str(output / filename)
             bpy.ops.render.render(write_still=True)

@@ -1,0 +1,871 @@
+{
+  "assets": {
+    "low": {
+      "drawCalls": 1,
+      "jointCount": 52,
+      "sha256": "48712cb85bc92c798fd7c6dc53ef721f43a0797db7739facd61f30449e80b390",
+      "triangles": 1964,
+      "vertices": 3269
+    },
+    "near": {
+      "drawCalls": 1,
+      "jointCount": 52,
+      "sha256": "af01e0ea9e8e4ae6d9dae068f87fe03f1550732583a553eb64660ce1bd6afe90",
+      "triangles": 7685,
+      "vertices": 9075
+    }
+  },
+  "atlasProvenance": {
+    "bakedKits": {
+      "away": {
+        "file": "away_colour_2048.png",
+        "sha256": "52d6262f5aaa3f9149db3068f95a9ec0fe920d830fa0aad21c2fc80bd0110a4c",
+        "size": [
+          2048,
+          2048
+        ]
+      },
+      "home": {
+        "file": "home_colour_2048.png",
+        "sha256": "b8a2bbf1082cc6d921df9726c5708891747fa22fc55f0a61a59ba617aaf51773",
+        "size": [
+          2048,
+          2048
+        ]
+      },
+      "keeper": {
+        "file": "keeper_colour_2048.png",
+        "sha256": "bb638c812244b185f7df13541f3d5fe347e0a0d06715d128519d8edc7bb55e9e",
+        "size": [
+          2048,
+          2048
+        ]
+      }
+    },
+    "matchedUniqueUVCoordinates": 16699,
+    "maximumUVMatchedPositionErrorMetres": 1.5832483768463135e-07,
+    "sourceGLBSHA256": "e4fbdbcf98c631d283733ff9f339dd2bf01877bf8ab81756b6fe274a25c10eb5",
+    "sourceJPEGByteIdenticalIn": [
+      "original",
+      "motion",
+      "near",
+      "low"
+    ],
+    "sourceJPEG_SHA256": "7988c03904f11099aae60730d77dd05b07126a9fac78ca5da66d543bda4d1431"
+  },
+  "clips": [
+    {
+      "durationSeconds": 3.4583332538604736,
+      "frames": 84,
+      "id": "idle"
+    },
+    {
+      "durationSeconds": 0.7916666865348816,
+      "frames": 20,
+      "id": "run"
+    }
+  ],
+  "contactSummary": {
+    "low": {
+      "headProbeBoundsMax": [
+        0.0937678,
+        1.8189592,
+        0.111638
+      ],
+      "headProbeBoundsMin": [
+        -0.0961045,
+        1.6331259,
+        -0.1121341
+      ],
+      "totalVertices": 512,
+      "weightedHeadProbes": 96,
+      "weightedHeadSourceCandidates": 683
+    },
+    "near": {
+      "headProbeBoundsMax": [
+        0.0968444,
+        1.819943,
+        0.130898
+      ],
+      "headProbeBoundsMin": [
+        -0.0986251,
+        1.6299432,
+        -0.1109548
+      ],
+      "totalVertices": 512,
+      "weightedHeadProbes": 96,
+      "weightedHeadSourceCandidates": 2334
+    }
+  },
+  "files": {
+    "ReplayXITripoAthlete.usdz": {
+      "bytes": 646984,
+      "sha256": "af01e0ea9e8e4ae6d9dae068f87fe03f1550732583a553eb64660ce1bd6afe90"
+    },
+    "ReplayXITripoContactSurface.json": {
+      "bytes": 61310,
+      "sha256": "ae384cf32679b5f57851a5b10032ba0fc41892605c98c81030ba77104ba8007e"
+    },
+    "ReplayXITripoLow.usdz": {
+      "bytes": 339995,
+      "sha256": "48712cb85bc92c798fd7c6dc53ef721f43a0797db7739facd61f30449e80b390"
+    },
+    "ReplayXITripoLowContactSurface.json": {
+      "bytes": 62983,
+      "sha256": "f12a6d033535790654af6c75b80c8afb5decf4c2125cc12a0a1dd2a18bc1aa92"
+    },
+    "ReplayXITripoMotion.json": {
+      "bytes": 552931,
+      "sha256": "877857959a46e2ea1c47de3fbbf5822ff8e774d20c973f1e9eade55ff578a84f"
+    }
+  },
+  "geometry": {
+    "boundsMax": [
+      0.5833628,
+      1.819943,
+      0.1569502
+    ],
+    "boundsMin": [
+      -0.5834079,
+      -5.7e-05,
+      -0.1561438
+    ],
+    "jointCount": 52,
+    "materialCount": 1,
+    "nominalHeight": 1.8200000000000003,
+    "pelvisRestHeight": 0.9561112325191894,
+    "restMinY": -5.7039700084217405e-05,
+    "triangles": 7685,
+    "vertices": 9075
+  },
+  "heightScale": 1.820699033904095,
+  "normalMode": "area-weighted",
+  "numberPanel": {
+    "after": {
+      "back": {
+        "halfHeightMetres": 0.12,
+        "halfWidthMetres": 0.15,
+        "maximumClothDepthMetres": -0.01000003118263093,
+        "samples": [
+          {
+            "clip": "idle",
+            "frame": 0,
+            "maximumClothDepthMetres": -0.010589877631975775,
+            "shirtTriangles": 139
+          },
+          {
+            "clip": "idle",
+            "frame": 20,
+            "maximumClothDepthMetres": -0.010643733150912854,
+            "shirtTriangles": 139
+          },
+          {
+            "clip": "idle",
+            "frame": 40,
+            "maximumClothDepthMetres": -0.01066098765084833,
+            "shirtTriangles": 138
+          },
+          {
+            "clip": "idle",
+            "frame": 60,
+            "maximumClothDepthMetres": -0.010585159635608382,
+            "shirtTriangles": 137
+          },
+          {
+            "clip": "idle",
+            "frame": 83,
+            "maximumClothDepthMetres": -0.010589877631975775,
+            "shirtTriangles": 139
+          },
+          {
+            "clip": "run",
+            "frame": 0,
+            "maximumClothDepthMetres": -0.012394904899541204,
+            "shirtTriangles": 123
+          },
+          {
+            "clip": "run",
+            "frame": 1,
+            "maximumClothDepthMetres": -0.012394904899541204,
+            "shirtTriangles": 123
+          },
+          {
+            "clip": "run",
+            "frame": 2,
+            "maximumClothDepthMetres": -0.012517357922053163,
+            "shirtTriangles": 119
+          },
+          {
+            "clip": "run",
+            "frame": 3,
+            "maximumClothDepthMetres": -0.011691340450837806,
+            "shirtTriangles": 144
+          },
+          {
+            "clip": "run",
+            "frame": 4,
+            "maximumClothDepthMetres": -0.011329186790536516,
+            "shirtTriangles": 148
+          },
+          {
+            "clip": "run",
+            "frame": 5,
+            "maximumClothDepthMetres": -0.011473198865561418,
+            "shirtTriangles": 149
+          },
+          {
+            "clip": "run",
+            "frame": 6,
+            "maximumClothDepthMetres": -0.011766097360856098,
+            "shirtTriangles": 143
+          },
+          {
+            "clip": "run",
+            "frame": 7,
+            "maximumClothDepthMetres": -0.011848765028372732,
+            "shirtTriangles": 143
+          },
+          {
+            "clip": "run",
+            "frame": 8,
+            "maximumClothDepthMetres": -0.011182815948617919,
+            "shirtTriangles": 145
+          },
+          {
+            "clip": "run",
+            "frame": 9,
+            "maximumClothDepthMetres": -0.01055158847853166,
+            "shirtTriangles": 143
+          },
+          {
+            "clip": "run",
+            "frame": 10,
+            "maximumClothDepthMetres": -0.01000003118263093,
+            "shirtTriangles": 141
+          },
+          {
+            "clip": "run",
+            "frame": 11,
+            "maximumClothDepthMetres": -0.010326825508289561,
+            "shirtTriangles": 135
+          },
+          {
+            "clip": "run",
+            "frame": 12,
+            "maximumClothDepthMetres": -0.01112816735691502,
+            "shirtTriangles": 119
+          },
+          {
+            "clip": "run",
+            "frame": 13,
+            "maximumClothDepthMetres": -0.012357520093869256,
+            "shirtTriangles": 119
+          },
+          {
+            "clip": "run",
+            "frame": 14,
+            "maximumClothDepthMetres": -0.012784803760729324,
+            "shirtTriangles": 126
+          },
+          {
+            "clip": "run",
+            "frame": 15,
+            "maximumClothDepthMetres": -0.012802121316461412,
+            "shirtTriangles": 137
+          },
+          {
+            "clip": "run",
+            "frame": 16,
+            "maximumClothDepthMetres": -0.012832993607209908,
+            "shirtTriangles": 138
+          },
+          {
+            "clip": "run",
+            "frame": 17,
+            "maximumClothDepthMetres": -0.012478185072687498,
+            "shirtTriangles": 135
+          },
+          {
+            "clip": "run",
+            "frame": 18,
+            "maximumClothDepthMetres": -0.012346015107306374,
+            "shirtTriangles": 129
+          },
+          {
+            "clip": "run",
+            "frame": 19,
+            "maximumClothDepthMetres": -0.01239490415839406,
+            "shirtTriangles": 123
+          }
+        ]
+      },
+      "front": {
+        "halfHeightMetres": 0.065,
+        "halfWidthMetres": 0.075,
+        "maximumClothDepthMetres": -0.009999957029393698,
+        "samples": [
+          {
+            "clip": "idle",
+            "frame": 0,
+            "maximumClothDepthMetres": -0.015168981172193285,
+            "shirtTriangles": 42
+          },
+          {
+            "clip": "idle",
+            "frame": 20,
+            "maximumClothDepthMetres": -0.015130866275362535,
+            "shirtTriangles": 42
+          },
+          {
+            "clip": "idle",
+            "frame": 40,
+            "maximumClothDepthMetres": -0.015142604255666235,
+            "shirtTriangles": 42
+          },
+          {
+            "clip": "idle",
+            "frame": 60,
+            "maximumClothDepthMetres": -0.015217227337679919,
+            "shirtTriangles": 42
+          },
+          {
+            "clip": "idle",
+            "frame": 83,
+            "maximumClothDepthMetres": -0.015168981172193285,
+            "shirtTriangles": 42
+          },
+          {
+            "clip": "run",
+            "frame": 0,
+            "maximumClothDepthMetres": -0.009999957029393698,
+            "shirtTriangles": 49
+          },
+          {
+            "clip": "run",
+            "frame": 1,
+            "maximumClothDepthMetres": -0.009999957029393698,
+            "shirtTriangles": 49
+          },
+          {
+            "clip": "run",
+            "frame": 2,
+            "maximumClothDepthMetres": -0.010596590156401233,
+            "shirtTriangles": 46
+          },
+          {
+            "clip": "run",
+            "frame": 3,
+            "maximumClothDepthMetres": -0.011666704447237455,
+            "shirtTriangles": 46
+          },
+          {
+            "clip": "run",
+            "frame": 4,
+            "maximumClothDepthMetres": -0.012847272261340149,
+            "shirtTriangles": 49
+          },
+          {
+            "clip": "run",
+            "frame": 5,
+            "maximumClothDepthMetres": -0.013685596361550484,
+            "shirtTriangles": 48
+          },
+          {
+            "clip": "run",
+            "frame": 6,
+            "maximumClothDepthMetres": -0.014536295777239592,
+            "shirtTriangles": 46
+          },
+          {
+            "clip": "run",
+            "frame": 7,
+            "maximumClothDepthMetres": -0.015666468117180025,
+            "shirtTriangles": 48
+          },
+          {
+            "clip": "run",
+            "frame": 8,
+            "maximumClothDepthMetres": -0.017209504338432016,
+            "shirtTriangles": 51
+          },
+          {
+            "clip": "run",
+            "frame": 9,
+            "maximumClothDepthMetres": -0.01881402769150225,
+            "shirtTriangles": 51
+          },
+          {
+            "clip": "run",
+            "frame": 10,
+            "maximumClothDepthMetres": -0.018559566361788824,
+            "shirtTriangles": 50
+          },
+          {
+            "clip": "run",
+            "frame": 11,
+            "maximumClothDepthMetres": -0.01719623180979204,
+            "shirtTriangles": 50
+          },
+          {
+            "clip": "run",
+            "frame": 12,
+            "maximumClothDepthMetres": -0.015698549144966698,
+            "shirtTriangles": 49
+          },
+          {
+            "clip": "run",
+            "frame": 13,
+            "maximumClothDepthMetres": -0.015031353042857973,
+            "shirtTriangles": 41
+          },
+          {
+            "clip": "run",
+            "frame": 14,
+            "maximumClothDepthMetres": -0.015449166375155463,
+            "shirtTriangles": 51
+          },
+          {
+            "clip": "run",
+            "frame": 15,
+            "maximumClothDepthMetres": -0.016973553783118774,
+            "shirtTriangles": 51
+          },
+          {
+            "clip": "run",
+            "frame": 16,
+            "maximumClothDepthMetres": -0.016304969895881344,
+            "shirtTriangles": 51
+          },
+          {
+            "clip": "run",
+            "frame": 17,
+            "maximumClothDepthMetres": -0.014257457259032526,
+            "shirtTriangles": 51
+          },
+          {
+            "clip": "run",
+            "frame": 18,
+            "maximumClothDepthMetres": -0.011870906177359294,
+            "shirtTriangles": 49
+          },
+          {
+            "clip": "run",
+            "frame": 19,
+            "maximumClothDepthMetres": -0.00999996278004499,
+            "shirtTriangles": 49
+          }
+        ]
+      }
+    },
+    "before": {
+      "back": {
+        "halfHeightMetres": 0.12,
+        "halfWidthMetres": 0.15,
+        "maximumClothDepthMetres": -0.0035652073535620277,
+        "samples": [
+          {
+            "clip": "idle",
+            "frame": 0,
+            "maximumClothDepthMetres": -0.0041550538029068995,
+            "shirtTriangles": 139
+          },
+          {
+            "clip": "idle",
+            "frame": 20,
+            "maximumClothDepthMetres": -0.004208909321844007,
+            "shirtTriangles": 139
+          },
+          {
+            "clip": "idle",
+            "frame": 40,
+            "maximumClothDepthMetres": -0.004226163821779427,
+            "shirtTriangles": 138
+          },
+          {
+            "clip": "idle",
+            "frame": 60,
+            "maximumClothDepthMetres": -0.004150335806539507,
+            "shirtTriangles": 137
+          },
+          {
+            "clip": "idle",
+            "frame": 83,
+            "maximumClothDepthMetres": -0.0041550538029068995,
+            "shirtTriangles": 139
+          },
+          {
+            "clip": "run",
+            "frame": 0,
+            "maximumClothDepthMetres": -0.005960081070472301,
+            "shirtTriangles": 123
+          },
+          {
+            "clip": "run",
+            "frame": 1,
+            "maximumClothDepthMetres": -0.005960081070472301,
+            "shirtTriangles": 123
+          },
+          {
+            "clip": "run",
+            "frame": 2,
+            "maximumClothDepthMetres": -0.006082534092984371,
+            "shirtTriangles": 119
+          },
+          {
+            "clip": "run",
+            "frame": 3,
+            "maximumClothDepthMetres": -0.0052565166217690695,
+            "shirtTriangles": 144
+          },
+          {
+            "clip": "run",
+            "frame": 4,
+            "maximumClothDepthMetres": -0.00489436296146778,
+            "shirtTriangles": 148
+          },
+          {
+            "clip": "run",
+            "frame": 5,
+            "maximumClothDepthMetres": -0.005038375036492515,
+            "shirtTriangles": 149
+          },
+          {
+            "clip": "run",
+            "frame": 6,
+            "maximumClothDepthMetres": -0.005331273531787195,
+            "shirtTriangles": 143
+          },
+          {
+            "clip": "run",
+            "frame": 7,
+            "maximumClothDepthMetres": -0.005413941199304051,
+            "shirtTriangles": 143
+          },
+          {
+            "clip": "run",
+            "frame": 8,
+            "maximumClothDepthMetres": -0.004747992119549016,
+            "shirtTriangles": 145
+          },
+          {
+            "clip": "run",
+            "frame": 9,
+            "maximumClothDepthMetres": -0.004116764649462867,
+            "shirtTriangles": 143
+          },
+          {
+            "clip": "run",
+            "frame": 10,
+            "maximumClothDepthMetres": -0.0035652073535620277,
+            "shirtTriangles": 141
+          },
+          {
+            "clip": "run",
+            "frame": 11,
+            "maximumClothDepthMetres": -0.003892001679220658,
+            "shirtTriangles": 135
+          },
+          {
+            "clip": "run",
+            "frame": 12,
+            "maximumClothDepthMetres": -0.004693343527846228,
+            "shirtTriangles": 119
+          },
+          {
+            "clip": "run",
+            "frame": 13,
+            "maximumClothDepthMetres": -0.005922696264800409,
+            "shirtTriangles": 119
+          },
+          {
+            "clip": "run",
+            "frame": 14,
+            "maximumClothDepthMetres": -0.006349979931660421,
+            "shirtTriangles": 126
+          },
+          {
+            "clip": "run",
+            "frame": 15,
+            "maximumClothDepthMetres": -0.00636729748739262,
+            "shirtTriangles": 137
+          },
+          {
+            "clip": "run",
+            "frame": 16,
+            "maximumClothDepthMetres": -0.006398169778141116,
+            "shirtTriangles": 138
+          },
+          {
+            "clip": "run",
+            "frame": 17,
+            "maximumClothDepthMetres": -0.006043361243618595,
+            "shirtTriangles": 135
+          },
+          {
+            "clip": "run",
+            "frame": 18,
+            "maximumClothDepthMetres": -0.005911191278237582,
+            "shirtTriangles": 129
+          },
+          {
+            "clip": "run",
+            "frame": 19,
+            "maximumClothDepthMetres": -0.005960080329325268,
+            "shirtTriangles": 123
+          }
+        ]
+      },
+      "front": {
+        "halfHeightMetres": 0.065,
+        "halfWidthMetres": 0.075,
+        "maximumClothDepthMetres": 0.019191545928540922,
+        "samples": [
+          {
+            "clip": "idle",
+            "frame": 0,
+            "maximumClothDepthMetres": 0.014022515594202853,
+            "shirtTriangles": 42
+          },
+          {
+            "clip": "idle",
+            "frame": 20,
+            "maximumClothDepthMetres": 0.014060630502643504,
+            "shirtTriangles": 42
+          },
+          {
+            "clip": "idle",
+            "frame": 40,
+            "maximumClothDepthMetres": 0.01404889256157522,
+            "shirtTriangles": 42
+          },
+          {
+            "clip": "idle",
+            "frame": 60,
+            "maximumClothDepthMetres": 0.013974269466938916,
+            "shirtTriangles": 42
+          },
+          {
+            "clip": "idle",
+            "frame": 83,
+            "maximumClothDepthMetres": 0.014022515594202853,
+            "shirtTriangles": 42
+          },
+          {
+            "clip": "run",
+            "frame": 0,
+            "maximumClothDepthMetres": 0.019191545928540922,
+            "shirtTriangles": 49
+          },
+          {
+            "clip": "run",
+            "frame": 1,
+            "maximumClothDepthMetres": 0.019191545928540922,
+            "shirtTriangles": 49
+          },
+          {
+            "clip": "run",
+            "frame": 2,
+            "maximumClothDepthMetres": 0.01859491257116119,
+            "shirtTriangles": 46
+          },
+          {
+            "clip": "run",
+            "frame": 3,
+            "maximumClothDepthMetres": 0.017524798043404788,
+            "shirtTriangles": 46
+          },
+          {
+            "clip": "run",
+            "frame": 4,
+            "maximumClothDepthMetres": 0.016344230038588956,
+            "shirtTriangles": 49
+          },
+          {
+            "clip": "run",
+            "frame": 5,
+            "maximumClothDepthMetres": 0.015505905844400609,
+            "shirtTriangles": 48
+          },
+          {
+            "clip": "run",
+            "frame": 6,
+            "maximumClothDepthMetres": 0.014655206482693655,
+            "shirtTriangles": 46
+          },
+          {
+            "clip": "run",
+            "frame": 7,
+            "maximumClothDepthMetres": 0.013525034324170062,
+            "shirtTriangles": 48
+          },
+          {
+            "clip": "run",
+            "frame": 8,
+            "maximumClothDepthMetres": 0.011981998354978755,
+            "shirtTriangles": 51
+          },
+          {
+            "clip": "run",
+            "frame": 9,
+            "maximumClothDepthMetres": 0.010377475303770855,
+            "shirtTriangles": 51
+          },
+          {
+            "clip": "run",
+            "frame": 10,
+            "maximumClothDepthMetres": 0.010631934060919343,
+            "shirtTriangles": 50
+          },
+          {
+            "clip": "run",
+            "frame": 11,
+            "maximumClothDepthMetres": 0.011995268903915546,
+            "shirtTriangles": 50
+          },
+          {
+            "clip": "run",
+            "frame": 12,
+            "maximumClothDepthMetres": 0.01349295090279675,
+            "shirtTriangles": 49
+          },
+          {
+            "clip": "run",
+            "frame": 13,
+            "maximumClothDepthMetres": 0.014160146043012155,
+            "shirtTriangles": 41
+          },
+          {
+            "clip": "run",
+            "frame": 14,
+            "maximumClothDepthMetres": 0.01374233594236514,
+            "shirtTriangles": 51
+          },
+          {
+            "clip": "run",
+            "frame": 15,
+            "maximumClothDepthMetres": 0.012217948087856376,
+            "shirtTriangles": 51
+          },
+          {
+            "clip": "run",
+            "frame": 16,
+            "maximumClothDepthMetres": 0.012886534081065472,
+            "shirtTriangles": 51
+          },
+          {
+            "clip": "run",
+            "frame": 17,
+            "maximumClothDepthMetres": 0.014934046332861852,
+            "shirtTriangles": 51
+          },
+          {
+            "clip": "run",
+            "frame": 18,
+            "maximumClothDepthMetres": 0.01732059707321483,
+            "shirtTriangles": 49
+          },
+          {
+            "clip": "run",
+            "frame": 19,
+            "maximumClothDepthMetres": 0.019191540177889196,
+            "shirtTriangles": 49
+          }
+        ]
+      }
+    },
+    "outwardOffsetsMetres": {
+      "back": 0.0064347926464379725,
+      "front": 0.029191545928540924
+    },
+    "targetClearanceMetres": 0.01
+  },
+  "poseBounds": [
+    {
+      "boundsMax": [
+        0.2720652,
+        1.8175353,
+        0.2122258
+      ],
+      "boundsMin": [
+        -0.3267559,
+        0.0045505,
+        -0.1594843
+      ],
+      "clip": "idle",
+      "frame": 1,
+      "scaledBlenderMaximumErrorMetres": 3.4386297440569535e-06
+    },
+    {
+      "boundsMax": [
+        0.3520023,
+        1.6657068,
+        0.4030312
+      ],
+      "boundsMin": [
+        -0.3043412,
+        0.0151126,
+        -0.31044
+      ],
+      "clip": "run",
+      "frame": 1,
+      "scaledBlenderMaximumErrorMetres": 4.0609777796074553e-07
+    },
+    {
+      "boundsMax": [
+        0.3291469,
+        1.7318296,
+        0.6116188
+      ],
+      "boundsMin": [
+        -0.3175505,
+        0.1216583,
+        -0.6353219
+      ],
+      "clip": "run",
+      "frame": 5,
+      "scaledBlenderMaximumErrorMetres": 6.027974096919908e-06
+    },
+    {
+      "boundsMax": [
+        0.2767456,
+        1.6730656,
+        0.3851462
+      ],
+      "boundsMin": [
+        -0.3657697,
+        0.0210774,
+        -0.2802379
+      ],
+      "clip": "run",
+      "frame": 10,
+      "scaledBlenderMaximumErrorMetres": 2.9731356794293617e-06
+    },
+    {
+      "boundsMax": [
+        0.3217065,
+        1.7373205,
+        0.6347555
+      ],
+      "boundsMin": [
+        -0.3413977,
+        0.0813082,
+        -0.6541986
+      ],
+      "clip": "run",
+      "frame": 14,
+      "scaledBlenderMaximumErrorMetres": 2.918575441435145e-06
+    }
+  ],
+  "sourceCommit": "tripo-fbx-9ad8011a64517bb1eead61ce8f95b66e",
+  "sourceHashes": {
+    "kitsReport": "84afd0ac0edcd01a226977643f4d55e772f7c10c3daa74714ce326a3afbf66a0",
+    "lowGLB": "5e9fc51e793162b6b3984244ca4851d5b0ef7432ef96e0642255f04484f60695",
+    "motionGLB": "aeb55693b716998cbf2edfbdc1fdc6dd80d7495489225d9b1868c33e56c8bbbc",
+    "nearGLB": "4116c9a2662229273de403c1a09072bc4ffd6b4bc05b8d1cc231da370eb98ee7",
+    "sourceArchive": "32f79b8f58897d98e486e29890c279b14c90e5b39e8b9ced44134ff23a7166ba",
+    "sourceFBX": "9ad8011a64517bb1eead61ce8f95b66eeab0021bf46da7aca7d5024b697568d2",
+    "sourceGLB": "e4fbdbcf98c631d283733ff9f339dd2bf01877bf8ab81756b6fe274a25c10eb5",
+    "sourceJPEG": "7988c03904f11099aae60730d77dd05b07126a9fac78ca5da66d543bda4d1431",
+    "sourceReport": "91721e88959e7745a1cd394e5c6e3240c4c3183b4cff4f8eb98512ddd7b5c314"
+  }
+}

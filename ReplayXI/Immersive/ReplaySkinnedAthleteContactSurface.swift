@@ -1,24 +1,54 @@
 import Foundation
 import simd
 
-/// A small set of real, weighted skin vertices baked from the audited Blender
-/// library. Bone-local points are prepared once; a contact query needs only
-/// matrix/vector products, never a mesh readback or all 5,012 body vertices.
+/// A small set of real, weighted skin vertices baked from an audited library.
+/// Bone-local points are prepared once; contact queries need only matrix/vector
+/// products, never a mesh readback.
 struct ReplaySkinnedAthleteContactSurface: Sendable {
     static let maximumVertices = 512
     static let maximumPayloadBytes = 256 * 1_024
     enum DecodeError: Error, Equatable { case invalid(String) }
 
-    /// The optional low mesh uses every admitted vertex and its actual USD
-    /// inverse binds. Its larger payload must not relax the original profile.
+    /// Rocketbox profiles retain their exact legacy bounds. Tripo profiles
+    /// bind the decoded payload to an explicit source vertex count; their
+    /// sample and byte limits stay equal to the original near profile.
     enum Profile: Equatable, Sendable {
         case near
         case fullLowDetail
+        case tripoNear(sourceVertexCount: Int)
+        case tripoLow(sourceVertexCount: Int)
 
-        var maximumVertices: Int { self == .near ? 512 : 1_800 }
-        var maximumPayloadBytes: Int { self == .near ? 256 * 1_024 : 512 * 1_024 }
-        var sourceVertexCount: Int { self == .near ? 5_012 : 1_707 }
-        var schemaVersion: Int { self == .near ? 1 : 2 }
+        var maximumVertices: Int {
+            switch self {
+            case .near, .tripoNear, .tripoLow: 512
+            case .fullLowDetail: 1_800
+            }
+        }
+        var maximumPayloadBytes: Int {
+            switch self {
+            case .near, .tripoNear, .tripoLow: 256 * 1_024
+            case .fullLowDetail: 512 * 1_024
+            }
+        }
+        var sourceVertexCount: Int {
+            switch self {
+            case .near: 5_012
+            case .fullLowDetail: 1_707
+            case let .tripoNear(sourceVertexCount), let .tripoLow(sourceVertexCount): sourceVertexCount
+            }
+        }
+        var schemaVersion: Int {
+            switch self {
+            case .near, .tripoNear, .tripoLow: 1
+            case .fullLowDetail: 2
+            }
+        }
+        var hasValidSourceVertexCount: Bool {
+            switch self {
+            case let .tripoNear(count), let .tripoLow(count): (1...12_000).contains(count)
+            case .near, .fullLowDetail: true
+            }
+        }
     }
 
     private struct Influence: Sendable {
@@ -53,16 +83,32 @@ struct ReplaySkinnedAthleteContactSurface: Sendable {
     private let ranges: [Range<Int>]
     private let influences: [Influence]
     private let jointCount: Int
-    /// Rigid skull probes from the admitted asset, not a guessed forehead.
+    /// Legacy rigid skull probes from the admitted asset, not a guessed forehead.
     /// Cached and bounded at load; header aiming never reads a mesh per frame.
     private let headerPoints: [SIMD4<Float>]
-    var headerProbeCount: Int { headerPoints.count }
+    /// Tripo's skull is blended with its neck. Retain real skin influences,
+    /// rather than discarding those vertices or pretending they are rigid.
+    private let weightedHeaderRanges: [Range<Int>]
+    var headerProbeCount: Int { headerPoints.count + weightedHeaderRanges.count }
 
     var vertexCount: Int { ranges.count }
     var influenceCount: Int { influences.count }
 
     init(data: Data, motion: ReplaySkinnedAthleteMotion,
          assetSHA256: String, motionSHA256: String, profile: Profile = .near) throws {
+        guard profile.hasValidSourceVertexCount else {
+            throw DecodeError.invalid("Invalid contact source vertex count")
+        }
+        switch profile {
+        case .near, .fullLowDetail:
+            guard motion.rigProfile == .rocketbox else {
+                throw DecodeError.invalid("Rocketbox contact profile requires the Rocketbox rig")
+            }
+        case .tripoNear(sourceVertexCount: _), .tripoLow(sourceVertexCount: _):
+            guard motion.rigProfile == .tripo52 else {
+                throw DecodeError.invalid("Tripo contact profile requires the 52-joint rig")
+            }
+        }
         guard data.count <= profile.maximumPayloadBytes else { throw DecodeError.invalid("Contact data exceeds budget") }
         let document = try JSONDecoder().decode(Document.self, from: data)
         guard document.schemaVersion == profile.schemaVersion,
@@ -119,7 +165,16 @@ struct ReplaySkinnedAthleteContactSurface: Sendable {
         influences.reserveCapacity(document.vertices.count * 4)
         var identities = Set<String>()
         var skull: [SIMD4<Float>] = []
+        var weightedSkull: [(point: SIMD4<Float>, range: Range<Int>)] = []
         let headJoint = motion.semanticJointIndices["head"]
+        let headSubtree = Set(motion.joints.indices.filter { index in
+            var cursor = index
+            while cursor >= 0 {
+                if cursor == headJoint { return true }
+                cursor = motion.joints[cursor].parentIndex
+            }
+            return false
+        })
         for vertex in document.vertices {
             guard !vertex.id.isEmpty, vertex.id.count <= 40, identities.insert(vertex.id).inserted,
                   vertex.position.count == 3, vertex.position.allSatisfy({ $0.isFinite && abs($0) <= 3 }),
@@ -133,7 +188,7 @@ struct ReplaySkinnedAthleteContactSurface: Sendable {
             let total = vertex.weights.reduce(0, +)
             guard abs(total - 1) <= 0.0001 else { throw DecodeError.invalid("Unnormalised contact weights") }
             let point = SIMD4<Float>(vertex.position[0], vertex.position[1], vertex.position[2], 1)
-            if let headJoint, vertex.joints == [headJoint],
+            if motion.rigProfile == .rocketbox, let headJoint, vertex.joints == [headJoint],
                vertex.position[1] >= motion.geometry.restMinY + motion.geometry.nominalHeight - 0.19 {
                 skull.append(inverses[headJoint] * point)
             }
@@ -142,11 +197,49 @@ struct ReplaySkinnedAthleteContactSurface: Sendable {
                 influences.append(Influence(joint: joint, localPoint: inverses[joint] * point, weight: weight / total))
             }
             ranges.append(start..<influences.count)
+            if motion.rigProfile == .tripo52,
+               vertex.position[1] >= motion.geometry.restMinY + motion.geometry.nominalHeight - 0.19 {
+                let headWeight = zip(vertex.joints, vertex.weights).reduce(Float(0)) {
+                    $0 + (headSubtree.contains($1.0) ? $1.1 : 0)
+                }
+                if headWeight >= 0.8 {
+                    weightedSkull.append((point, start..<influences.count))
+                }
+            }
         }
         self.paddingMetres = document.paddingMetres
         self.ranges = ranges
         self.influences = influences
         self.jointCount = document.jointCount
+        if weightedSkull.count <= 96 {
+            weightedHeaderRanges = weightedSkull.map(\.range)
+        } else {
+            // Deterministic spatial coverage; computed only on asset admission.
+            var chosen = Set<Int>()
+            for axis in 0..<3 {
+                if let low = weightedSkull.indices.min(by: { weightedSkull[$0].point[axis] < weightedSkull[$1].point[axis] }) {
+                    chosen.insert(low)
+                }
+                if let high = weightedSkull.indices.max(by: { weightedSkull[$0].point[axis] < weightedSkull[$1].point[axis] }) {
+                    chosen.insert(high)
+                }
+            }
+            var distances = [Float](repeating: .infinity, count: weightedSkull.count)
+            for seed in chosen {
+                for index in weightedSkull.indices {
+                    distances[index] = min(distances[index], simd_distance_squared(weightedSkull[seed].point, weightedSkull[index].point))
+                }
+            }
+            while chosen.count < 96 {
+                guard let next = weightedSkull.indices.filter({ !chosen.contains($0) })
+                    .max(by: { distances[$0] < distances[$1] }) else { break }
+                chosen.insert(next)
+                for index in weightedSkull.indices {
+                    distances[index] = min(distances[index], simd_distance_squared(weightedSkull[next].point, weightedSkull[index].point))
+                }
+            }
+            weightedHeaderRanges = chosen.sorted().map { weightedSkull[$0].range }
+        }
         if skull.count <= 96 {
             headerPoints = skull
         } else {
@@ -167,16 +260,31 @@ struct ReplaySkinnedAthleteContactSurface: Sendable {
     /// skeletal stretch, extra full-hierarchy rebuild or scene lookup.
     @MainActor
     func plantedHeaderAim(_ aim: simd_quatf, weight: Float, pivot: SIMD3<Float>,
-                          head: simd_float4x4, ball: SIMD3<Float>) -> simd_quatf {
+                          head: simd_float4x4, ball: SIMD3<Float>,
+                          pose: ReplaySkinnedAthleteMotion.Pose) -> simd_quatf {
         let identity = simd_quatf(real: 1, imag: .zero)
         let desired = ReplayAthleteInteractionPose.blend(identity, aim, weight)
-        guard weight > 0, !headerPoints.isEmpty else { return desired }
+        guard weight > 0, headerProbeCount > 0 else { return desired }
+        let weightedPoints: [SIMD3<Float>]
+        if !weightedHeaderRanges.isEmpty, pose.modelSpaceTransforms.count == jointCount {
+            weightedPoints = weightedHeaderRanges.map { range in
+                var point = SIMD4<Float>.zero
+                for index in range {
+                    let item = influences[index]
+                    point += pose.modelSpaceTransforms[item.joint] * item.localPoint * item.weight
+                }
+                return SIMD3(point.x, point.y, point.z)
+            }
+        } else { weightedPoints = [] }
         func clearance(_ delta: simd_quatf) -> Float {
             var distance = Float.infinity
             for local in headerPoints {
                 let current = head * local
                 let point = pivot + delta.act(SIMD3(current.x, current.y, current.z) - pivot)
                 distance = min(distance, simd_distance(point, ball))
+            }
+            for current in weightedPoints {
+                distance = min(distance, simd_distance(pivot + delta.act(current - pivot), ball))
             }
             return distance - ReplayNativeBallPhysics.radius
         }

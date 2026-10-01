@@ -524,7 +524,7 @@ final class ReplaySkinnedAthleteInstance {
             let desired: simd_quatf
             if action.headerSupportLeg != nil {
                 desired = contactSurface.plantedHeaderAim(aim, weight: action.influence,
-                    pivot: pivot, head: head, ball: ball) * world
+                    pivot: pivot, head: head, ball: ball, pose: pose) * world
             } else {
                 desired = ReplayAthleteInteractionPose.blend(world, aim * world, action.influence)
             }

@@ -5,6 +5,18 @@ import simd
 /// Immutable, validated animation data. Decode once; every replay seek fills a
 /// reusable pose directly from absolute time and travelled gait phase.
 struct ReplaySkinnedAthleteMotion: Sendable {
+    enum RigProfile: Equatable, Sendable {
+        case rocketbox
+        case tripo52
+
+        var jointCount: Int {
+            switch self {
+            case .rocketbox: ReplaySkinnedAthleteMotion.expectedJointCount
+            case .tripo52: 52
+            }
+        }
+    }
+
     static let expectedJointCount = 80
     static let maximumPayloadBytes = 4 * 1_024 * 1_024
     static let maximumSlowRunPayloadBytes = 512 * 1_024
@@ -67,6 +79,7 @@ struct ReplaySkinnedAthleteMotion: Sendable {
     }
 
     let sourceCommit: String
+    let rigProfile: RigProfile
     let joints: [Joint]
     let jointNames: [String]
     let semanticJointIndices: [String: Int]
@@ -104,15 +117,16 @@ struct ReplaySkinnedAthleteMotion: Sendable {
     static func resetClipSampleCountsForTesting() { sampleCounter.reset() }
     #endif
 
-    init(data: Data) throws {
+    init(data: Data, profile: RigProfile = .rocketbox) throws {
         guard data.count <= Self.maximumPayloadBytes else {
             throw DecodeError.invalid("Motion payload exceeds 4 MB")
         }
         let document = try JSONDecoder().decode(Document.self, from: data)
         guard document.schemaVersion == 1 else { throw DecodeError.invalid("Unsupported motion version") }
-        guard document.joints.count == Self.expectedJointCount,
-              document.geometry.jointCount == Self.expectedJointCount else {
-            throw DecodeError.invalid("Expected 80 joints")
+        let expectedCount = profile.jointCount
+        guard document.joints.count == expectedCount,
+              document.geometry.jointCount == expectedCount else {
+            throw DecodeError.invalid("Joint count does not match rig profile")
         }
         guard !document.sourceCommit.isEmpty, document.sourceCommit.count <= 80 else {
             throw DecodeError.invalid("Invalid source identity")
@@ -165,7 +179,7 @@ struct ReplaySkinnedAthleteMotion: Sendable {
             "leftShoulder", "rightShoulder", "leftElbow", "rightElbow", "leftWrist", "rightWrist"
         ]
         guard requiredSemantics.isSubset(of: Set(document.semanticJoints.keys)),
-              document.semanticJoints.count <= Self.expectedJointCount else {
+              document.semanticJoints.count <= expectedCount else {
             throw DecodeError.invalid("Missing semantic joints")
         }
         var semantics: [String: Int] = [:]
@@ -202,12 +216,13 @@ struct ReplaySkinnedAthleteMotion: Sendable {
               Set(document.clips.map(\.id)) == Set(ClipID.allCases.map(\.rawValue)) else {
             throw DecodeError.invalid("Expected one idle clip and one run clip")
         }
-        let decodedClips = try document.clips.map { ($0.id, try Self.decodeClip($0)) }
+        let decodedClips = try document.clips.map { ($0.id, try Self.decodeClip($0, jointCount: expectedCount)) }
         let clips = Dictionary(uniqueKeysWithValues: decodedClips)
         guard let idle = clips[ClipID.idle.rawValue], let run = clips[ClipID.run.rawValue] else {
             throw DecodeError.invalid("Missing clip")
         }
         self.sourceCommit = document.sourceCommit
+        self.rigProfile = profile
         self.joints = decodedJoints
         self.jointNames = decodedJoints.map(\.name)
         self.semanticJointIndices = semantics
@@ -233,6 +248,9 @@ struct ReplaySkinnedAthleteMotion: Sendable {
     /// A failed decode leaves the original motion fully usable. The caller also
     /// checks the packaged asset digest before this validation during prewarm.
     func addingSlowRun(data: Data, baseMotionSHA256: String) throws -> Self {
+        guard rigProfile == .rocketbox else {
+            throw DecodeError.invalid("Slow run extension is bound to the Rocketbox rig")
+        }
         guard data.count <= Self.maximumSlowRunPayloadBytes else {
             throw DecodeError.invalid("Slow run payload exceeds 512 KB")
         }
@@ -247,13 +265,13 @@ struct ReplaySkinnedAthleteMotion: Sendable {
               document.clip.id == ClipID.run.rawValue else {
             throw DecodeError.invalid("Slow run source or base motion binding mismatch")
         }
-        let clip = try Self.decodeClip(document.clip)
+        let clip = try Self.decodeClip(document.clip, jointCount: Self.expectedJointCount)
         var result = self
         result.slowRun = clip
         return result
     }
 
-    private static func decodeClip(_ raw: RawClip) throws -> Clip {
+    private static func decodeClip(_ raw: RawClip, jointCount: Int) throws -> Clip {
         guard raw.durationSeconds.isFinite, (0.05...20).contains(raw.durationSeconds),
               raw.fps.isFinite, (1...120).contains(raw.fps),
               (2...2_401).contains(raw.frames.count),
@@ -268,9 +286,9 @@ struct ReplaySkinnedAthleteMotion: Sendable {
             guard frame.time.isFinite, frame.time >= 0,
                   frame.time <= raw.durationSeconds + 0.000_01,
                   frame.time > previousTime,
-                  frame.translations.count == Self.expectedJointCount,
-                  frame.rotations.count == Self.expectedJointCount,
-                  frame.scales.count == Self.expectedJointCount else {
+                  frame.translations.count == jointCount,
+                  frame.rotations.count == jointCount,
+                  frame.scales.count == jointCount else {
                 throw DecodeError.invalid("Invalid frame order or joint count")
             }
             let translations = try frame.translations.map { try Self.vector($0, bound: 5) }

@@ -15,12 +15,15 @@ struct ReplaySkinnedAthleteBootMarkers: Sendable {
     let markers: [Marker]
 
     @MainActor
-    init?(model: ModelEntity, motion: ReplaySkinnedAthleteMotion) {
+    init?(model: ModelEntity, motion: ReplaySkinnedAthleteMotion,
+          maximumVertices: Int? = nil) {
         guard let component = model.model,
               let skeleton = component.mesh.contents.skeletons.first,
               skeleton.joints.count == motion.joints.count else { return nil }
         let parts = component.mesh.contents.models.flatMap { Array($0.parts) }
-        guard parts.reduce(0, { $0 + $1.positions.count }) <= ReplaySkinnedAthleteProvider.skinVertices
+        let vertexLimit = maximumVertices ?? ReplaySkinnedAthleteProvider.skinVertices
+        guard (1...12_000).contains(vertexLimit),
+              parts.reduce(0, { $0 + $1.positions.count }) <= vertexLimit
         else { return nil }
         var result: [Marker] = []
         for name in ["left", "right"] {

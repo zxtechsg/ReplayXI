@@ -1,4 +1,4 @@
-# Tripo footballer — authoring source, not bundled
+# Tripo footballer source and native integration
 
 Generated on 1 October 2026 from our [A-pose reference](../../../Docs/ReplayXI/AssetReferences/footballer-a-pose-v1.png),
 using the user's authorized shared Tripo account. No third-party game mesh or
@@ -17,23 +17,85 @@ this record does not claim unrestricted redistribution or commercial rights.
 | --- | --- |
 | `ReplayXI_Footballer_P2_Source.glb` | `e4fbdbcf98c631d283733ff9f339dd2bf01877bf8ab81756b6fe274a25c10eb5` |
 | `ReplayXI_Footballer_P2_Rigged.glb` | `132f0c84715f9337ef98366fe7edbb00db9c72fd6d2530bff8ea863d712a4b34` |
+| `Tripo_Blender_FBX.zip` | `32f79b8f58897d98e486e29890c279b14c90e5b39e8b9ced44134ff23a7166ba` |
 
 The source imports as 17,082 triangles / 16,702 vertices including UV seams.
 Inspect skinning rather than relying on Tripo's displayed polygon count.
 White/red kits use identical geometry and scale. New 2K colour atlases are
 generated locally by `Scripts/blender/prepare_tripo_kit_candidate.py`.
 
-Do not copy these straight into runtime resources. The existing app validates
-an 80-joint skeleton, two material sections, exact vertex/contact data and
-asset hashes. The first nearest-surface weight transfer failed visual QA
-(arms/sleeves). Its finite normalized weights did **not** establish good motion.
-Auto-rig retargeting is a separate offline candidate and needs its own review.
-The downloaded auto-rig GLB omits joint rest transforms. Its repaired retarget
-also failed arm/sleeve visual QA. Neither candidate is approved for runtime.
-Chrome blocked the Blender FBX ZIP export; that file has been requested from
-the user as the next input to assess.
+The user supplied the FBX ZIP after Chrome blocked its download. Its bones
+align with the body. The earlier GLB repair and nearest-surface retarget failed
+visual QA and remain rejected; do not load those GLBs directly into the app.
+No extra Tripo credits were spent on this local integration.
 
-Before adoption: retarget idle/run/kick/head poses, inspect sleeve and hip
-deformation, build near/far detail, regenerate number/contact surfaces, verify
-USDZ/RealityKit import, and measure performance. Keep the working app unchanged
-until those checks pass.
+## Native assets
+
+`ReplayTripoAthleteProvider` admits a separate, exact 52-joint rig. It does not
+relax the legacy Rocketbox 80-joint contract. Both teams and keepers share the
+same 1.82 m body, with white, red and amber 2K kit atlases and geometric numbers.
+
+| Detail | Vertices including UV seams | Triangles | Skin materials |
+| --- | ---: | ---: | ---: |
+| Near | 9,075 | 7,685 | 1 |
+| Low | 3,269 | 1,964 | 1 |
+
+Both have four normalized skin weights per vertex and 512 ground/contact
+samples. Each contact set reserves 96 head-weighted samples. Header aiming
+uses their actual blended skin positions, not an assumed rigid skull.
+Front/back numbers add two draws. Three shared 2K RGBA8 atlases require 48 MiB
+at their base level; this excludes mipmaps, staging and renderer caches.
+
+The launcher prepares both LODs and all kits atomically. Failed hashes,
+skeletons, contact data, pose solvers or textures leave the existing models
+available as a fallback. Balanced mode retains its four-skin cap; Full squad
+uses the new skin for all 22 players, or 21 visible teammates/opponents in POV.
+No replay, annotation or saved-review schema was changed.
+
+The app validates exact USDZ/motion/contact hashes and exact decoded PNG
+pixels. Xcode rewrites PNG encoding, so file hashes alone are unsuitable for
+packaged atlases. [NativeBuildReport.json](NativeBuildReport.json) records
+source hashes, geometry, UV/atlas correspondence, pose parity and number
+clearance. Runtime files live in `ReplayXI/Resources/Players/ReplayXITripo*`.
+
+## Blender sources and rebuild
+
+- [Base rig](Blender/ReplayXITripoFBXBase.blend): valid 1 m local FBX skeleton.
+- [Football motion](Blender/ReplayXITripoFootballMotion.blend): relaxed idle,
+  running arm swing and finger/wrist adjustments.
+- [Motion report](Blender/MotionBuildReport.json): independently evaluated poses.
+- `Scripts/blender/build_tripo_fbx_lods.py`: run against the base blend.
+- `Scripts/blender/polish_tripo_fbx_motion.py`: run against the base blend.
+- `Scripts/blender/prepare_tripo_kit_candidate.py`: bake the three atlases.
+- `Scripts/build_replayxi_tripo_athlete.py`: convert validated GLBs to native
+  resources. Use `--help` for its explicit source/report inputs. It requires
+  Blender's Python with NumPy and OpenUSD; no online generation is involved.
+- `Scripts/audit_replayxi_texture.swift`, compiled with
+  `ReplayTexturePixels.swift`, checks source and packaged PNG pixel identity.
+
+Run Blender scripts in an isolated `--factory-startup --background` process.
+Outputs must be new directories under `.codex-derived`; the scripts do not
+overwrite sources. Preserve the 1 m skeleton throughout Blender work. The
+native converter scales mesh, bind and animation translations to 1.82 m once.
+Baking that scale into the Blender rig caused stretched limbs and is rejected.
+
+## Verification and limits
+
+USDZ ARKit validation passes. Sampled native skin bounds agree with independent
+Blender evaluations within 6.03 micrometres. Simulator tests cover both feet,
+headers against actual head triangles, mesh grounding, contacts, rewind,
+jersey anchors, 22-player admission, POV visibility and fallback loading.
+The two sampled header scenarios meet the sphere within 0.9–5.7 mm without
+changing the ball recording. Evidence: `Docs/ReplayXI/Evidence164`.
+
+The final simulator regression passed 178 tests with no failures, covering
+playback, POV switching, annotations, saved reviews, player detail and contacts.
+All 15 offline native/source audit tests passed. Existing saved reviews retained
+their original SHA-256 after testing. Work is paused at the user's request;
+no further features or visual experiments are being added.
+
+This is a prototype, not EA FC animation quality. A high-knee shirt/shorts
+intersection and a partly open running hand remain. Attempts to reweight the
+hem worsened it and were rejected. Faceting in the native offscreen renderer
+remains visible; imported positions, normals and indices match the
+USDZ exactly. On-headset frame rate, comfort and appearance remain unmeasured.

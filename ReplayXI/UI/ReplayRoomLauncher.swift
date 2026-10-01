@@ -17,24 +17,24 @@ enum ReplayRoomLauncher {
         // never blocks the room. It remains separate from the licensed
         // Rocketbox body and the procedural football-action fallback.
         _ = try? ReplayImportedAthleteProvider.prewarm()
-        // The licensed single-skeleton body is prepared once before
-        // presentation. Failed admission keeps the working fallback.
+        // Admit the new FBX-derived players only as a complete, hash-checked
+        // near/low set. Missing or incompatible assets retain the old renderer.
         do {
-            try ReplaySkinnedAthleteProvider.prewarm()
+            try ReplayTripoAthleteProvider.prewarm()
         } catch {
             #if DEBUG
-            print("Replay XI skinned-player preparation failed; using standard rig: \(error)")
+            print("Replay XI Tripo players unavailable; using existing players: \(error)")
             #endif
         }
-        // Neighbours can use the cheaper canonical skin: spare balanced
-        // slots, or the squad when explicitly selected. Its complete contact
-        // profile and shared kit materials are prepared once, not per frame.
-        do {
-            try ReplaySkinnedAthleteProvider.prewarmLowDetail()
-        } catch {
-            #if DEBUG
-            print("Replay XI low-detail players unavailable; keeping existing player visuals: \(error)")
-            #endif
+        if !ReplayTripoAthleteProvider.isPrewarmed {
+            do {
+                try ReplaySkinnedAthleteProvider.prewarm()
+                try ReplaySkinnedAthleteProvider.prewarmLowDetail()
+            } catch {
+                #if DEBUG
+                print("Replay XI skinned-player preparation failed; using standard rig: \(error)")
+                #endif
+            }
         }
         // Distant players share one static face and the existing skin
         // palettes. No extra skeleton or per-frame resource load.

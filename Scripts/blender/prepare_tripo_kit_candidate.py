@@ -97,7 +97,8 @@ def main():
     obj.select_set(True)
     bpy.context.view_layer.objects.active = obj
     reports = []
-    for kit, colour in (("home", (1, 1, 1, 1)), ("away", (.72, .035, .022, 1))):
+    for kit, colour in (("home", (1, 1, 1, 1)), ("away", (.72, .035, .022, 1)),
+                        ("keeper", (.95, .48, .018, 1))):
         tint.inputs[2].default_value = colour
         atlas = bpy.data.images.new("ReplayXI_Tripo_" + kit, width=2048, height=2048, alpha=False)
         atlas.colorspace_settings.name = "sRGB"

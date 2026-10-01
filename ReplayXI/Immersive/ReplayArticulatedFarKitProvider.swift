@@ -81,32 +81,15 @@ enum ReplayArticulatedFarKitProvider {
     /// metadata before allocating pixels; require one opaque 8-bit PNG and
     /// rasterise into declared sRGB/RGBA order without resizing/interpolation.
     static func canonicalRGBA(data: Data, expectedSize: Int, maximumEncodedBytes: Int) throws -> Data {
-        guard (1...1_024).contains(expectedSize), (1...4_194_304).contains(maximumEncodedBytes),
-              !data.isEmpty, data.count <= maximumEncodedBytes,
-              let source = CGImageSourceCreateWithData(data as CFData, nil),
-              CGImageSourceGetType(source) as String? == "public.png", CGImageSourceGetCount(source) == 1,
-              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any],
-              let width = properties[kCGImagePropertyPixelWidth as String] as? Int,
-              let height = properties[kCGImagePropertyPixelHeight as String] as? Int,
-              width == expectedSize, height == expectedSize,
-              (properties[kCGImagePropertyOrientation as String] as? Int ?? 1) == 1,
-              let image = CGImageSourceCreateImageAtIndex(source, 0, nil),
-              image.width == width, image.height == height, image.bitsPerComponent == 8,
-              let colourSpace = CGColorSpace(name: CGColorSpace.sRGB)
+        // Keep the original far-kit limits; only the Tripo caller admits 2K.
+        guard (1...1_024).contains(expectedSize), (1...4_194_304).contains(maximumEncodedBytes)
         else { throw PreparationError.invalidTexture }
-        var pixels = Data(count: width * height * 4)
-        try pixels.withUnsafeMutableBytes { (bytes: UnsafeMutableRawBufferPointer) in
-            guard let context = CGContext(data: bytes.baseAddress, width: width, height: height,
-                bitsPerComponent: 8, bytesPerRow: width * 4, space: colourSpace,
-                bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue)
-            else { throw PreparationError.invalidTexture }
-            context.interpolationQuality = .none
-            context.setBlendMode(.copy)
-            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        do {
+            return try ReplayTexturePixels.rgbaPNG(data, size: expectedSize,
+                maximumEncodedBytes: maximumEncodedBytes)
+        } catch {
+            throw PreparationError.invalidTexture
         }
-        guard stride(from: 3, to: pixels.count, by: 4).allSatisfy({ pixels[$0] == 255 })
-        else { throw PreparationError.invalidTexture }
-        return pixels
     }
 
     static func materials(for configuration: ReplayAthleteConfiguration) -> Materials? {

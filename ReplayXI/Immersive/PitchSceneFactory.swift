@@ -1043,7 +1043,7 @@ enum PitchSceneFactory {
         if let playersRoot = directChild(named: "players-root", of: root) {
             // Resolve the developer preference once for this update, not once
             // per already-cached skin. Keep unprepared fallback reads at zero.
-            let importedPlayerPilotIsEnabled = ReplaySkinnedAthleteProvider.isPrewarmed
+            let importedPlayerPilotIsEnabled = ReplayTripoAthleteProvider.preferredIsReady
                 && ReplayImportedAthleteFeatureGate.isEnabled
             sceneState?.preparePlayerEntityIndex(
                 playersRoot: playersRoot,
@@ -1078,7 +1078,7 @@ enum PitchSceneFactory {
                 posesByPlayerID: playerPosesByID,
                 nearPlayerIDs: nearSkinIDs,
                 maximumTotal: skinAdmission.maximum,
-                lowDetailIsReady: ReplaySkinnedAthleteProvider.isLowDetailPrewarmed
+                lowDetailIsReady: ReplayTripoAthleteProvider.preferredLowIsReady
                     && !importedPlayerPilotIsEnabled,
                 allowsFirstPerson: skinAdmission.allowsPOVLow
             )
@@ -1277,14 +1277,14 @@ enum PitchSceneFactory {
                 if importedBelongsToPlayer && hasBallAction { attachedImportedAthlete?.root.isEnabled = false }
                 let usesLegacySkin = hasImportedAthlete && importedMotionIsSupported && !hasBallAction
                 if canUseAdmittedSkin, let admittedSkinDetail,
-                   ReplaySkinnedAthleteProvider.isPrewarmed,
+                   ReplayTripoAthleteProvider.preferredIsReady,
                    !importedPlayerPilotIsEnabled,
                    let sceneState, sceneState.skinnedAthletes[player.id] == nil,
                    sceneState.skinnedAthletes.count < skinAdmission.maximum,
                    !sceneState.skinnedAthleteFailedVariants.contains(
                         SkinnedAthleteVariantKey(playerID: player.id, detail: admittedSkinDetail)
                    ) {
-                    if let skin = try? ReplaySkinnedAthleteProvider.make(for: player, detail: admittedSkinDetail) {
+                    if let skin = try? ReplayTripoAthleteProvider.makePreferred(for: player, detail: admittedSkinDetail) {
                         entity.addChild(skin.root)
                         sceneState.skinnedAthletes[player.id] = skin
                     } else {
