@@ -8,11 +8,11 @@ import UIKit
 @MainActor
 enum ReplayTripoAthleteProvider {
     // Filled only from the audited native build, never from downloaded GLBs.
-    static let assetSHA256 = "af01e0ea9e8e4ae6d9dae068f87fe03f1550732583a553eb64660ce1bd6afe90"
-    static let lowAssetSHA256 = "48712cb85bc92c798fd7c6dc53ef721f43a0797db7739facd61f30449e80b390"
-    static let motionSHA256 = "877857959a46e2ea1c47de3fbbf5822ff8e774d20c973f1e9eade55ff578a84f"
-    static let contactSHA256 = "ae384cf32679b5f57851a5b10032ba0fc41892605c98c81030ba77104ba8007e"
-    static let lowContactSHA256 = "f12a6d033535790654af6c75b80c8afb5decf4c2125cc12a0a1dd2a18bc1aa92"
+    static let assetSHA256 = "b06a0f95decdec70bb92c148807186d581d15bc821f651f5fc2929a3484efaa0"
+    static let lowAssetSHA256 = "bceb8575bb26cc8b647638beca1177109fdee482f01ba436c84593cfc9541914"
+    static let motionSHA256 = "525b42f4377d16644d81dc46456169be33818ec806e37ffd18a7a2041072b4f2"
+    static let contactSHA256 = "f22677d2514cac26ba1c95cec22b49f707b95d9494c9373b8f37aba3859053d7"
+    static let lowContactSHA256 = "31a53bff5255b025080bb117b4e14c3f6423dca1e1596c43e4e66f9ae8c29283"
     static let skinVertices = 9_075
     static let skinTriangles = 7_685
     static let lowSkinVertices = 3_269

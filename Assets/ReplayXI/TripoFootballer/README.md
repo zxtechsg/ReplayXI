@@ -62,7 +62,8 @@ clearance. Runtime files live in `ReplayXI/Resources/Players/ReplayXITripo*`.
 
 - [Base rig](Blender/ReplayXITripoFBXBase.blend): valid 1 m local FBX skeleton.
 - [Football motion](Blender/ReplayXITripoFootballMotion.blend): relaxed idle,
-  running arm swing and finger/wrist adjustments.
+  v9 running arm swing and finger adjustments. The forward arm sits lower and
+  closer to the torso; idle, mesh weights and bind pose are unchanged.
 - [Motion report](Blender/MotionBuildReport.json): independently evaluated poses.
 - `Scripts/blender/build_tripo_fbx_lods.py`: run against the base blend.
 - `Scripts/blender/polish_tripo_fbx_motion.py`: run against the base blend.
@@ -88,14 +89,25 @@ jersey anchors, 22-player admission, POV visibility and fallback loading.
 The two sampled header scenarios meet the sphere within 0.9–5.7 mm without
 changing the ball recording. Evidence: `Docs/ReplayXI/Evidence164`.
 
-The final simulator regression passed 178 tests with no failures, covering
+The cycle165 simulator regression passed 186 tests with no failures, covering
 playback, POV switching, annotations, saved reviews, player detail and contacts.
-All 15 offline native/source audit tests passed. Existing saved reviews retained
-their original SHA-256 after testing. Work is paused at the user's request;
-no further features or visual experiments are being added.
+All 15 offline native/source audit tests passed. The generic physical-headset
+Release build also passed (unsigned; this is not an on-device performance test).
+Existing saved reviews retained their pre-test SHA-256 after testing.
+
+The final cervical correction now rebuilds only the affected head branch:
+1 of 52 Tripo joints, or 29 of 80 fallback joints. Forward/reverse samples of
+both gaits are exactly equal to the previous full-hierarchy calculation. This
+reduces transform work when a correction is needed; it is not a measured FPS gain.
+
+The actual rebound-save test now covers both rigs and both LODs. Tripo's
+existing palm markers meet the ball surface within 3.7–4.9 mm in that sampled
+save, with planted boots and exact rewind. These are rig markers, not full
+hand-mesh collision tests. Current evidence: `Docs/ReplayXI/Evidence165`.
 
 This is a prototype, not EA FC animation quality. A high-knee shirt/shorts
 intersection and a partly open running hand remain. Attempts to reweight the
 hem worsened it and were rejected. Faceting in the native offscreen renderer
 remains visible; imported positions, normals and indices match the
-USDZ exactly. On-headset frame rate, comfort and appearance remain unmeasured.
+USDZ exactly. A tangent rebuild gave byte-identical images and was not shipped.
+On-headset frame rate, comfort and appearance remain unmeasured.

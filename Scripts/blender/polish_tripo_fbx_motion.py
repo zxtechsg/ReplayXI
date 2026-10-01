@@ -142,13 +142,14 @@ def main():
                     shoulder.keyframe_insert("rotation_quaternion", frame=frame, group=shoulder.name)
                     bpy.context.view_layer.update()
                     arm = rig.pose.bones[f"mixamorig:{side}Arm"]
-                    point_bone(arm, (side_sign * .25, .12 - .22 * max(swing, 0) + .33 * max(-swing, 0), -.91))
+                    point_bone(arm, (side_sign * (.25 - .07 * max(swing, 0)),
+                                     .12 - .22 * max(swing, 0) + .33 * max(-swing, 0), -.91))
                     forearm = rig.pose.bones[f"mixamorig:{side}ForeArm"]
                     front = max(swing, 0)
                     back = max(-swing, 0)
-                    point_bone(forearm, (side_sign * .12,
-                                         -.10 - .65 * front + .65 * back,
-                                         -.95 + 1.60 * front + .20 * back))
+                    point_bone(forearm, (side_sign * (.12 - .07 * front),
+                                         -.10 - .75 * front + .65 * back,
+                                         -.95 + 1.30 * front + .20 * back))
                     hand = rig.pose.bones[f"mixamorig:{side}Hand"]
                     hand.rotation_quaternion = Quaternion((1, 0, 0, 0))
                     for pose in (arm, forearm, hand):
@@ -161,7 +162,10 @@ def main():
             for name, (axis, angle, _) in curls.items():
                 pose = rig.pose.bones[name]
                 pose.rotation_mode = "QUATERNION"
-                pose.rotation_quaternion = Quaternion(axis, angle)
+                applied_angle = angle
+                if clip == "run" and "Thumb" not in name:
+                    applied_angle = math.radians((55, 65, 40)[int(name[-1]) - 1])
+                pose.rotation_quaternion = Quaternion(axis, applied_angle)
                 pose.keyframe_insert("rotation_quaternion", frame=frame, group=name)
         changed[clip] = {"frames": last - first + 1, "range": [first, last]}
     pose_samples = []
@@ -201,7 +205,8 @@ def main():
     report = {"sourceBlendSHA256": SOURCE_SHA, "outputs": {"blend": str(blend), "blendSHA256": sha(blend),
               "motionGLB": str(glb), "motionGLBSHA256": sha(glb)}, "clips": changed,
               "idleArms": "Native shafts directed down/slightly outward; torso motion retained",
-              "fingerCurlsDegrees": {"fingers": [42, 52, 32], "thumb": [18, 22, 12]},
+              "fingerCurlsDegrees": {"idleFingers": [42, 52, 32], "runFingers": [55, 65, 40],
+                                      "thumb": [18, 22, 12]},
               "fingerBendAxesWorld": {name: axis for name, (_, _, axis) in curls.items()},
               "hemWeightRepair": "Not applied: isolated weight edits worsened jersey/shorts intersection",
               "poseSamples": pose_samples,

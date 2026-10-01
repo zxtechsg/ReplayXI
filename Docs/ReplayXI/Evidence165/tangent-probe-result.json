@@ -1,0 +1,13 @@
+{
+  "resultBundle": "Tangent-01.xcresult",
+  "testsPassed": 3,
+  "testsFailed": 0,
+  "importedPartCount": 1,
+  "importedPartsMissingTangentsOrBitangents": 0,
+  "degenerateUVTriangles": 0,
+  "originalCapture": "Tangent-01-Attachments/719C3668-85E6-4487-A779-5E9E37D728B4.png",
+  "recomputedTangentCapture": "Tangent-01-Attachments/B89B6E83-2661-4F78-A094-D8ADD92904B7.png",
+  "originalSHA256": "0a62f7d11c62098a956709c80798a9de0b2987f02627044f6524416040c65204",
+  "recomputedTangentSHA256": "0a62f7d11c62098a956709c80798a9de0b2987f02627044f6524416040c65204",
+  "verdict": "Imported tangents and bitangents already exist; recomputing them changes no captured pixels. No tangent production fix."
+}

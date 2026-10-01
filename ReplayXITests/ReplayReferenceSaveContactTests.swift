@@ -10,11 +10,21 @@ final class ReplayReferenceSaveContactTests: XCTestCase {
     override func tearDown() {
         ReplayNativeBallPhysics.resetCacheForTesting()
         ReplaySkinnedAthleteProvider.resetForTesting()
+        ReplayTripoAthleteProvider.resetForTesting()
         ReplayAthleteHeadProvider.resetForTesting()
         super.tearDown()
     }
 
     func testActualReboundSaveTouchesBothPalmsAcrossNearAndLowRigs() async throws {
+        try await assertActualReboundSaveTouchesBothPalms(useTripo: false)
+    }
+
+    func testActualReboundSaveTouchesBothPalmsAcrossTripoNearAndLowRigs() async throws {
+        try await assertActualReboundSaveTouchesBothPalms(useTripo: true)
+    }
+
+    private func assertActualReboundSaveTouchesBothPalms(useTripo: Bool) async throws {
+        let rig = useTripo ? "Tripo52" : "Rocketbox80"
         let scenario = try XCTUnwrap(FootballReferenceScenarios.all.first { $0.id == "final-108-rebound-v2" })
         let plan = try XCTUnwrap(FootballReferenceScenarios.touches(for: scenario))
         let recording = try await ReplayNativeBallPhysics.bake(track: scenario.ball,
@@ -34,12 +44,16 @@ final class ReplayReferenceSaveContactTests: XCTestCase {
         let actor = Entity()
         actor.position = [presented.position.x, 0, presented.position.z]
         actor.orientation = simd_quatf(angle: presented.facingDegrees * .pi / 180, axis: [0, 1, 0])
-        try ReplaySkinnedAthleteProvider.prewarm()
-        try ReplaySkinnedAthleteProvider.prewarmLowDetail()
+        if useTripo {
+            try ReplayTripoAthleteProvider.prewarm()
+        } else {
+            try ReplaySkinnedAthleteProvider.prewarm()
+            try ReplaySkinnedAthleteProvider.prewarmLowDetail()
+        }
         var rows: [[String: Any]] = []
 
         for detail in [ReplaySkinnedAthleteProvider.Detail.near, .lowDetail] {
-            let skin = try ReplaySkinnedAthleteProvider.make(for: player, detail: detail)
+            let skin = try makeSkin(for: player, detail: detail, useTripo: useTripo)
             actor.addChild(skin.root)
             XCTAssertTrue(skin.update(at: touch.time, track: player,
                 locomotion: player.locomotion(at: touch.time), lookTarget: touch.position,
@@ -99,7 +113,7 @@ final class ReplayReferenceSaveContactTests: XCTestCase {
         }
 
         XCTAssertEqual(rows.count, 4, "Both hands of both real skin details must be measured")
-        let report: [String: Any] = ["scenario": scenario.id, "playerID": player.id,
+        let report: [String: Any] = ["scenario": scenario.id, "playerID": player.id, "rig": rig,
             "time": touch.time, "ballCentre": [touch.position.x, touch.position.y, touch.position.z],
             "playerRoot": [presented.position.x, 0, presented.position.z],
             "facingDegrees": presented.facingDegrees,
@@ -108,9 +122,17 @@ final class ReplayReferenceSaveContactTests: XCTestCase {
             "scope": "Fresh native rebound save; read-back RealityKit joint transforms; existing rig palm markers; not hand-mesh vertices; no root or ball correction"]
         let receipt = XCTAttachment(data: try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]),
                                     uniformTypeIdentifier: "public.json")
-        receipt.name = "ReplayXI-Reference125-ActualSaveContact.json"
+        receipt.name = "ReplayXI-Reference125-ActualSaveContact-\(rig).json"
         receipt.lifetime = .keepAlways
         add(receipt)
+    }
+
+    private func makeSkin(for player: PlayerTrack, detail: ReplaySkinnedAthleteProvider.Detail,
+                          useTripo: Bool) throws -> ReplaySkinnedAthleteInstance {
+        if useTripo {
+            return try ReplayTripoAthleteProvider.make(for: player, detail: detail)
+        }
+        return try ReplaySkinnedAthleteProvider.make(for: player, detail: detail)
     }
 
     private func position(_ matrix: simd_float4x4) -> SIMD3<Float> {

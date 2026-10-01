@@ -3,14 +3,14 @@
     "low": {
       "drawCalls": 1,
       "jointCount": 52,
-      "sha256": "48712cb85bc92c798fd7c6dc53ef721f43a0797db7739facd61f30449e80b390",
+      "sha256": "bceb8575bb26cc8b647638beca1177109fdee482f01ba436c84593cfc9541914",
       "triangles": 1964,
       "vertices": 3269
     },
     "near": {
       "drawCalls": 1,
       "jointCount": 52,
-      "sha256": "af01e0ea9e8e4ae6d9dae068f87fe03f1550732583a553eb64660ce1bd6afe90",
+      "sha256": "b06a0f95decdec70bb92c148807186d581d15bc821f651f5fc2929a3484efaa0",
       "triangles": 7685,
       "vertices": 9075
     }
@@ -100,23 +100,23 @@
   "files": {
     "ReplayXITripoAthlete.usdz": {
       "bytes": 646984,
-      "sha256": "af01e0ea9e8e4ae6d9dae068f87fe03f1550732583a553eb64660ce1bd6afe90"
+      "sha256": "b06a0f95decdec70bb92c148807186d581d15bc821f651f5fc2929a3484efaa0"
     },
     "ReplayXITripoContactSurface.json": {
       "bytes": 61310,
-      "sha256": "ae384cf32679b5f57851a5b10032ba0fc41892605c98c81030ba77104ba8007e"
+      "sha256": "f22677d2514cac26ba1c95cec22b49f707b95d9494c9373b8f37aba3859053d7"
     },
     "ReplayXITripoLow.usdz": {
       "bytes": 339995,
-      "sha256": "48712cb85bc92c798fd7c6dc53ef721f43a0797db7739facd61f30449e80b390"
+      "sha256": "bceb8575bb26cc8b647638beca1177109fdee482f01ba436c84593cfc9541914"
     },
     "ReplayXITripoLowContactSurface.json": {
       "bytes": 62983,
-      "sha256": "f12a6d033535790654af6c75b80c8afb5decf4c2125cc12a0a1dd2a18bc1aa92"
+      "sha256": "31a53bff5255b025080bb117b4e14c3f6423dca1e1596c43e4e66f9ae8c29283"
     },
     "ReplayXITripoMotion.json": {
-      "bytes": 552931,
-      "sha256": "877857959a46e2ea1c47de3fbbf5822ff8e774d20c973f1e9eade55ff578a84f"
+      "bytes": 553281,
+      "sha256": "525b42f4377d16644d81dc46456169be33818ec806e37ffd18a7a2041072b4f2"
     }
   },
   "geometry": {
@@ -145,7 +145,7 @@
       "back": {
         "halfHeightMetres": 0.12,
         "halfWidthMetres": 0.15,
-        "maximumClothDepthMetres": -0.01000003118263093,
+        "maximumClothDepthMetres": -0.010000033177292478,
         "samples": [
           {
             "clip": "idle",
@@ -181,277 +181,277 @@
             "clip": "run",
             "frame": 0,
             "maximumClothDepthMetres": -0.012394904899541204,
-            "shirtTriangles": 123
+            "shirtTriangles": 129
           },
           {
             "clip": "run",
             "frame": 1,
             "maximumClothDepthMetres": -0.012394904899541204,
-            "shirtTriangles": 123
+            "shirtTriangles": 129
           },
           {
             "clip": "run",
             "frame": 2,
-            "maximumClothDepthMetres": -0.012517357922053163,
-            "shirtTriangles": 119
+            "maximumClothDepthMetres": -0.01229283368124895,
+            "shirtTriangles": 127
           },
           {
             "clip": "run",
             "frame": 3,
-            "maximumClothDepthMetres": -0.011691340450837806,
-            "shirtTriangles": 144
+            "maximumClothDepthMetres": -0.011281194050933974,
+            "shirtTriangles": 155
           },
           {
             "clip": "run",
             "frame": 4,
-            "maximumClothDepthMetres": -0.011329186790536516,
-            "shirtTriangles": 148
+            "maximumClothDepthMetres": -0.010770500227155866,
+            "shirtTriangles": 160
           },
           {
             "clip": "run",
             "frame": 5,
-            "maximumClothDepthMetres": -0.011473198865561418,
-            "shirtTriangles": 149
+            "maximumClothDepthMetres": -0.010856625602910897,
+            "shirtTriangles": 163
           },
           {
             "clip": "run",
             "frame": 6,
-            "maximumClothDepthMetres": -0.011766097360856098,
-            "shirtTriangles": 143
+            "maximumClothDepthMetres": -0.011197296078998775,
+            "shirtTriangles": 146
           },
           {
             "clip": "run",
             "frame": 7,
-            "maximumClothDepthMetres": -0.011848765028372732,
+            "maximumClothDepthMetres": -0.011402164245263968,
             "shirtTriangles": 143
           },
           {
             "clip": "run",
             "frame": 8,
-            "maximumClothDepthMetres": -0.011182815948617919,
+            "maximumClothDepthMetres": -0.01090946012184102,
             "shirtTriangles": 145
           },
           {
             "clip": "run",
             "frame": 9,
-            "maximumClothDepthMetres": -0.01055158847853166,
+            "maximumClothDepthMetres": -0.01046265272265956,
             "shirtTriangles": 143
           },
           {
             "clip": "run",
             "frame": 10,
-            "maximumClothDepthMetres": -0.01000003118263093,
-            "shirtTriangles": 141
+            "maximumClothDepthMetres": -0.010000033177292478,
+            "shirtTriangles": 142
           },
           {
             "clip": "run",
             "frame": 11,
-            "maximumClothDepthMetres": -0.010326825508289561,
-            "shirtTriangles": 135
+            "maximumClothDepthMetres": -0.010326827284040885,
+            "shirtTriangles": 142
           },
           {
             "clip": "run",
             "frame": 12,
-            "maximumClothDepthMetres": -0.01112816735691502,
-            "shirtTriangles": 119
+            "maximumClothDepthMetres": -0.01112816886979473,
+            "shirtTriangles": 131
           },
           {
             "clip": "run",
             "frame": 13,
-            "maximumClothDepthMetres": -0.012357520093869256,
-            "shirtTriangles": 119
+            "maximumClothDepthMetres": -0.012357521326363696,
+            "shirtTriangles": 125
           },
           {
             "clip": "run",
             "frame": 14,
-            "maximumClothDepthMetres": -0.012784803760729324,
-            "shirtTriangles": 126
+            "maximumClothDepthMetres": -0.01239188269641256,
+            "shirtTriangles": 128
           },
           {
             "clip": "run",
             "frame": 15,
-            "maximumClothDepthMetres": -0.012802121316461412,
+            "maximumClothDepthMetres": -0.012396457966543206,
             "shirtTriangles": 137
           },
           {
             "clip": "run",
             "frame": 16,
-            "maximumClothDepthMetres": -0.012832993607209908,
+            "maximumClothDepthMetres": -0.012490945597994796,
             "shirtTriangles": 138
           },
           {
             "clip": "run",
             "frame": 17,
-            "maximumClothDepthMetres": -0.012478185072687498,
+            "maximumClothDepthMetres": -0.012284316606871237,
             "shirtTriangles": 135
           },
           {
             "clip": "run",
             "frame": 18,
-            "maximumClothDepthMetres": -0.012346015107306374,
+            "maximumClothDepthMetres": -0.012291656209966528,
             "shirtTriangles": 129
           },
           {
             "clip": "run",
             "frame": 19,
             "maximumClothDepthMetres": -0.01239490415839406,
-            "shirtTriangles": 123
+            "shirtTriangles": 129
           }
         ]
       },
       "front": {
         "halfHeightMetres": 0.065,
         "halfWidthMetres": 0.075,
-        "maximumClothDepthMetres": -0.009999957029393698,
+        "maximumClothDepthMetres": -0.01000000107049499,
         "samples": [
           {
             "clip": "idle",
             "frame": 0,
-            "maximumClothDepthMetres": -0.015168981172193285,
+            "maximumClothDepthMetres": -0.015136025850204734,
             "shirtTriangles": 42
           },
           {
             "clip": "idle",
             "frame": 20,
-            "maximumClothDepthMetres": -0.015130866275362535,
+            "maximumClothDepthMetres": -0.015097910957368342,
             "shirtTriangles": 42
           },
           {
             "clip": "idle",
             "frame": 40,
-            "maximumClothDepthMetres": -0.015142604255666235,
+            "maximumClothDepthMetres": -0.015109648951171598,
             "shirtTriangles": 42
           },
           {
             "clip": "idle",
             "frame": 60,
-            "maximumClothDepthMetres": -0.015217227337679919,
+            "maximumClothDepthMetres": -0.015184272028842458,
             "shirtTriangles": 42
           },
           {
             "clip": "idle",
             "frame": 83,
-            "maximumClothDepthMetres": -0.015168981172193285,
+            "maximumClothDepthMetres": -0.015136025850204734,
             "shirtTriangles": 42
           },
           {
             "clip": "run",
             "frame": 0,
-            "maximumClothDepthMetres": -0.009999957029393698,
+            "maximumClothDepthMetres": -0.01000000107049499,
             "shirtTriangles": 49
           },
           {
             "clip": "run",
             "frame": 1,
-            "maximumClothDepthMetres": -0.009999957029393698,
+            "maximumClothDepthMetres": -0.01000000107049499,
             "shirtTriangles": 49
           },
           {
             "clip": "run",
             "frame": 2,
-            "maximumClothDepthMetres": -0.010596590156401233,
+            "maximumClothDepthMetres": -0.010706332952515949,
             "shirtTriangles": 46
           },
           {
             "clip": "run",
             "frame": 3,
-            "maximumClothDepthMetres": -0.011666704447237455,
+            "maximumClothDepthMetres": -0.011914400360527867,
             "shirtTriangles": 46
           },
           {
             "clip": "run",
             "frame": 4,
-            "maximumClothDepthMetres": -0.012847272261340149,
+            "maximumClothDepthMetres": -0.013205850562025405,
             "shirtTriangles": 49
           },
           {
             "clip": "run",
             "frame": 5,
-            "maximumClothDepthMetres": -0.013685596361550484,
-            "shirtTriangles": 48
+            "maximumClothDepthMetres": -0.01408684792248155,
+            "shirtTriangles": 49
           },
           {
             "clip": "run",
             "frame": 6,
-            "maximumClothDepthMetres": -0.014536295777239592,
+            "maximumClothDepthMetres": -0.014902896235327538,
             "shirtTriangles": 46
           },
           {
             "clip": "run",
             "frame": 7,
-            "maximumClothDepthMetres": -0.015666468117180025,
+            "maximumClothDepthMetres": -0.015945582121921365,
             "shirtTriangles": 48
           },
           {
             "clip": "run",
             "frame": 8,
-            "maximumClothDepthMetres": -0.017209504338432016,
+            "maximumClothDepthMetres": -0.017366826301431545,
             "shirtTriangles": 51
           },
           {
             "clip": "run",
             "frame": 9,
-            "maximumClothDepthMetres": -0.01881402769150225,
+            "maximumClothDepthMetres": -0.01884351377705291,
             "shirtTriangles": 51
           },
           {
             "clip": "run",
             "frame": 10,
-            "maximumClothDepthMetres": -0.018559566361788824,
+            "maximumClothDepthMetres": -0.01852005213631203,
             "shirtTriangles": 50
           },
           {
             "clip": "run",
             "frame": 11,
-            "maximumClothDepthMetres": -0.01719623180979204,
+            "maximumClothDepthMetres": -0.017168746734208727,
             "shirtTriangles": 50
           },
           {
             "clip": "run",
             "frame": 12,
-            "maximumClothDepthMetres": -0.015698549144966698,
+            "maximumClothDepthMetres": -0.015666472585177393,
             "shirtTriangles": 49
           },
           {
             "clip": "run",
             "frame": 13,
-            "maximumClothDepthMetres": -0.015031353042857973,
+            "maximumClothDepthMetres": -0.015001311072980653,
             "shirtTriangles": 41
           },
           {
             "clip": "run",
             "frame": 14,
-            "maximumClothDepthMetres": -0.015449166375155463,
-            "shirtTriangles": 51
+            "maximumClothDepthMetres": -0.015420218813550773,
+            "shirtTriangles": 50
           },
           {
             "clip": "run",
             "frame": 15,
-            "maximumClothDepthMetres": -0.016973553783118774,
-            "shirtTriangles": 51
+            "maximumClothDepthMetres": -0.01696541800440532,
+            "shirtTriangles": 50
           },
           {
             "clip": "run",
             "frame": 16,
-            "maximumClothDepthMetres": -0.016304969895881344,
+            "maximumClothDepthMetres": -0.016272019183490097,
             "shirtTriangles": 51
           },
           {
             "clip": "run",
             "frame": 17,
-            "maximumClothDepthMetres": -0.014257457259032526,
+            "maximumClothDepthMetres": -0.014224506314692572,
             "shirtTriangles": 51
           },
           {
             "clip": "run",
             "frame": 18,
-            "maximumClothDepthMetres": -0.011870906177359294,
+            "maximumClothDepthMetres": -0.01183795497845647,
             "shirtTriangles": 49
           },
           {
             "clip": "run",
             "frame": 19,
-            "maximumClothDepthMetres": -0.00999996278004499,
+            "maximumClothDepthMetres": -0.010000005129567856,
             "shirtTriangles": 49
           }
         ]
@@ -461,7 +461,7 @@
       "back": {
         "halfHeightMetres": 0.12,
         "halfWidthMetres": 0.15,
-        "maximumClothDepthMetres": -0.0035652073535620277,
+        "maximumClothDepthMetres": -0.0035652093482235747,
         "samples": [
           {
             "clip": "idle",
@@ -497,128 +497,128 @@
             "clip": "run",
             "frame": 0,
             "maximumClothDepthMetres": -0.005960081070472301,
-            "shirtTriangles": 123
+            "shirtTriangles": 129
           },
           {
             "clip": "run",
             "frame": 1,
             "maximumClothDepthMetres": -0.005960081070472301,
-            "shirtTriangles": 123
+            "shirtTriangles": 129
           },
           {
             "clip": "run",
             "frame": 2,
-            "maximumClothDepthMetres": -0.006082534092984371,
-            "shirtTriangles": 119
+            "maximumClothDepthMetres": -0.005858009852180157,
+            "shirtTriangles": 127
           },
           {
             "clip": "run",
             "frame": 3,
-            "maximumClothDepthMetres": -0.0052565166217690695,
-            "shirtTriangles": 144
+            "maximumClothDepthMetres": -0.004846370221865237,
+            "shirtTriangles": 155
           },
           {
             "clip": "run",
             "frame": 4,
-            "maximumClothDepthMetres": -0.00489436296146778,
-            "shirtTriangles": 148
+            "maximumClothDepthMetres": -0.004335676398087129,
+            "shirtTriangles": 160
           },
           {
             "clip": "run",
             "frame": 5,
-            "maximumClothDepthMetres": -0.005038375036492515,
-            "shirtTriangles": 149
+            "maximumClothDepthMetres": -0.0044218017738419935,
+            "shirtTriangles": 163
           },
           {
             "clip": "run",
             "frame": 6,
-            "maximumClothDepthMetres": -0.005331273531787195,
-            "shirtTriangles": 143
+            "maximumClothDepthMetres": -0.004762472249929872,
+            "shirtTriangles": 146
           },
           {
             "clip": "run",
             "frame": 7,
-            "maximumClothDepthMetres": -0.005413941199304051,
+            "maximumClothDepthMetres": -0.004967340416195287,
             "shirtTriangles": 143
           },
           {
             "clip": "run",
             "frame": 8,
-            "maximumClothDepthMetres": -0.004747992119549016,
+            "maximumClothDepthMetres": -0.004474636292772116,
             "shirtTriangles": 145
           },
           {
             "clip": "run",
             "frame": 9,
-            "maximumClothDepthMetres": -0.004116764649462867,
+            "maximumClothDepthMetres": -0.004027828893590768,
             "shirtTriangles": 143
           },
           {
             "clip": "run",
             "frame": 10,
-            "maximumClothDepthMetres": -0.0035652073535620277,
-            "shirtTriangles": 141
+            "maximumClothDepthMetres": -0.0035652093482235747,
+            "shirtTriangles": 142
           },
           {
             "clip": "run",
             "frame": 11,
-            "maximumClothDepthMetres": -0.003892001679220658,
-            "shirtTriangles": 135
+            "maximumClothDepthMetres": -0.0038920034549719817,
+            "shirtTriangles": 142
           },
           {
             "clip": "run",
             "frame": 12,
-            "maximumClothDepthMetres": -0.004693343527846228,
-            "shirtTriangles": 119
+            "maximumClothDepthMetres": -0.004693345040725938,
+            "shirtTriangles": 131
           },
           {
             "clip": "run",
             "frame": 13,
-            "maximumClothDepthMetres": -0.005922696264800409,
-            "shirtTriangles": 119
+            "maximumClothDepthMetres": -0.005922697497294849,
+            "shirtTriangles": 125
           },
           {
             "clip": "run",
             "frame": 14,
-            "maximumClothDepthMetres": -0.006349979931660421,
-            "shirtTriangles": 126
+            "maximumClothDepthMetres": -0.005957058867343656,
+            "shirtTriangles": 128
           },
           {
             "clip": "run",
             "frame": 15,
-            "maximumClothDepthMetres": -0.00636729748739262,
+            "maximumClothDepthMetres": -0.005961634137474414,
             "shirtTriangles": 137
           },
           {
             "clip": "run",
             "frame": 16,
-            "maximumClothDepthMetres": -0.006398169778141116,
+            "maximumClothDepthMetres": -0.006056121768926004,
             "shirtTriangles": 138
           },
           {
             "clip": "run",
             "frame": 17,
-            "maximumClothDepthMetres": -0.006043361243618595,
+            "maximumClothDepthMetres": -0.005849492777802334,
             "shirtTriangles": 135
           },
           {
             "clip": "run",
             "frame": 18,
-            "maximumClothDepthMetres": -0.005911191278237582,
+            "maximumClothDepthMetres": -0.005856832380897736,
             "shirtTriangles": 129
           },
           {
             "clip": "run",
             "frame": 19,
             "maximumClothDepthMetres": -0.005960080329325268,
-            "shirtTriangles": 123
+            "shirtTriangles": 129
           }
         ]
       },
       "front": {
         "halfHeightMetres": 0.065,
         "halfWidthMetres": 0.075,
-        "maximumClothDepthMetres": 0.019191545928540922,
+        "maximumClothDepthMetres": 0.019158548693225735,
         "samples": [
           {
             "clip": "idle",
@@ -653,129 +653,129 @@
           {
             "clip": "run",
             "frame": 0,
-            "maximumClothDepthMetres": 0.019191545928540922,
+            "maximumClothDepthMetres": 0.019158548693225735,
             "shirtTriangles": 49
           },
           {
             "clip": "run",
             "frame": 1,
-            "maximumClothDepthMetres": 0.019191545928540922,
+            "maximumClothDepthMetres": 0.019158548693225735,
             "shirtTriangles": 49
           },
           {
             "clip": "run",
             "frame": 2,
-            "maximumClothDepthMetres": 0.01859491257116119,
+            "maximumClothDepthMetres": 0.018452216500797404,
             "shirtTriangles": 46
           },
           {
             "clip": "run",
             "frame": 3,
-            "maximumClothDepthMetres": 0.017524798043404788,
+            "maximumClothDepthMetres": 0.017244148780628184,
             "shirtTriangles": 46
           },
           {
             "clip": "run",
             "frame": 4,
-            "maximumClothDepthMetres": 0.016344230038588956,
+            "maximumClothDepthMetres": 0.01595269832998982,
             "shirtTriangles": 49
           },
           {
             "clip": "run",
             "frame": 5,
-            "maximumClothDepthMetres": 0.015505905844400609,
-            "shirtTriangles": 48
+            "maximumClothDepthMetres": 0.01507170084179178,
+            "shirtTriangles": 49
           },
           {
             "clip": "run",
             "frame": 6,
-            "maximumClothDepthMetres": 0.014655206482693655,
+            "maximumClothDepthMetres": 0.014255652594155418,
             "shirtTriangles": 46
           },
           {
             "clip": "run",
             "frame": 7,
-            "maximumClothDepthMetres": 0.013525034324170062,
+            "maximumClothDepthMetres": 0.013212966947103647,
             "shirtTriangles": 48
           },
           {
             "clip": "run",
             "frame": 8,
-            "maximumClothDepthMetres": 0.011981998354978755,
+            "maximumClothDepthMetres": 0.011791723108443892,
             "shirtTriangles": 51
           },
           {
             "clip": "run",
             "frame": 9,
-            "maximumClothDepthMetres": 0.010377475303770855,
+            "maximumClothDepthMetres": 0.010315036039581274,
             "shirtTriangles": 51
           },
           {
             "clip": "run",
             "frame": 10,
-            "maximumClothDepthMetres": 0.010631934060919343,
+            "maximumClothDepthMetres": 0.010638493442390455,
             "shirtTriangles": 50
           },
           {
             "clip": "run",
             "frame": 11,
-            "maximumClothDepthMetres": 0.011995268903915546,
+            "maximumClothDepthMetres": 0.01198979982036298,
             "shirtTriangles": 50
           },
           {
             "clip": "run",
             "frame": 12,
-            "maximumClothDepthMetres": 0.01349295090279675,
+            "maximumClothDepthMetres": 0.013492073212687515,
             "shirtTriangles": 49
           },
           {
             "clip": "run",
             "frame": 13,
-            "maximumClothDepthMetres": 0.014160146043012155,
+            "maximumClothDepthMetres": 0.014157233427393959,
             "shirtTriangles": 41
           },
           {
             "clip": "run",
             "frame": 14,
-            "maximumClothDepthMetres": 0.01374233594236514,
-            "shirtTriangles": 51
+            "maximumClothDepthMetres": 0.013738330262654298,
+            "shirtTriangles": 50
           },
           {
             "clip": "run",
             "frame": 15,
-            "maximumClothDepthMetres": 0.012217948087856376,
-            "shirtTriangles": 51
+            "maximumClothDepthMetres": 0.012193130477108764,
+            "shirtTriangles": 50
           },
           {
             "clip": "run",
             "frame": 16,
-            "maximumClothDepthMetres": 0.012886534081065472,
+            "maximumClothDepthMetres": 0.012886531952369279,
             "shirtTriangles": 51
           },
           {
             "clip": "run",
             "frame": 17,
-            "maximumClothDepthMetres": 0.014934046332861852,
+            "maximumClothDepthMetres": 0.014934044303631168,
             "shirtTriangles": 51
           },
           {
             "clip": "run",
             "frame": 18,
-            "maximumClothDepthMetres": 0.01732059707321483,
+            "maximumClothDepthMetres": 0.0173205951811105,
             "shirtTriangles": 49
           },
           {
             "clip": "run",
             "frame": 19,
-            "maximumClothDepthMetres": 0.019191540177889196,
+            "maximumClothDepthMetres": 0.01915854463415268,
             "shirtTriangles": 49
           }
         ]
       }
     },
     "outwardOffsetsMetres": {
-      "back": 0.0064347926464379725,
-      "front": 0.029191545928540924
+      "back": 0.0064347906517764255,
+      "front": 0.029158548693225733
     },
     "targetClearanceMetres": 0.01
   },
@@ -802,7 +802,7 @@
         0.4030312
       ],
       "boundsMin": [
-        -0.3043412,
+        -0.2935383,
         0.0151126,
         -0.31044
       ],
@@ -817,7 +817,7 @@
         0.6116188
       ],
       "boundsMin": [
-        -0.3175505,
+        -0.2769689,
         0.1216583,
         -0.6353219
       ],
@@ -827,7 +827,7 @@
     },
     {
       "boundsMax": [
-        0.2767456,
+        0.2659668,
         1.6730656,
         0.3851462
       ],
@@ -842,7 +842,7 @@
     },
     {
       "boundsMax": [
-        0.3217065,
+        0.2787282,
         1.7373205,
         0.6347555
       ],
@@ -860,12 +860,12 @@
   "sourceHashes": {
     "kitsReport": "84afd0ac0edcd01a226977643f4d55e772f7c10c3daa74714ce326a3afbf66a0",
     "lowGLB": "5e9fc51e793162b6b3984244ca4851d5b0ef7432ef96e0642255f04484f60695",
-    "motionGLB": "aeb55693b716998cbf2edfbdc1fdc6dd80d7495489225d9b1868c33e56c8bbbc",
+    "motionGLB": "42b9218a393baf0ef79ce4fc08ac6114dc13cc64c364f6a5c2a2c37fa5bad240",
     "nearGLB": "4116c9a2662229273de403c1a09072bc4ffd6b4bc05b8d1cc231da370eb98ee7",
     "sourceArchive": "32f79b8f58897d98e486e29890c279b14c90e5b39e8b9ced44134ff23a7166ba",
     "sourceFBX": "9ad8011a64517bb1eead61ce8f95b66eeab0021bf46da7aca7d5024b697568d2",
     "sourceGLB": "e4fbdbcf98c631d283733ff9f339dd2bf01877bf8ab81756b6fe274a25c10eb5",
     "sourceJPEG": "7988c03904f11099aae60730d77dd05b07126a9fac78ca5da66d543bda4d1431",
-    "sourceReport": "91721e88959e7745a1cd394e5c6e3240c4c3183b4cff4f8eb98512ddd7b5c314"
+    "sourceReport": "931a3e0f0329a2b53eb0d39b492a76116faa1d2f35b17888697f29699c54d7c0"
   }
 }

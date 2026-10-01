@@ -1,10 +1,10 @@
 {
   "sourceBlendSHA256": "a43e38d51b0878c96819abd4d85f956315f01928f35d446be65ab82a5e94c2e4",
   "outputs": {
-    "blend": "/Users/zx/Documents/ChatGPT/SPATIAL PLATFORM/.codex-derived/replayxi-tripo164/fbx-motion-polished-v8/ReplayXITripoFBXMotionPolished.blend",
-    "blendSHA256": "f3d96c4ec1051c9970d86022df9e04b507241e3b682747d904a275b0a30a843a",
-    "motionGLB": "/Users/zx/Documents/ChatGPT/SPATIAL PLATFORM/.codex-derived/replayxi-tripo164/fbx-motion-polished-v8/ReplayXITripoFBXMotionPolished_1m.glb",
-    "motionGLBSHA256": "aeb55693b716998cbf2edfbdc1fdc6dd80d7495489225d9b1868c33e56c8bbbc"
+    "blend": "/Users/zx/Documents/ChatGPT/SPATIAL PLATFORM/.codex-derived/replayxi-tripo165/motion/v9/ReplayXITripoFBXMotionPolished.blend",
+    "blendSHA256": "3b3aa3c6541510e477f767f2f232b81b53c9919cdfb1cca877108adf2809ff2f",
+    "motionGLB": "/Users/zx/Documents/ChatGPT/SPATIAL PLATFORM/.codex-derived/replayxi-tripo165/motion/v9/ReplayXITripoFBXMotionPolished_1m.glb",
+    "motionGLBSHA256": "42b9218a393baf0ef79ce4fc08ac6114dc13cc64c364f6a5c2a2c37fa5bad240"
   },
   "clips": {
     "idle": {
@@ -24,10 +24,15 @@
   },
   "idleArms": "Native shafts directed down/slightly outward; torso motion retained",
   "fingerCurlsDegrees": {
-    "fingers": [
+    "idleFingers": [
       42,
       52,
       32
+    ],
+    "runFingers": [
+      55,
+      65,
+      40
     ],
     "thumb": [
       18,
@@ -212,7 +217,7 @@
       "frame": 1,
       "bounds": [
         [
-          -0.16520404815673828,
+          -0.15927070379257202,
           0.19528594613075256
         ],
         [
@@ -230,7 +235,7 @@
       "frame": 5,
       "bounds": [
         [
-          -0.172459214925766,
+          -0.15017008781433105,
           0.18273255228996277
         ],
         [
@@ -249,7 +254,7 @@
       "bounds": [
         [
           -0.19894284009933472,
-          0.15395158529281616
+          0.14803177118301392
         ],
         [
           -0.21348963677883148,
@@ -267,7 +272,7 @@
       "bounds": [
         [
           -0.18555685877799988,
-          0.17864587903022766
+          0.15504077076911926
         ],
         [
           -0.3505859375,

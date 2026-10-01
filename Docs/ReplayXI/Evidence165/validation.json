@@ -1,0 +1,34 @@
+{
+  "date": "2026-10-01",
+  "scope": "Local Replay XI; motion v9/native-v5 and head-branch update",
+  "simulatorRegression": {
+    "resultBundle": ".codex-derived/replayxi-tripo165/Regression-03.xcresult",
+    "tests": 186,
+    "failures": 0,
+    "device": "visionOS 27.0 Simulator"
+  },
+  "offlineAssetTests": { "tests": 15, "failures": 0 },
+  "physicalHeadsetReleaseBuild": {
+    "result": "passed",
+    "signing": "disabled",
+    "executedOnHeadset": false
+  },
+  "headCorrection": {
+    "tripoJointsBefore": 52,
+    "tripoJointsAfter": 1,
+    "fallbackJointsBefore": 80,
+    "fallbackJointsAfter": 29,
+    "poseParity": "Exact matrix and local-transform equality; forward, reverse and repeat samples of both source gaits",
+    "deviceFPSMeasured": false
+  },
+  "reviewIntegrity": {
+    "beforeAndAfterSHA256": "81a3eff4007841eaa2eac8eaca17fc3d2eee76a69184ccf23ed4736bca72aa6a",
+    "contentsIncluded": false
+  },
+  "remainingLimits": [
+    "Native offscreen shading faceting",
+    "High-knee jersey/shorts intersection",
+    "Running hand still partly open",
+    "Headset frame rate, comfort and appearance not measured"
+  ]
+}

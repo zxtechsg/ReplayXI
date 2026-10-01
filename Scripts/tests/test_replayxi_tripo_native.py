@@ -23,14 +23,14 @@ REPO = Path(__file__).resolve().parents[2]
 SOURCE = REPO / "Assets/ReplayXI/TripoFootballer/ReplayXI_Footballer_P2_Source.glb"
 FBX_SOURCE = REPO / ".codex-derived/replayxi-tripo164/fbx-player-v2/ReplayXITripoFBXCandidate.glb"
 NEAR = REPO / ".codex-derived/replayxi-tripo164/fbx-lods-v2/ReplayXITripoFBX_Near_1m.glb"
-NATIVE = REPO / ".codex-derived/replayxi-tripo164/native-v4"
+NATIVE = REPO / ".codex-derived/replayxi-tripo165/native-v5"
 KITS = REPO / ".codex-derived/replayxi-tripo164/kits-v1"
 EXPECTED_NATIVE_SHA256 = {
-    "ReplayXITripoAthlete.usdz": "af01e0ea9e8e4ae6d9dae068f87fe03f1550732583a553eb64660ce1bd6afe90",
-    "ReplayXITripoLow.usdz": "48712cb85bc92c798fd7c6dc53ef721f43a0797db7739facd61f30449e80b390",
-    "ReplayXITripoMotion.json": "877857959a46e2ea1c47de3fbbf5822ff8e774d20c973f1e9eade55ff578a84f",
-    "ReplayXITripoContactSurface.json": "ae384cf32679b5f57851a5b10032ba0fc41892605c98c81030ba77104ba8007e",
-    "ReplayXITripoLowContactSurface.json": "f12a6d033535790654af6c75b80c8afb5decf4c2125cc12a0a1dd2a18bc1aa92",
+    "ReplayXITripoAthlete.usdz": "b06a0f95decdec70bb92c148807186d581d15bc821f651f5fc2929a3484efaa0",
+    "ReplayXITripoLow.usdz": "bceb8575bb26cc8b647638beca1177109fdee482f01ba436c84593cfc9541914",
+    "ReplayXITripoMotion.json": "525b42f4377d16644d81dc46456169be33818ec806e37ffd18a7a2041072b4f2",
+    "ReplayXITripoContactSurface.json": "f22677d2514cac26ba1c95cec22b49f707b95d9494c9373b8f37aba3859053d7",
+    "ReplayXITripoLowContactSurface.json": "31a53bff5255b025080bb117b4e14c3f6423dca1e1596c43e4e66f9ae8c29283",
 }
 JPEG = REPO / (".codex-derived/replayxi-tripo164/fbx-source/"
                "tripo_convert_e7d9fe2a-ac2d-497b-a733-92e3003ca9bb.fbm/"
@@ -100,7 +100,7 @@ class ConverterRejectsInvalidInputs(unittest.TestCase):
                 glb(path)
 
 
-@unittest.skipUnless(AVAILABLE and NATIVE.is_dir(), "native-v4 artifacts required")
+@unittest.skipUnless(AVAILABLE and NATIVE.is_dir(), "native-v5 artifacts required")
 class NativeOutputContract(unittest.TestCase):
     def test_report_hashes_counts_and_contact_bindings(self):
         report = json.loads((NATIVE / "ReplayXITripoBuildReport.json").read_text())
