@@ -1,0 +1,35 @@
+{
+  "resultBundle": ".codex-derived/replayxi-tripo166/Shading-02.xcresult",
+  "attachmentPathBase": ".codex-derived/replayxi-tripo166",
+  "focusedTestsPassed": 1,
+  "posedVertices": 9075,
+  "triangles": 7685,
+  "material": "flat white PBR, roughness 0.78, metallic 0",
+  "controls": {
+    "nativeSkinned": "Original RealityKit skinned mesh",
+    "nativeWarmed": "Same renderer and output, four additional 1/60-second frames",
+    "staticPosedNormals": "Same CPU-posed positions and triangles, inverse-transpose transformed authored normals",
+    "staticGeometryNormals": "Same CPU-posed positions and triangles, normals recomputed from incident triangle area without seam weld"
+  },
+  "idle": {
+    "native": "Shading-02-Attachments/40E833D5-807C-47D2-AE03-720E2EEAD328.png",
+    "warmed": "Shading-02-Attachments/80502EB7-ED45-4391-AE4A-D14FC91F788A.png",
+    "staticPosedNormals": "Shading-02-Attachments/77A08B25-D560-4BEB-8EB6-77F4EF572A2E.png",
+    "staticGeometryNormals": "Shading-02-Attachments/C544A960-B3C8-4415-9600-BE19B9E971B2.png",
+    "nativeVsWarmedDifferentRGBPixels": 0,
+    "nativeVsStaticPosedNormalsDifferentRGBPixels": 16169,
+    "nativeVsStaticGeometryNormalsDifferentRGBPixels": 2,
+    "nativeVsStaticGeometryNormalsTotalRGBAbsoluteError": 6
+  },
+  "run": {
+    "native": "Shading-02-Attachments/9DDB9134-0FA7-4563-AC7E-4FC612D59E3E.png",
+    "warmed": "Shading-02-Attachments/EF08EBE1-F43F-410C-B540-2FE005E62145.png",
+    "staticPosedNormals": "Shading-02-Attachments/026A76CF-837A-4891-B528-D6F7F6904DDF.png",
+    "staticGeometryNormals": "Shading-02-Attachments/6D9EA5CF-4B50-473B-BCA1-4CB3DA159B6A.png",
+    "nativeVsWarmedDifferentRGBPixels": 0,
+    "nativeVsStaticPosedNormalsDifferentRGBPixels": 15623,
+    "nativeVsStaticGeometryNormalsDifferentRGBPixels": 1,
+    "nativeVsStaticGeometryNormalsTotalRGBAbsoluteError": 3
+  },
+  "verdict": "The RealityKit skinned render matches un-welded geometric normals, not correctly transformed authored normals. Imported normals and tangents exist; four-frame warmup does not change pixels. No production fix tested."
+}

@@ -1,0 +1,51 @@
+{
+  "date": "2026-10-02",
+  "implementationCommit": "fb07432",
+  "scope": "Local Replay XI; native-v6 UV-preserving welded player topology",
+  "simulatorRegression": {
+    "resultBundle": ".codex-derived/replayxi-tripo166/Regression27-02.xcresult",
+    "platform": "visionOS 27.0 Simulator",
+    "tests": 187,
+    "failures": 0
+  },
+  "stableRuntimePlayerChecks": {
+    "resultBundle": ".codex-derived/replayxi-tripo166/Integrated265-02.xcresult",
+    "platform": "visionOS 26.5 Simulator",
+    "tests": 11,
+    "failures": 0,
+    "coverage": "Player loading, exact runtime geometry/UV/skin parity, contact/grounding, rewind and nine native visual captures"
+  },
+  "offlineAssetChecks": { "tests": 19, "failures": 0 },
+  "releaseBuilds": {
+    "simulator": "passed",
+    "genericPhysicalHeadset": "passed; signing disabled",
+    "bundledModelHashesMatchAuditedAssets": true,
+    "executedOnPhysicalHeadset": false
+  },
+  "geometry": {
+    "near": { "sourceVertices": 9075, "authoredUSDPoints": 4096, "importedVertices": 9075, "triangles": 7685 },
+    "low": { "sourceVertices": 3269, "authoredUSDPoints": 1118, "importedVertices": 3267, "triangles": 1964 },
+    "jointCount": 52,
+    "drawsPerPlayerIncludingNumbers": 3,
+    "triangleCornerPositionUVSkinParity": "Exact after RealityKit import; all 28,947 corners",
+    "motionSHA256Unchanged": "525b42f4377d16644d81dc46456169be33818ec806e37ffd18a7a2041072b4f2",
+    "contactSamplesUnchanged": true,
+    "texturesUnchanged": true,
+    "combinedUSDZBytesBefore": 986979,
+    "combinedUSDZBytesAfter": 827309,
+    "deviceFPSMeasured": false
+  },
+  "resolvedTestIssues": [
+    "Offline-USD fingerprint differed from RealityKit representation. New expected signatures were independently verified against old-v5 runtime imports with zero corner deltas, then the temporary source-path dependency was removed.",
+    "Obsolete imported-mesh regeneration diagnostic trapped on visionOS 27. Removed that experiment only; the app never uses this regeneration path. All actual player-view captures remain."
+  ],
+  "reviewIntegrity": {
+    "beforeAndAfterSHA256": "81a3eff4007841eaa2eac8eaca17fc3d2eee76a69184ccf23ed4736bca72aa6a",
+    "contentsIncluded": false
+  },
+  "remainingLimits": [
+    "High-knee jersey/shorts intersection; reweight candidate rejected",
+    "Partly open running hands and minor source-mesh/texture artifacts",
+    "Physical-headset frame rate, comfort and appearance remain unmeasured"
+  ]
+}

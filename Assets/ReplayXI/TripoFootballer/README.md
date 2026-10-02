@@ -35,10 +35,15 @@ No extra Tripo credits were spent on this local integration.
 relax the legacy Rocketbox 80-joint contract. Both teams and keepers share the
 same 1.82 m body, with white, red and amber 2K kit atlases and geometric numbers.
 
-| Detail | Vertices including UV seams | Triangles | Skin materials |
-| --- | ---: | ---: | ---: |
-| Near | 9,075 | 7,685 | 1 |
-| Low | 3,269 | 1,964 | 1 |
+| Detail | Source vertices | USD points | Imported vertices | Triangles |
+| --- | ---: | ---: | ---: | ---: |
+| Near | 9,075 | 4,096 | 9,075 | 7,685 |
+| Low | 3,269 | 1,118 | 3,267 | 1,964 |
+
+Each skin still uses one material. Position/skin duplicates are welded in USD;
+per-corner UVs preserve the atlas. RealityKit expands those UVs on import while
+retaining the connected surface for smooth animated shading. Source contact
+counts are deliberately separate from exact imported vertex counts.
 
 Both have four normalized skin weights per vertex and 512 ground/contact
 samples. Each contact set reserves 96 head-weighted samples. Header aiming
@@ -71,6 +76,8 @@ clearance. Runtime files live in `ReplayXI/Resources/Players/ReplayXITripo*`.
 - `Scripts/build_replayxi_tripo_athlete.py`: convert validated GLBs to native
   resources. Use `--help` for its explicit source/report inputs. It requires
   Blender's Python with NumPy and OpenUSD; no online generation is involved.
+  Current native-v6 builds use `--normal-mode area-weighted --weld-uv-topology`.
+  Other divergent-normal inputs fail closed; the default keeps the old layout.
 - `Scripts/audit_replayxi_texture.swift`, compiled with
   `ReplayTexturePixels.swift`, checks source and packaged PNG pixel identity.
 
@@ -105,9 +112,20 @@ existing palm markers meet the ball surface within 3.7–4.9 mm in that sampled
 save, with planted boots and exact rewind. These are rig markers, not full
 hand-mesh collision tests. Current evidence: `Docs/ReplayXI/Evidence165`.
 
+Cycle166 isolated the native faceting in matched skinned/static render tests
+and rebuilt both native skins with connected USD topology and face-varying UVs.
+Idle/run captures on visionOS 26.5 and 27 show smoother shading without changing
+triangle-corner positions, UVs, weights, motion or texture assets. The two USDZs
+total 827,309 bytes (previously 986,979). This is a file-size saving, not an FPS
+measurement. Source contact samples are unchanged apart from their asset hashes.
+See [the controls and measurements](../../../Docs/ReplayXI/Evidence166/README.md).
+Final native-v6 verification passed 187 regression tests on visionOS 27, 11
+player/contact/render checks on 26.5, and 19 offline tests. Simulator and
+unsigned physical-headset Release builds passed. Saved reviews stayed intact.
+
 This is a prototype, not EA FC animation quality. A high-knee shirt/shorts
 intersection and a partly open running hand remain. Attempts to reweight the
-hem worsened it and were rejected. Faceting in the native offscreen renderer
-remains visible; imported positions, normals and indices match the
-USDZ exactly. A tangent rebuild gave byte-identical images and was not shipped.
+hem and shorts waistband worsened it and were rejected. Minor source-mesh and
+texture artifacts remain. A tangent rebuild gave byte-identical images and was
+not shipped; the successful shading fix is the offline USD topology change.
 On-headset frame rate, comfort and appearance remain unmeasured.

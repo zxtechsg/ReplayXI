@@ -1,0 +1,26 @@
+{
+  "method": "RealityKit-imported old v5 versus bundled welded v6, ordered triangle corners; compare position, UV, four joint indices and weights",
+  "resultBundle": ".codex-derived/replayxi-tripo166/CornerBaseline-01.xcresult",
+  "result": "passed",
+  "near": {
+    "oldUSDZSHA256": "b06a0f95decdec70bb92c148807186d581d15bc821f651f5fc2929a3484efaa0",
+    "newUSDZSHA256": "25585fd5fff5dc0060178c52fa559fe217773acfeab1b578d44174cb85e890db",
+    "corners": 23055,
+    "maximumPositionDeltaMetres": 0,
+    "maximumUVDelta": 0,
+    "maximumWeightDelta": 0,
+    "jointIndices": "exact, all four slots",
+    "oldAndNewRuntimeFNV64": "536e60d398cdadf1"
+  },
+  "low": {
+    "oldUSDZSHA256": "bceb8575bb26cc8b647638beca1177109fdee482f01ba436c84593cfc9541914",
+    "newUSDZSHA256": "343a8ef2527ac236a20c1bbe73202f650829be008c1d5381b3618f35933b349d",
+    "corners": 5892,
+    "maximumPositionDeltaMetres": 0,
+    "maximumUVDelta": 0,
+    "maximumWeightDelta": 0,
+    "jointIndices": "exact, all four slots",
+    "oldAndNewRuntimeFNV64": "b24f17241abc4d6b"
+  },
+  "offlineHashNote": "Offline USD per-corner hashes differ from imported RealityKit hashes. The reason is unresolved; runtime old/new parity was measured directly, with no inferred importer conversion."
+}
