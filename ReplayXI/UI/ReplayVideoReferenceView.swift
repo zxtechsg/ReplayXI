@@ -68,6 +68,10 @@ private struct ReplayVideoReferenceDetails: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            Text("Annotations are saved on the 3D replay, not drawn on the source video.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(22)
         .frame(width: 350, alignment: .leading)

@@ -6,6 +6,24 @@ struct ReplayXIApp: App {
     @State private var store: ReplayStore
     @State private var sharedSpace: LocalPitchAnchorCoordinator
     @State private var comparisonSession = ReplayConversionPreviewSession()
+    @State private var annotationEntry = ReplayAnnotationEntrySession()
+    @AppStorage(ReplayEnvironmentMode.storageKey) private var environmentModeRawValue =
+        ReplayEnvironmentMode.defaultSelection.rawValue
+
+    private var immersionStyle: Binding<any ImmersionStyle> {
+        Binding(get: {
+            let mode = ReplayEnvironmentMode.effective(environmentModeRawValue,
+                isPhysicalPractice: store.selectedScenario.kind == .shapeLab || store.triangleLockMode == .place)
+            if mode == .stadium { return .full }
+            return .mixed
+        }, set: { style in
+            // A safety override for physical practice never overwrites the
+            // user's chosen replay environment.
+            guard store.selectedScenario.kind != .shapeLab, store.triangleLockMode != .place else { return }
+            environmentModeRawValue = style is FullImmersionStyle
+                ? ReplayEnvironmentMode.stadium.rawValue : ReplayEnvironmentMode.room.rawValue
+        })
+    }
 
     init() {
         // Test hosts and scripted demos never touch production saves. A normal
@@ -38,6 +56,7 @@ struct ReplayXIApp: App {
                 .environment(store)
                 .environment(sharedSpace)
                 .environment(comparisonSession)
+                .environment(annotationEntry)
         }
         .defaultSize(width: 1_380, height: 820)
         .onChange(of: scenePhase) { _, phase in
@@ -48,6 +67,7 @@ struct ReplayXIApp: App {
             ReplayReferenceVideoWindow()
                 .environment(store)
                 .environment(comparisonSession)
+                .environment(annotationEntry)
         }
         .defaultSize(width: 1_280, height: 760)
         .windowResizability(.contentMinSize)
@@ -58,8 +78,9 @@ struct ReplayXIApp: App {
                     .id(requestID)
                     .environment(store)
                     .environment(sharedSpace)
+                    .environment(annotationEntry)
             }
         }
-        .immersionStyle(selection: .constant(.mixed), in: .mixed)
+        .immersionStyle(selection: immersionStyle, in: .mixed, .full)
     }
 }

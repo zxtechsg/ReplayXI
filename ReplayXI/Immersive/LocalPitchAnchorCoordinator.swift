@@ -94,6 +94,15 @@ final class LocalPitchAnchorCoordinator {
     private(set) var isPlacingPitchAnchor = false
     private(set) var isRemovingPitchAnchor = false
 
+    enum SurfaceDetectionStatus: Equatable, Sendable {
+        case stopped, starting, scanning, ready
+        case unavailable(String)
+    }
+    private(set) var surfaceDetectionStatus: SurfaceDetectionStatus = .stopped
+    private(set) var horizontalSurfaces: [ReplayPitchSurfaceSnap.Surface] = []
+    /// Observe this small token, not triangle arrays, during playback updates.
+    private(set) var surfaceRevision: UInt = 0
+
     /// Called only when ARKit unexpectedly removes the anchor currently selected
     /// by shared playback state. Explicit app-driven removal clears the selection
     /// first and therefore does not produce a duplicate transition.
@@ -124,6 +133,203 @@ final class LocalPitchAnchorCoordinator {
     @ObservationIgnored private var placementIntentRevision = UUID()
     @ObservationIgnored private var trackingOwnerID: UUID?
     @ObservationIgnored private var trackingRequestRevision = UUID()
+    @ObservationIgnored private var planeDetectionProvider: PlaneDetectionProvider?
+    @ObservationIgnored private var surfaceUpdatesTask: Task<Void, Never>?
+    @ObservationIgnored private var surfaceEventsTask: Task<Void, Never>?
+    @ObservationIgnored private var surfaceStartTask: Task<Void, Never>?
+    @ObservationIgnored private var surfaceStopTask: Task<Void, Never>?
+    @ObservationIgnored private var surfaceRequestRevision = UUID()
+    @ObservationIgnored private var surfaceAuthorizationAllowed = false
+
+    var currentWorldDeviceTransform: simd_float4x4? {
+        guard let provider = worldTrackingProvider,
+              let device = provider.queryDeviceAnchor(atTimestamp: CACurrentMediaTime()),
+              device.isTracked else { return nil }
+        return device.originFromAnchorTransform
+    }
+
+    /// Called only by the Room/table surface action. An active physical drill
+    /// cannot replace its providers or surrender ownership to a surface scan.
+    func startSurfaceDetection(for ownerID: UUID) async {
+        guard !Task.isCancelled else { return }
+        guard !placedPitchAnchorLocally, !isPlacingPitchAnchor, !isRemovingPitchAnchor else {
+            surfaceDetectionStatus = .unavailable("End physical practice before finding a surface.")
+            return
+        }
+        await surfaceStopTask?.value
+        guard !Task.isCancelled else { return }
+        await start(for: ownerID)
+        guard !Task.isCancelled, ownsTracking(for: ownerID) else { return }
+        guard let session = arkitSession, let world = worldTrackingProvider else {
+            surfaceDetectionStatus = .unavailable("Surface detection is unavailable. The pitch keeps its last position.")
+            return
+        }
+        guard world.state != .stopped else {
+            surfaceDetectionStatus = .unavailable("Tracking stopped. Reopen the room to find surfaces again.")
+            return
+        }
+        guard PlaneDetectionProvider.isSupported else {
+            surfaceDetectionStatus = .unavailable("Surface detection needs a supported headset. Use the default level pitch.")
+            return
+        }
+        if surfaceStartTask?.isCancelled == true { surfaceStartTask = nil }
+        if let surfaceStartTask { await surfaceStartTask.value; return }
+        let revision = sessionRevision
+        let request = UUID()
+        surfaceRequestRevision = request
+        surfaceDetectionStatus = .starting
+        let startup = Task { [weak self] in
+            guard let self else { return }
+            defer { if surfaceRequestRevision == request { surfaceStartTask = nil } }
+            do {
+                let authorization = try await withSessionLifetime {
+                    await session.requestAuthorization(for: [.worldSensing])
+                }
+                guard surfaceRequestRevision == request, ownsTracking(for: ownerID) else { return }
+                guard authorization[.worldSensing] == .allowed else {
+                    surfaceAuthorizationAllowed = false
+                    clearSurfaceGeometry()
+                    surfaceDetectionStatus = .unavailable("World sensing is off. Allow it in Settings to snap, or use the default level pitch.")
+                    return
+                }
+                surfaceAuthorizationAllowed = true
+                guard !placedPitchAnchorLocally, !isPlacingPitchAnchor, !isRemovingPitchAnchor else {
+                    surfaceDetectionStatus = .unavailable("End physical practice before finding a surface.")
+                    return
+                }
+                let planes: PlaneDetectionProvider
+                if let existing = planeDetectionProvider, existing.state == .running {
+                    planes = existing
+                } else {
+                    planes = PlaneDetectionProvider(alignments: [.horizontal])
+                    planeDetectionProvider = planes
+                    // Retain the exact running world provider. ARKit stops only
+                    // providers omitted from this array; do not restart it.
+                    try await withSessionLifetime { try await session.run([world, planes]) }
+                }
+                guard surfaceRequestRevision == request, ownsTracking(for: ownerID) else { return }
+                clearSurfaceGeometry()
+                surfaceDetectionStatus = .scanning
+                for anchor in planes.allAnchors { receiveSurface(anchor) }
+                surfaceUpdatesTask?.cancel()
+                surfaceUpdatesTask = Task { [weak self] in
+                    for await update in planes.anchorUpdates {
+                        guard let self, !Task.isCancelled, sessionRevision == revision,
+                              surfaceRequestRevision == request, ownsTracking(for: ownerID) else { return }
+                        switch update.event {
+                        case .added, .updated: receiveSurface(update.anchor)
+                        case .removed: removeSurface(id: update.anchor.id)
+                        @unknown default: break
+                        }
+                    }
+                }
+                surfaceEventsTask?.cancel()
+                surfaceEventsTask = Task { [weak self] in
+                    for await event in session.events {
+                        guard let self, !Task.isCancelled, sessionRevision == revision,
+                              surfaceRequestRevision == request, ownsTracking(for: ownerID) else { return }
+                        switch event {
+                        case .authorizationChanged(type: .worldSensing, status: let status) where status != .allowed:
+                            surfaceAuthorizationAllowed = false
+                            clearSurfaceGeometry()
+                            surfaceDetectionStatus = .unavailable("World sensing is off. The pitch keeps its last position.")
+                        case .dataProviderStateChanged(let providers, let state, _) where providers.contains(where: { $0 === planes }):
+                            if state == .running, surfaceAuthorizationAllowed {
+                                surfaceDetectionStatus = .scanning
+                                for anchor in planes.allAnchors { receiveSurface(anchor) }
+                            } else {
+                                clearSurfaceGeometry()
+                                surfaceDetectionStatus = .unavailable("Surface tracking paused. Find surfaces again; the pitch keeps its last position.")
+                            }
+                        default: break
+                        }
+                    }
+                }
+            } catch {
+                guard sessionRevision == revision, surfaceRequestRevision == request,
+                      ownsTracking(for: ownerID) else { return }
+                clearSurfaceGeometry()
+                surfaceDetectionStatus = error is CancellationError ? .stopped
+                    : .unavailable("Surface detection could not start. The pitch keeps its last position.")
+            }
+        }
+        surfaceStartTask = startup
+        await startup.value
+    }
+
+    /// Stop plane sensing while preserving any running world-tracking provider.
+    /// A late stop belonging to an old room cannot change a new room's session.
+    func stopSurfaceDetection(for ownerID: UUID) async {
+        guard ownsTracking(for: ownerID) else { return }
+        if let surfaceStopTask { await surfaceStopTask.value; return }
+        invalidateSurfaceScan()
+        let pendingStart = surfaceStartTask
+        surfaceStartTask = nil
+        let revision = sessionRevision, request = surfaceRequestRevision
+        let operation = Task { [weak self] in
+            await pendingStart?.value
+            guard let self, sessionRevision == revision, surfaceRequestRevision == request,
+                  ownsTracking(for: ownerID) else { return }
+            defer { if surfaceRequestRevision == request { surfaceStopTask = nil } }
+            // Physical practice may have begun during authorization. Leave its
+            // provider set alone; room teardown will stop the remaining planes.
+            guard !placedPitchAnchorLocally, !isPlacingPitchAnchor, !isRemovingPitchAnchor,
+                  planeDetectionProvider != nil, let session = arkitSession,
+                  let world = worldTrackingProvider else { return }
+            planeDetectionProvider = nil
+            guard world.state != .stopped else { return }
+            try? await withSessionLifetime { try await session.run([world]) }
+        }
+        surfaceStopTask = operation
+        await operation.value
+    }
+
+    /// Re-evaluate at the explicit Snap action; a removed plane cannot be
+    /// committed from an old UI candidate. This never moves the control bar.
+    func snapPitchToSurface(near position: SIMD3<Float>, yawRadians: Float,
+                            footprint: SIMD2<Float> = ReplayPitchSurfaceSnap.defaultFootprint,
+                            bottomOffset: Float = ReplayPitchSurfaceSnap.defaultBottomOffset,
+                            preferredSurfaceID: UUID? = nil) -> ReplayPitchSurfaceSnap.Placement? {
+        guard planeDetectionProvider?.state == .running, surfaceAuthorizationAllowed, surfaceDetectionStatus == .ready,
+              !placedPitchAnchorLocally, !isPlacingPitchAnchor, !isRemovingPitchAnchor else { return nil }
+        return ReplayPitchSurfaceSnap.placement(on: horizontalSurfaces, near: position,
+            yawRadians: yawRadians, footprint: footprint, bottomOffset: bottomOffset,
+            preferredSurfaceID: preferredSurfaceID)
+    }
+
+    private func receiveSurface(_ anchor: PlaneAnchor) {
+        guard surfaceAuthorizationAllowed else { return }
+        guard let surface = ReplayPitchSurfaceSnap.surface(from: anchor) else {
+            removeSurface(id: anchor.id)
+            return
+        }
+        horizontalSurfaces.removeAll { $0.id == anchor.id }
+        horizontalSurfaces.append(surface)
+        surfaceRevision &+= 1
+        surfaceDetectionStatus = .ready
+    }
+
+    private func removeSurface(id: UUID) {
+        guard horizontalSurfaces.contains(where: { $0.id == id }) else { return }
+        horizontalSurfaces.removeAll { $0.id == id }
+        surfaceRevision &+= 1
+        surfaceDetectionStatus = horizontalSurfaces.isEmpty ? .scanning : .ready
+    }
+
+    private func clearSurfaceGeometry() {
+        horizontalSurfaces.removeAll()
+        surfaceRevision &+= 1
+    }
+
+    private func invalidateSurfaceScan() {
+        surfaceRequestRevision = UUID()
+        surfaceAuthorizationAllowed = false
+        surfaceStartTask?.cancel()
+        surfaceUpdatesTask?.cancel(); surfaceUpdatesTask = nil
+        surfaceEventsTask?.cancel(); surfaceEventsTask = nil
+        clearSurfaceGeometry()
+        surfaceDetectionStatus = .stopped
+    }
 
     func ownsTracking(for ownerID: UUID) -> Bool {
         trackingOwnerID == ownerID
@@ -133,6 +339,7 @@ final class LocalPitchAnchorCoordinator {
     /// a running provider, but never another room's anchor or pending teardown.
     func claimTracking(for ownerID: UUID) {
         if let previous = trackingOwnerID, previous != ownerID {
+            invalidateSurfaceScan()
             retireLocallyPlacedPitchAnchor()
         }
         trackingOwnerID = ownerID
@@ -145,6 +352,7 @@ final class LocalPitchAnchorCoordinator {
     func stopTracking(for ownerID: UUID) -> Task<Void, Never>? {
         guard ownsTracking(for: ownerID) else { return nil }
         trackingOwnerID = nil
+        invalidateSurfaceScan()
         trackingRequestRevision = UUID()
         let request = trackingRequestRevision
         let revision = sessionRevision
@@ -572,6 +780,10 @@ final class LocalPitchAnchorCoordinator {
     private func tearDownSession() {
         // Invalidate before stopping providers, so delayed completions are stale.
         sessionRevision = UUID()
+        invalidateSurfaceScan()
+        surfaceStartTask = nil
+        surfaceStopTask?.cancel(); surfaceStopTask = nil
+        planeDetectionProvider = nil
         trackingOwnerID = nil
         trackingRequestRevision = UUID()
         sessionStartTask?.cancel()

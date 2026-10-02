@@ -57,7 +57,7 @@ final class PlaybackSpatialWorkspaceTests: XCTestCase {
         XCTAssertEqual(ReplayAppMode.situationRoleplay.title, "Strategy analysis")
         XCTAssertEqual(ReplayAppMode.situationRoleplay.rawValue, "situationRoleplay")
         XCTAssertEqual(ReplayAppMode.matchReplay.title, "Match replay")
-        XCTAssertEqual(ReplayAppMode.matchReplay.subtitle, "Video-referenced match studies")
+        XCTAssertEqual(ReplayAppMode.matchReplay.subtitle, "Match studies with 3D annotations")
         XCTAssertTrue(CityLiverpoolReferenceScenarios.all.allSatisfy {
             $0.proofPoint.contains("Not recovered tracking")
         })

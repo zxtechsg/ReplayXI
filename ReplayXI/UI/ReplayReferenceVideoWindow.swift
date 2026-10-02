@@ -5,10 +5,12 @@ import SwiftUI
 struct ReplayReferenceVideoWindow: View {
     @Environment(ReplayConversionPreviewSession.self) private var session
     @Environment(ReplayStore.self) private var store
+    @Environment(ReplayAnnotationEntrySession.self) private var annotationEntry: ReplayAnnotationEntrySession?
     @Environment(\.openImmersiveSpace) private var openImmersiveSpace
     @Environment(\.dismissWindow) private var dismissWindow
     @Environment(\.scenePhase) private var scenePhase
     @State private var framing = ReplayComparisonPitchFraming.play
+    @State private var hasRequestedRoom = false
 
     private var roomIsPresenting: Bool {
         store.isImmersiveOpen || store.isOpeningImmersive || store.isClosingImmersive
@@ -110,13 +112,33 @@ struct ReplayReferenceVideoWindow: View {
                         Button {
                             enterRoom(capture)
                         } label: {
-                            Label("Enter 3D · POVs & annotations", systemImage: "vision.pro")
+                            Label("Enter 3D · Player POVs", systemImage: "vision.pro")
                                 .frame(maxWidth: .infinity).padding(.vertical, 5)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .tint(ReplayTheme.signal)
-                        .foregroundStyle(.black)
-                        .disabled(store.hasActiveTimelineScrub || store.hasActiveCoachMarkGeometryPreview)
+                        .buttonStyle(.bordered)
+                        .disabled(ReplayAnnotationEntryPolicy.navigationBlockReason(in: store) != nil)
+                        if annotationEntry != nil {
+                            Button {
+                                enterRoom(capture, annotating: true)
+                            } label: {
+                                Label("Annotate in 3D", systemImage: "pencil.and.outline")
+                                    .frame(maxWidth: .infinity).padding(.vertical, 5)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(ReplayTheme.orange)
+                            .foregroundStyle(.black)
+                            .disabled(ReplayAnnotationEntryPolicy.blockReason(in: store) != nil)
+                            .accessibilityHint("Opens drawing tools at the paused 3D replay time. Marks are saved on the replay, not the video.")
+                        }
+                        Text(ReplayAnnotationEntryPolicy.navigationBlockReason(in: store)
+                            ?? "Timed marks are saved on the 3D replay. Source video is separate.")
+                            .font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if hasRequestedRoom {
+                            Text(store.statusMessage)
+                                .font(.caption).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -161,9 +183,12 @@ struct ReplayReferenceVideoWindow: View {
         }
     }
 
-    private func enterRoom(_ capture: ReplayConversionPreviewSession.Capture) {
-        guard !roomIsPresenting, !store.hasActiveTimelineScrub,
-              !store.hasActiveCoachMarkGeometryPreview else { return }
+    private func enterRoom(_ capture: ReplayConversionPreviewSession.Capture, annotating: Bool = false) {
+        guard !annotating || annotationEntry != nil else { return }
+        let blockReason = annotating
+            ? ReplayAnnotationEntryPolicy.blockReason(in: store)
+            : ReplayAnnotationEntryPolicy.navigationBlockReason(in: store)
+        guard blockReason == nil else { return }
         session.isPlaying = false
         store.selectScenario(id: capture.scenario.id, broadcast: false)
         guard store.selectedScenarioID == capture.scenario.id else { return }
@@ -171,7 +196,9 @@ struct ReplayReferenceVideoWindow: View {
         store.setLocalPerspective(capture.perspectiveID)
         // Preserve live/saved annotations. The read-only capture must never
         // replace edits made after the comparison window was opened.
+        hasRequestedRoom = true
         ReplayRoomLauncher.open(store: store, openImmersiveSpace: openImmersiveSpace,
-                                dismissWindow: dismissWindow)
+                                dismissWindow: dismissWindow,
+                                annotationEntry: annotating ? annotationEntry : nil)
     }
 }

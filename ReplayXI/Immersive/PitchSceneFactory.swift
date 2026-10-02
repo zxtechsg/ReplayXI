@@ -4533,11 +4533,10 @@ enum PitchSceneFactory {
             root.position = -rotatedPlayerOffset
 
         case .tacticalTable:
-            // A large, gently raked coaching board keeps player targets and
-            // annotations visible above the transport instead of presenting a
-            // tiny, nearly edge-on table in the distance.
+            // Keep the playing surface horizontal. A wearer-local surface
+            // placement can replace this default without tilting the pitch.
             root.scale = SIMD3<Float>(repeating: 0.0255)
-            root.orientation = simd_quatf(angle: 0.22, axis: [1, 0, 0])
+            root.orientation = simd_quatf(angle: 0, axis: [0, 1, 0])
             root.position = [0, 0.92, -3.15]
 
         case .touchline:

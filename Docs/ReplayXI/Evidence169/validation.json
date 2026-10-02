@@ -1,0 +1,35 @@
+{
+  "cycle": 169,
+  "date": "2026-10-02",
+  "platform": "visionOS 26.5 Simulator",
+  "deviceID": "E0A4415E-98B8-4FC3-B2A8-C140B736E6C2",
+  "finalTests": {
+    "bundle": ".codex-derived/replayxi-flow169/FinalLighting265-02.xcresult",
+    "passed": 280,
+    "failed": 0,
+    "skipped": 0
+  },
+  "focusedTests": {
+    "bundle": ".codex-derived/replayxi-flow169/FinalGuards265-01.xcresult",
+    "passed": 53,
+    "failed": 0,
+    "skipped": 0,
+    "note": "Preceded the late-headset-pose guard and final lighting; full280 rerun includes final code. Counts overlap."
+  },
+  "releaseBuilds": {
+    "unsignedDevice": "passed",
+    "simulator": "passed",
+    "deviceLog": "/private/tmp/replayxi169-light-device-release02.log",
+    "simulatorLog": "/private/tmp/replayxi169-light-sim-release02.log"
+  },
+  "stadiumSHA256": "78adb0f5fd3b240e65b3618cfcab045429827c1a94572648a5360b4aa1017c9e",
+  "mainSavedReviewSHA256Unchanged": "a472d19ff9b2f3495dab0b38d98c306dddfed2e2e0493c8a450ce82f4e9b18cb",
+  "evidence": {
+    "motionTimingStadium": ".codex-derived/replayxi-flow169/Final265-01.xcresult attachments; unchanged rendering in final02",
+    "surfaceControls": ".codex-derived/replayxi-flow169/Final265-02.xcresult attachments",
+    "playerLighting": ".codex-derived/replayxi-flow169/LightingGuard265-01.xcresult attachments;10 tests passed",
+    "roomFlatNative": "Final Debug app, isolated demo route, Room override for this launch only",
+    "headsetRun": false,
+    "measuredFPS": false
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "kind": "User-supplied OBJ ZIP; not Tripo-generated",
+    "file": "3d-model.obj.zip",
+    "sha256": "702ee7d612bcdb4450bb1676e86a781152594e221c975432951cb2bdb2f4d7b7",
+    "bytes": 308203,
+    "member": "3d-model.obj",
+    "memberSHA256": "6c19f80c4b201a3bc74e7d31f4fbb8723ca237e341885e579027b07270c65fb8",
+    "memberBytes": 1792919,
+    "hasMTL": false,
+    "hasTextures": false,
+    "license": "No license supplied in archive; ownership/licensing not independently verified"
+  },
+  "preparation": {
+    "candidate": "04",
+    "blender": "5.2.1 LTS",
+    "script": "Scripts/blender/prepare_supplied_stadium169.py",
+    "scriptSHA256": "fb052778f94ae237152c007b6899fa6450ad44005fdc867afa996d6e66abe2a1",
+    "calibration": "calibration.json",
+    "calibrationSHA256": "2e345e90822d7a3b9c0f5a22fb2fdec5b900eca3073bf4d31bdc68b1beeb6d78",
+    "uniformScaleMetresPerSourceUnit": 0.0010849341227817382,
+    "removedCentralFieldTriangles": 2,
+    "decimationApplied": false,
+    "minimumClearRectangleMetres": [74, 112],
+    "originalUVs": "Preserved in source; backed up to original-uv.npz in derived output",
+    "bakeMeshPositionIndexSHA256BeforeAndAfter": "1b041bbe96105998c6261929354459061c2d1cd82c7a01b9bc503fe2a85cce6a"
+  },
+  "authoredAppearance": {
+    "qualification": "Authored colours and baked shading, not recovered source textures; no added seats or Tripo content",
+    "linearRGBPalette": {
+      "structure": [0.045, 0.080, 0.125],
+      "seating": [0.060, 0.34, 0.36],
+      "steel": [0.33, 0.41, 0.47],
+      "fixtures": [0.64, 0.74, 0.76]
+    },
+    "atlasSize": [2048, 2048],
+    "colourSpace": "sRGB",
+    "bake": "CPU Cycles emission bake of palette × soft diffuse directional factor × local AO",
+    "cyclesSamples": 32,
+    "aoRays": 16,
+    "cpuThreads": 8,
+    "aoDistanceMetres": 4,
+    "aoFloor": 0.35,
+    "softDiffuseFactor": "0.78 + 0.25 * dot(upperHemisphereNormal, normalized(-0.35,-0.5,0.8))",
+    "uv": "Smart project 66 degrees; areaWeight0.5; islandMargin0.004; 8px bake padding"
+  },
+  "runtimeCandidate": {
+    "file": "ReplayXIStadium.usdz",
+    "sha256": "78adb0f5fd3b240e65b3618cfcab045429827c1a94572648a5360b4aa1017c9e",
+    "bytes": 3140045,
+    "triangles": 24768,
+    "meshes": 1,
+    "materials": 1,
+    "doubleSided": true,
+    "upAxis": "Y",
+    "metresPerUnit": 1,
+    "boundsMin": [-83.28208923339844, -0.8608310818672331, -98.12387084960938],
+    "boundsMax": [73.91756439208984, 28.079460144042983, 98.51128387451172],
+    "texture": "textures/SuppliedStadiumBakedColour.png",
+    "textureSHA256": "f85a504aef9486e0cbd452431424de1b421dfbdccaa12befce979aa1f005d5c5",
+    "offlineChecks": "Clearance SAT, unchanged bake geometry, unchanged bounds from03, packaged2K PNG hash, USDZ ARKit validation passed",
+    "nativeValidation": "Separate runtime admission and render tests; offline export makes no headset/performance claim"
+  }
+}

@@ -1,5 +1,5 @@
 {
-  "date": "2026-10-01",
+  "date": "2026-10-02",
   "startingBalance": 3145,
   "maximumCumulativeSpend": 2201,
   "minimumRemainingBalance": 944,
@@ -44,10 +44,25 @@
       "export": "../../Assets/ReplayXI/TripoFootballer/ReplayXI_Footballer_P2_Rigged.glb",
       "exportSHA256": "132f0c84715f9337ef98366fe7edbb00db9c72fd6d2530bff8ea863d712a4b34",
       "knownIssue": "GLB omits joint rest transforms; Blender movement QA failed. Not runtime ready. Blender FBX export was blocked by Chrome and requested from the user."
+    },
+    {
+      "purpose": "One original stadium bowl for Replay XI surroundings",
+      "date": "2026-10-02",
+      "model": "H3.1 - Best Quality",
+      "count": 1,
+      "privacy": "Private",
+      "quotedCredits": 55,
+      "balanceBefore": 2170,
+      "balanceAfterSubmission": 2115,
+      "assetID": "b067b86f-71dd-4e19-ad05-a77eed47e092",
+      "freeRetriesUsed": 1,
+      "exportSHA256": "aae231097b214a73716697d2239043ddeea07541489753a0052c1bf97abba059",
+      "reportedFaces": 1932614,
+      "status": "first candidate rejected after visual inspection (missing/floating stands); one free retry started, balance unchanged. User supplied an OBJ replacement before retry completion. No Tripo stadium admitted to runtime."
     }
   ],
-  "verifiedCreditsSpent": 40,
-  "latestObservedBalance": 3050,
-  "unattributedBalanceDecrease": 55,
-  "balanceNote": "Balance fell a further 55 after our 40-credit jobs. This is a shared account; no additional paid job was submitted by this task. Recheck live balance before further spending."
+  "verifiedCreditsSpent": 95,
+  "latestObservedBalance": 2115,
+  "unattributedBalanceDecrease": 935,
+  "balanceNote": "Shared balance was 2170 before the stadium job, and 2115 after its verified 55-credit charge. Other balance changes are unattributed. Recheck live balance before further spending; preserve the 944-credit floor."
 }

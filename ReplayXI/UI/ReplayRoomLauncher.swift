@@ -5,6 +5,10 @@ import SwiftUI
 @MainActor
 enum ReplayRoomLauncher {
     static func prepareVisuals(for scenarios: [ReplayScenario]) throws {
+        ReplayStadiumEnvironment.prewarm()
+        // The supplied bowl is optional; missing or changed scenery keeps the
+        // low-cost local fallback without blocking replay or annotations.
+        _ = try? ReplayStadiumAssetProvider.prewarm()
         // Meshes and geometric shirt digits are finite and shared.
         // Warm them before RealityView starts its frame loop so the
         // first close player or impact cue cannot hitch playback.
@@ -77,9 +81,19 @@ enum ReplayRoomLauncher {
     }
 
     static func open(store: ReplayStore, openImmersiveSpace: OpenImmersiveSpaceAction,
-                     dismissWindow: DismissWindowAction) {
+                     dismissWindow: DismissWindowAction,
+                     annotationEntry: ReplayAnnotationEntrySession? = nil) {
+        if annotationEntry != nil, let reason = ReplayAnnotationEntryPolicy.blockReason(in: store) {
+            store.statusMessage = reason
+            return
+        }
         guard let requestID = store.beginImmersiveOpen() else { return }
+        annotationEntry?.request(roomID: requestID, scenarioID: store.selectedScenarioID)
         Task {
+            var didOpen = false
+            defer {
+                if !didOpen { annotationEntry?.cancel(roomID: requestID) }
+            }
             do {
                 try prepareVisuals(for: store.scenarios)
             } catch {
@@ -114,6 +128,7 @@ enum ReplayRoomLauncher {
             let result = await openImmersiveSpace(id: "ReplayRoom", value: requestID)
             guard store.completeImmersiveOpen(requestID, opened: result == .opened) else { return }
             if result == .opened {
+                didOpen = true
                 dismissWindow(id: "ReplayDashboard")
             } else {
                 store.statusMessage = "The immersive room did not open. Try again."

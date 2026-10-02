@@ -21,7 +21,7 @@ enum ReplayAppMode: String, CaseIterable, Identifiable, Hashable, Sendable {
     var subtitle: String {
         switch self {
         case .situationRoleplay: "3D plays, POVs and annotations"
-        case .matchReplay: "Video-referenced match studies"
+        case .matchReplay: "Match studies with 3D annotations"
         }
     }
 

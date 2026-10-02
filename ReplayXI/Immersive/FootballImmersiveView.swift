@@ -3,6 +3,7 @@ import SwiftUI
 
 struct FootballImmersiveView: View {
     @Environment(ReplayStore.self) private var store
+    @Environment(ReplayAnnotationEntrySession.self) private var annotationEntry: ReplayAnnotationEntrySession?
     @Environment(LocalPitchAnchorCoordinator.self) private var sharedSpace
     @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
     @Environment(\.openWindow) private var openWindow
@@ -12,6 +13,8 @@ struct FootballImmersiveView: View {
     @AppStorage("ReplayXI.PlaybackControlDeckSize") private var controlDeckSize = 1.0
     @AppStorage(ReplayPlayerDetail.storageKey) private var playerDetailRawValue =
         ReplayPlayerDetail.defaultSelection.rawValue
+    @AppStorage(ReplayEnvironmentMode.storageKey) private var environmentModeRawValue =
+        ReplayEnvironmentMode.defaultSelection.rawValue
     @State private var selectedAnnotationID: UUID?
     @State private var annotationHandleDrag = AnnotationHandleDragController()
     private var draggedAnnotationTarget: AnnotationSceneTarget? { annotationHandleDrag.target }
@@ -31,6 +34,12 @@ struct FootballImmersiveView: View {
     @State private var pitchTrackingOwner = UUID()
     @State private var nativeAdmission = NativeReplaySceneAdmission()
     @State private var nativePreparationRetry = 0
+    @State private var surfaceScanRequest: UUID?
+    @State private var surfaceCandidate: ReplayPitchSurfaceSnap.Placement?
+    @State private var surfacePlacement: ReplayPitchSurfaceSnap.Placement?
+    @State private var surfaceSearchPosition = SIMD3<Float>(0, 0.92, -3.15)
+    @State private var surfaceHasSearchPose = false
+    @State private var surfaceStatusText = "Find a floor or table. The pitch stays level."
     let roomPresentationID: UUID
 
     private var acceptsRoomInteraction: Bool {
@@ -99,6 +108,7 @@ struct FootballImmersiveView: View {
             if let root {
                 updateMatchRoot(root)
             }
+            updateEnvironment(in: content, matchRoot: root)
             addAttachments(
                 to: content,
                 attachments: attachments,
@@ -127,6 +137,7 @@ struct FootballImmersiveView: View {
             if let root {
                 updateMatchRoot(root)
             }
+            updateEnvironment(in: content, matchRoot: root)
             // Recenter only on explicit request, never on head or player motion.
             if let controlsAnchor = content.entities.first(where: {
                 $0.name == PlaybackAttachmentPlacement.anchorName
@@ -170,7 +181,8 @@ struct FootballImmersiveView: View {
                     isPinchDrawing: annotationStroke != nil,
                     isPinchDrawingReady: annotationStroke?.isReadyToCommit == true,
                     recenterControls: recenterControls,
-                    exit: exitRoom
+                    exit: exitRoom,
+                    roomPresentationID: roomPresentationID
                         )
                     } else {
                         nativePreparationPanel
@@ -186,7 +198,8 @@ struct FootballImmersiveView: View {
                     PlaybackViewOverlayHUD(
                         showsPlaybackAnnotations: $showsPlaybackAnnotations,
                         emphasizesBall: $emphasizesBall,
-                        recenterControls: recenterControls
+                        recenterControls: recenterControls,
+                        surfaceControls: pitchSurfaceControls
                     )
                     .frame(width: viewHUDLayout.attachmentWidth)
                     .disabled(workspaceMove.isActive)
@@ -222,6 +235,33 @@ struct FootballImmersiveView: View {
         .task(id: NativeReplaySceneAdmission.TaskID(scenarioID: store.selectedScenarioID,
                                                      retry: nativePreparationRetry)) {
             await prepareSelectedNativeScene()
+        }
+        .task(id: surfaceScanRequest) {
+            guard let request = surfaceScanRequest else {
+                await sharedSpace.stopSurfaceDetection(for: pitchTrackingOwner)
+                return
+            }
+            guard canEditPitchPlacement else { return }
+            await sharedSpace.startSurfaceDetection(for: pitchTrackingOwner)
+            guard !Task.isCancelled, surfaceScanRequest == request,
+                  acceptsRoomInteraction, surfaceModeIsAvailable else { return }
+            // World tracking may deliver its first pose after plane startup.
+            // Capture once per scan; never offer a surface near a stale origin
+            // or move the target continually with the wearer's head.
+            for _ in 0..<25 {
+                guard !Task.isCancelled, surfaceScanRequest == request,
+                      acceptsRoomInteraction, surfaceModeIsAvailable else { return }
+                refreshSurfaceCandidate()
+                if surfaceHasSearchPose { break }
+                if case .unavailable = sharedSpace.surfaceDetectionStatus { break }
+                do { try await Task.sleep(for: .milliseconds(200)) }
+                catch { return }
+            }
+        }
+        .onChange(of: sharedSpace.surfaceRevision) { _, _ in refreshSurfaceCandidate() }
+        .onChange(of: sharedSpace.surfaceDetectionStatus) { _, _ in refreshSurfaceCandidate() }
+        .onChange(of: surfaceModeIsAvailable) { _, available in
+            if !available { cancelSurfaceSearch() }
         }
         .task(id: store.selectedScenario.kind) {
             guard !Task.isCancelled, store.roomPresentation.owns(roomPresentationID),
@@ -272,6 +312,8 @@ struct FootballImmersiveView: View {
             }
         }
         .onDisappear {
+            surfaceScanRequest = nil
+            annotationEntry?.cancel(roomID: roomPresentationID)
             nativeAdmission.cancel()
             cancelWorkspaceMove()
             accessibilityActivationSubscription?.cancel()
@@ -311,6 +353,7 @@ struct FootballImmersiveView: View {
             annotationStroke = nil
         }
         .onChange(of: store.selectedScenarioID) { _, _ in
+            cancelSurfaceSearch()
             cancelWorkspaceMove(rejectCurrentGesture: workspaceMove.isActive)
             annotationStroke = nil
             annotationHandleDrag.cancelCurrent(in: store)
@@ -412,6 +455,41 @@ struct FootballImmersiveView: View {
             _ = nativeAdmission.fail(request: request, currentScenarioID: store.selectedScenarioID,
                 roomIsOwned: store.roomPresentation.owns(roomPresentationID) && !store.isClosingImmersive)
         }
+    }
+
+    private func updateEnvironment(in content: RealityViewContent, matchRoot: Entity?) {
+        let mode = ReplayEnvironmentMode.effective(environmentModeRawValue,
+            isPhysicalPractice: store.selectedScenario.kind == .shapeLab || store.triangleLockMode == .place)
+        let enabled = mode == .stadium
+        // Keep resources and entities through toggle/seek changes. No model
+        // import, texture creation or collision work belongs in playback ticks.
+        var sky = content.entities.first { $0.name == ReplayStadiumEnvironment.skyRootName }
+        var stadium = content.entities.first { $0.name == ReplayStadiumEnvironment.stadiumRootName }
+        var lighting = content.entities.first { $0.name == ReplayStadiumEnvironment.lightingRootName }
+        if enabled, sky == nil {
+            let made = ReplayStadiumEnvironment.makeSkyRoot()
+            content.add(made)
+            sky = made
+        }
+        if enabled, stadium == nil {
+            let made = ReplayStadiumAssetProvider.makeInstance() ?? ReplayStadiumEnvironment.makeStadium()
+            made.name = ReplayStadiumEnvironment.stadiumRootName
+            content.add(made)
+            stadium = made
+        }
+        if enabled, lighting == nil {
+            let made = ReplayStadiumEnvironment.makeReplayLighting()
+            content.add(made)
+            lighting = made
+        }
+        if sky?.isEnabled != enabled { sky?.isEnabled = enabled }
+        if stadium?.isEnabled != enabled { stadium?.isEnabled = enabled }
+        if lighting?.isEnabled != enabled { lighting?.isEnabled = enabled }
+        guard enabled, let stadium else { return }
+        // POV shares pitch coordinates. Table/touchline keeps the full-size
+        // bowl around the wearer; miniature front stands hide annotation tools.
+        let wanted = store.viewMode == .firstPerson ? (matchRoot?.transform ?? .identity) : .identity
+        if stadium.transform != wanted { stadium.transform = wanted }
     }
 
     private func addAttachments(
@@ -545,7 +623,115 @@ struct FootballImmersiveView: View {
             emphasizesBall: emphasizesBall,
             playerDetail: playerDetail
         )
+        if surfaceModeIsAvailable, let surfacePlacement {
+            root.transform = Transform(matrix: surfacePlacement.worldTransform)
+            root.scale = SIMD3<Float>(repeating: 0.0255 * surfacePlacement.scaleFactor)
+        }
         applyLocalOverlayVisibility(to: root)
+    }
+
+    private var surfaceModeIsAvailable: Bool {
+        store.selectedScenario.kind != .shapeLab && store.viewMode == .tacticalTable
+            && ReplayEnvironmentMode.effective(environmentModeRawValue, isPhysicalPractice: false) == .room
+    }
+
+    private var pitchSurfaceControls: ReplaySurfacePlacementControls {
+        ReplaySurfacePlacementControls(
+            targetLabel: surfaceCandidate?.surfaceKind.rawValue.capitalized,
+            statusText: surfaceStatusText,
+            isBusy: surfaceSearchIsBusy,
+            isScanning: surfaceScanRequest != nil,
+            hasPlacement: surfacePlacement != nil,
+            canEdit: canEditPitchPlacement,
+            findSurface: findPitchSurface, place: placePitchOnSurface,
+            reset: resetPitchSurface, cancel: cancelSurfaceSearch)
+    }
+
+    private var surfaceSearchIsBusy: Bool {
+        guard surfaceScanRequest != nil, surfaceCandidate == nil else { return false }
+        switch sharedSpace.surfaceDetectionStatus {
+        case .stopped, .starting, .scanning: return true
+        case .ready, .unavailable: return false
+        }
+    }
+
+    private var canEditPitchPlacement: Bool {
+        surfaceModeIsAvailable && acceptsMatchInteraction && store.canChangePlaybackView
+            && !workspaceMove.isActive && !store.isDrawing && annotationStroke == nil
+            && !store.hasActiveTimelineScrub && !store.hasActiveCoachMarkGeometryPreview
+            && store.pendingAnnotationTimingEditID == nil
+    }
+
+    private func findPitchSurface() {
+        guard canEditPitchPlacement else { return }
+        store.setPlaying(false, broadcast: false)
+        surfaceCandidate = nil
+        surfaceHasSearchPose = false
+        surfaceSearchPosition = surfacePlacement.map {
+            [$0.worldTransform.columns.3.x, $0.worldTransform.columns.3.y, $0.worldTransform.columns.3.z]
+        } ?? [0, 0.92, -3.15]
+        surfaceStatusText = "Look at a floor or table near you."
+        surfaceScanRequest = UUID()
+    }
+
+    private func refreshSurfaceCandidate() {
+        guard surfaceScanRequest != nil, surfaceModeIsAvailable else { return }
+        if !surfaceHasSearchPose, let device = sharedSpace.currentWorldDeviceTransform {
+            let forward = SIMD2<Float>(-device.columns.2.x, -device.columns.2.z)
+            let length = simd_length(forward)
+            if length.isFinite, length > 0.01 {
+                let offset = forward / length * 1.4
+                surfaceSearchPosition = [device.columns.3.x + offset.x,
+                    device.columns.3.y - 0.75, device.columns.3.z + offset.y]
+                surfaceHasSearchPose = true
+            }
+        }
+        guard surfaceHasSearchPose else {
+            surfaceCandidate = nil
+            if case let .unavailable(reason) = sharedSpace.surfaceDetectionStatus {
+                surfaceStatusText = reason
+            } else {
+                surfaceStatusText = "Waiting for headset tracking. Keep looking towards a floor or table."
+            }
+            return
+        }
+        surfaceCandidate = sharedSpace.snapPitchToSurface(near: surfaceSearchPosition, yawRadians: 0)
+        if let candidate = surfaceCandidate {
+            let percent = Int((candidate.scaleFactor * 100).rounded())
+            surfaceStatusText = "\(candidate.surfaceKind.rawValue.capitalized) found · \(percent)% size. Tap Place to confirm."
+        } else if case let .unavailable(reason) = sharedSpace.surfaceDetectionStatus {
+            surfaceStatusText = reason
+        } else {
+            surfaceStatusText = "Look at a clear floor or table. Only surfaces that fit the pitch are offered."
+        }
+    }
+
+    private func placePitchOnSurface() {
+        guard canEditPitchPlacement, let candidate = surfaceCandidate,
+              let current = sharedSpace.snapPitchToSurface(near: surfaceSearchPosition, yawRadians: 0,
+                  preferredSurfaceID: candidate.surfaceID) else {
+            refreshSurfaceCandidate()
+            return
+        }
+        store.setPlaying(false, broadcast: false)
+        surfacePlacement = current
+        surfaceStatusText = "Placed on \(current.surfaceKind.rawValue.lowercased()). Controls stay in place."
+        surfaceCandidate = nil
+        surfaceScanRequest = nil
+    }
+
+    private func cancelSurfaceSearch() {
+        surfaceCandidate = nil
+        surfaceScanRequest = nil
+        surfaceStatusText = surfacePlacement == nil
+            ? "Find a floor or table. The pitch stays level."
+            : "Pitch placement kept. Reset returns it to the default position."
+    }
+
+    private func resetPitchSurface() {
+        guard canEditPitchPlacement else { return }
+        surfacePlacement = nil
+        cancelSurfaceSearch()
     }
 
     /// Hide local render/edit affordances without changing saved annotations.
@@ -1426,9 +1612,12 @@ enum AnnotationJoystickAccessibility {
 private struct PlaybackViewOverlayHUD: View {
     @Environment(ReplayStore.self) private var store
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @AppStorage(ReplayEnvironmentMode.storageKey) private var environmentModeRawValue =
+        ReplayEnvironmentMode.defaultSelection.rawValue
     @Binding var showsPlaybackAnnotations: Bool
     @Binding var emphasizesBall: Bool
     let recenterControls: () -> Void
+    var surfaceControls: ReplaySurfacePlacementControls? = nil
     @State private var isExpanded = false
 
     var body: some View {
@@ -1546,6 +1735,12 @@ private struct PlaybackViewOverlayHUD: View {
                         }
                     }
                 }
+                environmentChoices
+                if store.viewMode == .tacticalTable,
+                   ReplayEnvironmentMode.effective(environmentModeRawValue, isPhysicalPractice: false) == .room,
+                   let surfaceControls {
+                    surfaceControls
+                }
             }
         }
         .padding(11)
@@ -1562,6 +1757,32 @@ private struct PlaybackViewOverlayHUD: View {
                 isExpanded = true
             }
             #endif
+        }
+    }
+
+    private var environmentChoices: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Eyebrow(text: "Surroundings", color: ReplayTheme.cyan)
+            HStack(spacing: 6) {
+                ForEach(ReplayEnvironmentMode.allCases) { mode in
+                    Button {
+                        store.setPlaying(false, broadcast: false)
+                        environmentModeRawValue = mode.rawValue
+                    } label: {
+                        Label(mode.title, systemImage: mode.systemImage)
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity, minHeight: 60)
+                            .foregroundStyle(environmentModeRawValue == mode.rawValue ? .black : .white)
+                            .background(environmentModeRawValue == mode.rawValue
+                                ? ReplayTheme.signal : .white.opacity(0.10), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!store.canChangePlaybackView)
+                    .accessibilityAddTraits(environmentModeRawValue == mode.rawValue ? .isSelected : [])
+                    .accessibilityHint(mode == .room
+                        ? "Shows your real surroundings" : "Hides passthrough. Stay seated or planted")
+                }
+            }
         }
     }
 
@@ -1922,6 +2143,7 @@ func playbackPOVControlsForTesting(width: CGFloat, showsRoster: Bool) -> some Vi
 
 private struct ImmersiveControlDeck: View {
     @Environment(ReplayStore.self) private var store
+    @Environment(ReplayAnnotationEntrySession.self) private var annotationEntry: ReplayAnnotationEntrySession?
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var annotationConfirmation: String?
     @State private var showsEventStrip = false
@@ -1958,6 +2180,7 @@ private struct ImmersiveControlDeck: View {
     let isPinchDrawingReady: Bool
     let recenterControls: () -> Void
     let exit: () -> Void
+    var roomPresentationID: UUID? = nil
 
     #if DEBUG
     var showsPOVControlsOnlyForTesting = false
@@ -2036,6 +2259,8 @@ private struct ImmersiveControlDeck: View {
             cancelInterruptedTimelineScrub()
             releaseTimingDraftOwnership()
         }
+        .onChange(of: annotationEntry?.pending, initial: true) { _, _ in consumeAnnotationEntry() }
+        .onChange(of: store.roomPresentation) { _, _ in consumeAnnotationEntry() }
         .onChange(of: timelineScrubIsActive) { wasActive, isActive in
             guard wasActive, !isActive, timelineScrubState != nil else { return }
             // A normal lift clears the transaction in `onEnded` first. Reaching
@@ -2170,6 +2395,24 @@ private struct ImmersiveControlDeck: View {
             }
             #endif
         }
+    }
+
+    private func consumeAnnotationEntry() {
+        guard let roomPresentationID,
+              store.roomPresentation.acceptsInteraction(for: roomPresentationID),
+              let annotationEntry,
+              annotationEntry.consume(roomID: roomPresentationID, scenarioID: store.selectedScenarioID)
+        else { return }
+        guard store.localRole == .coach, !store.isDrawing,
+              !timingDraftSession.hasUnsavedChanges, !store.hasActiveCoachMarkGeometryPreview else { return }
+        showsPlaybackAnnotations = true
+        selectedAnnotationID = nil
+        inlinePanel = nil
+        showsToolsShelf = false
+        showsDecisionStrip = false
+        showsEventStrip = false
+        showsPlayerGrid = false
+        showsAnnotationTools = true
     }
 
     /// Match and Shape share the same annotation state. Keeping its observers
@@ -4734,7 +4977,7 @@ private struct ImmersiveControlDeck: View {
                     .buttonStyle(.bordered)
                     .accessibilityLabel("Annotation timing and position keys")
                     .accessibilityValue(annotationDurationLabel(mark))
-                    .accessibilityHint("Set In and Out times and animate positions between timestamps")
+                    .accessibilityHint("Set Start and End times. Position animation is optional.")
                     .accessibilityAddTraits(
                         inlinePanel == .annotationDuration(mark.id) ? .isSelected : []
                     )

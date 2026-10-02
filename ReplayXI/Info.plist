@@ -4,6 +4,8 @@
 <dict>
 	<key>CFBundleDisplayName</key>
 	<string>Replay XI</string>
+	<key>NSWorldSensingUsageDescription</key>
+	<string>Replay XI detects floors and tables so you can place the replay pitch on a real surface. Room data stays on this device.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationPreferredDefaultSceneSessionRole</key>

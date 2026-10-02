@@ -4,9 +4,15 @@ struct ReplayDashboardView: View {
     @Environment(ReplayStore.self) private var store
     @Environment(LocalPitchAnchorCoordinator.self) private var sharedSpace
     @Environment(ReplayConversionPreviewSession.self) private var comparisonSession
+    @Environment(ReplayAnnotationEntrySession.self) private var annotationEntry: ReplayAnnotationEntrySession?
     @Environment(\.openImmersiveSpace) private var openImmersiveSpace
     @Environment(\.dismissWindow) private var dismissWindow
     @Environment(\.openWindow) private var openWindow
+
+    private var annotationAction: (() -> Void)? {
+        guard annotationEntry != nil else { return nil }
+        return { openAnnotations() }
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -15,7 +21,8 @@ struct ReplayDashboardView: View {
 
             Divider().opacity(0.5)
 
-            ScenarioWorkspace(openRoom: openRoom, openComparison: openComparison)
+            ScenarioWorkspace(openRoom: openRoom, openComparison: openComparison,
+                              openAnnotations: annotationAction)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             Divider().opacity(0.5)
@@ -115,7 +122,10 @@ struct ReplayDashboardView: View {
             if arguments.contains("--replayxi-comparison") {
                 openComparison()
             }
-            if arguments.contains("--replayxi-autostart") {
+            if arguments.contains("--replayxi-annotate-autostart") {
+                try? await Task.sleep(for: .milliseconds(750))
+                openAnnotations()
+            } else if arguments.contains("--replayxi-autostart") {
                 try? await Task.sleep(for: .milliseconds(750))
                 openRoom()
             }
@@ -126,6 +136,12 @@ struct ReplayDashboardView: View {
     private func openRoom() {
         ReplayRoomLauncher.open(store: store, openImmersiveSpace: openImmersiveSpace,
                                 dismissWindow: dismissWindow)
+    }
+
+    private func openAnnotations() {
+        guard let annotationEntry else { return }
+        ReplayRoomLauncher.open(store: store, openImmersiveSpace: openImmersiveSpace,
+                                dismissWindow: dismissWindow, annotationEntry: annotationEntry)
     }
 
     private func openComparison() {
@@ -362,6 +378,7 @@ private struct ScenarioWorkspace: View {
 
     let openRoom: () -> Void
     let openComparison: () -> Void
+    let openAnnotations: (() -> Void)?
 
     var scenario: ReplayScenario { store.selectedScenario }
 
@@ -445,6 +462,28 @@ private struct ScenarioWorkspace: View {
                     shapeFocusStage: scenario.kind == .shapeLab ? store.shapeFocusStage : nil
                 )
                 .frame(height: scenario.kind == .shapeLab ? 310 : 290)
+
+                if let openAnnotations {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Button(action: openAnnotations) {
+                            Label("Annotate in 3D", systemImage: "pencil.and.outline")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(ReplayTheme.orange)
+                        .foregroundStyle(.black)
+                        .disabled(ReplayAnnotationEntryPolicy.blockReason(in: store) != nil)
+                        .accessibilityHint("Pauses at this replay time and opens drawing tools on the 3D pitch.")
+                        Text(ReplayAnnotationEntryPolicy.blockReason(in: store)
+                            ?? (scenario.kind == .realWorldReplay
+                                ? "Add timed marks to this 3D replay. Source video is separate."
+                                : "Add timed marks to the 3D pitch at this replay time."))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
 
                 if scenario.kind == .shapeLab {
                     ShapeFocusDashboard(openRoom: openRoom)

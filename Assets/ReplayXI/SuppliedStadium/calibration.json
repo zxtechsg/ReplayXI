@@ -1,0 +1,13 @@
+{
+  "sourceSHA256": "702ee7d612bcdb4450bb1676e86a781152594e221c975432951cb2bdb2f4d7b7",
+  "sourceOpeningCenter": [4315.703125, 178.54296875, 793.4456176757812],
+  "rotationDegreesXYZ": [0, 0, 0],
+  "sourceOpeningSize": [68206.90625, 111179.9921875],
+  "safetyMarginMetres": [3, 3.5],
+  "scaleMode": "uniform",
+  "removeObjects": [],
+  "removeMaterials": [],
+  "removeInteriorBelowMetres": 1.35,
+  "authoredPalette": "replay-navy-teal-steel-v1",
+  "notes": "Measured original Layer0_001 face3235: the sloped field quadrilateral has X[-29787.75,38419.15625] at south and X[-29787.75,43012.25] at north; Y[-55411.453125,55768.5390625]. Use its inscribed axis-aligned rectangle, not stadium outside bounds. Lowest field level793.4456177 becomes0m. Uniform scale fits74m width; this extra metre each side also brings the north canopy fully outside the required112m clear length (an initial72m fit left roof triangles over the112m opening). Explicit1.35m low-interior removal covers the entire supplied sloped field while keeping higher terraces. No source MTL or textures supplied. Preserve all remaining original vertices/faces apart from triangulation and stated floor removal. Render and geometry audit must confirm clearance."
+}
