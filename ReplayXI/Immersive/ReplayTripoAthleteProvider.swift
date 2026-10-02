@@ -8,14 +8,18 @@ import UIKit
 @MainActor
 enum ReplayTripoAthleteProvider {
     // Filled only from the audited native build, never from downloaded GLBs.
-    static let assetSHA256 = "b06a0f95decdec70bb92c148807186d581d15bc821f651f5fc2929a3484efaa0"
-    static let lowAssetSHA256 = "bceb8575bb26cc8b647638beca1177109fdee482f01ba436c84593cfc9541914"
+    static let assetSHA256 = "25585fd5fff5dc0060178c52fa559fe217773acfeab1b578d44174cb85e890db"
+    static let lowAssetSHA256 = "343a8ef2527ac236a20c1bbe73202f650829be008c1d5381b3618f35933b349d"
     static let motionSHA256 = "525b42f4377d16644d81dc46456169be33818ec806e37ffd18a7a2041072b4f2"
-    static let contactSHA256 = "f22677d2514cac26ba1c95cec22b49f707b95d9494c9373b8f37aba3859053d7"
-    static let lowContactSHA256 = "31a53bff5255b025080bb117b4e14c3f6423dca1e1596c43e4e66f9ae8c29283"
+    static let contactSHA256 = "054a10f93888f6ac4ac0a1505929ae1f4f9d4695d5dd418ba2a6fc815818fa05"
+    static let lowContactSHA256 = "6efcdcd2a3df2fd4f48948e32f62b400c6750dec79480a7afd12262a83dd5061"
+    // Contact sidecars describe the original UV-split source vertex arrays.
+    // RealityKit expands welded USD face-varying UVs to its own vertex arrays.
     static let skinVertices = 9_075
+    static let importedSkinVertices = 9_075
     static let skinTriangles = 7_685
     static let lowSkinVertices = 3_269
+    static let lowImportedSkinVertices = 3_267
     static let lowSkinTriangles = 1_964
     static let materialDrawsPerInstance = 3 // One skin plus front/back numbers.
     static let decodedTextureBytes = 3 * 2_048 * 2_048 * 4 // Base levels only.
@@ -44,11 +48,13 @@ enum ReplayTripoAthleteProvider {
             data: data("ReplayXITripoMotion", "json", hash: motionSHA256, in: bundle), profile: .tripo52)
         let preparedNear = try loadSkin(name: "ReplayXITripoAthlete", hash: assetSHA256,
             contactName: "ReplayXITripoContactSurface", contactHash: contactSHA256,
-            vertices: skinVertices, triangles: skinTriangles, detail: .near,
+            sourceVertices: skinVertices, importedVertices: importedSkinVertices,
+            triangles: skinTriangles, detail: .near,
             motion: preparedMotion, bundle: bundle)
         let preparedLow = try loadSkin(name: "ReplayXITripoLow", hash: lowAssetSHA256,
             contactName: "ReplayXITripoLowContactSurface", contactHash: lowContactSHA256,
-            vertices: lowSkinVertices, triangles: lowSkinTriangles, detail: .lowDetail,
+            sourceVertices: lowSkinVertices, importedVertices: lowImportedSkinVertices,
+            triangles: lowSkinTriangles, detail: .lowDetail,
             motion: preparedMotion, bundle: bundle)
         var preparedKits: [PhysicallyBasedMaterial] = []
         for (index, kit) in ["Home", "Away", "Keeper"].enumerated() {
@@ -88,14 +94,16 @@ enum ReplayTripoAthleteProvider {
     }
 
     private static func loadSkin(name: String, hash: String, contactName: String, contactHash: String,
-                                 vertices: Int, triangles: Int, detail: ReplaySkinnedAthleteProvider.Detail,
+                                 sourceVertices: Int, importedVertices: Int, triangles: Int,
+                                 detail: ReplaySkinnedAthleteProvider.Detail,
                                  motion: ReplaySkinnedAthleteMotion, bundle: Bundle) throws -> Skin {
         let url = try resource(name, "usdz", in: bundle)
         _ = try checkedData(url, hash: hash)
         let contact = try ReplaySkinnedAthleteContactSurface(
             data: data(contactName, "json", hash: contactHash, in: bundle), motion: motion,
             assetSHA256: hash, motionSHA256: motionSHA256,
-            profile: detail == .near ? .tripoNear(sourceVertexCount: vertices) : .tripoLow(sourceVertexCount: vertices))
+            profile: detail == .near ? .tripoNear(sourceVertexCount: sourceVertices)
+                                    : .tripoLow(sourceVertexCount: sourceVertices))
         guard (64...96).contains(contact.headerProbeCount) else {
             throw ReplaySkinnedAthleteError.invalidSkeleton
         }
@@ -109,9 +117,14 @@ enum ReplayTripoAthleteProvider {
         let parts = component.mesh.contents.models.flatMap { Array($0.parts) }
         guard component.materials.count == 1, component.materials[0] is PhysicallyBasedMaterial,
               parts.count == 1, let part = parts.first, part.id == "Body", part.materialIndex == 0,
-              part.positions.count == vertices,
+              part.positions.count == importedVertices,
+              part.normals?.rate == .vertex, part.normals?.count == importedVertices,
+              part.textureCoordinates?.rate == .vertex,
+              part.textureCoordinates?.count == importedVertices,
+              part.jointInfluences?.influences.count == importedVertices * 4,
               (part.triangleIndices?.count ?? 0) == triangles * 3,
-              let boots = ReplaySkinnedAthleteBootMarkers(model: model, motion: motion, maximumVertices: vertices)
+              let boots = ReplaySkinnedAthleteBootMarkers(model: model, motion: motion,
+                                                          maximumVertices: sourceVertices)
         else { throw ReplaySkinnedAthleteError.invalidMaterials }
         guard let _ = ReplaySkinnedAthleteFootballPose(motion: motion, bootMarkers: boots),
               let _ = ReplaySkinnedAthleteImpactPose(motion: motion, contactSurface: contact)

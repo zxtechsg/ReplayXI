@@ -1,16 +1,20 @@
 {
   "assets": {
     "low": {
+      "authoredUSDPointCount": 1118,
       "drawCalls": 1,
       "jointCount": 52,
-      "sha256": "bceb8575bb26cc8b647638beca1177109fdee482f01ba436c84593cfc9541914",
+      "sha256": "343a8ef2527ac236a20c1bbe73202f650829be008c1d5381b3618f35933b349d",
+      "sourceVertices": 3269,
       "triangles": 1964,
       "vertices": 3269
     },
     "near": {
+      "authoredUSDPointCount": 4096,
       "drawCalls": 1,
       "jointCount": 52,
-      "sha256": "b06a0f95decdec70bb92c148807186d581d15bc821f651f5fc2929a3484efaa0",
+      "sha256": "25585fd5fff5dc0060178c52fa559fe217773acfeab1b578d44174cb85e890db",
+      "sourceVertices": 9075,
       "triangles": 7685,
       "vertices": 9075
     }
@@ -99,20 +103,20 @@
   },
   "files": {
     "ReplayXITripoAthlete.usdz": {
-      "bytes": 646984,
-      "sha256": "b06a0f95decdec70bb92c148807186d581d15bc821f651f5fc2929a3484efaa0"
+      "bytes": 554459,
+      "sha256": "25585fd5fff5dc0060178c52fa559fe217773acfeab1b578d44174cb85e890db"
     },
     "ReplayXITripoContactSurface.json": {
       "bytes": 61310,
-      "sha256": "f22677d2514cac26ba1c95cec22b49f707b95d9494c9373b8f37aba3859053d7"
+      "sha256": "054a10f93888f6ac4ac0a1505929ae1f4f9d4695d5dd418ba2a6fc815818fa05"
     },
     "ReplayXITripoLow.usdz": {
-      "bytes": 339995,
-      "sha256": "bceb8575bb26cc8b647638beca1177109fdee482f01ba436c84593cfc9541914"
+      "bytes": 272850,
+      "sha256": "343a8ef2527ac236a20c1bbe73202f650829be008c1d5381b3618f35933b349d"
     },
     "ReplayXITripoLowContactSurface.json": {
       "bytes": 62983,
-      "sha256": "31a53bff5255b025080bb117b4e14c3f6423dca1e1596c43e4e66f9ae8c29283"
+      "sha256": "6efcdcd2a3df2fd4f48948e32f62b400c6750dec79480a7afd12262a83dd5061"
     },
     "ReplayXITripoMotion.json": {
       "bytes": 553281,
@@ -867,5 +871,6 @@
     "sourceGLB": "e4fbdbcf98c631d283733ff9f339dd2bf01877bf8ab81756b6fe274a25c10eb5",
     "sourceJPEG": "7988c03904f11099aae60730d77dd05b07126a9fac78ca5da66d543bda4d1431",
     "sourceReport": "931a3e0f0329a2b53eb0d39b492a76116faa1d2f35b17888697f29699c54d7c0"
-  }
+  },
+  "usdTopologyMode": "welded-position-skin-faceVarying-uv"
 }

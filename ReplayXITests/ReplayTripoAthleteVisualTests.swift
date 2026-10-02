@@ -55,13 +55,6 @@ final class ReplayTripoAthleteVisualTests: XCTestCase {
                           view: .front, calibration: calibration)
         homeNear.model.model = original
         let savedJoints = homeNear.model.jointTransforms
-        var rebuilt = original
-        rebuilt.mesh = try MeshResource.generate(from: original.mesh.contents)
-        homeNear.model.model = rebuilt
-        homeNear.model.jointTransforms = savedJoints
-        try await capture(homeNear.root, label: "home-near-rebuilt-mesh-diagnostic", player: home,
-                          view: .front, calibration: calibration)
-        homeNear.model.model = original
         homeNear.model.jointTransforms = homeNear.motion.restPose.translations.indices.map { index in
             Transform(scale: homeNear.motion.restPose.scales[index],
                       rotation: homeNear.motion.restPose.rotations[index],

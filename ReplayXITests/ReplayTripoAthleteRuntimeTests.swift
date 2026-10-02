@@ -51,7 +51,18 @@ final class ReplayTripoAthleteRuntimeTests: XCTestCase {
             XCTAssertNotNil(ReplaySkinnedAthleteImpactPose(motion: first.motion, contactSurface: first.contactSurface))
             let component = try XCTUnwrap(first.model.model)
             let part = try XCTUnwrap(component.mesh.contents.models.first?.parts.first)
-            XCTAssertEqual(part.positions.count, detail == .near ? 9_075 : 3_269)
+            let sourceVertices = detail == .near ? ReplayTripoAthleteProvider.skinVertices
+                : ReplayTripoAthleteProvider.lowSkinVertices
+            let importedVertices = detail == .near ? ReplayTripoAthleteProvider.importedSkinVertices
+                : ReplayTripoAthleteProvider.lowImportedSkinVertices
+            XCTAssertEqual(sourceVertices, detail == .near ? 9_075 : 3_269)
+            XCTAssertEqual(importedVertices, detail == .near ? 9_075 : 3_267)
+            XCTAssertEqual(part.positions.count, importedVertices)
+            XCTAssertEqual(part.normals?.rate, .vertex)
+            XCTAssertEqual(part.normals?.count, importedVertices)
+            XCTAssertEqual(part.textureCoordinates?.rate, .vertex)
+            XCTAssertEqual(part.textureCoordinates?.count, importedVertices)
+            XCTAssertEqual(part.jointInfluences?.influences.count, importedVertices * 4)
             XCTAssertEqual(part.triangleIndices?.count, (detail == .near ? 7_685 : 1_964) * 3)
             XCTAssertTrue(first.update(at: 1.25, track: home,
                 locomotion: locomotion(home, time: 1.25, speed: 3.6), lookTarget: nil, ballAction: nil))
@@ -61,6 +72,57 @@ final class ReplayTripoAthleteRuntimeTests: XCTestCase {
         }
         XCTAssertEqual(ReplayTripoAthleteProvider.materialDrawsPerInstance, 3)
         XCTAssertEqual(ReplayTripoAthleteProvider.decodedTextureBytes, 50_331_648)
+    }
+
+    func testImportedTriangleCornersRetainPinnedSourceGeometryUVAndSkin() throws {
+        try ReplayTripoAthleteProvider.prewarm()
+        let track = try player()
+        // Old-v5 and welded-v6 RealityKit readbacks had identical ordered
+        // corners (zero position, UV and weight delta). No source path needed.
+        for (detail, expected) in [
+            (ReplaySkinnedAthleteProvider.Detail.near, UInt64(0x536e60d398cdadf1)),
+            (.lowDetail, UInt64(0xb24f17241abc4d6b)),
+        ] {
+            let skin = try ReplayTripoAthleteProvider.make(for: track, detail: detail)
+            XCTAssertEqual(skin.model.jointNames, skin.motion.jointNames)
+            let part = try XCTUnwrap(skin.model.model?.mesh.contents.models.first?.parts.first)
+            XCTAssertEqual(part.textureCoordinates?.rate, .vertex)
+            let positions = part.positions.elements
+            let uv = try XCTUnwrap(part.textureCoordinates).elements
+            let indices = try XCTUnwrap(part.triangleIndices).elements
+            let influences = try XCTUnwrap(part.jointInfluences).influences.elements
+            XCTAssertEqual(positions.count, uv.count)
+            XCTAssertEqual(influences.count, positions.count * 4)
+            XCTAssertEqual(indices.count, detail == .near ? 23_055 : 5_892)
+            XCTAssertEqual(cornerSignature(part), expected,
+                           "Imported triangle-corner geometry, UV, or skin changed")
+        }
+    }
+
+    private func cornerSignature(_ part: MeshResource.Part) -> UInt64 {
+        let positions = part.positions.elements
+        let uv = part.textureCoordinates!.elements
+        let indices = part.triangleIndices!.elements
+        let influences = part.jointInfluences!.influences.elements
+        var hash: UInt64 = 14_695_981_039_346_656_037
+        func feed(_ value: Float) {
+            let quantized = Int64((Double(value) * 100_000).rounded(.toNearestOrEven))
+            let bits = UInt64(bitPattern: quantized)
+            for shift in stride(from: 0, through: 56, by: 8) {
+                let byte = UInt8(truncatingIfNeeded: bits >> shift)
+                hash = (hash ^ UInt64(byte)) &* 1_099_511_628_211
+            }
+        }
+        for rawIndex in indices {
+            let index = Int(rawIndex)
+            let point = positions[index], coord = uv[index]
+            feed(point.x); feed(point.y); feed(point.z)
+            feed(coord.x); feed(coord.y)
+            let start = index * 4
+            for slot in 0..<4 { feed(Float(influences[start + slot].jointIndex)) }
+            for slot in 0..<4 { feed(influences[start + slot].weight) }
+        }
+        return hash
     }
 
     func testSeeksTouchesAndImpactsAreDeterministicForBothDetails() throws {

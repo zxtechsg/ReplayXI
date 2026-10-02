@@ -342,6 +342,66 @@ def mesh_data(document, binary, skin, scale, normal_mode="source"):
             "triangles": len(indices) // 3, "vertices": len(points)}
 
 
+def weld_body_uv_topology(body):
+    """Weld exact position+skin duplicates while moving UVs to face corners.
+
+    This changes only the authored USD point topology. Source body arrays remain
+    untouched so contact sampling and motion geometry keep source vertex counts.
+    """
+    points = np.asarray(body["points"])
+    normals = np.asarray(body["normals"])
+    joints = np.asarray(body["joints"])
+    weights = np.asarray(body["weights"])
+    uvs = np.asarray(body["uv"])
+    indices = np.asarray(body["indices"], dtype=np.int64)
+    if (points.ndim != 2 or points.shape[1] != 3 or normals.shape != points.shape
+            or joints.shape != weights.shape or len(points) != len(joints)
+            or uvs.shape != (len(points), 2) or len(indices) % 3
+            or np.any(indices < 0) or np.any(indices >= len(points))):
+        raise ValueError("invalid source body arrays for USD topology weld")
+
+    key_to_point = {}
+    remap = np.empty(len(points), dtype=np.int32)
+    representatives = []
+    groups = []
+    for source_index, (point, row, mass) in enumerate(zip(points, joints, weights)):
+        # These values are authored as USD Vec3f/FloatArray. Key at that exact
+        # storage precision, without a geometric epsilon or rounded tolerance.
+        key = (tuple(float(value) for value in np.asarray(point, dtype=np.float32))
+               + tuple(int(value) for value in row)
+               + tuple(float(value) for value in np.asarray(mass, dtype=np.float32)))
+        target = key_to_point.get(key)
+        if target is None:
+            target = len(representatives)
+            key_to_point[key] = target
+            representatives.append(source_index)
+            groups.append([])
+        remap[source_index] = target
+        groups[target].append(source_index)
+
+    for target, members in enumerate(groups):
+        reference = np.asarray(normals[representatives[target]], dtype=np.float32)
+        if any(not np.array_equal(np.asarray(normals[index], dtype=np.float32), reference)
+               for index in members):
+            raise ValueError("position+skin weld would merge divergent source normals")
+
+    representatives = np.asarray(representatives, dtype=np.int64)
+    mapped_indices = remap[indices]
+    return {
+        "points": points[representatives],
+        "normals": normals[representatives],
+        "uv": uvs[indices],
+        "indices": mapped_indices,
+        "joints": joints[representatives],
+        "weights": weights[representatives],
+        "triangles": int(body["triangles"]),
+        "vertices": len(representatives),
+        "sourceVertices": len(points),
+        "uvInterpolation": "faceVarying",
+        "sourceToUsdPoint": remap,
+    }
+
+
 def motion_clips(document, binary, skin, scale):
     animations = document.get("animations", [])
     clips = {}
@@ -418,7 +478,9 @@ def material(stage):
     return result
 
 
-def write_usd(path, joints, rests, binds, body, clips, source_hash):
+def write_usd(path, joints, rests, binds, body, clips, source_hash, weld_uv_topology=False):
+    usd_body = weld_body_uv_topology(body) if weld_uv_topology else {
+        **body, "uvInterpolation": "vertex", "sourceVertices": body["vertices"]}
     stage = Usd.Stage.CreateNew(str(path))
     UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.y)
     UsdGeom.SetStageMetersPerUnit(stage, 1)
@@ -436,19 +498,21 @@ def write_usd(path, joints, rests, binds, body, clips, source_hash):
     skel.CreateBindTransformsAttr(Vt.Matrix4dArray([usd_matrix(value) for value in binds]))
     skel.CreateRestTransformsAttr(Vt.Matrix4dArray([usd_matrix(value) for value in rests]))
     mesh = UsdGeom.Mesh.Define(stage, ROOT + "/Body")
-    mesh.CreatePointsAttr(Vt.Vec3fArray(body["points"].tolist()))
-    mesh.CreateFaceVertexCountsAttr([3] * body["triangles"])
-    mesh.CreateFaceVertexIndicesAttr(body["indices"].tolist())
-    mesh.CreateNormalsAttr(Vt.Vec3fArray(body["normals"].tolist()))
+    mesh.CreatePointsAttr(Vt.Vec3fArray(usd_body["points"].tolist()))
+    mesh.CreateFaceVertexCountsAttr([3] * usd_body["triangles"])
+    mesh.CreateFaceVertexIndicesAttr(usd_body["indices"].tolist())
+    mesh.CreateNormalsAttr(Vt.Vec3fArray(usd_body["normals"].tolist()))
     mesh.SetNormalsInterpolation(UsdGeom.Tokens.vertex)
     mesh.CreateSubdivisionSchemeAttr(UsdGeom.Tokens.none)
-    mesh.CreateExtentAttr(Vt.Vec3fArray([body["points"].min(axis=0).tolist(), body["points"].max(axis=0).tolist()]))
-    UsdGeom.PrimvarsAPI(mesh).CreatePrimvar("st", Sdf.ValueTypeNames.TexCoord2fArray, UsdGeom.Tokens.vertex).Set(Vt.Vec2fArray(body["uv"].tolist()))
+    mesh.CreateExtentAttr(Vt.Vec3fArray([usd_body["points"].min(axis=0).tolist(), usd_body["points"].max(axis=0).tolist()]))
+    UsdGeom.PrimvarsAPI(mesh).CreatePrimvar(
+        "st", Sdf.ValueTypeNames.TexCoord2fArray, usd_body["uvInterpolation"]
+    ).Set(Vt.Vec2fArray(usd_body["uv"].tolist()))
     binding = UsdSkel.BindingAPI.Apply(mesh.GetPrim())
     binding.CreateSkeletonRel().SetTargets([skel.GetPath()])
     binding.CreateGeomBindTransformAttr(Gf.Matrix4d(1))
-    binding.CreateJointIndicesPrimvar(False, 4).Set(body["joints"].reshape(-1).tolist())
-    binding.CreateJointWeightsPrimvar(False, 4).Set(body["weights"].reshape(-1).tolist())
+    binding.CreateJointIndicesPrimvar(False, 4).Set(usd_body["joints"].reshape(-1).tolist())
+    binding.CreateJointWeightsPrimvar(False, 4).Set(usd_body["weights"].reshape(-1).tolist())
     UsdShade.MaterialBindingAPI.Apply(mesh.GetPrim()).Bind(material(stage))
     for clip in clips:
         anim = UsdSkel.Animation.Define(stage, ROOT + "/" + clip["id"].title())
@@ -700,7 +764,8 @@ def validate_pose_reference(report_path, body, joints, binds, clips, root_offset
     return audit
 
 
-def audit_usd(path, expected_paths, expected_rest, expected_bind, body, asset_hash):
+def audit_usd(path, expected_paths, expected_rest, expected_bind, body, asset_hash,
+              weld_uv_topology=False):
     stage = Usd.Stage.Open(str(path))
     if stage is None or str(stage.GetDefaultPrim().GetPath()) != ROOT:
         raise ValueError("USDZ lost Tripo SkelRoot")
@@ -723,30 +788,61 @@ def audit_usd(path, expected_paths, expected_rest, expected_bind, body, asset_ha
         if not animation or list(animation.GetJointsAttr().Get() or []) != expected_paths:
             raise ValueError(f"USDZ {name} animation joint order differs from motion")
     mesh = UsdGeom.Mesh(stage.GetPrimAtPath(ROOT + "/Body"))
-    if not mesh or len(mesh.GetPointsAttr().Get()) != body["vertices"]:
-        raise ValueError("USDZ lost single body vertex array")
+    if not mesh:
+        raise ValueError("USDZ lost body mesh")
     if len([prim for prim in stage.Traverse() if prim.GetTypeName() == "Mesh"]) != 1:
         raise ValueError("USDZ introduced an extra draw mesh")
-    if len(mesh.GetFaceVertexCountsAttr().Get()) != body["triangles"]:
+    face_counts = np.asarray(mesh.GetFaceVertexCountsAttr().Get(), dtype=np.int64)
+    if (len(face_counts) != body["triangles"]
+            or not np.array_equal(face_counts, np.full(body["triangles"], 3, dtype=np.int64))):
         raise ValueError("USDZ triangle count changed")
+    usd_body = weld_body_uv_topology(body) if weld_uv_topology else body
+    points = np.asarray(mesh.GetPointsAttr().Get(), dtype=float)
+    indices = np.asarray(mesh.GetFaceVertexIndicesAttr().Get(), dtype=np.int64)
+    if (len(points) != len(usd_body["points"])
+            or not np.array_equal(indices, usd_body["indices"])):
+        raise ValueError("USDZ authored point count or triangle mapping changed")
+    source_indices = np.asarray(body["indices"], dtype=np.int64)
+    if (not np.allclose(points[indices], body["points"][source_indices], atol=1e-6, rtol=0)
+            or not np.allclose(np.asarray(usd_body["points"]), points, atol=1e-6, rtol=0)):
+        raise ValueError("USDZ changed per-corner body positions")
     normals = np.asarray(mesh.GetNormalsAttr().Get())
-    if (normals.shape != body["normals"].shape
-            or mesh.GetNormalsInterpolation() != UsdGeom.Tokens.vertex
-            or np.max(abs(normals - body["normals"])) > 1e-6
+    if (normals.shape != points.shape or mesh.GetNormalsInterpolation() != UsdGeom.Tokens.vertex
+            or not np.allclose(normals[indices], body["normals"][source_indices], atol=1e-6, rtol=0)
             or np.max(abs(np.linalg.norm(normals, axis=1) - 1)) > 1e-4):
         raise ValueError("USDZ lost smooth vertex normals")
     uv = UsdGeom.PrimvarsAPI(mesh).GetPrimvar("st")
-    if (not uv or uv.GetInterpolation() != UsdGeom.Tokens.vertex
-            or np.asarray(uv.Get()).shape != body["uv"].shape
-            or np.max(abs(np.asarray(uv.Get()) - body["uv"])) > 1e-6):
+    if not uv:
         raise ValueError("USDZ lost body UVs")
+    uv_values = np.asarray(uv.Get())
+    if weld_uv_topology:
+        if (uv.GetInterpolation() != UsdGeom.Tokens.faceVarying
+                or uv_values.shape != (len(indices), 2)
+                or not np.allclose(uv_values, body["uv"][source_indices], atol=1e-6, rtol=0)):
+            raise ValueError("USDZ changed per-corner face-varying UVs")
+    else:
+        if (uv.GetInterpolation() != UsdGeom.Tokens.vertex
+                or uv_values.shape != body["uv"].shape
+                or not np.allclose(uv_values, body["uv"], atol=1e-6, rtol=0)
+                or not np.allclose(uv_values[indices], body["uv"][source_indices], atol=1e-6, rtol=0)):
+            raise ValueError("USDZ lost body UVs")
     binding = UsdSkel.BindingAPI(mesh.GetPrim())
+    joint_values = np.asarray(binding.GetJointIndicesPrimvar().Get(), dtype=np.int64).reshape(len(points), -1)
+    weight_values = np.asarray(binding.GetJointWeightsPrimvar().Get(), dtype=float).reshape(len(points), -1)
+    if (joint_values.shape != usd_body["joints"].shape
+            or weight_values.shape != usd_body["weights"].shape
+            or not np.array_equal(joint_values[indices], body["joints"][source_indices])
+            or not np.allclose(weight_values[indices], body["weights"][source_indices], atol=1e-6, rtol=0)
+            or not np.array_equal(joint_values, usd_body["joints"])
+            or not np.allclose(weight_values, usd_body["weights"], atol=1e-6, rtol=0)):
+        raise ValueError("USDZ changed per-corner skin joint IDs or weights")
     if list(binding.GetSkeletonRel().GetTargets()) != [Sdf.Path(ROOT + "/Skeleton")]:
         raise ValueError("USDZ lost skeleton binding")
     bound, _ = UsdShade.MaterialBindingAPI(mesh.GetPrim()).ComputeBoundMaterial()
     if str(bound.GetPath()) != ROOT + "/BodyMaterial":
         raise ValueError("USDZ lost one body PBR material")
-    return {"vertices": body["vertices"], "triangles": body["triangles"],
+    return {"vertices": body["vertices"], "sourceVertices": body["vertices"],
+            "authoredUSDPointCount": len(points), "triangles": body["triangles"],
             "drawCalls": 1, "jointCount": len(expected_paths), "sha256": asset_hash}
 
 
@@ -827,7 +923,8 @@ def build(args):
                 raise ValueError("LOD rest skeleton differs")
             skeletons[label] = (rests, binds)
             layer = work / f"{label}.usdc"
-            write_usd(layer, joints, rests, binds, body, clips, hashes["sourceFBX"])
+            write_usd(layer, joints, rests, binds, body, clips, hashes["sourceFBX"],
+                      args.weld_uv_topology)
             name = "ReplayXITripoAthlete.usdz" if label == "near" else "ReplayXITripoLow.usdz"
             package = work / name
             subprocess.run(["usdzip", "--arkitAsset", str(layer), str(package)], check=True, capture_output=True)
@@ -899,7 +996,11 @@ def build(args):
         for label, name in (("near", "ReplayXITripoAthlete.usdz"), ("low", "ReplayXITripoLow.usdz")):
             rests, binds = skeletons[label]
             report["assets"][label] = audit_usd(output / name, paths, rests, binds,
-                                                 bodies[label], sha(output / name))
+                                                 bodies[label], sha(output / name),
+                                                 args.weld_uv_topology)
+        report["usdTopologyMode"] = (
+            "welded-position-skin-faceVarying-uv" if args.weld_uv_topology
+            else "source-vertex-topology")
         for path in sorted(output.iterdir()):
             report["files"][path.name] = {"bytes": path.stat().st_size, "sha256": sha(path)}
         (output / "ReplayXITripoBuildReport.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
@@ -920,5 +1021,7 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--height", type=float, default=1.82)
     parser.add_argument("--normal-mode", choices=("source", "area-weighted"), default="source")
+    parser.add_argument("--weld-uv-topology", action="store_true",
+                        help="weld exact position+skin duplicates and store UVs face-varying in USD")
     arguments = parser.parse_args()
     print(json.dumps(build(arguments), indent=2, sort_keys=True))

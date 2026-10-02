@@ -14,7 +14,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 try:
     import numpy as np
     from build_replayxi_rocketbox_pilot import read_accessor
-    from build_replayxi_tripo_athlete import glb, inspect_skin, mesh_data, sha
+    from build_replayxi_tripo_athlete import (
+        glb, inspect_skin, mesh_data, sha, weld_body_uv_topology,
+    )
     AVAILABLE = True
 except ImportError:
     AVAILABLE = False
@@ -23,14 +25,14 @@ REPO = Path(__file__).resolve().parents[2]
 SOURCE = REPO / "Assets/ReplayXI/TripoFootballer/ReplayXI_Footballer_P2_Source.glb"
 FBX_SOURCE = REPO / ".codex-derived/replayxi-tripo164/fbx-player-v2/ReplayXITripoFBXCandidate.glb"
 NEAR = REPO / ".codex-derived/replayxi-tripo164/fbx-lods-v2/ReplayXITripoFBX_Near_1m.glb"
-NATIVE = REPO / ".codex-derived/replayxi-tripo165/native-v5"
+NATIVE = REPO / ".codex-derived/replayxi-tripo166/native-v6"
 KITS = REPO / ".codex-derived/replayxi-tripo164/kits-v1"
 EXPECTED_NATIVE_SHA256 = {
-    "ReplayXITripoAthlete.usdz": "b06a0f95decdec70bb92c148807186d581d15bc821f651f5fc2929a3484efaa0",
-    "ReplayXITripoLow.usdz": "bceb8575bb26cc8b647638beca1177109fdee482f01ba436c84593cfc9541914",
+    "ReplayXITripoAthlete.usdz": "25585fd5fff5dc0060178c52fa559fe217773acfeab1b578d44174cb85e890db",
+    "ReplayXITripoLow.usdz": "343a8ef2527ac236a20c1bbe73202f650829be008c1d5381b3618f35933b349d",
     "ReplayXITripoMotion.json": "525b42f4377d16644d81dc46456169be33818ec806e37ffd18a7a2041072b4f2",
-    "ReplayXITripoContactSurface.json": "f22677d2514cac26ba1c95cec22b49f707b95d9494c9373b8f37aba3859053d7",
-    "ReplayXITripoLowContactSurface.json": "31a53bff5255b025080bb117b4e14c3f6423dca1e1596c43e4e66f9ae8c29283",
+    "ReplayXITripoContactSurface.json": "054a10f93888f6ac4ac0a1505929ae1f4f9d4695d5dd418ba2a6fc815818fa05",
+    "ReplayXITripoLowContactSurface.json": "6efcdcd2a3df2fd4f48948e32f62b400c6750dec79480a7afd12262a83dd5061",
 }
 JPEG = REPO / (".codex-derived/replayxi-tripo164/fbx-source/"
                "tripo_convert_e7d9fe2a-ac2d-497b-a733-92e3003ca9bb.fbm/"
@@ -100,7 +102,80 @@ class ConverterRejectsInvalidInputs(unittest.TestCase):
                 glb(path)
 
 
-@unittest.skipUnless(AVAILABLE and NATIVE.is_dir(), "native-v5 artifacts required")
+@unittest.skipUnless(AVAILABLE, "NumPy and Blender Python required")
+class WeldedUVTopology(unittest.TestCase):
+    def make_body(self):
+        points = np.asarray([
+            [0, 0, 0], [1, 0, 0], [0, 1, 0],
+            [0, 0, 0], [0, 1, 0], [0, 0, -1],
+        ], dtype=float)
+        normals = np.asarray([
+            [0, 0, 1], [0, 0, 1], [0, 0, 1],
+            [0, 0, 1], [0, 0, 1], [0, 0, -1],
+        ], dtype=float)
+        uv = np.asarray([
+            [0, 0], [1, 0], [0, 1],
+            [.5, 0], [.5, 1], [1, 1],
+        ], dtype=float)
+        joints = np.zeros((6, 4), dtype=int)
+        weights = np.tile([1., 0, 0, 0], (6, 1))
+        indices = np.asarray([0, 1, 2, 3, 4, 5], dtype=int)
+        return {"points": points, "normals": normals, "uv": uv,
+                "indices": indices, "joints": joints, "weights": weights,
+                "triangles": 2, "vertices": len(points)}
+
+    def test_weld_keeps_uv_seams_and_every_triangle_corner_attribute(self):
+        body = self.make_body()
+        original = {key: value.copy() for key, value in body.items() if isinstance(value, np.ndarray)}
+        result = weld_body_uv_topology(body)
+        self.assertEqual(result["vertices"], 4)
+        self.assertEqual(result["sourceVertices"], 6)
+        np.testing.assert_array_equal(result["sourceToUsdPoint"], [0, 1, 2, 0, 2, 3])
+        np.testing.assert_array_equal(result["indices"], [0, 1, 2, 0, 2, 3])
+        np.testing.assert_array_equal(result["points"][result["indices"]], body["points"][body["indices"]])
+        np.testing.assert_array_equal(result["normals"][result["indices"]], body["normals"][body["indices"]])
+        np.testing.assert_array_equal(result["joints"][result["indices"]], body["joints"][body["indices"]])
+        np.testing.assert_array_equal(result["weights"][result["indices"]], body["weights"][body["indices"]])
+        np.testing.assert_array_equal(result["uv"], body["uv"][body["indices"]])
+        self.assertEqual(result["uvInterpolation"], "faceVarying")
+        self.assertNotEqual(result["uv"][0, 0], result["uv"][3, 0])
+        for key, value in original.items():
+            np.testing.assert_array_equal(body[key], value)
+
+    def test_same_position_with_different_skin_weights_does_not_weld(self):
+        body = self.make_body()
+        body["points"][1] = body["points"][0]
+        body["weights"][1] = [.5, .5, 0, 0]
+        result = weld_body_uv_topology(body)
+        self.assertEqual(result["vertices"], 4)
+        self.assertNotEqual(result["sourceToUsdPoint"][0], result["sourceToUsdPoint"][1])
+
+    def test_weld_rejects_same_position_skin_with_divergent_normals(self):
+        body = self.make_body()
+        body["normals"][3] = [0, 1, 0]
+        with self.assertRaisesRegex(ValueError, "divergent source normals"):
+            weld_body_uv_topology(body)
+
+    def test_float32_equivalent_positions_merge_but_next_float32_and_weight_do_not(self):
+        same_storage = self.make_body()
+        same_storage["points"][0] = [1.0, 0, 0]
+        same_storage["points"][3] = [np.nextafter(1.0, 2.0), 0, 0]
+        same = weld_body_uv_topology(same_storage)
+        self.assertEqual(same["sourceToUsdPoint"][0], same["sourceToUsdPoint"][3])
+
+        next_storage = self.make_body()
+        next_storage["points"][0] = [1.0, 0, 0]
+        next_storage["points"][3] = [float(np.nextafter(np.float32(1), np.float32(2))), 0, 0]
+        next_value = weld_body_uv_topology(next_storage)
+        self.assertNotEqual(next_value["sourceToUsdPoint"][0], next_value["sourceToUsdPoint"][3])
+
+        different_weight = self.make_body()
+        different_weight["weights"][3] = [.75, .25, 0, 0]
+        weighted = weld_body_uv_topology(different_weight)
+        self.assertNotEqual(weighted["sourceToUsdPoint"][0], weighted["sourceToUsdPoint"][3])
+
+
+@unittest.skipUnless(AVAILABLE and NATIVE.is_dir(), "native-v6 artifacts required")
 class NativeOutputContract(unittest.TestCase):
     def test_report_hashes_counts_and_contact_bindings(self):
         report = json.loads((NATIVE / "ReplayXITripoBuildReport.json").read_text())
@@ -108,6 +183,11 @@ class NativeOutputContract(unittest.TestCase):
         self.assertEqual(report["assets"]["near"]["triangles"], 7685)
         self.assertEqual(report["assets"]["low"]["vertices"], 3269)
         self.assertEqual(report["assets"]["low"]["triangles"], 1964)
+        self.assertEqual(report["assets"]["near"]["sourceVertices"], 9075)
+        self.assertEqual(report["assets"]["low"]["sourceVertices"], 3269)
+        self.assertEqual(report["assets"]["near"]["authoredUSDPointCount"], 4096)
+        self.assertEqual(report["assets"]["low"]["authoredUSDPointCount"], 1118)
+        self.assertEqual(report["usdTopologyMode"], "welded-position-skin-faceVarying-uv")
         self.assertEqual(report["assets"]["near"]["drawCalls"], 1)
         self.assertEqual(report["assets"]["low"]["drawCalls"], 1)
         self.assertEqual(report["sourceHashes"]["sourceArchive"],
