@@ -1,0 +1,50 @@
+{
+  "status": "rejected_not_recommended",
+  "source": {
+    "motionBlend": "Assets/ReplayXI/TripoFootballer/Blender/ReplayXITripoFootballMotion.blend",
+    "motionBlendSHA256": "3b3aa3c6541510e477f767f2f232b81b53c9919cdfb1cca877108adf2809ff2f",
+    "baseBlendSHA256": "a43e38d51b0878c96819abd4d85f956315f01928f35d446be65ab82a5e94c2e4"
+  },
+  "candidate": {
+    "script": "Scripts/blender/repair_tripo_shorts_waist166.py",
+    "blend": ".codex-derived/replayxi-tripo166/hem/waist-candidate-v1/ReplayXITripoShortsWaistCandidate.blend",
+    "blendSHA256": "43fe012c32f2d04e42da768b6e77d79d4c20af1de597d963736f30dea923e575",
+    "glb": ".codex-derived/replayxi-tripo166/hem/waist-candidate-v1/ReplayXITripoShortsWaistCandidate_1m.glb",
+    "glbSHA256": "cc552ab31a49d9eebdf3e4563601df1146b438696b700246c775053728d0549b"
+  },
+  "selection": {
+    "shortsShellFaces": 502,
+    "changedVertices": 150,
+    "restZMetres": [0.45, 0.515],
+    "rule": "Smoothstep from thigh weights to hips weights, shorts shell only"
+  },
+  "contractChecks": {
+    "geometryAndUVHashBeforeAfter": "318c143284f6d8e265e8273b1f77dcc394ebb02d2ac03a388b8ee69cd621acc9",
+    "restBoundsMaxErrorMetres": 0.0,
+    "maxInfluences": 4,
+    "maxWeightSumError": 4.470348358154297e-8,
+    "sourceVertices": 8820,
+    "sourcePolygons": 9388
+  },
+  "measurement": {
+    "sourceWaistbandMedianThighWeight": 0.9462239965796471,
+    "sourceWaistbandMedianHipsWeight": 0.05377601087093353,
+    "candidateWaistbandMedianThighWeight": 0.0,
+    "candidateWaistbandMedianHipsWeight": 1.0,
+    "runFrame5FrontWaistbandMedianZMetres": {
+      "sourceLeftRight": [0.5236718654632568, 0.48113974928855896],
+      "candidateLeftRight": [0.4953571557998657, 0.4906603991985321]
+    },
+    "torsoShortsBVHFacePairIntersectionsAcross19RunFrames": {
+      "source": 2167,
+      "candidate": 2103
+    }
+  },
+  "rejectionReason": "Front/side renders show the small high-knee white slash became a wide jagged white/grey band; idle gained a waistband edge artifact. Fewer BVH overlaps did not mean better appearance.",
+  "evidence": {
+    "sourceAudit": ".codex-derived/replayxi-tripo166/hem/audit-waist-v1/report.json",
+    "candidateAudit": ".codex-derived/replayxi-tripo166/hem/audit-waist-candidate-v1/report.json",
+    "candidatePreviews": ".codex-derived/replayxi-tripo166/hem/waist-candidate-v1/previews/report.json"
+  },
+  "admission": "No production asset, LOD, or native package was changed. Do not use this candidate."
+}
