@@ -81,6 +81,45 @@ final class ReplayTripoAthleteVisualTests: XCTestCase {
         withExtendedLifetime(liveInstances) {}
     }
 
+    /// Matched native body-local crop; only the cervical aim switch changes.
+    func testReferenceHeadAim168CloseUpBeforeAfter() async throws {
+        ReplayTripoAthleteProvider.resetForTesting()
+        defer { ReplayTripoAthleteProvider.resetForTesting() }
+        try ReplayTripoAthleteProvider.prewarm()
+        let calibration = try await calibrate()
+        for (scenarioID, playerID, time) in [
+            ("final-36-counter-v2", "arg-11", 7.2),
+            ("final-81-volley-v2", "fra-10", 6.1),
+        ] {
+            let scenario = try XCTUnwrap(FootballReferenceScenarios.all.first { $0.id == scenarioID })
+            let player = try XCTUnwrap(scenario.player(id: playerID))
+            let touches = try XCTUnwrap(FootballReferenceScenarios.touches(for: scenario))
+            let recording = try await ReplayNativeBallPhysics.prewarm(
+                track: scenario.ball, players: scenario.players, plannedTouches: touches)
+            let skin = try ReplayTripoAthleteProvider.make(for: player, detail: .near)
+            let pose = player.presentationPose(at: time)
+            let ball = recording.sample(at: time)
+            let poses = Dictionary(uniqueKeysWithValues: scenario.players.map {
+                ($0.id, $0.presentationPose(at: time))
+            })
+            let target = ReplayAthleteTacticalAttention.target(for: player, at: time, pose: pose,
+                ball: ball.position, players: scenario.players, poses: poses, contacts: [])
+            let head = try XCTUnwrap(skin.motion.semanticJointIndices["head"])
+            var controlHead: Transform?
+            for control in [true, false] {
+                skin.disablesCervicalAimForTesting = control
+                XCTAssertTrue(skin.update(at: time, track: player, locomotion: player.locomotion(at: time),
+                    lookTarget: target, ballAction: nil, presentationPose: pose,
+                    allowsTrackLocomotionSampling: true))
+                if control { controlHead = skin.model.jointTransforms[head] }
+                else { XCTAssertNotEqual(skin.model.jointTransforms[head], try XCTUnwrap(controlHead)) }
+                try await capture(skin.root,
+                    label: "head-aim168-\(scenarioID)-\(playerID)-\(control ? "control" : "aimed")-close",
+                    player: player, view: .front, calibration: calibration, closeUp: true)
+            }
+        }
+    }
+
     private enum View {
         case front, back, side
     }
@@ -100,22 +139,23 @@ final class ReplayTripoAthleteVisualTests: XCTestCase {
     }
 
     private func capture(_ avatar: Entity, label: String, player: PlayerTrack, view: View,
-                         calibration: ReplayRealityRendererAudit.Calibration) async throws {
-        let target = SIMD3<Float>(0, 0.91, 0)
+                         calibration: ReplayRealityRendererAudit.Calibration,
+                         closeUp: Bool = false) async throws {
+        let target = SIMD3<Float>(0, closeUp ? 1.40 : 0.91, 0)
         let position: SIMD3<Float>
         let keyPosition: SIMD3<Float>
         let fillPosition: SIMD3<Float>
         switch view {
         case .front:
-            position = [0, 1.25, 4.4]
+            position = closeUp ? [0, 1.55, 2.4] : [0, 1.25, 4.4]
             keyPosition = [-3, 4, 3]
             fillPosition = [3, 2, 2]
         case .back:
-            position = [0, 1.25, -4.4]
+            position = closeUp ? [0, 1.55, -2.4] : [0, 1.25, -4.4]
             keyPosition = [3, 4, -3]
             fillPosition = [-3, 2, -2]
         case .side:
-            position = [4.4, 1.25, 0]
+            position = closeUp ? [2.4, 1.55, 0] : [4.4, 1.25, 0]
             keyPosition = [3, 4, 3]
             fillPosition = [2, 2, -3]
         }
@@ -148,7 +188,7 @@ final class ReplayTripoAthleteVisualTests: XCTestCase {
         XCTAssertGreaterThan(left, 4, "\(label) clipped left")
         XCTAssertGreaterThan(top, 4, "\(label) clipped top")
         XCTAssertLessThan(right, frame.width - 5, "\(label) clipped right")
-        XCTAssertLessThan(bottom, frame.height - 5, "\(label) clipped bottom")
+        if !closeUp { XCTAssertLessThan(bottom, frame.height - 5, "\(label) clipped bottom") }
         let attachment = XCTAttachment(data: try ReplayRealityRendererAudit.png(frame, calibration: calibration),
                                        uniformTypeIdentifier: "public.png")
         attachment.name = "ReplayXI-Tripo-\(player.team.rawValue)-\(label).png"

@@ -246,6 +246,7 @@ final class ReplaySkinnedAthleteInstance {
     var disablesCutWeightSmoothingForTesting = false
     var disablesHeaderHandoffForTesting = false
     var disablesOffBallReadyArmsForTesting = false
+    var disablesCervicalAimForTesting = false
     /// Matched original-arm control; body, phase, source and contacts are shared.
     var disablesArmCutSmoothingForTesting = false
     enum DiagnosticStage: String, CaseIterable {
@@ -456,10 +457,17 @@ final class ReplaySkinnedAthleteInstance {
         #if DEBUG
         poseStageObserverForTesting?(.footballRetargetAndContact, pose)
         #endif
+        let rawContactAttention = max(
+            movement?.contactProtection ?? ReplayAthleteMovementIntent.contactProtection(
+                for: interaction, track: track, at: time),
+            interactionSample?.influence ?? 0, ballAction?.influence ?? 0)
+        let contactAttention = rawContactAttention.isFinite
+            ? min(max(rawContactAttention, 0), 1) : 1
         let baseLook = ReplayAthleteMotion.lookPose(for: track, at: time, locomotion: locomotion,
                                                targetWorldPosition: lookTarget,
                                                stationaryPose: stationaryPose,
-                                               presentationPose: presentationPose)
+                                               presentationPose: presentationPose,
+                                               contactAttention: contactAttention)
         #if DEBUG
         let preservesReadyArms = !disablesOffBallReadyArmsForTesting
         #else
@@ -534,7 +542,13 @@ final class ReplaySkinnedAthleteInstance {
         #if DEBUG
         poseStageObserverForTesting?(.headerAim, pose)
         #endif
-        constrainHeadRelativeToChest()
+        let hasFiniteLookTarget = lookTarget.map { $0.x.isFinite && $0.y.isFinite && $0.z.isFinite } ?? false
+        var aimFreedom: Float = hasFiniteLookTarget && stationaryPose == nil
+            && impact == nil && !track.isGoalkeeper ? 1 - min(max(contactAttention, 0), 1) : 0
+        #if DEBUG
+        if disablesCervicalAimForTesting { aimFreedom = 0 }
+        #endif
+        constrainHeadRelativeToChest(look: baseLook, aimFreedom: aimFreedom)
         #if DEBUG
         poseStageObserverForTesting?(.cervical, pose)
         #endif
@@ -573,20 +587,47 @@ final class ReplaySkinnedAthleteInstance {
         offBallRightArm?.apply(sample, torso: torso, motion: motion, to: &pose)
     }
 
-    private func constrainHeadRelativeToChest() {
+    private func constrainHeadRelativeToChest(look: ReplayAthleteLookPose, aimFreedom: Float) {
         let chestIndex = motion.numberAnchors.jointIndex
         let chestDelta = simd_quatf(pose.modelSpaceTransforms[chestIndex]) * inverseRestChestRotation
+        let headWorld = simd_quatf(pose.modelSpaceTransforms[headIndex])
         let relative = simd_normalize(chestDelta.inverse
-            * simd_quatf(pose.modelSpaceTransforms[headIndex]) * restHeadRotation.inverse)
-        let limited = ReplayCervicalConstraint.limited(relative)
+            * headWorld * restHeadRotation.inverse)
+        let candidate: simd_quatf
+        if aimFreedom > 0 {
+            let aimed = ReplayCervicalConstraint.aimedModelRotation(
+                simd_normalize(headWorld * restHeadRotation.inverse),
+                look: look, weight: 0.65 * aimFreedom)
+            candidate = simd_normalize(chestDelta.inverse * aimed)
+        } else { candidate = relative }
+        let limited = ReplayCervicalConstraint.limited(candidate)
         guard simd_length_squared(limited.vector - relative.vector) > 0.000_000_000_1 else { return }
         let parent = motion.joints[headIndex].parentIndex
-        let parentRotation = parent < 0 ? simd_quatf(real: 1, imag: .zero)
+        var parentRotation = parent < 0 ? simd_quatf(real: 1, imag: .zero)
             : simd_quatf(pose.modelSpaceTransforms[parent])
+        if aimFreedom > 0, parent == neckIndex {
+            // Share stabilization/limiting across both cervical joints. A
+            // head-only correction bends the skull against a frozen neck.
+            let desired = chestDelta * limited * restHeadRotation
+            var correction = simd_normalize(desired * headWorld.inverse)
+            if correction.real < 0 { correction = simd_quatf(vector: -correction.vector) }
+            let shared = simd_slerp(simd_quatf(real: 1, imag: .zero), correction, 0.45 * aimFreedom)
+            let neckParent = motion.joints[neckIndex].parentIndex
+            let neckParentRotation = neckParent < 0 ? simd_quatf(real: 1, imag: .zero)
+                : simd_quatf(pose.modelSpaceTransforms[neckParent])
+            let oldLocal = pose.rotations[neckIndex]
+            parentRotation = simd_normalize(shared * parentRotation)
+            pose.rotations[neckIndex] = simd_normalize(neckParentRotation.inverse * parentRotation)
+            let delta = simd_normalize(oldLocal.inverse * pose.rotations[neckIndex])
+            compensateNeckChildren(for: delta)
+        }
         pose.rotations[headIndex] = simd_normalize(parentRotation.inverse * chestDelta * limited * restHeadRotation)
-        // Only the head branch changed. Keep the current torso/limb matrices
-        // instead of rebuilding every joint for a bounded gaze correction.
-        motion.rebuildHeadModelSpaceTransforms(in: &pose)
+        if aimFreedom > 0, parent == neckIndex {
+            motion.rebuildCervicalModelSpaceTransforms(in: &pose)
+        } else {
+            // Contact cores retain the previous head-only path exactly.
+            motion.rebuildHeadModelSpaceTransforms(in: &pose)
+        }
     }
 
     private func applyLook(_ look: ReplayAthleteLookPose) {
@@ -596,13 +637,17 @@ final class ReplaySkinnedAthleteInstance {
         pose.rotations[neckIndex] = simd_normalize(pose.rotations[neckIndex] * delta)
         // Biped's clavicles are parented to Neck. Keep their complete local
         // transforms fixed in chest space; looking aside must not drag the arms.
-        for index in neckCompensatedChildren {
-            pose.translations[index] = delta.inverse.act(pose.translations[index])
-            pose.rotations[index] = simd_normalize(delta.inverse * pose.rotations[index])
-        }
+        compensateNeckChildren(for: delta)
         let head = motion.joints[headIndex]
         pose.rotations[headIndex] = simd_normalize(pose.rotations[headIndex]
             * simd_quatf(angle: look.headYawRadians, axis: head.localUpAxis)
             * simd_quatf(angle: look.headPitchRadians, axis: head.localRightAxis))
+    }
+
+    private func compensateNeckChildren(for delta: simd_quatf) {
+        for index in neckCompensatedChildren {
+            pose.translations[index] = delta.inverse.act(pose.translations[index])
+            pose.rotations[index] = simd_normalize(delta.inverse * pose.rotations[index])
+        }
     }
 }

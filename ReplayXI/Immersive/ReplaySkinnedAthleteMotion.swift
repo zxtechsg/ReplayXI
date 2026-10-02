@@ -86,6 +86,7 @@ struct ReplaySkinnedAthleteMotion: Sendable {
     /// Parent-first head branch, prepared once for the final gaze correction.
     /// Other branches are already current and must not be rebuilt per correction.
     let headSubtreeJointIndices: [Int]
+    let cervicalSubtreeJointIndices: [Int]
     let numberAnchors: NumberAnchors
     let footContacts: [String: FootContact]
     let geometry: Geometry
@@ -229,15 +230,18 @@ struct ReplaySkinnedAthleteMotion: Sendable {
         self.joints = decodedJoints
         self.jointNames = decodedJoints.map(\.name)
         self.semanticJointIndices = semantics
-        let headIndex = semantics["head"]!
-        self.headSubtreeJointIndices = decodedJoints.indices.filter { index in
-            var cursor = index
-            while cursor >= 0 {
-                if cursor == headIndex { return true }
-                cursor = decodedJoints[cursor].parentIndex
+        func branch(root: Int) -> [Int] {
+            decodedJoints.indices.filter { index in
+                var cursor = index
+                while cursor >= 0 {
+                    if cursor == root { return true }
+                    cursor = decodedJoints[cursor].parentIndex
+                }
+                return false
             }
-            return false
         }
+        self.headSubtreeJointIndices = branch(root: semantics["head"]!)
+        self.cervicalSubtreeJointIndices = branch(root: semantics["neck"]!)
         self.geometry = Geometry(nominalHeight: document.geometry.nominalHeight, restMinY: document.geometry.restMinY)
         self.numberAnchors = NumberAnchors(
             jointIndex: numberIndex,
@@ -472,15 +476,26 @@ struct ReplaySkinnedAthleteMotion: Sendable {
     /// Invalid buffers take the same safe full-reset path as a full rebuild.
     @discardableResult
     func rebuildHeadModelSpaceTransforms(in pose: inout Pose) -> Int {
+        rebuildModelSpaceTransforms(indices: headSubtreeJointIndices, in: &pose)
+    }
+
+    /// Shared neck/head correction also compensates Biped clavicles. Rebuild
+    /// that cached branch only (two joints on Tripo), not the lower body.
+    @discardableResult
+    func rebuildCervicalModelSpaceTransforms(in pose: inout Pose) -> Int {
+        rebuildModelSpaceTransforms(indices: cervicalSubtreeJointIndices, in: &pose)
+    }
+
+    private func rebuildModelSpaceTransforms(indices: [Int], in pose: inout Pose) -> Int {
         guard pose.translations.count == joints.count, pose.rotations.count == joints.count,
               pose.scales.count == joints.count, pose.modelSpaceTransforms.count == joints.count else {
             rebuildModelSpaceTransforms(in: &pose)
             return joints.count
         }
-        for index in headSubtreeJointIndices {
+        for index in indices {
             Self.rebuildJoint(index, joints: joints, pose: &pose)
         }
-        return headSubtreeJointIndices.count
+        return indices.count
     }
 
     private func ensureBuffer(_ pose: inout Pose) {

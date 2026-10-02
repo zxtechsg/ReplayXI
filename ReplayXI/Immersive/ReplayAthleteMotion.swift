@@ -219,18 +219,19 @@ enum ReplayAthleteMotion {
         let runningTurnBank = turn * 0.025 * effort
         let cutBank = runningTurnBank
             + ((turn * 0.18 - runningTurnBank) * cutInfluence)
+        let ballAction = suppliedBallAction ?? ballTrack.flatMap {
+            ballActionPose(for: track, ballTrack: $0, at: time)
+        }
         let look = lookPose(
             for: track,
             at: time,
             locomotion: locomotion,
             targetWorldPosition: lookTargetWorldPosition,
             stationaryPose: stationaryPose,
-            presentationPose: presentationPose
+            presentationPose: presentationPose,
+            contactAttention: max(ballAction?.influence ?? 0,
+                ReplayAthleteMovementIntent.contactProtection(for: interaction, track: track, at: time))
         )
-
-        let ballAction = suppliedBallAction ?? ballTrack.flatMap {
-            ballActionPose(for: track, ballTrack: $0, at: time)
-        }
         // The legacy left lane is -X. A negative Z rotation abducts its
         // downward leg; the opposite sign collapsed keeper boots inward.
         var leftHipLateral: Float = track.isGoalkeeper ? -0.10 : tuning.lateralStance
@@ -519,7 +520,8 @@ enum ReplayAthleteMotion {
         locomotion: PlayerLocomotionSample? = nil,
         targetWorldPosition: SIMD3<Float>? = nil,
         stationaryPose: PlayerPose? = nil,
-        presentationPose: PlayerPose? = nil
+        presentationPose: PlayerPose? = nil,
+        contactAttention: Float = 0
     ) -> ReplayAthleteLookPose {
         let sample = stationaryPose == nil
             ? locomotion ?? track.locomotion(at: time)
@@ -596,15 +598,26 @@ enum ReplayAthleteMotion {
                 let farScanWeight: Float = 0.10
                 let blendedMidScanWeight = nearScanWeight
                     + ((midScanWeight - nearScanWeight) * nearToMid)
-                scanWeight = blendedMidScanWeight
+                let targetScanWeight = blendedMidScanWeight
                     + ((farScanWeight - blendedMidScanWeight) * midToFar)
-                desiredYawDegrees = (travelDelta * isMoving * (1 - targetWeight))
+                scanWeight += (targetScanWeight - scanWeight) * visibility
+                let targetYaw = (travelDelta * isMoving * (1 - targetWeight))
                     + (targetDelta * targetWeight)
+                desiredYawDegrees += (targetYaw - desiredYawDegrees) * visibility
 
                 let downwardPitch = atan2(max(1.70 - target.y, -0.30), horizontalDistance)
                     * 180 / .pi
                 let pitchWeight = (0.52 + (0.20 * nearToMid)) * visibility
                 desiredPitchDegrees = min(max(downwardPitch * pitchWeight, -7), 24)
+                // Low balls at carrying distance invite brief glances, not a
+                // sustained 24-degree downward pose. Keep elevated and distant
+                // target pitch, plus protected contact poses, unchanged.
+                let protection = contactAttention.isFinite ? min(max(contactAttention, 0), 1) : 0
+                if !track.isGoalkeeper && protection < 1 {
+                    let nearGround = (1 - smootherStep((horizontalDistance - 1.8) / 2.2))
+                        * (1 - smootherStep((target.y - 0.2) / 1.0)) * (1 - protection)
+                    desiredPitchDegrees += (min(desiredPitchDegrees, 11) - desiredPitchDegrees) * nearGround
+                }
             }
         }
 

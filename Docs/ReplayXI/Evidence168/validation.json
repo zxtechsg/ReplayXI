@@ -1,0 +1,37 @@
+{
+  "date": "2026-10-02",
+  "scope": "Root-frame head aiming, shared cervical correction and ground-ball gaze",
+  "simulator": "ReplayXI Native Audit 26.5",
+  "regression": {
+    "bundle": ".codex-derived/replayxi-head168/Regression265-01.xcresult",
+    "passed": 174,
+    "failed": 0,
+    "skipped": 0
+  },
+  "finalGuardRerun": {
+    "bundle": ".codex-derived/replayxi-head168/FinalGuard265-01.xcresult",
+    "passed": 2,
+    "note": "Re-runs two tests in the regression suite after adding head-step bounds."
+  },
+  "builds": { "deviceReleaseUnsigned": "passed", "simulatorReleaseUnsigned": "passed" },
+  "headsetRun": false,
+  "headsetFPSMeasured": false,
+  "nativeCloseUpRendersInspected": 4,
+  "poseDiagnostic": {
+    "poses": 450,
+    "adjacentModelSpaceHeadSteps": 420,
+    "baselineMeanDegrees": 1.2183958544617608,
+    "updatedMeanDegrees": 0.9689707098794835,
+    "baselineNearestRankP95Degrees": 3.0173966884613037,
+    "updatedNearestRankP95Degrees": 2.186854362487793,
+    "baselineMaximumDegrees": 7.440520286560059,
+    "updatedMaximumDegrees": 7.832433223724365,
+    "limit": "Short contact-free windows, not video ground truth or full-match realism. Worst step slightly increases."
+  },
+  "reviewSHA256BeforeAndAfter": "a472d19ff9b2f3495dab0b38d98c306dddfed2e2e0493c8a450ce82f4e9b18cb",
+  "unchangedAssets": {
+    "nearUSDZ": "25585fd5fff5dc0060178c52fa559fe217773acfeab1b578d44174cb85e890db",
+    "lowUSDZ": "343a8ef2527ac236a20c1bbe73202f650829be008c1d5381b3618f35933b349d",
+    "motionJSON": "525b42f4377d16644d81dc46456169be33818ec806e37ffd18a7a2041072b4f2"
+  }
+}

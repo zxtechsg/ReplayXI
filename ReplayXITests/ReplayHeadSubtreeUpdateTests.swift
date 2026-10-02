@@ -76,4 +76,36 @@ final class ReplayHeadSubtreeUpdateTests: XCTestCase {
             }
         }
     }
+
+    func testSharedCervicalRebuildMatchesFullHierarchyWithoutTouchingOtherBranches() throws {
+        for motion in try motions() {
+            let neck = try XCTUnwrap(motion.semanticJointIndices["neck"])
+            let head = try XCTUnwrap(motion.semanticJointIndices["head"])
+            let branch = Set(motion.cervicalSubtreeJointIndices)
+            XCTAssertEqual(motion.cervicalSubtreeJointIndices.first, neck)
+            XCTAssertTrue(branch.contains(head))
+            if motion.rigProfile == .tripo52 { XCTAssertEqual(branch.count, 2) }
+            var pose = motion.makePoseBuffer()
+            for frame in Array(0..<30) + Array((0..<30).reversed()) {
+                motion.sample(clip: .run, at: Double(frame) / 30, into: &pose)
+                let before = pose.modelSpaceTransforms
+                pose.rotations[neck] = simd_normalize(pose.rotations[neck]
+                    * simd_quatf(angle: Float(frame) * 0.01, axis: motion.joints[neck].localUpAxis))
+                pose.rotations[head] = simd_normalize(pose.rotations[head]
+                    * simd_quatf(angle: Float(frame) * -0.02, axis: motion.joints[head].localRightAxis))
+                var full = pose
+                motion.rebuildModelSpaceTransforms(in: &full)
+                XCTAssertEqual(motion.rebuildCervicalModelSpaceTransforms(in: &pose), branch.count)
+                assertIdentical(pose, full)
+                for index in motion.joints.indices where !branch.contains(index) {
+                    XCTAssertEqual(pose.modelSpaceTransforms[index], before[index])
+                }
+            }
+            pose.rotations.removeLast()
+            var recovered = pose
+            motion.rebuildModelSpaceTransforms(in: &recovered)
+            XCTAssertEqual(motion.rebuildCervicalModelSpaceTransforms(in: &pose), motion.joints.count)
+            assertIdentical(pose, recovered)
+        }
+    }
 }
