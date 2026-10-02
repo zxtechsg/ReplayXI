@@ -120,8 +120,107 @@ final class ReplayTripoAthleteVisualTests: XCTestCase {
         }
     }
 
+    /// Native A/B evidence, not an automatic judgement of animation quality.
+    /// Same contacts, latest cervical aim, source phase, view, skin and lights.
+    func testUpperBodyFlow169RunAndTurnBeforeAfter() async throws {
+        ReplayTripoAthleteProvider.resetForTesting()
+        defer {
+            ReplayTripoAthleteProvider.resetForTesting()
+            ReplayNativeBallPhysics.resetCacheForTesting()
+        }
+        try ReplayTripoAthleteProvider.prewarm()
+        let calibration = try await calibrate()
+        let scenario = try XCTUnwrap(FootballReferenceScenarios.all.first { $0.id == "final-36-counter-v2" })
+        let recording = try await ReplayNativeBallPhysics.prewarm(track: scenario.ball,
+            players: scenario.players, plannedTouches: FootballReferenceScenarios.touches(for: scenario))
+        XCTAssertEqual(recording.missedTouchCount, 0)
+        var rows: [[String: Any]] = []
+        for (playerID, turning) in [("arg-11", false), ("fra-5", true)] {
+            let player = try XCTUnwrap(scenario.player(id: playerID))
+            let cues = try recording.touches.filter { $0.playerID == playerID }.map {
+                ReplayAthleteInteractionCue(playerID: playerID,
+                    kind: try XCTUnwrap(ReplayAthleteInteractionCue.Kind(rawValue: $0.kind.rawValue)),
+                    contactTime: $0.time, startTime: $0.time - 0.32, endTime: $0.time + 0.42,
+                    kickingLeg: $0.kickingLeg, contactBallWorldPosition: $0.position,
+                    outgoingDirectionWorld: $0.outgoingVelocity, headerSupportLeg: $0.headerSupportLeg)
+            }
+            func cue(_ time: Double) -> ReplayAthleteInteractionCue? {
+                cues.filter { ReplayAthleteMovementIntent.includesPreparation($0, at: time) }
+                    .min { abs($0.contactTime - time) < abs($1.contactTime - time) }
+            }
+            func target(_ time: Double) -> SIMD3<Float> {
+                let poses = Dictionary(uniqueKeysWithValues: scenario.players.map { ($0.id, $0.presentationPose(at: time)) })
+                return ReplayAthleteTacticalAttention.target(for: player, at: time, pose: player.presentationPose(at: time),
+                    ball: recording.sample(at: time).position, players: scenario.players, poses: poses, contacts: cues)
+            }
+            // Pick a visible phase from the real route. The criterion uses only
+            // telemetry and the flow descriptor, never rendered image scoring.
+            var chosen: Double?, bestScore: Float = 0
+            for frame in 15..<Int((scenario.duration - 0.6) * 30) {
+                let time = Double(frame) / 30, locomotion = player.locomotion(at: time)
+                guard locomotion.speedMetresPerSecond > 1.8, cue(time) == nil, cue(time + 0.1) == nil else { continue }
+                let movement = ReplayAthleteMovementIntent.sample(track: player, at: time,
+                    presentationPose: player.presentationPose(at: time), lookTarget: target(time), interaction: cue(time))
+                let flow = ReplayAthleteUpperBodyFlow.sample(gaitPhase: player.gaitPhase(at: time),
+                    locomotion: locomotion, actionInfluence: 0, armReadiness: movement?.readiness ?? 0)
+                let visible = abs(flow.leftArm.shoulderPitch) + abs(flow.leftArm.wristPitch)
+                let turn = abs(locomotion.turnRateDegreesPerSecond)
+                let score = visible * (turning ? turn : locomotion.speedMetresPerSecond / (1 + turn / 40))
+                if score > bestScore { chosen = time; bestScore = score }
+            }
+            let centre = try XCTUnwrap(chosen, "No eligible \(playerID) \(turning ? "turn" : "run") sample")
+            XCTAssertGreaterThan(bestScore, 0)
+            if turning { XCTAssertGreaterThan(abs(player.locomotion(at: centre).turnRateDegreesPerSecond), 10) }
+            for detail in [ReplaySkinnedAthleteProvider.Detail.near, .lowDetail] {
+                let skin = try ReplayTripoAthleteProvider.make(for: player, detail: detail)
+                let retained = skin
+                for (frame, time) in [centre, centre + 1.0 / 12].enumerated() {
+                    let locomotion = player.locomotion(at: time)
+                    let attention = target(time), presentation = player.presentationPose(at: time)
+                    let interaction = cue(time)
+                    var controlJoints: [Transform] = [], controlPose: ReplaySkinnedAthleteMotion.Pose?
+                    for control in [true, false] {
+                        skin.disablesUpperBodyFlowForTesting = control
+                        XCTAssertTrue(skin.update(at: time, track: player, locomotion: locomotion,
+                            lookTarget: attention, ballAction: nil, interaction: interaction,
+                            presentationPose: presentation, allowsTrackLocomotionSampling: true))
+                        if control {
+                            controlJoints = skin.model.jointTransforms
+                            controlPose = skin.pose
+                        } else {
+                            let old = try XCTUnwrap(controlPose)
+                            XCTAssertNotEqual(skin.model.jointTransforms, controlJoints)
+                            for name in ["hips", "leftHip", "rightHip", "leftKnee", "rightKnee", "leftAnkle", "rightAnkle"] {
+                                let joint = try XCTUnwrap(skin.motion.semanticJointIndices[name])
+                                XCTAssertEqual(skin.pose.modelSpaceTransforms[joint], old.modelSpaceTransforms[joint])
+                            }
+                            XCTAssertEqual(skin.pose.translations, old.translations)
+                            XCTAssertEqual(skin.pose.scales, old.scales)
+                        }
+                        let variant = control ? "before" : "after"
+                        let detailName = detail == .near ? "near" : "low"
+                        let label = "flow169-\(playerID)-\(turning ? "turn" : "run")-\(detailName)-f\(frame)-\(variant)"
+                        try await capture(skin.root, label: label, player: player, view: .threeQuarter,
+                                          calibration: calibration, closeUp: true)
+                        rows.append(["label": label, "time": time, "gaitPhase": player.gaitPhase(at: time),
+                            "speed": locomotion.speedMetresPerSecond, "turnDegreesPerSecond": locomotion.turnRateDegreesPerSecond,
+                            "detail": detailName, "player": playerID, "team": player.team.rawValue,
+                            "variant": variant, "hasPreparedContact": interaction != nil,
+                            "cervicalAimEnabled": !skin.disablesCervicalAimForTesting])
+                    }
+                }
+                withExtendedLifetime(retained) {}
+            }
+        }
+        let attachment = XCTAttachment(data: try JSONSerialization.data(withJSONObject: rows, options: [.sortedKeys]),
+                                       uniformTypeIdentifier: "public.json")
+        attachment.name = "ReplayXI-UpperBodyFlow169-VisualFrames.json"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     private enum View {
-        case front, back, side
+        case front, back, side, threeQuarter
     }
 
     private func update(_ instance: ReplaySkinnedAthleteInstance, player: PlayerTrack,
@@ -158,6 +257,10 @@ final class ReplayTripoAthleteVisualTests: XCTestCase {
             position = closeUp ? [2.4, 1.55, 0] : [4.4, 1.25, 0]
             keyPosition = [3, 4, 3]
             fillPosition = [2, 2, -3]
+        case .threeQuarter:
+            position = closeUp ? [1.5, 1.55, 2.1] : [2.8, 1.25, 3.4]
+            keyPosition = [-3, 4, 3]
+            fillPosition = [3, 2, 2]
         }
         let camera = PerspectiveCamera()
         camera.camera = PerspectiveCameraComponent(near: 0.05, far: 20, fieldOfViewInDegrees: 36)

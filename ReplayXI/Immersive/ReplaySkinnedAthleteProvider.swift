@@ -247,6 +247,7 @@ final class ReplaySkinnedAthleteInstance {
     var disablesHeaderHandoffForTesting = false
     var disablesOffBallReadyArmsForTesting = false
     var disablesCervicalAimForTesting = false
+    var disablesUpperBodyFlowForTesting = false
     /// Matched original-arm control; body, phase, source and contacts are shared.
     var disablesArmCutSmoothingForTesting = false
     enum DiagnosticStage: String, CaseIterable {
@@ -282,6 +283,7 @@ final class ReplaySkinnedAthleteInstance {
     private let neckCompensatedChildren: [Int]
     private let offBallLeftArm: ReplayAthleteOffBallPose.NativeArmBinding?
     private let offBallRightArm: ReplayAthleteOffBallPose.NativeArmBinding?
+    private let upperBodyFlow: ReplayAthleteUpperBodyFlow.NativeBinding?
     private var footballPose: ReplaySkinnedAthleteFootballPose?
     private var impactPose: ReplaySkinnedAthleteImpactPose?
     private let turnInPlace: ReplaySkinnedAthleteTurnInPlace?
@@ -306,6 +308,7 @@ final class ReplaySkinnedAthleteInstance {
         turnInPlace = ReplaySkinnedAthleteTurnInPlace(motion: motion)
         offBallLeftArm = .init(side: "left", motion: motion)
         offBallRightArm = .init(side: "right", motion: motion)
+        upperBodyFlow = .init(motion: motion)
         transforms = model.jointTransforms
         neckIndex = motion.semanticJointIndices["neck"]!
         headIndex = motion.semanticJointIndices["head"]!
@@ -483,10 +486,19 @@ final class ReplaySkinnedAthleteInstance {
             enabled: allowsOffBallPose && presentationPose != nil && stationaryPose == nil
                 && impact == nil && lookTarget != nil)
         applyOffBall(offBall)
+        var flowEnabled = allowsOffBallPose && presentationPose != nil && stationaryPose == nil
+            && impact == nil && lookTarget != nil && !track.isGoalkeeper
+        #if DEBUG
+        flowEnabled = flowEnabled && !disablesUpperBodyFlowForTesting
+        #endif
+        let flow = ReplayAthleteUpperBodyFlow.sample(gaitPhase: gaitPhase, locomotion: locomotion,
+            actionInfluence: contactAttention, armReadiness: movement?.readiness ?? 0,
+            enabled: flowEnabled && upperBodyFlow != nil)
+        upperBodyFlow?.apply(flow, motion: motion, to: &pose)
         #if DEBUG
         poseStageObserverForTesting?(.offBall, pose)
         #endif
-        let look = offBall.adjusting(baseLook)
+        let look = flow.adjusting(offBall.adjusting(baseLook))
         if let action = interactionSample {
             applyLook(ReplayAthleteLookPose(neckYawRadians: look.neckYawRadians,
                 headYawRadians: look.headYawRadians,

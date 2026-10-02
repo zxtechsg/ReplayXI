@@ -222,6 +222,8 @@ enum ReplayAthleteMotion {
         let ballAction = suppliedBallAction ?? ballTrack.flatMap {
             ballActionPose(for: track, ballTrack: $0, at: time)
         }
+        let contactProtection = ReplayAthleteMovementIntent.contactProtection(
+            for: interaction, track: track, at: time)
         let look = lookPose(
             for: track,
             at: time,
@@ -229,8 +231,7 @@ enum ReplayAthleteMotion {
             targetWorldPosition: lookTargetWorldPosition,
             stationaryPose: stationaryPose,
             presentationPose: presentationPose,
-            contactAttention: max(ballAction?.influence ?? 0,
-                ReplayAthleteMovementIntent.contactProtection(for: interaction, track: track, at: time))
+            contactAttention: max(ballAction?.influence ?? 0, contactProtection)
         )
         // The legacy left lane is -X. A negative Z rotation abducts its
         // downward leg; the opposite sign collapsed keeper boots inward.
@@ -343,7 +344,10 @@ enum ReplayAthleteMotion {
             actionInfluence: max(interactionInfluence, ballAction?.influence ?? 0,
                 track.isGoalkeeper && stationaryPose == nil ? goalkeeperReadiness?.influence ?? 0 : 0),
             enabled: offBallEnabled)
-        let sharedLook = offBall.adjusting(look)
+        let flow = ReplayAthleteUpperBodyFlow.sample(gaitPhase: phase, locomotion: locomotion,
+            actionInfluence: max(interactionInfluence, ballAction?.influence ?? 0, contactProtection),
+            enabled: offBallEnabled && !track.isGoalkeeper)
+        let sharedLook = flow.adjusting(offBall.adjusting(look))
 
         let base = ReplayAthleteLocomotionPose(
             // A planted boot owns vertical placement. During the flight phase,
@@ -370,14 +374,14 @@ enum ReplayAthleteMotion {
                 axis: [0, 0, 1]
             ) * simd_quatf(angle: cycle * tuning.pelvisYaw, axis: [0, 1, 0]),
             spineOrientation: simd_quatf(
-                angle: (-forwardLean * 0.90) + breathingPitch + offBall.chestPitch,
+                angle: (-forwardLean * 0.90) + breathingPitch + offBall.chestPitch + flow.chestPitch,
                 axis: [1, 0, 0]
             )
                 * simd_quatf(
-                    angle: (-doubleCycle * tuning.spineRoll) + (cutBank * 0.62) + offBall.chestRoll,
+                    angle: (-doubleCycle * tuning.spineRoll) + (cutBank * 0.62) + offBall.chestRoll + flow.chestRoll,
                     axis: [0, 0, 1]
                 )
-                * simd_quatf(angle: -cycle * tuning.spineYaw + offBall.chestYaw, axis: [0, 1, 0]),
+                * simd_quatf(angle: -cycle * tuning.spineYaw + offBall.chestYaw + flow.chestYaw, axis: [0, 1, 0]),
             neckOrientation: simd_quatf(
                 angle: (forwardLean * 0.30) + sharedLook.neckPitchRadians
                     - (breathingPitch * 0.55),
@@ -404,35 +408,35 @@ enum ReplayAthleteMotion {
             rightKneeOrientation: simd_quatf(angle: rightKneeBend, axis: [1, 0, 0]),
             leftAnkleOrientation: simd_quatf(angle: leftAnkleAngle, axis: [1, 0, 0]),
             rightAnkleOrientation: simd_quatf(angle: rightAnkleAngle, axis: [1, 0, 0]),
-            leftShoulderOrientation: offBall.shoulder(simd_quatf(
+            leftShoulderOrientation: flow.leftArm.shoulderRotation * offBall.shoulder(simd_quatf(
                 angle: -(keeperReach + balanceReach),
                 axis: [0, 0, 1]
             ) * simd_quatf(
                 angle: rightFootfall.stride * tuning.strideAmplitude * tuning.armSwing,
                 axis: [1, 0, 0]
             ), isLeft: true),
-            rightShoulderOrientation: offBall.shoulder(simd_quatf(
+            rightShoulderOrientation: flow.rightArm.shoulderRotation * offBall.shoulder(simd_quatf(
                 angle: keeperReach + balanceReach,
                 axis: [0, 0, 1]
             ) * simd_quatf(
                 angle: leftFootfall.stride * tuning.strideAmplitude * tuning.armSwing,
                 axis: [1, 0, 0]
             ), isLeft: false),
-            leftElbowOrientation: offBall.elbow(simd_quatf(
+            leftElbowOrientation: flow.leftArm.elbowRotation * offBall.elbow(simd_quatf(
                 // Limbs hang down -Y and the footballer faces +Z. Elbow
                 // flexion is -X (forward), opposite to a knee's +X fold.
                 angle: -(elbowBend + (max(-rightFootfall.stride, 0) * tuning.elbowTravel)),
                 axis: [1, 0, 0]
             ), isLeft: true),
-            rightElbowOrientation: offBall.elbow(simd_quatf(
+            rightElbowOrientation: flow.rightArm.elbowRotation * offBall.elbow(simd_quatf(
                 angle: -(elbowBend + (max(-leftFootfall.stride, 0) * tuning.elbowTravel)),
                 axis: [1, 0, 0]
             ), isLeft: false),
-            leftWristOrientation: simd_quatf(
+            leftWristOrientation: flow.leftArm.wristRotation * simd_quatf(
                 angle: rightFootfall.stride * tuning.wristTravel,
                 axis: [0, 1, 0]
             ),
-            rightWristOrientation: simd_quatf(
+            rightWristOrientation: flow.rightArm.wristRotation * simd_quatf(
                 angle: leftFootfall.stride * tuning.wristTravel,
                 axis: [0, 1, 0]
             )
