@@ -46,7 +46,7 @@ final class AnnotationExistingKeyHint162Tests: XCTestCase {
             .recordingPose(at: 2)
         XCTAssertEqual(AnnotationTimingEditor.keyframeHint(for: mark, at: 2,
             windowIsDirty: true, positionIsDirty: false),
-            "Apply or reset In/Out before adjusting shape.")
+            "Apply or reset times before adjusting shape.")
         XCTAssertEqual(AnnotationTimingEditor.keyframeHint(for: mark, at: 2,
             windowIsDirty: true, positionIsDirty: true),
             "Move or reset this position time before switching.")

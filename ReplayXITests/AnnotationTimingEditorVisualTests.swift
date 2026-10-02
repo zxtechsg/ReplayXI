@@ -27,7 +27,8 @@ final class AnnotationTimingEditorVisualTests: XCTestCase {
 
     func testClosePositionTimesRemainReadable() throws {
         try renderEditor(width: 1136, height: 700, typeSize: .large,
-                         name: "annotation-timestamp-editor-close-keys", extraKeyTimes: [2.01, 2.04])
+                         name: "annotation-timestamp-editor-close-keys", extraKeyTimes: [2.01, 2.04],
+                         selectedKeyTime: 2, revealSelectedKey: true)
     }
 
     func testSelectedKeyNudgesFitLargestTextAndExplainCollision() throws {
@@ -66,8 +67,9 @@ final class AnnotationTimingEditorVisualTests: XCTestCase {
                                         duration: store.selectedScenario.duration, store: store))
             if pendingDrafts { session.window.startText = "1" }
             XCTAssertTrue(session.position.select(selectedKeyTime ?? 2))
-            session.position.text = positionText ?? "3"
-            XCTAssertTrue(session.hasUnsavedChanges)
+            if pendingDrafts { session.position.text = "3" }
+            if let positionText { session.position.text = positionText }
+            XCTAssertEqual(session.hasUnsavedChanges, pendingDrafts || positionText != nil)
             XCTAssertTrue(store.canChangePlaybackView, "Close stays available with unsaved drafts")
         }
         defer { session.releaseOwnership() }

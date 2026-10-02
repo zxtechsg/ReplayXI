@@ -18,17 +18,39 @@ struct AnnotationTimingDraft: Equatable {
     var start: TimeInterval? { AnnotationTimestamp.parse(startText) }
     var end: TimeInterval? { AnnotationTimestamp.parse(endText) }
 
+    /// Setting a boundary changes only the draft. Keep the other boundary as
+    /// entered so an invalid range remains visible and can be corrected.
+    @discardableResult
+    mutating func setBoundary(_ boundary: Boundary, at time: TimeInterval, duration: TimeInterval) -> Bool {
+        guard duration.isFinite, duration >= 0, time.isFinite, (0...duration).contains(time) else { return false }
+        switch boundary {
+        case .start: startText = AnnotationTimestamp.editable(time)
+        case .end:
+            endText = AnnotationTimestamp.editable(time)
+            throughEnd = false
+        }
+        return true
+    }
+
+    enum Boundary { case start, end }
+
+    func visibleRange(duration: TimeInterval) -> ClosedRange<TimeInterval>? {
+        guard validationMessage(duration: duration) == nil, let start,
+              let end = throughEnd ? duration : end else { return nil }
+        return start...end
+    }
+
     func validationMessage(duration: TimeInterval) -> String? {
         guard let start, throughEnd || end != nil else { return "Use seconds or m:ss, e.g. 12.5 or 1:12.5." }
         guard duration.isFinite, duration >= 0, (0...duration).contains(start),
               throughEnd || end.map({ (0...duration).contains($0) }) == true else {
-            return "Keep In and Out inside this replay."
+            return "Keep Start and End inside this replay."
         }
         if !throughEnd, let end {
             guard CoachMarkTimingPolicy.meetsMinimumEditableDuration(revealTime: start, hideTime: end)
-            else { return "Out must be at least 0.5 seconds after In." }
+            else { return "Set End at least 0.5 seconds after Start." }
             guard CoachMarkTimingPolicy.fitsMaximumDuration(revealTime: start, displayDuration: end - start) else {
-                return "Use a window up to 30 seconds, or choose To end."
+                return "Use up to 30 seconds, or turn on Keep to replay end."
             }
         }
         return nil

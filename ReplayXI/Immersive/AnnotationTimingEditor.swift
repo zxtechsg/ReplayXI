@@ -11,6 +11,8 @@ struct AnnotationTimingEditor: View {
     var close: () -> Void = {}
     @State private var localSession = AnnotationTimingDraftSession()
     @State private var keyTimeLabels = AnnotationKeyTimeLabels()
+    @State private var showsExactTimes = false
+    @State private var showsPositionTools = false
     @FocusState private var focusedField: Field?
     private enum Field: Hashable { case inTime, outTime, positionTime }
     @State private var measuredContentHeight: CGFloat?
@@ -56,51 +58,85 @@ struct AnnotationTimingEditor: View {
                 .disabled(!store.canChangePlaybackView)
                 .accessibilityLabel("Close timing controls")
                 .accessibilityHint("Returns to this annotation. Unsaved changes need Apply or Discard.")
-                adaptiveRow {
-                    Label("In / Out", systemImage: "timer").font(.headline).foregroundStyle(color)
-                    Toggle("To end", isOn: draftBinding.throughEnd).toggleStyle(.button).disabled(!canEdit)
-                        .accessibilityHint("Keep the annotation visible through the final replay frame")
-                    Button("Reset In/Out", action: resetWindow).disabled(!isDirty || !canEdit)
-                        .accessibilityLabel("Reset In and Out changes only")
-                    Button("Apply In/Out", action: applyWindow)
-                        .buttonStyle(.borderedProminent).tint(color)
-                        .disabled(!canEdit || !isDirty || draft.validationMessage(duration: duration) != nil)
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("Annotation timing", systemImage: "timer").font(.headline).foregroundStyle(color)
+                    Text(session.hasUnsavedChanges ? "Unsaved changes · Done saves them" : "Choose when this mark appears")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                Button(action: finishEditing) {
+                    Label("Done", systemImage: "checkmark")
+                        .frame(minHeight: PlaybackControlDeckPresentation.minimumSpatialHitTarget)
+                }
+                .buttonStyle(.borderedProminent).tint(color)
+                .disabled(!store.canChangePlaybackView || (session.hasUnsavedChanges && !session.canApply(in: store)))
+                .accessibilityHint("Saves timing changes and returns to this annotation")
             }
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 12) {
-                    timeRow("In", text: draftBinding.startText, fallback: mark?.revealTime ?? 0, field: .inTime)
-                    if !draft.throughEnd {
-                        timeRow("Out", text: draftBinding.endText, fallback: mark?.hideTime ?? duration, field: .outTime)
+                    adaptiveRow {
+                        Text("Scrub the replay, then set Start and End.")
+                            .font(.subheadline).fixedSize(horizontal: false, vertical: true)
+                        Label("Playhead \(AnnotationTimestamp.display(store.playhead))", systemImage: "clock")
+                            .font(.subheadline.weight(.semibold)).monospacedDigit()
+                            .accessibilityLabel("Playhead \(AnnotationTimestamp.display(store.playhead))")
                     }
+                    windowOverview
+                    adaptiveRow {
+                        boundaryCard(.start)
+                        boundaryCard(.end)
+                    }
+                    Toggle("Keep to replay end", isOn: draftBinding.throughEnd)
+                        .frame(minHeight: PlaybackControlDeckPresentation.minimumSpatialHitTarget)
+                        .disabled(!canEdit)
+                        .accessibilityHint("The annotation stays visible through the final replay frame")
                     if let error = draft.validationMessage(duration: duration) {
                         Label(error, systemImage: "exclamationmark.circle").font(.caption).foregroundStyle(.orange)
-                    } else if isDirty {
-                        Text("In/Out not applied. Saved position times stay unchanged.")
-                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    DisclosureGroup(isExpanded: $showsExactTimes) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            timeRow("Start", text: draftBinding.startText, fallback: mark?.revealTime ?? 0, field: .inTime)
+                            if !draft.throughEnd {
+                                timeRow("End", text: draftBinding.endText, fallback: mark?.hideTime ?? duration, field: .outTime)
+                            }
+                            adaptiveRow {
+                                Button("Reset times", action: resetWindow).disabled(!isDirty || !canEdit)
+                                    .accessibilityLabel("Reset Start and End changes only")
+                                Button("Apply times", action: applyWindow)
+                                    .disabled(!canEdit || !isDirty || draft.validationMessage(duration: duration) != nil)
+                                    .accessibilityHint("Saves Start and End. Position times stay unchanged.")
+                            }.buttonStyle(.bordered)
+                            if let mark {
+                                adaptiveRow {
+                                    Text("Shift all timing").font(.caption)
+                                    HStack {
+                                        Button("−1s") { shift(mark, by: -1) }.disabled(!canShift(mark, by: -1))
+                                            .accessibilityLabel("Move annotation window and all position keys one second earlier")
+                                        Button("+1s") { shift(mark, by: 1) }.disabled(!canShift(mark, by: 1))
+                                            .accessibilityLabel("Move annotation window and all position keys one second later")
+                                    }
+                                }.buttonStyle(.bordered)
+                            }
+                        }.padding(.top, 8)
+                    } label: {
+                        Label("Fine-tune times", systemImage: "slider.horizontal.3")
+                            .frame(minHeight: PlaybackControlDeckPresentation.minimumSpatialHitTarget)
                     }
                     if let mark {
-                        adaptiveRow {
-                            Text("Shift all timing").font(.caption)
-                            HStack {
-                                Button("−1s") { shift(mark, by: -1) }.disabled(!canShift(mark, by: -1))
-                                    .accessibilityLabel("Move annotation window and all position keys one second earlier")
-                                Button("+1s") { shift(mark, by: 1) }.disabled(!canShift(mark, by: 1))
-                                    .accessibilityLabel("Move annotation window and all position keys one second later")
-                            }
-                            Label(AnnotationTimingEditPolicy.visibilityLabel(for: mark, at: store.playhead),
-                                  systemImage: mark.isVisible(at: store.playhead) ? "eye" : "eye.slash")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }.buttonStyle(.bordered)
-                        if !mark.isVisible(at: store.playhead) {
-                            Text(AnnotationTimingEditPolicy.outsideWindowHint)
-                                .font(.caption).foregroundStyle(.orange)
-                        }
                         if mark.kind != .playerLabel {
                             Divider()
-                            keyframeSection(mark)
+                            DisclosureGroup(isExpanded: $showsPositionTools) {
+                                keyframeSection(mark).padding(.top, 12)
+                            } label: {
+                                Label(mark.hasKeyframes ? "Animate position · \(mark.keyframes?.count ?? 0) \((mark.keyframes?.count ?? 0) == 1 ? "key" : "keys")" : "Animate position",
+                                      systemImage: "diamond")
+                                    .frame(minHeight: PlaybackControlDeckPresentation.minimumSpatialHitTarget)
+                            }
                         }
+                        Text("Selected marks stay visible while editing. Close the annotation to check playback.")
+                            .font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 .padding(.trailing, 8)
@@ -116,24 +152,86 @@ struct AnnotationTimingEditor: View {
             .frame(height: AnnotationTimingPanelLayout.height(contentHeight: measuredContentHeight,
                 usesAccessibilityText: dynamicTypeSize.isAccessibilitySize))
             .scrollIndicators(.visible)
-            .accessibilityHint("Scroll for position keys and key timing controls")
+            .accessibilityHint("Scroll for fine-tune times and optional position animation")
         }
-        .onAppear { beginSession(); refreshKeyTimeLabels() }
+        .onAppear { beginSession(); refreshKeyTimeLabels(); revealPendingEdits() }
         .onDisappear {
             if draftSession == nil { localSession.releaseOwnership() }
         }
         .onChange(of: markID) { _, _ in
-            focusedField = nil; beginSession(); refreshKeyTimeLabels()
+            focusedField = nil; showsExactTimes = false; showsPositionTools = false
+            beginSession(); refreshKeyTimeLabels(); revealPendingEdits()
         }
         .onChange(of: draft.throughEnd) { _, throughEnd in
             if throughEnd, focusedField == .outTime { focusedField = nil }
         }
         .onChange(of: mark?.revealTime) { _, _ in refreshCommittedWindow() }
         .onChange(of: mark?.hideTime) { _, _ in refreshCommittedWindow() }
+        .onChange(of: positionDraft.selectedTime) { _, _ in revealPendingEdits() }
+        .onChange(of: positionDraft.isDirty) { _, _ in revealPendingEdits() }
         .onChange(of: mark?.keyframes?.map(\.time)) { _, times in
             if let selectedTime = positionDraft.selectedTime, !(times ?? []).contains(selectedTime) { positionDraft.clear() }
             keyTimeLabels = AnnotationKeyTimeLabels(times: times ?? [])
         }
+    }
+
+    private var windowOverview: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(draft.visibleRange(duration: duration).map {
+                "Visible \(AnnotationTimestamp.display($0.lowerBound)) – \(AnnotationTimestamp.display($0.upperBound))"
+            } ?? "Set a valid Start and End")
+                .font(.caption.weight(.semibold)).monospacedDigit()
+            GeometryReader { geometry in
+                let width = max(0, geometry.size.width)
+                let timelineDuration = max(duration, 0.1)
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.white.opacity(0.12)).frame(height: 8)
+                    if let range = draft.visibleRange(duration: duration) {
+                        let start = width * range.lowerBound / timelineDuration
+                        let end = width * range.upperBound / timelineDuration
+                        Capsule().fill(color).frame(width: max(4, end - start), height: 8).offset(x: min(start, max(0, width - 4)))
+                    }
+                    RoundedRectangle(cornerRadius: 2).fill(.white)
+                        .frame(width: 3, height: 20)
+                        .offset(x: min(max(0, width * store.playhead / timelineDuration), max(0, width - 3)))
+                }.frame(height: 20)
+            }
+            .frame(height: 20)
+            .accessibilityHidden(true)
+        }
+    }
+
+    private func boundaryCard(_ boundary: AnnotationTimingDraft.Boundary) -> some View {
+        let isStart = boundary == .start
+        let title = isStart ? "Start" : "End"
+        let time = isStart ? draft.start : (draft.throughEnd ? duration : draft.end)
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                Text(title).font(.subheadline.weight(.semibold))
+                Spacer(minLength: 0)
+                Text(time.map { AnnotationTimestamp.display($0) } ?? "—").monospacedDigit()
+            }
+            adaptiveRow {
+                Button { setBoundary(boundary) } label: {
+                    Label(isStart ? "Start here" : "End here", systemImage: isStart ? "arrow.right.to.line" : "arrow.left.to.line")
+                        .frame(minHeight: PlaybackControlDeckPresentation.minimumSpatialHitTarget)
+                }
+                .buttonStyle(.borderedProminent).tint(color)
+                .disabled(!canEdit || !isValidSeek(store.playhead))
+                .accessibilityHint("Sets \(title) to the playhead. Choose Done to save.")
+                Button { preview(time) } label: {
+                    Label(isStart ? "Go to start" : "Go to end", systemImage: "arrow.forward.to.line")
+                        .frame(minHeight: PlaybackControlDeckPresentation.minimumSpatialHitTarget)
+                }
+                .buttonStyle(.bordered)
+                .disabled(!store.canChangePlaybackView || !isValidSeek(time))
+                .accessibilityHint("Pauses the replay at this boundary without saving changes")
+            }
+        }
+        .padding(12)
+        .frame(minWidth: 280, maxWidth: .infinity, alignment: .leading)
+        .background(color.opacity(0.1), in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(color.opacity(0.25)))
     }
 
     private func timeRow(_ title: String, text: Binding<String>, fallback: Double, field: Field) -> some View {
@@ -146,14 +244,6 @@ struct AnnotationTimingEditor: View {
                 .focused($focusedField, equals: field)
                 .submitLabel(.done)
                 .onSubmit { applyWindow() }
-            HStack {
-                Button("Now") { text.wrappedValue = AnnotationTimestamp.editable(store.playhead) }
-                    .accessibilityLabel("Set \(title) to playhead")
-                Button { preview(AnnotationTimestamp.parse(text.wrappedValue)) } label: {
-                    Image(systemName: "forward.frame").frame(minWidth: 44, minHeight: 44)
-                }.accessibilityLabel("Preview annotation \(title) time")
-                    .disabled(!isValidSeek(AnnotationTimestamp.parse(text.wrappedValue)))
-            }
             Slider(value: sliderBinding(text, fallback: fallback), in: 0...max(duration, 0.1), step: 0.1)
                 .tint(color).frame(minWidth: 140)
                 .accessibilityLabel("Annotation \(title) time")
@@ -282,6 +372,22 @@ struct AnnotationTimingEditor: View {
         guard let time, isValidSeek(time) else { return }
         store.setPlaying(false); store.seek(to: time)
     }
+    private func setBoundary(_ boundary: AnnotationTimingDraft.Boundary) {
+        guard canEdit, isValidSeek(store.playhead) else { return }
+        store.setPlaying(false)
+        _ = draft.setBoundary(boundary, at: store.playhead, duration: duration)
+        if focusedField != .positionTime { focusedField = nil }
+    }
+    private func finishEditing() {
+        guard store.canChangePlaybackView else { return }
+        if session.hasUnsavedChanges, !session.apply(in: store) { return }
+        focusedField = nil
+        close()
+    }
+    private func revealPendingEdits() {
+        if draft.start == nil || (!draft.throughEnd && draft.end == nil) { showsExactTimes = true }
+        if positionDraft.selectedTime != nil || positionDraft.isDirty { showsPositionTools = true }
+    }
     private func reload() {
         guard let mark else { return }
         session.resetWindow(mark: mark, duration: duration)
@@ -336,7 +442,7 @@ struct AnnotationTimingEditor: View {
     static func keyframeHint(for mark: CoachMark, at time: TimeInterval,
                              windowIsDirty: Bool, positionIsDirty: Bool) -> String {
         if positionIsDirty { return "Move or reset this position time before switching." }
-        if windowIsDirty { return "Apply or reset In/Out before adjusting shape." }
+        if windowIsDirty { return "Apply or reset times before adjusting shape." }
         if mark.followsPlayerTracks { return "Switch to Fixed before adding position keys." }
         if (mark.keyframes?.count ?? 0) >= CoachMark.maximumKeyframes {
             return "64 keys saved. Adjust an existing position, or delete a key."
