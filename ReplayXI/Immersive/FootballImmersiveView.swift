@@ -97,34 +97,7 @@ struct FootballImmersiveView: View {
                 }
             }
             if let root {
-                PitchSceneFactory.update(
-                root: root,
-                scenario: store.selectedScenario,
-                time: store.playhead,
-                viewMode: store.viewMode,
-                perspectiveID: store.activePerspectiveID,
-                marks: store.marks,
-                selectedAnnotationID: selectedAnnotationID,
-                selectedAnnotationIsEditable: selectedAnnotationIsEditable,
-                decisionSnapshot: visibleDecisionSnapshot,
-                showsLaneLens: store.showsLaneLens,
-                isDrawing: store.isDrawing,
-                draftStart: store.pendingDrawStart,
-                draftEnd: annotationStroke?.previewEnd,
-                draftKind: store.selectedTool,
-                positionalOriginTransform: sharedSpace.pitchOriginTransform,
-                triangleLockMode: store.triangleLockMode,
-                isTrianglePlacementReady: store.hasLocallyAcknowledgedTrianglePlacement
-                    && sharedSpace.hasUsableSharedPitchFrame
-                    && store.canRevealPhysicalTriangleMarkers(
-                        participantID: nil,
-                        sharedSession: false
-                    ),
-                showsIdealBranch: store.showsIdealBranch,
-                emphasizesBall: emphasizesBall,
-                playerDetail: playerDetail
-            )
-                applyLocalOverlayVisibility(to: root)
+                updateMatchRoot(root)
             }
             addAttachments(
                 to: content,
@@ -152,34 +125,7 @@ struct FootballImmersiveView: View {
             }
 
             if let root {
-                PitchSceneFactory.update(
-                    root: root,
-                    scenario: store.selectedScenario,
-                    time: store.playhead,
-                    viewMode: store.viewMode,
-                    perspectiveID: store.activePerspectiveID,
-                    marks: store.marks,
-                    selectedAnnotationID: selectedAnnotationID,
-                    selectedAnnotationIsEditable: selectedAnnotationIsEditable,
-                    decisionSnapshot: visibleDecisionSnapshot,
-                    showsLaneLens: store.showsLaneLens,
-                    isDrawing: store.isDrawing,
-                    draftStart: store.pendingDrawStart,
-                    draftEnd: annotationStroke?.previewEnd,
-                    draftKind: store.selectedTool,
-                    positionalOriginTransform: sharedSpace.pitchOriginTransform,
-                    triangleLockMode: store.triangleLockMode,
-                    isTrianglePlacementReady: store.hasLocallyAcknowledgedTrianglePlacement
-                        && sharedSpace.hasUsableSharedPitchFrame
-                        && store.canRevealPhysicalTriangleMarkers(
-                            participantID: nil,
-                            sharedSession: false
-                        ),
-                    showsIdealBranch: store.showsIdealBranch,
-                    emphasizesBall: emphasizesBall,
-                    playerDetail: playerDetail
-                )
-                applyLocalOverlayVisibility(to: root)
+                updateMatchRoot(root)
             }
             // Recenter only on explicit request, never on head or player motion.
             if let controlsAnchor = content.entities.first(where: {
@@ -572,9 +518,37 @@ struct FootballImmersiveView: View {
         movingWorkspace = nil
     }
 
-    /// Annotation visibility is a wearer-local analysis preference. Keep the
-    /// authored marks in ReplayStore (and therefore in the shared room) while
-    /// suppressing only this headset's render and edit affordances.
+    /// Initial creation, scenario replacement and ordinary updates must use
+    /// the same playback, editing and local placement state.
+    private func updateMatchRoot(_ root: Entity) {
+        PitchSceneFactory.update(
+            root: root,
+            scenario: store.selectedScenario,
+            time: store.playhead,
+            viewMode: store.viewMode,
+            perspectiveID: store.activePerspectiveID,
+            marks: store.marks,
+            selectedAnnotationID: selectedAnnotationID,
+            selectedAnnotationIsEditable: selectedAnnotationIsEditable,
+            decisionSnapshot: visibleDecisionSnapshot,
+            showsLaneLens: store.showsLaneLens,
+            isDrawing: store.isDrawing,
+            draftStart: store.pendingDrawStart,
+            draftEnd: annotationStroke?.previewEnd,
+            draftKind: store.selectedTool,
+            positionalOriginTransform: sharedSpace.pitchOriginTransform,
+            triangleLockMode: store.triangleLockMode,
+            isTrianglePlacementReady: store.hasLocallyAcknowledgedTrianglePlacement
+                && sharedSpace.hasUsableSharedPitchFrame
+                && store.canRevealPhysicalTriangleMarkers(participantID: nil, sharedSession: false),
+            showsIdealBranch: store.showsIdealBranch,
+            emphasizesBall: emphasizesBall,
+            playerDetail: playerDetail
+        )
+        applyLocalOverlayVisibility(to: root)
+    }
+
+    /// Hide local render/edit affordances without changing saved annotations.
     private func applyLocalOverlayVisibility(to root: Entity) {
         PlaybackLocalOverlayVisibility.apply(
             to: root,

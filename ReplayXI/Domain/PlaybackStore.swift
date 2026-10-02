@@ -145,6 +145,7 @@ final class ReplayStore {
     @ObservationIgnored private var isRestoringSavedReview = false
     @ObservationIgnored private var retainedScenarioMarks: [String: [CoachMark]] = [:]
     private var annotationEditHistory: ReplayAnnotationEditHistory
+    @ObservationIgnored private let authoredCoachMarkIDsByScenarioIndex: [Set<UUID>]
 
     @ObservationIgnored
     var onBroadcastSnapshot: (@MainActor (SharedPlaybackSnapshot) -> Void)?
@@ -306,6 +307,7 @@ final class ReplayStore {
     init(scenarios: [ReplayScenario], reviewLibrary: ReplayReviewLibrary? = nil) {
         precondition(!scenarios.isEmpty, "Replay XI requires at least one scenario")
         self.scenarios = scenarios
+        self.authoredCoachMarkIDsByScenarioIndex = scenarios.map { Set($0.coachMarks.map(\.id)) }
         self.reviewLibrary = reviewLibrary ?? ReplayReviewLibrary(scenarios: scenarios)
         let first = scenarios[0]
         selectedScenarioID = first.id
@@ -373,7 +375,7 @@ final class ReplayStore {
         guard localRole == .coach, !isCollaborationActive,
               pendingAnnotationTimingEditID == nil || pendingAnnotationTimingEditID == id,
               marks.contains(where: { $0.id == id }),
-              !selectedScenario.coachMarks.contains(where: { $0.id == id }) else { return false }
+              !selectedScenarioAuthoredCoachMarkIDs.contains(id) else { return false }
         pendingAnnotationTimingEditID = id
         return true
     }
@@ -522,6 +524,12 @@ final class ReplayStore {
 
     var selectedScenarioIndex: Int {
         scenarios.firstIndex { $0.id == selectedScenarioID } ?? 0
+    }
+
+    /// Scenarios are immutable. Reuse their authored IDs across annotation
+    /// edits while matching `selectedScenario`'s first-match/fallback rules.
+    private var selectedScenarioAuthoredCoachMarkIDs: Set<UUID> {
+        authoredCoachMarkIDsByScenarioIndex[selectedScenarioIndex]
     }
 
     var activePerspectiveID: String {
@@ -1314,7 +1322,7 @@ final class ReplayStore {
         guard allowsAnnotationAuthoring() else { return false }
         guard allowsMutationOutsideEndpointPreview() else { return false }
         guard localRole == .coach else { return false }
-        let authoredIDs = Set(selectedScenario.coachMarks.map(\.id))
+        let authoredIDs = selectedScenarioAuthoredCoachMarkIDs
         guard !authoredIDs.contains(id),
               let index = marks.firstIndex(where: { $0.id == id }) else {
             statusMessage = authoredIDs.contains(id)
@@ -1339,7 +1347,7 @@ final class ReplayStore {
         guard allowsAnnotationAuthoring(), allowsMutationOutsideEndpointPreview(), canChangePlaybackView,
               localRole == .coach, !isDrawing,
               pendingAnnotationTimingEditID == nil || pendingAnnotationTimingEditID == id,
-              !selectedScenario.coachMarks.contains(where: { $0.id == id }),
+              !selectedScenarioAuthoredCoachMarkIDs.contains(id),
               let index = marks.firstIndex(where: { $0.id == id }),
               windowStart != nil || windowEnd == nil,
               (keyframeFrom == nil) == (keyframeTo == nil) else { return false }
@@ -1378,7 +1386,7 @@ final class ReplayStore {
     func setCoachMarkWindow(id: UUID, start: TimeInterval, end: TimeInterval?) -> Bool {
         guard allowsAnnotationAuthoring(), allowsMutationOutsideEndpointPreview(),
               localRole == .coach, !hasActiveTimelineScrub, !isDrawing,
-              !selectedScenario.coachMarks.contains(where: { $0.id == id }),
+              !selectedScenarioAuthoredCoachMarkIDs.contains(id),
               let index = marks.firstIndex(where: { $0.id == id }),
               CoachMarkTimingPolicy.windowFits(revealTime: start, displayDuration: end.map { $0 - start },
                   replayDuration: selectedScenario.duration),
@@ -1401,7 +1409,7 @@ final class ReplayStore {
     @discardableResult
     func captureCoachMarkKeyframe(id: UUID) -> Bool {
         guard allowsAnnotationAuthoring(), allowsMutationOutsideEndpointPreview(), canChangePlaybackView,
-              localRole == .coach, !selectedScenario.coachMarks.contains(where: { $0.id == id }),
+              localRole == .coach, !selectedScenarioAuthoredCoachMarkIDs.contains(id),
               let index = marks.firstIndex(where: { $0.id == id }),
               marks[index].kind != .playerLabel, !marks[index].followsPlayerTracks else { return false }
         guard allowsCoachMarkPoseRecording(marks[index]) else { return false }
@@ -1418,7 +1426,7 @@ final class ReplayStore {
     @discardableResult
     func removeCoachMarkKeyframe(id: UUID, at time: TimeInterval) -> Bool {
         guard allowsAnnotationAuthoring(), allowsMutationOutsideEndpointPreview(), canChangePlaybackView,
-              localRole == .coach, !selectedScenario.coachMarks.contains(where: { $0.id == id }),
+              localRole == .coach, !selectedScenarioAuthoredCoachMarkIDs.contains(id),
               let index = marks.firstIndex(where: { $0.id == id }),
               let frames = marks[index].keyframes,
               let frameIndex = frames.firstIndex(where: { abs($0.time - time) < 0.000_001 }) else { return false }
@@ -1438,7 +1446,7 @@ final class ReplayStore {
     @discardableResult
     func retimeCoachMarkKeyframe(id: UUID, from time: TimeInterval, to destination: TimeInterval) -> Bool {
         guard allowsAnnotationAuthoring(), allowsMutationOutsideEndpointPreview(), canChangePlaybackView,
-              localRole == .coach, !selectedScenario.coachMarks.contains(where: { $0.id == id }),
+              localRole == .coach, !selectedScenarioAuthoredCoachMarkIDs.contains(id),
               let index = marks.firstIndex(where: { $0.id == id }) else { return false }
         var replacement = marks[index]
         guard replacement.canRetimeKeyframe(from: time, to: destination, duration: selectedScenario.duration),
@@ -1462,7 +1470,7 @@ final class ReplayStore {
     @discardableResult
     func freezeCoachMarkKeyframes(id: UUID) -> Bool {
         guard allowsAnnotationAuthoring(), allowsMutationOutsideEndpointPreview(), canChangePlaybackView,
-              localRole == .coach, !selectedScenario.coachMarks.contains(where: { $0.id == id }),
+              localRole == .coach, !selectedScenarioAuthoredCoachMarkIDs.contains(id),
               let index = marks.firstIndex(where: { $0.id == id }), marks[index].hasKeyframes else { return false }
         var replacement = marks[index].sampled(at: playhead)
         replacement.keyframes = nil
@@ -1491,7 +1499,7 @@ final class ReplayStore {
             return false
         }
 
-        let authoredIDs = Set(selectedScenario.coachMarks.map(\.id))
+        let authoredIDs = selectedScenarioAuthoredCoachMarkIDs
         guard !authoredIDs.contains(id),
               let index = marks.firstIndex(where: { $0.id == id }) else {
             statusMessage = authoredIDs.contains(id)
@@ -1562,7 +1570,7 @@ final class ReplayStore {
             }
         }
 
-        let authoredIDs = Set(selectedScenario.coachMarks.map(\.id))
+        let authoredIDs = selectedScenarioAuthoredCoachMarkIDs
         guard !authoredIDs.contains(id),
               let index = marks.firstIndex(where: { $0.id == id }) else {
             statusMessage = authoredIDs.contains(id)
@@ -1625,7 +1633,7 @@ final class ReplayStore {
             return false
         }
 
-        let authoredIDs = Set(selectedScenario.coachMarks.map(\.id))
+        let authoredIDs = selectedScenarioAuthoredCoachMarkIDs
         guard !authoredIDs.contains(id),
               let index = marks.firstIndex(where: { $0.id == id }) else {
             statusMessage = authoredIDs.contains(id)
@@ -1687,7 +1695,7 @@ final class ReplayStore {
             return false
         }
         guard localRole == .coach else { return false }
-        let authoredIDs = Set(selectedScenario.coachMarks.map(\.id))
+        let authoredIDs = selectedScenarioAuthoredCoachMarkIDs
         guard !authoredIDs.contains(id),
               let index = marks.firstIndex(where: { $0.id == id }),
               marks[index].kind.requiresTwoPitchPoints else {
@@ -1806,7 +1814,7 @@ final class ReplayStore {
             return false
         }
         guard localRole == .coach else { return false }
-        let authoredIDs = Set(selectedScenario.coachMarks.map(\.id))
+        let authoredIDs = selectedScenarioAuthoredCoachMarkIDs
         guard !authoredIDs.contains(id),
               let index = marks.firstIndex(where: { $0.id == id }),
               marks[index].kind != .playerLabel else {
@@ -2066,7 +2074,7 @@ final class ReplayStore {
             return false
         }
 
-        let authoredIDs = Set(selectedScenario.coachMarks.map(\.id))
+        let authoredIDs = selectedScenarioAuthoredCoachMarkIDs
         guard !authoredIDs.contains(id),
               let index = marks.firstIndex(where: { $0.id == id }),
               marks[index].kind.requiresTwoPitchPoints,
@@ -2158,7 +2166,7 @@ final class ReplayStore {
             return false
         }
 
-        let authoredIDs = Set(selectedScenario.coachMarks.map(\.id))
+        let authoredIDs = selectedScenarioAuthoredCoachMarkIDs
         guard !authoredIDs.contains(id),
               let index = marks.firstIndex(where: { $0.id == id }),
               marks[index].kind.requiresTwoPitchPoints,
@@ -2267,7 +2275,7 @@ final class ReplayStore {
             return nil
         }
 
-        let authoredIDs = Set(selectedScenario.coachMarks.map(\.id))
+        let authoredIDs = selectedScenarioAuthoredCoachMarkIDs
         guard !authoredIDs.contains(id),
               let index = marks.firstIndex(where: { $0.id == id }),
               marks[index].kind.requiresTwoPitchPoints,
@@ -2604,7 +2612,7 @@ final class ReplayStore {
         guard allowsAnnotationAuthoring() else { return }
         guard allowsMutationOutsideEndpointPreview() else { return }
         guard localRole == .coach else { return }
-        let authoredIDs = Set(selectedScenario.coachMarks.map(\.id))
+        let authoredIDs = selectedScenarioAuthoredCoachMarkIDs
         let previousCount = marks.count
         let removedIDs = Set(marks.lazy.filter { !authoredIDs.contains($0.id) }.map(\.id))
         marks.removeAll { removedIDs.contains($0.id) }

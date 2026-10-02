@@ -339,6 +339,11 @@ struct ReplaySkinnedAthleteMotion: Sendable {
     private func writeSample(_ selected: Clip, at time: TimeInterval, looping: Bool,
                              rebuildingModelSpace: Bool, into pose: inout Pose) {
         let span = Self.span(in: selected, time: time, looping: looping)
+        writeSample(selected, span: span, rebuildingModelSpace: rebuildingModelSpace, into: &pose)
+    }
+
+    private func writeSample(_ selected: Clip, span: SampleSpan,
+                             rebuildingModelSpace: Bool, into pose: inout Pose) {
         let first = selected.frames[span.lower]
         let second = selected.frames[span.upper]
         for index in joints.indices {
@@ -360,26 +365,31 @@ struct ReplaySkinnedAthleteMotion: Sendable {
         let effort = locomotionEffort.isFinite ? min(max(locomotionEffort, 0), 1) : 0
         let linearWeight = min(max((effort - 0.02) / 0.20, 0), 1)
         let runWeight = linearWeight * linearWeight * (3 - 2 * linearWeight)
-        let phase = gaitPhase.isFinite ? Double(gaitPhase) : 0
-        let runTime = Self.wrapped(phase, duration: 2 * .pi) / (2 * .pi) * run.duration
         // Most athletes are fully idle or running. Avoid sampling a second clip
         // at these endpoints and keep a full run exactly independent of idle time.
         if runWeight <= 0 {
             sample(clip: .idle, at: time, rebuildingModelSpace: rebuildingModelSpace, into: &pose)
             return
         }
+        let phase = gaitPhase.isFinite ? Double(gaitPhase) : 0
+        let phaseFraction = Self.wrapped(phase, duration: 2 * .pi) / (2 * .pi)
+        let runTime = phaseFraction * run.duration
         let slowWeight = slowRunWeight.isFinite ? min(max(slowRunWeight, 0), 1) : 0
         if slowWeight > 0, let slowRun {
-            sampleWithSlowRun(slowRun, time: time, phase: phase, runWeight: runWeight,
+            sampleWithSlowRun(slowRun, time: time, phaseFraction: phaseFraction, runWeight: runWeight,
                               slowWeight: slowWeight, rebuildingModelSpace: rebuildingModelSpace, into: &pose)
             return
         }
         if runWeight >= 1 {
-            sample(clip: .run, at: runTime, rebuildingModelSpace: rebuildingModelSpace, into: &pose)
+            #if DEBUG
+            Self.sampleCounter.add(fast: 1)
+            #endif
+            writeSample(run, span: Self.span(in: run, phaseTime: runTime),
+                        rebuildingModelSpace: rebuildingModelSpace, into: &pose)
             return
         }
         let idleSpan = Self.span(in: idle, time: time, looping: true)
-        let runSpan = Self.span(in: run, time: runTime, looping: true)
+        let runSpan = Self.span(in: run, phaseTime: runTime)
         let idleStart = idle.frames[idleSpan.lower], idleEnd = idle.frames[idleSpan.upper]
         let runStart = run.frames[runSpan.lower], runEnd = run.frames[runSpan.upper]
         #if DEBUG
@@ -402,20 +412,20 @@ struct ReplaySkinnedAthleteMotion: Sendable {
     /// Blend intact full-body run poses, then the existing idle contribution.
     /// No second Pose, array allocation, hierarchy pass or phase adjustment.
     /// Only triple overlap reads three clips; zero-weight clips are not sampled.
-    private func sampleWithSlowRun(_ slow: Clip, time: TimeInterval, phase: Double,
+    private func sampleWithSlowRun(_ slow: Clip, time: TimeInterval, phaseFraction: Double,
                                    runWeight: Float, slowWeight: Float,
                                    rebuildingModelSpace: Bool, into pose: inout Pose) {
-        let fraction = Self.wrapped(phase, duration: 2 * .pi) / (2 * .pi)
-        let slowTime = fraction * slow.duration
+        let slowTime = phaseFraction * slow.duration
         if runWeight >= 1, slowWeight >= 1 {
             #if DEBUG
             Self.sampleCounter.add(slow: 1)
             #endif
-            writeSample(slow, at: slowTime, looping: true, rebuildingModelSpace: rebuildingModelSpace, into: &pose)
+            writeSample(slow, span: Self.span(in: slow, phaseTime: slowTime),
+                        rebuildingModelSpace: rebuildingModelSpace, into: &pose)
             return
         }
-        let slowSpan = Self.span(in: slow, time: slowTime, looping: true)
-        let fastSpan = slowWeight < 1 ? Self.span(in: run, time: fraction * run.duration, looping: true) : nil
+        let slowSpan = Self.span(in: slow, phaseTime: slowTime)
+        let fastSpan = slowWeight < 1 ? Self.span(in: run, phaseTime: phaseFraction * run.duration) : nil
         let idleSpan = runWeight < 1 ? Self.span(in: idle, time: time, looping: true) : nil
         let slowStart = slow.frames[slowSpan.lower], slowEnd = slow.frames[slowSpan.upper]
         #if DEBUG
@@ -499,6 +509,16 @@ struct ReplaySkinnedAthleteMotion: Sendable {
     private static func span(in clip: Clip, time: TimeInterval, looping: Bool) -> SampleSpan {
         let safeTime = time.isFinite ? time : 0
         let time = looping ? wrapped(safeTime, duration: clip.duration) : min(max(safeTime, 0), clip.duration)
+        return span(in: clip, normalizedTime: time)
+    }
+
+    /// Phase-derived clip time is already in [0, duration]. Keep the duration
+    /// boundary's wrap-to-zero behavior without a second floating-point modulo.
+    private static func span(in clip: Clip, phaseTime: TimeInterval) -> SampleSpan {
+        span(in: clip, normalizedTime: phaseTime < clip.duration ? phaseTime : 0)
+    }
+
+    private static func span(in clip: Clip, normalizedTime time: TimeInterval) -> SampleSpan {
         if time <= clip.frames[0].time { return SampleSpan(lower: 0, upper: 0, weight: 0) }
         let last = clip.frames.count - 1
         if time >= clip.frames[last].time { return SampleSpan(lower: last, upper: last, weight: 0) }

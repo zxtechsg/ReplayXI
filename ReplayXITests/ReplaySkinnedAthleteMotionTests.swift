@@ -248,4 +248,82 @@ final class ReplaySkinnedAthleteMotionTests: XCTestCase {
             XCTAssertEqual(pose.translations[0].z, 0, accuracy: 0.001)
         }
     }
+
+    func testPhaseSamplingMatchesDirectClipOracleAcrossRigsAndSeekOrder() throws {
+        let repository = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let rigs: [(String, ReplaySkinnedAthleteMotion.RigProfile)] = [
+            ("ReplayXITripoMotion", .tripo52), ("ReplayXIRocketboxMotion", .rocketbox)
+        ]
+        func shortestSlerp(_ start: simd_quatf, _ end: simd_quatf, _ weight: Float) -> simd_quatf {
+            let target = simd_dot(start.vector, end.vector) < 0 ? simd_quatf(vector: -end.vector) : end
+            return simd_normalize(simd_slerp(start, target, weight))
+        }
+        for (resource, profile) in rigs {
+            let url = repository.appendingPathComponent("ReplayXI/Resources/Players/\(resource).json")
+            let motion = try ReplaySkinnedAthleteMotion(data: Data(contentsOf: url), profile: profile)
+            let slowOracle: ReplaySkinnedAthleteMotion?
+            let active: ReplaySkinnedAthleteMotion
+            if profile == .rocketbox {
+                let slowData = try Data(contentsOf: repository.appendingPathComponent(
+                    "ReplayXI/Resources/Players/ReplayXIRocketboxSlowRun.json"))
+                active = try motion.addingSlowRun(data: slowData,
+                    baseMotionSHA256: ReplaySkinnedAthleteProvider.motionSHA256)
+                slowOracle = try ReplaySkinnedAthleteMotion(data: Data(contentsOf:
+                    repository.appendingPathComponent("ReplayXITests/Fixtures/Generated/ReplayXIRocketboxSlowRun150.json")))
+            } else {
+                active = motion
+                slowOracle = nil
+            }
+            func blend(_ first: ReplaySkinnedAthleteMotion.Pose, _ second: ReplaySkinnedAthleteMotion.Pose,
+                       weight: Float) -> ReplaySkinnedAthleteMotion.Pose {
+                var result = first
+                for index in motion.joints.indices {
+                    result.translations[index] = first.translations[index]
+                        + (second.translations[index] - first.translations[index]) * weight
+                    result.rotations[index] = shortestSlerp(first.rotations[index], second.rotations[index], weight)
+                    result.scales[index] = first.scales[index]
+                        + (second.scales[index] - first.scales[index]) * weight
+                }
+                motion.rebuildModelSpaceTransforms(in: &result)
+                return result
+            }
+            var reused = active.makePoseBuffer()
+            // Forward, reverse and nonadjacent seeks exercise the same absolute-time path.
+            for (time, phase) in [
+                (0.0, Float(0)), (0.13, Float(0.7)), (0.8, Float(2 * Double.pi)),
+                (3.2, Float(18.4)), (1.1, Float(-2.9)), (-0.7, Float(-17.1)),
+                (84.2, Float(0.000_01)), (0.0, Float.nan), (0.3, Float.infinity),
+                (0.2, -Float.leastNonzeroMagnitude), (3.2, Float(18.4))
+            ] {
+                for effort: Float in [0, 0.12, 0.8] {
+                    let finitePhase = phase.isFinite ? Double(phase) : 0
+                    let remainder = finitePhase.truncatingRemainder(dividingBy: 2 * .pi)
+                    let wrapped = remainder < 0 ? remainder + 2 * .pi : remainder
+                    let runTime = wrapped / (2 * .pi) * motion.duration(of: .run)
+                    var idle = motion.makePoseBuffer(), run = motion.makePoseBuffer()
+                    motion.sample(clip: .idle, at: time, into: &idle)
+                    motion.sample(clip: .run, at: runTime, into: &run)
+                    let linear = min(max((effort - 0.02) / 0.20, 0), 1)
+                    let weight = linear * linear * (3 - 2 * linear)
+                    for slowWeight: Float in [0, 0.4, 1] {
+                        var blendedRun = run
+                        if slowWeight > 0, let slowOracle {
+                            var slow = slowOracle.makePoseBuffer()
+                            let slowTime = wrapped / (2 * .pi) * slowOracle.duration(of: .run)
+                            slowOracle.sample(clip: .run, at: slowTime, into: &slow)
+                            blendedRun = slowWeight >= 1 ? slow : blend(run, slow, weight: slowWeight)
+                        }
+                        let expected = weight <= 0 ? idle
+                            : weight >= 1 ? blendedRun : blend(idle, blendedRun, weight: weight)
+                        active.sample(time: time, locomotionEffort: effort, gaitPhase: phase,
+                                      slowRunWeight: slowWeight, into: &reused)
+                        XCTAssertEqual(reused.translations, expected.translations, resource)
+                        XCTAssertEqual(reused.rotations.map(\.vector), expected.rotations.map(\.vector), resource)
+                        XCTAssertEqual(reused.scales, expected.scales, resource)
+                        XCTAssertEqual(reused.modelSpaceTransforms, expected.modelSpaceTransforms, resource)
+                    }
+                }
+            }
+        }
+    }
 }

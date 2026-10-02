@@ -2963,6 +2963,17 @@ enum PitchSceneFactory {
                         // mark's transforms and hit geometry. Track-dependent
                         // presentation still updates below for admitted marks.
                         canRetainTree = true
+                    } else if incoming.kind != .playerLabel,
+                              incoming.hasAnimatedGeometry,
+                              existing.mark.kind == incoming.kind,
+                              existing.mark.label == incoming.label,
+                              hasIntactMarkStructure(existing, entity: entity, marksRoot: marksRoot) {
+                        // A keyed/tracked mark is resolved later at this frame's
+                        // time. Writing its authored base pose here only to
+                        // replace it with the sampled pose doubles geometry and
+                        // hit-target work for each edit. Hidden marks catch up
+                        // when admitted, including after a reverse seek.
+                        canRetainTree = true
                     } else if existing.mark.kind == incoming.kind,
                        existing.mark.label == incoming.label {
                         #if DEBUG
@@ -2973,7 +2984,6 @@ enum PitchSceneFactory {
                         #endif
                         canRetainTree = updateMarkGeometry(
                             in: entity,
-                            from: existing.mark,
                             to: incoming,
                             bodyTarget: existing.bodyTarget.value
                         )
@@ -3178,7 +3188,6 @@ enum PitchSceneFactory {
             #endif
             _ = updateMarkGeometry(
                 in: entity,
-                from: binding.mark,
                 to: presentation,
                 bodyTarget: binding.bodyTarget.value
             )
@@ -3449,7 +3458,6 @@ enum PitchSceneFactory {
     /// allowing the cold-path rebuild to repair it safely.
     private static func updateMarkGeometry(
         in entity: Entity,
-        from previous: CoachMark,
         to incoming: CoachMark,
         bodyTarget: Entity?
     ) -> Bool {
