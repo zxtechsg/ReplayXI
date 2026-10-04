@@ -56,6 +56,10 @@ This is a native RealityKit app; no engine migration was made.
 - Final focused `tests24.xcresult`: **475 passed, zero failed, zero skipped**.
   This includes all five scene audits, native assets, UI and annotation regressions.
 - Final unsigned Release builds passed for visionOS device and Simulator.
+  All nine optional palettes decode to the expected runtime pixel hashes in both
+  packaged Release apps. Their recovery payload hashes also match the source.
+  [Device palettes](Evidence170/release-device-pixel-hashes.txt) ·
+  [Simulator palettes](Evidence170/release-simulator-pixel-hashes.txt).
 - Counterattack warm DEBUG Simulator CPU median: control 5.941 ms, new 5.992 ms.
   Volley: control 6.796 ms, new 6.909 ms. These are local samples, not device FPS
   or evidence of a timing gain. All five warm scene audits record zero native asset
