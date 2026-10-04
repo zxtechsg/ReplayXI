@@ -30,8 +30,10 @@ struct ReplayVideoReferenceButton: View {
     }
 }
 
-private struct ReplayVideoReferenceDetails: View {
+struct ReplayVideoReferenceDetails: View {
     let reference: ReplayVideoReference
+    var fixedWidth: CGFloat? = 350
+    @State private var showsDetails = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -50,7 +52,7 @@ private struct ReplayVideoReferenceDetails: View {
                     Image(systemName: "arrow.up.right")
                         .font(.caption.weight(.bold))
                 }
-                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
             }
             .buttonStyle(.bordered)
             .accessibilityLabel("Watch source video, \(reference.matchTitle), \(reference.timeRangeLabel)")
@@ -59,21 +61,36 @@ private struct ReplayVideoReferenceDetails: View {
                 Link(destination: reference.sourceURL(at: angle.startSeconds)) {
                     Label(angle.title, systemImage: "video")
                         .font(.caption.weight(.semibold))
-                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
                 }
                 .accessibilityHint("Opens an alternate broadcast replay angle. Replay speed may differ from live play.")
             }
             Divider()
-            Text(reference.reconstructionNote)
+            Text("Authored 3D replay. Unseen motion is estimated.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Text("Annotations are saved on the 3D replay, not drawn on the source video.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            Button { showsDetails.toggle() } label: {
+                Label("Reconstruction details", systemImage: showsDetails ? "chevron.up" : "chevron.down")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .hoverEffect(.highlight)
+            .accessibilityHint(showsDetails ? "Hides the reconstruction notes" : "Shows the reconstruction notes")
+            if showsDetails {
+                Text(reference.reconstructionNote)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Marks are saved on the 3D replay, not the source video.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(22)
-        .frame(width: 350, alignment: .leading)
+        .frame(width: fixedWidth, alignment: .leading)
+        .onChange(of: reference) { _, _ in showsDetails = false }
     }
 }

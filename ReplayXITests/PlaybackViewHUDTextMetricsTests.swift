@@ -80,10 +80,8 @@ final class PlaybackViewHUDTextMetricsTests: XCTestCase {
 
     func testProbeMatchesTheLiveHUDFontsAndImageFramePolicy() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-        let source = try String(contentsOf: root.appendingPathComponent(
-            "ReplayXI/Immersive/FootballImmersiveView.swift"), encoding: .utf8)
-        let hud = try slice(source, after: "private struct PlaybackViewOverlayHUD:",
-            before: "private struct ImmersiveControlDeck:")
+        let hud = try String(contentsOf: root.appendingPathComponent(
+            "ReplayXI/Immersive/PlaybackViewOverlayHUD.swift"), encoding: .utf8)
         let header = try slice(hud, after: "var body: some View", before: "if isExpanded {")
         XCTAssertTrue(header.contains(".font(.headline.weight(.black))"))
         XCTAssertTrue(header.contains(".font(.caption.weight(.black))"))
@@ -171,7 +169,7 @@ final class PlaybackViewHUDTextMetricsTests: XCTestCase {
         }
         let offSymbol = try symbol("eye.slash", font: caption,
             width: Double(symbolLayout.overlayBadgeDiameter), height: Double(symbolLayout.overlayBadgeDiameter))
-        let overlayTitles = ["Marks", "Ball glow", "Lanes"]
+        let overlayTitles = ["Marks", "Ball", "Lanes"]
         let overlayWidth = zip(overlayTitles, badges).reduce(12.0) { sum, item in
             sum + textWidth(item.0, font: caption) + max(item.1.width, offSymbol.width)
         }

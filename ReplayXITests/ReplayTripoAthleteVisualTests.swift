@@ -219,6 +219,50 @@ final class ReplayTripoAthleteVisualTests: XCTestCase {
         add(attachment)
     }
 
+    func testAppearance170BothTeamsAndRecoveryRunNativeViews() async throws {
+        ReplayTripoAthleteProvider.resetForTesting()
+        defer { ReplayTripoAthleteProvider.resetForTesting() }
+        try ReplayTripoAthleteProvider.prewarm()
+        XCTAssertEqual(ReplayTripoAthleteProvider.loadedAppearanceCount, 4)
+        let calibration = try await calibrate()
+        let scenario = try XCTUnwrap(FootballReferenceScenarios.all.first { $0.id == "final-36-counter-v2" })
+        var retained: [ReplaySkinnedAthleteInstance] = []
+        for team in FootballTeam.allCases {
+            let source = try XCTUnwrap(scenario.players.first { $0.team == team && !$0.isGoalkeeper })
+            for number in team == .home ? [5, 6, 7, 8] : [8, 9, 5, 6] {
+                let player = PlayerTrack(id: "appearance-\(team.rawValue)-\(number)", displayName: "Fictional appearance",
+                    role: source.role, shirtNumber: number, team: team, isGoalkeeper: false, keyframes: source.keyframes)
+                let skin = try ReplayTripoAthleteProvider.make(for: player)
+                retained.append(skin)
+                XCTAssertTrue(update(skin, player: player, time: 1.25, speed: 0, stationary: true))
+                let label = "appearance170-\(ReplayTripoAppearance.palette(for: player).rawValue)-\(team.rawValue)"
+                try await capture(skin.root, label: label, player: player, view: .front,
+                                  calibration: calibration, closeUp: true)
+            }
+        }
+        let player = try XCTUnwrap(scenario.player(id: "fra-5"))
+        let skin = try ReplayTripoAthleteProvider.make(for: player)
+        retained.append(skin)
+        // This isolates the two source clips, not the scene's contact retarget.
+        XCTAssertTrue(update(skin, player: player, time: 2, speed: 2, stationary: false))
+        skin.front.isEnabled = false; skin.back.isEnabled = false
+        for phase: Float in [0.85, 3.9] {
+            for weight: Float in [0, 1] {
+                var pose = skin.motion.makePoseBuffer()
+                skin.motion.sample(time: 2, locomotionEffort: 1, gaitPhase: phase,
+                                   slowRunWeight: weight, into: &pose)
+                skin.contactSurface.raiseAboveFloor(skin.motion.geometry.restMinY + skin.contactSurface.paddingMetres,
+                                                    in: &pose)
+                skin.model.jointTransforms = pose.translations.indices.map {
+                    Transform(scale: pose.scales[$0], rotation: pose.rotations[$0], translation: pose.translations[$0])
+                }
+                try await capture(skin.root, label: "recovery170-phase\(phase)-\(weight == 0 ? "source" : "relaxed")",
+                    player: player, view: .threeQuarter, calibration: calibration)
+            }
+        }
+        withExtendedLifetime(retained) {}
+    }
+
     private enum View {
         case front, back, side, threeQuarter
     }

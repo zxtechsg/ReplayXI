@@ -320,11 +320,16 @@ final class ReplaySkinnedAthleteInstance {
         let restRotation = simd_quatf(motion.restPose.modelSpaceTransforms[chest])
         inverseRestChestRotation = restRotation.inverse
         restHeadRotation = simd_quatf(motion.restPose.modelSpaceTransforms[headIndex])
+        // The Tripo shirt's weighted folds protrude past its rest-pose number
+        // anchors. A small skin-local clearance avoids clipped/z-fighting
+        // digits while preserving attachment to the animated chest joint.
+        let numberClearance: Float = motion.rigProfile == .tripo52 ? 0.022 : 0
+        let numberNormal = restRotation.inverse.act(SIMD3<Float>(0, 0, numberClearance))
         frontLocal = Transform(scale: .init(repeating: 0.115), rotation: restRotation.inverse,
-                               translation: motion.numberAnchors.front).matrix
+                               translation: motion.numberAnchors.front + numberNormal).matrix
         backLocal = Transform(scale: .init(repeating: 0.23),
                               rotation: restRotation.inverse * simd_quatf(angle: .pi, axis: [0, 1, 0]),
-                              translation: motion.numberAnchors.back).matrix
+                              translation: motion.numberAnchors.back - numberNormal).matrix
     }
 
     /// Supplied locomotion is authoritative by default, including deliberate

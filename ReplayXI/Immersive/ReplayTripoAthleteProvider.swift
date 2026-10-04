@@ -11,6 +11,7 @@ enum ReplayTripoAthleteProvider {
     static let assetSHA256 = "25585fd5fff5dc0060178c52fa559fe217773acfeab1b578d44174cb85e890db"
     static let lowAssetSHA256 = "343a8ef2527ac236a20c1bbe73202f650829be008c1d5381b3618f35933b349d"
     static let motionSHA256 = "525b42f4377d16644d81dc46456169be33818ec806e37ffd18a7a2041072b4f2"
+    static let recoveryMotionSHA256 = "0df7bd3f545babbd517a620bc47d06500f9824a097ad6999762d74e5dd07e558"
     static let contactSHA256 = "054a10f93888f6ac4ac0a1505929ae1f4f9d4695d5dd418ba2a6fc815818fa05"
     static let lowContactSHA256 = "6efcdcd2a3df2fd4f48948e32f62b400c6750dec79480a7afd12262a83dd5061"
     // Contact sidecars describe the original UV-split source vertex arrays.
@@ -38,14 +39,22 @@ enum ReplayTripoAthleteProvider {
     private static var low: Skin?
     private(set) static var motion: ReplaySkinnedAthleteMotion?
     private static var kits: [PhysicallyBasedMaterial] = []
+    private static var appearanceKits: [ReplayTripoAppearance.Palette: [PhysicallyBasedMaterial]] = [:]
+    static var loadedAppearanceCount: Int { appearanceKits.count + (kits.isEmpty ? 0 : 1) }
     static var isPrewarmed: Bool { near != nil && low != nil && motion != nil && kits.count == 3 }
 
     /// Both detail levels and all team kits are published together. An invalid
     /// resource leaves the existing renderer available, not half a new squad.
     static func prewarm(in bundle: Bundle = .main) throws {
         guard !isPrewarmed else { return }
-        let preparedMotion = try ReplaySkinnedAthleteMotion(
+        var preparedMotion = try ReplaySkinnedAthleteMotion(
             data: data("ReplayXITripoMotion", "json", hash: motionSHA256, in: bundle), profile: .tripo52)
+        // Optional extension is source/base hash-bound. Missing or invalid
+        // recovery data never replaces the validated base locomotion.
+        if let recovery = try? data("ReplayXITripoRecoveryMotion", "json", hash: recoveryMotionSHA256, in: bundle),
+           let extended = try? preparedMotion.addingSlowRun(data: recovery, baseMotionSHA256: motionSHA256) {
+            preparedMotion = extended
+        }
         let preparedNear = try loadSkin(name: "ReplayXITripoAthlete", hash: assetSHA256,
             contactName: "ReplayXITripoContactSurface", contactHash: contactSHA256,
             sourceVertices: skinVertices, importedVertices: importedSkinVertices,
@@ -91,6 +100,40 @@ enum ReplayTripoAthleteProvider {
         low = preparedLow
         motion = preparedMotion
         kits = preparedKits
+        // Publish each complete palette atomically. A bad optional atlas falls
+        // back to its original kit, without discarding the audited player rig.
+        for palette in ReplayTripoAppearance.Palette.allCases where palette != .base {
+            if let prepared = try? ReplayTripoAppearance.atlases(for: palette).map({ atlas in
+                try appearanceMaterial(atlas, bundle: bundle)
+            }), prepared.count == 3 {
+                appearanceKits[palette] = prepared
+            }
+        }
+    }
+
+    private static func appearanceMaterial(_ atlas: ReplayTripoAppearance.Atlas, bundle: Bundle) throws
+        -> PhysicallyBasedMaterial {
+        let url = try resource(atlas.name, "png", in: bundle)
+        let metadata = try url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+        guard metadata.isRegularFile == true, let size = metadata.fileSize,
+              (1...12 * 1_024 * 1_024).contains(size) else {
+            throw ReplayArticulatedFarKitProvider.PreparationError.invalidTexture
+        }
+        let pixels = try ReplayTexturePixels.rgbaPNG(Data(contentsOf: url, options: .mappedIfSafe),
+            size: ReplayTripoAppearance.textureSize, maximumEncodedBytes: 12 * 1_024 * 1_024)
+        guard SHA256.hash(data: pixels).map({ String(format: "%02x", $0) }).joined() == atlas.pixelSHA256 else {
+            throw ReplaySkinnedAthleteError.invalidHash(atlas.name)
+        }
+        let texture = try TextureResource.load(contentsOf: url)
+        guard texture.width == ReplayTripoAppearance.textureSize,
+              texture.height == ReplayTripoAppearance.textureSize else {
+            throw ReplayArticulatedFarKitProvider.PreparationError.invalidTexture
+        }
+        var material = PhysicallyBasedMaterial()
+        material.baseColor = .init(tint: .white, texture: .init(texture))
+        material.roughness = .init(floatLiteral: 0.78)
+        material.metallic = .init(floatLiteral: 0)
+        return material
     }
 
     private static func loadSkin(name: String, hash: String, contactName: String, contactHash: String,
@@ -141,7 +184,9 @@ enum ReplayTripoAthleteProvider {
         clone.stopAllAnimations(recursive: true)
         guard let model = ReplaySkinnedAthleteProvider.skinnedModels(in: clone).first,
               var component = model.model else { throw ReplaySkinnedAthleteError.invalidSkeleton }
-        component.materials = [kits[player.isGoalkeeper ? 2 : (player.team == .home ? 0 : 1)]]
+        let palette = ReplayTripoAppearance.palette(for: player)
+        let playerKits = appearanceKits[palette] ?? kits
+        component.materials = [playerKits[player.isGoalkeeper ? 2 : (player.team == .home ? 0 : 1)]]
         model.model = component
         let configuration = ReplayAthleteConfiguration(player: player)
         let root = Entity()
@@ -189,6 +234,6 @@ enum ReplayTripoAthleteProvider {
     }
 
     #if DEBUG
-    static func resetForTesting() { near = nil; low = nil; motion = nil; kits = [] }
+    static func resetForTesting() { near = nil; low = nil; motion = nil; kits = []; appearanceKits = [:] }
     #endif
 }

@@ -21,6 +21,7 @@ struct ReplaySkinnedAthleteMotion: Sendable {
     static let maximumPayloadBytes = 4 * 1_024 * 1_024
     static let maximumSlowRunPayloadBytes = 512 * 1_024
     private static let slowRunSourceSHA256 = "56af7ac64b05653d40f64205b58b2bf915646ee70dd6e2a68bc4536d71f07c1c"
+    private static let tripoRecoverySourceSHA256 = "5f60cd6c27acb0e88bbbfb8b14d3f6acebdac82d0ca4735ab736a5f5603107fc"
 
     enum ClipID: String, CaseIterable, Sendable { case idle, run }
     enum DecodeError: Error, Equatable { case invalid(String) }
@@ -96,9 +97,13 @@ struct ReplaySkinnedAthleteMotion: Sendable {
     private let run: Clip
     private let basePayloadSHA256: String
     private var slowRun: Clip?
+    // Empty means no optimisation is proved. A matching Tripo timeline can
+    // skip the second sample/blend on channels identical in every source frame.
+    private var slowRunUnchangedJointMask: [Bool] = []
     var hasSlowRun: Bool { slowRun != nil }
 
     #if DEBUG
+    var slowRunUnchangedJointCountForTesting: Int { slowRunUnchangedJointMask.filter { $0 }.count }
     struct ClipSampleCounts: Equatable, Sendable {
         var idle = 0
         var fastRun = 0
@@ -259,14 +264,11 @@ struct ReplaySkinnedAthleteMotion: Sendable {
         self.restPose = pose
     }
 
-    /// Optional immutable extension. The base digest binds the 80-frame-slot
+    /// Optional immutable extension. The base digest binds the rig's frame-slot
     /// order and rest rig without duplicating either in the supplemental file.
     /// A failed decode leaves the original motion fully usable. The caller also
     /// checks the packaged asset digest before this validation during prewarm.
     func addingSlowRun(data: Data, baseMotionSHA256: String) throws -> Self {
-        guard rigProfile == .rocketbox else {
-            throw DecodeError.invalid("Slow run extension is bound to the Rocketbox rig")
-        }
         guard data.count <= Self.maximumSlowRunPayloadBytes else {
             throw DecodeError.invalid("Slow run payload exceeds 512 KB")
         }
@@ -275,15 +277,28 @@ struct ReplaySkinnedAthleteMotion: Sendable {
               document.baseMotionSHA256 == baseMotionSHA256,
               baseMotionSHA256 == basePayloadSHA256,
               document.sourceCommit == sourceCommit,
-              document.sourceClipSHA256 == Self.slowRunSourceSHA256,
-              document.jointCount == Self.expectedJointCount,
+              document.sourceClipSHA256 == (rigProfile == .rocketbox
+                ? Self.slowRunSourceSHA256 : Self.tripoRecoverySourceSHA256),
+              document.jointCount == rigProfile.jointCount,
               document.units == "metres", document.phaseOffsetRadians == 0,
               document.clip.id == ClipID.run.rawValue else {
             throw DecodeError.invalid("Slow run source or base motion binding mismatch")
         }
-        let clip = try Self.decodeClip(document.clip, jointCount: Self.expectedJointCount)
+        let clip = try Self.decodeClip(document.clip, jointCount: rigProfile.jointCount)
         var result = self
         result.slowRun = clip
+        result.slowRunUnchangedJointMask = []
+        if rigProfile == .tripo52, clip.duration == run.duration,
+           clip.frames.count == run.frames.count,
+           zip(clip.frames, run.frames).allSatisfy({ $0.time == $1.time }) {
+            result.slowRunUnchangedJointMask = joints.indices.map { joint in
+                zip(clip.frames, run.frames).allSatisfy { a, b in
+                    a.translations[joint] == b.translations[joint]
+                        && a.rotations[joint].vector == b.rotations[joint].vector
+                        && a.scales[joint] == b.scales[joint]
+                }
+            }
+        }
         return result
     }
 
@@ -436,10 +451,15 @@ struct ReplaySkinnedAthleteMotion: Sendable {
         Self.sampleCounter.add(idle: idleSpan == nil ? 0 : 1, fast: fastSpan == nil ? 0 : 1, slow: 1)
         #endif
         for index in joints.indices {
-            var translation = Self.lerp(slowStart.translations[index], slowEnd.translations[index], slowSpan.weight)
-            var rotation = Self.shortestSlerp(slowStart.rotations[index], slowEnd.rotations[index], slowSpan.weight)
-            var scale = Self.lerp(slowStart.scales[index], slowEnd.scales[index], slowSpan.weight)
-            if let fastSpan {
+            let isUnchanged = !slowRunUnchangedJointMask.isEmpty && slowRunUnchangedJointMask[index]
+            let usesFastOnly = isUnchanged && fastSpan != nil
+            let primarySpan = usesFastOnly ? (fastSpan ?? slowSpan) : slowSpan
+            let primaryStart = usesFastOnly ? run.frames[primarySpan.lower] : slowStart
+            let primaryEnd = usesFastOnly ? run.frames[primarySpan.upper] : slowEnd
+            var translation = Self.lerp(primaryStart.translations[index], primaryEnd.translations[index], primarySpan.weight)
+            var rotation = Self.shortestSlerp(primaryStart.rotations[index], primaryEnd.rotations[index], primarySpan.weight)
+            var scale = Self.lerp(primaryStart.scales[index], primaryEnd.scales[index], primarySpan.weight)
+            if let fastSpan, !isUnchanged {
                 let first = run.frames[fastSpan.lower], second = run.frames[fastSpan.upper]
                 let fastTranslation = Self.lerp(first.translations[index], second.translations[index], fastSpan.weight)
                 let fastRotation = Self.shortestSlerp(first.rotations[index], second.rotations[index], fastSpan.weight)

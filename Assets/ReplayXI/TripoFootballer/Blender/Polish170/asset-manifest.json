@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-05",
+  "generator": "Scripts/blender/build_tripo_polish170.py",
+  "software": "Blender 5.2.1 LTS",
+  "paidCreditsSpent": 0,
+  "baseMotionSHA256": "525b42f4377d16644d81dc46456169be33818ec806e37ffd18a7a2041072b4f2",
+  "recovery": {
+    "sourceBlendSHA256": "3b3aa3c6541510e477f767f2f232b81b53c9919cdfb1cca877108adf2809ff2f",
+    "sourceClipSHA256": "5f60cd6c27acb0e88bbbfb8b14d3f6acebdac82d0ca4735ab736a5f5603107fc",
+    "payloadSHA256": "0df7bd3f545babbd517a620bc47d06500f9824a097ad6999762d74e5dd07e558",
+    "payloadBytes": 101401,
+    "frames": 20,
+    "maximumCanonicalizedExportDrift": 0.00034520000000004547,
+    "limits": "Hand-authored relaxed recovery arms; not measured motion capture. Lower-body source unchanged."
+  },
+  "appearance": {
+    "textures": [
+      {
+        "profile": "Light",
+        "kit": "Home",
+        "file": "ReplayXITripoHomeLight.png",
+        "sha256": "2a61726267bef50dcc5597202343b2717ced6e154ad760f0ec7c4add2dee6219",
+        "size": 1024
+      },
+      {
+        "profile": "Light",
+        "kit": "Away",
+        "file": "ReplayXITripoAwayLight.png",
+        "sha256": "5d154d9a5e9694e2192c51bf145375f5986b937a118b5bc768524117f3476ba9",
+        "size": 1024
+      },
+      {
+        "profile": "Light",
+        "kit": "Keeper",
+        "file": "ReplayXITripoKeeperLight.png",
+        "sha256": "3b27fe58cab26c995a8c6050ff8921389041ee2cbe814ecb36d052502f36093e",
+        "size": 1024
+      },
+      {
+        "profile": "Warm",
+        "kit": "Home",
+        "file": "ReplayXITripoHomeWarm.png",
+        "sha256": "49e81d0fc25205a69f807d9f787f10324ca744810f6f9c2407ec82ecde46300c",
+        "size": 1024
+      },
+      {
+        "profile": "Warm",
+        "kit": "Away",
+        "file": "ReplayXITripoAwayWarm.png",
+        "sha256": "74d5cb6edead07e2465263fba3bd9132edddfb1ff39d1f457cc56cb5afe60ee5",
+        "size": 1024
+      },
+      {
+        "profile": "Warm",
+        "kit": "Keeper",
+        "file": "ReplayXITripoKeeperWarm.png",
+        "sha256": "76533838a3659e16b4c1d2aa4869caa24e8a7d4f3b8ee22d43eebdd82344e915",
+        "size": 1024
+      },
+      {
+        "profile": "Deep",
+        "kit": "Home",
+        "file": "ReplayXITripoHomeDeep.png",
+        "sha256": "bf7324e18211c4ab190d29382ab994acee04de45f29bc3852f713d4b99788144",
+        "size": 1024
+      },
+      {
+        "profile": "Deep",
+        "kit": "Away",
+        "file": "ReplayXITripoAwayDeep.png",
+        "sha256": "2a571d12b3031df8e444098359bc3036649dcff9121072fd4b70782442ed05b3",
+        "size": 1024
+      },
+      {
+        "profile": "Deep",
+        "kit": "Keeper",
+        "file": "ReplayXITripoKeeperDeep.png",
+        "sha256": "7c03e673547e16bf7113f29d2b33762800f5f49c100a14e1927027d9033b8a99",
+        "size": 1024
+      }
+    ],
+    "additionalBaseRGBABytes": 37748736,
+    "limits": "Shared original face and rig; fictional skin palettes, not ethnicity or athlete likeness."
+  },
+  "runtimeLimits": {
+    "additionalTextureBaseRGBABytes": 37748736,
+    "totalTextureBaseRGBABytes": 88080384,
+    "materialDrawsPerPlayer": 3,
+    "additionalSkeletonJoints": 0
+  },
+  "claims": {
+    "motionCapture": false,
+    "athleteLikeness": false,
+    "raceAssignment": false,
+    "basePlayerMeshesChanged": false,
+    "baseMotionChanged": false
+  }
+}

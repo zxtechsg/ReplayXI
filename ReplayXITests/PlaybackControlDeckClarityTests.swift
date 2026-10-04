@@ -303,7 +303,9 @@ final class PlaybackControlDeckClarityTests: XCTestCase {
             .appendingPathComponent("ReplayXI")
             .appendingPathComponent("Immersive")
             .appendingPathComponent("FootballImmersiveView.swift")
+        let hudURL = projectRoot.appendingPathComponent("ReplayXI/Immersive/PlaybackViewOverlayHUD.swift")
         return try String(contentsOf: sourceURL, encoding: .utf8)
+            + String(contentsOf: hudURL, encoding: .utf8)
     }
 
     private func sourceSlice(
