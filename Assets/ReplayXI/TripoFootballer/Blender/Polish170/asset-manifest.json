@@ -7,9 +7,11 @@
   "baseMotionSHA256": "525b42f4377d16644d81dc46456169be33818ec806e37ffd18a7a2041072b4f2",
   "recovery": {
     "sourceBlendSHA256": "3b3aa3c6541510e477f767f2f232b81b53c9919cdfb1cca877108adf2809ff2f",
-    "sourceClipSHA256": "5f60cd6c27acb0e88bbbfb8b14d3f6acebdac82d0ca4735ab736a5f5603107fc",
-    "payloadSHA256": "0df7bd3f545babbd517a620bc47d06500f9824a097ad6999762d74e5dd07e558",
-    "payloadBytes": 101401,
+    "revision": 2,
+    "revisionNote": "Reduced idle blending after native QA showed overly straight elbows. Earlier candidate retained in commit 90a9181.",
+    "sourceClipSHA256": "b24566187c894ab251c513fe2a946c8ccfcedbbeebff2edc7318e6166150550a",
+    "payloadSHA256": "12485c8ca93c09da6d8b326c76f007821d102f8181d48f411ace8445ef43e969",
+    "payloadBytes": 101388,
     "frames": 20,
     "maximumCanonicalizedExportDrift": 0.00034520000000004547,
     "limits": "Hand-authored relaxed recovery arms; not measured motion capture. Lower-body source unchanged."

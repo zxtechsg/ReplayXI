@@ -129,42 +129,12 @@ struct PlaybackViewOverlayHUD: View {
                 }
 
                 if section == .overlays {
-                    HStack(spacing: 6) {
-                        overlayChoice(
-                            title: "Marks",
-                            systemImage: "arrow.up.right",
-                            isVisible: showsPlaybackAnnotations,
-                            color: ReplayTheme.orange
-                        ) {
-                            showsPlaybackAnnotations.toggle()
-                        }
-
-                        overlayChoice(
-                            title: "Ball",
-                            systemImage: "scope",
-                            isVisible: emphasizesBall,
-                            color: ReplayTheme.signal,
-                            accessibilityName: "Ball highlight",
-                            onValue: "On",
-                            offValue: "Off"
-                        ) {
-                            emphasizesBall.toggle()
-                        }
-
-                        if store.selectedScenario.kind == .passingChannels {
-                            overlayChoice(
-                                title: "Lanes",
-                                systemImage: "arrow.triangle.branch",
-                                isVisible: store.showsLaneLens,
-                                color: ReplayTheme.cyan,
-                                isEnabled: canControlOverlays
-                            ) {
-                                store.showsLaneLens.toggle()
-                                if store.localRole == .coach {
-                                    store.flushReviewAutosave()
-                                }
-                            }
-                        }
+                    // Three labelled pills truncate at accessibility sizes.
+                    // Keep full labels and targets instead of shrinking text.
+                    if dynamicTypeSize.isAccessibilitySize {
+                        VStack(spacing: 6) { overlayChoices }
+                    } else {
+                        HStack(spacing: 6) { overlayChoices }
                     }
                 }
             }
@@ -182,6 +152,26 @@ struct PlaybackViewOverlayHUD: View {
                 isExpanded = true
             }
             #endif
+        }
+    }
+
+    @ViewBuilder
+    private var overlayChoices: some View {
+        overlayChoice(title: "Marks", systemImage: "arrow.up.right",
+            isVisible: showsPlaybackAnnotations, color: ReplayTheme.orange) {
+            showsPlaybackAnnotations.toggle()
+        }
+        overlayChoice(title: "Ball", systemImage: "scope",
+            isVisible: emphasizesBall, color: ReplayTheme.signal,
+            accessibilityName: "Ball highlight", onValue: "On", offValue: "Off") {
+            emphasizesBall.toggle()
+        }
+        if store.selectedScenario.kind == .passingChannels {
+            overlayChoice(title: "Lanes", systemImage: "arrow.triangle.branch",
+                isVisible: store.showsLaneLens, color: ReplayTheme.cyan) {
+                store.showsLaneLens.toggle()
+                if store.localRole == .coach { store.flushReviewAutosave() }
+            }
         }
     }
 
@@ -218,8 +208,6 @@ struct PlaybackViewOverlayHUD: View {
     private var symbolLayout: PlaybackViewHUDSymbolLayout {
         PlaybackViewHUDSymbolLayout.resolve(usesAccessibilityText: dynamicTypeSize.isAccessibilitySize)
     }
-
-    private var canControlOverlays: Bool { true }
 
     private var activeOverlayBadges: [PlaybackOverlayBadge] {
         PlaybackOverlayBadge.activeBadges(

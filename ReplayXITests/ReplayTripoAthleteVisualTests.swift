@@ -263,6 +263,41 @@ final class ReplayTripoAthleteVisualTests: XCTestCase {
         withExtendedLifetime(retained) {}
     }
 
+    /// Fixed-camera native frames for slow A/B review of one gait cycle.
+    /// This isolates source arms, not a recovered match pose or scene playback.
+    func testRecovery170NativeCycleForSlowReview() async throws {
+        ReplayTripoAthleteProvider.resetForTesting()
+        defer { ReplayTripoAthleteProvider.resetForTesting() }
+        try ReplayTripoAthleteProvider.prewarm()
+        let calibration = try await calibrate()
+        let scenario = try XCTUnwrap(FootballReferenceScenarios.all.first {
+            $0.id == "final-36-counter-v2"
+        })
+        let player = try XCTUnwrap(scenario.player(id: "fra-5"))
+        let skin = try ReplayTripoAthleteProvider.make(for: player)
+        XCTAssertTrue(update(skin, player: player, time: 2, speed: 2, stationary: false))
+        skin.front.isEnabled = false; skin.back.isEnabled = false
+        var pose = skin.motion.makePoseBuffer()
+        for weight: Float in [0, 1] {
+            for frame in 0..<24 {
+                let phase = Float(frame) / 24 * 2 * .pi
+                skin.motion.sample(time: 2, locomotionEffort: 1, gaitPhase: phase,
+                                   slowRunWeight: weight, into: &pose)
+                skin.contactSurface.raiseAboveFloor(
+                    skin.motion.geometry.restMinY + skin.contactSurface.paddingMetres, in: &pose)
+                skin.model.jointTransforms = pose.translations.indices.map {
+                    Transform(scale: pose.scales[$0], rotation: pose.rotations[$0],
+                              translation: pose.translations[$0])
+                }
+                let variant = weight == 0 ? "source" : "relaxed"
+                try await capture(skin.root,
+                    label: String(format: "recovery170-cycle-%@-%03d", variant, frame),
+                    player: player, view: .threeQuarter, calibration: calibration)
+            }
+        }
+        withExtendedLifetime(skin) {}
+    }
+
     private enum View {
         case front, back, side, threeQuarter
     }

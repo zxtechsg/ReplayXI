@@ -115,7 +115,9 @@ final class PlaybackPlayerDetailControl148Tests: XCTestCase {
         let source = try String(contentsOf: root.appendingPathComponent("ReplayXI/Immersive/FootballImmersiveView.swift"), encoding: .utf8)
         XCTAssertTrue(source.contains("@AppStorage(ReplayPlayerDetail.storageKey)"))
         XCTAssertTrue(source.contains("ReplayPlayerDetail.defaultSelection.rawValue"))
-        XCTAssertEqual(source.components(separatedBy: "playerDetail: playerDetail").count - 1, 2)
+        // Creation and updates share one path; both must reach the detail choice.
+        XCTAssertEqual(source.components(separatedBy: "updateMatchRoot(root)").count - 1, 2)
+        XCTAssertEqual(source.components(separatedBy: "playerDetail: playerDetail").count - 1, 1)
         XCTAssertTrue(source.contains("playerDetailRawValue: $playerDetailRawValue"))
         let shelfStart = try XCTUnwrap(source.range(of: "private var playbackSettingsShelf:"))
         let shelfEnd = try XCTUnwrap(source.range(of: "private var speedShelfHeader:", range: shelfStart.upperBound..<source.endIndex))

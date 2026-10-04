@@ -2526,23 +2526,23 @@ private struct ImmersiveControlDeck: View {
         inlineShelf(color: ReplayTheme.cyan) {
             VStack(alignment: .leading, spacing: 12) {
                 if toolsShelfLayout.usesAdaptiveGrid {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(spacing: 10) {
-                        closePlaybackToolsButton
-                        playbackToolsHeading
-                        Spacer(minLength: 6)
-                    }
-                    LazyVGrid(
-                        columns: [GridItem(
-                            .adaptive(minimum: toolsShelfLayout.gridMinimumCellWidth),
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(spacing: 10) {
+                            closePlaybackToolsButton
+                            playbackToolsHeading
+                            Spacer(minLength: 6)
+                        }
+                        LazyVGrid(
+                            columns: [GridItem(
+                                .adaptive(minimum: toolsShelfLayout.gridMinimumCellWidth),
+                                spacing: PlaybackToolsShelfLayout.gridSpacing
+                            )],
+                            alignment: .leading,
                             spacing: PlaybackToolsShelfLayout.gridSpacing
-                        )],
-                        alignment: .leading,
-                        spacing: PlaybackToolsShelfLayout.gridSpacing
-                    ) {
-                        playbackToolsChoices
+                        ) {
+                            playbackToolsChoices
+                        }
                     }
-                }
                 } else {
                     HStack(spacing: 10) {
                         closePlaybackToolsButton
@@ -4109,7 +4109,7 @@ private struct ImmersiveControlDeck: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Free-look player point of view")
         .accessibilityHint(
-            "Your position follows the player. Your headset controls where you look. Green brackets show the player's recorded facing direction."
+            "Your position follows the player. Your headset controls where you look. Green brackets show the replay player's authored facing direction."
         )
     }
 

@@ -113,7 +113,9 @@ def gait(output):
         for bone in rig.pose.bones:
             position, rotation, scale = sample[bone.name]
             bone.location = position; bone.scale = scale; bone.rotation_mode = "QUATERNION"
-            weight = .48 if bone.name.endswith("ForeArm") else .35
+            # Keep a running elbow bend. The first candidate over-blended the
+            # forearm toward idle and made the recovery arms look too straight.
+            weight = .24 if bone.name.endswith("ForeArm") else (.10 if bone.name.endswith("Hand") else .22)
             bone.rotation_quaternion = rotation.slerp(relaxed[bone.name], weight) if bone.name in arm_bones else rotation
             for channel in ("location", "rotation_quaternion", "scale"):
                 bone.keyframe_insert(channel, frame=frame, group=bone.name)

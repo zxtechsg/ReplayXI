@@ -21,7 +21,7 @@ struct ReplaySkinnedAthleteMotion: Sendable {
     static let maximumPayloadBytes = 4 * 1_024 * 1_024
     static let maximumSlowRunPayloadBytes = 512 * 1_024
     private static let slowRunSourceSHA256 = "56af7ac64b05653d40f64205b58b2bf915646ee70dd6e2a68bc4536d71f07c1c"
-    private static let tripoRecoverySourceSHA256 = "5f60cd6c27acb0e88bbbfb8b14d3f6acebdac82d0ca4735ab736a5f5603107fc"
+    private static let tripoRecoverySourceSHA256 = "b24566187c894ab251c513fe2a946c8ccfcedbbeebff2edc7318e6166150550a"
 
     enum ClipID: String, CaseIterable, Sendable { case idle, run }
     enum DecodeError: Error, Equatable { case invalid(String) }

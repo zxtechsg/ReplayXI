@@ -146,9 +146,14 @@ final class ReplayTripoAthleteRuntimeTests: XCTestCase {
             XCTAssertEqual(skin.front.transform, front)
             XCTAssertEqual(skin.back.transform, back)
             let chest = skin.pose.modelSpaceTransforms[skin.motion.numberAnchors.jointIndex]
-            let expectedFront = chest * SIMD4(skin.motion.numberAnchors.front, 1)
+            let restChest = skin.motion.restPose.modelSpaceTransforms[skin.motion.numberAnchors.jointIndex]
+            let clearance = simd_quatf(restChest).inverse.act(SIMD3<Float>(0, 0, 0.022))
+            let expectedFront = chest * SIMD4(skin.motion.numberAnchors.front + clearance, 1)
+            let expectedBack = chest * SIMD4(skin.motion.numberAnchors.back - clearance, 1)
             XCTAssertLessThan(simd_distance(skin.front.position,
                 SIMD3(expectedFront.x, expectedFront.y, expectedFront.z)), 0.00001)
+            XCTAssertLessThan(simd_distance(skin.back.position,
+                SIMD3(expectedBack.x, expectedBack.y, expectedBack.z)), 0.00001)
         }
     }
 

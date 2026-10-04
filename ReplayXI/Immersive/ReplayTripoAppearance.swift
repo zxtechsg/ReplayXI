@@ -14,7 +14,9 @@ enum ReplayTripoAppearance {
     static func palette(for player: PlayerTrack) -> Palette {
         let remainder = (player.shirtNumber % 5 + (player.team == .away ? 2 : 0)) % 5
         let index = (remainder + 5) % 5
-        return [.base, .light, .warm, .deep, .warm][index]
+        // Match the existing far-rig light/medium/dark palette order. Reusing
+        // the base at slots 1 and 4 avoids an extra atlas for near-identical tones.
+        return [.light, .base, .warm, .deep, .base][index]
     }
 
     /// Home, away, keeper order, shared with the base kit contract.

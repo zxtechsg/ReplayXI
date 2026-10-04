@@ -38,6 +38,25 @@ final class PlaybackViewShelfVisual170Tests: XCTestCase {
         }
     }
 
+    func testThreeOverlayControlsFitPassingLanesWithoutChangingSavedReview() throws {
+        let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .passingChannels))
+        for largest in [false, true] {
+            let store = ReplayStore(scenarios: [scenario])
+            store.seek(to: 13.6)
+            let saved = store.makeSavedReviewState()
+            try capture(PlaybackViewOverlayHUD(showsPlaybackAnnotations: .constant(true),
+                emphasizesBall: .constant(true), recenterControls: {},
+                initialSection: .overlays, initiallyExpanded: true, usesSpatialGlass: false)
+                .environment(store)
+                .environment(\.colorScheme, .dark)
+                .dynamicTypeSize(largest ? .accessibility5 : .large)
+                .fixedSize(horizontal: false, vertical: true),
+                width: largest ? 500 : 420,
+                label: "hud-three-overlays-\(largest ? "AX5" : "regular")")
+            XCTAssertEqual(store.makeSavedReviewState(), saved)
+        }
+    }
+
     private func capture<V: View>(_ content: V, width: CGFloat, label: String) throws {
         let fittingHost = UIHostingController(rootView: content)
         let fitting = fittingHost.sizeThatFits(in: CGSize(width: width, height: 2_000))

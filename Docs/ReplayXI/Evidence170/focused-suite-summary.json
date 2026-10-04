@@ -1,0 +1,46 @@
+{
+  "devicesAndConfigurations" : [
+    {
+      "device" : {
+        "architecture" : "arm64",
+        "deviceId" : "E0A4415E-98B8-4FC3-B2A8-C140B736E6C2",
+        "deviceName" : "ReplayXI Native Audit 26.5",
+        "modelName" : "Apple Vision Pro",
+        "osBuildNumber" : "23O470",
+        "osVersion" : "26.5",
+        "platform" : "visionOS Simulator"
+      },
+      "expectedFailures" : 0,
+      "failedTests" : 0,
+      "passedTests" : 475,
+      "skippedTests" : 0,
+      "testPlanConfiguration" : {
+        "configurationId" : "1",
+        "configurationName" : "Test Scheme Action"
+      }
+    }
+  ],
+  "environmentDescription" : "ReplayXI · Built with macOS 26.5.1",
+  "expectedFailures" : 0,
+  "failedTests" : 0,
+  "finishTime" : 1791151014.69,
+  "passedTests" : 475,
+  "result" : "Passed",
+  "skippedTests" : 0,
+  "startTime" : 1791150896.179,
+  "statistics" : [
+
+  ],
+  "testFailures" : [
+
+  ],
+  "title" : "Test - ReplayXI",
+  "topInsights" : [
+    {
+      "category" : "Longest Test Runs",
+      "impact" : "51% of duration",
+      "text" : "6 longest test runs with outlier durations exceeding 2.76s (three standard deviations)"
+    }
+  ],
+  "totalTestCount" : 475
+}

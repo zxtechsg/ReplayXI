@@ -1,0 +1,95 @@
+{
+  "devicesAndConfigurations" : [
+    {
+      "device" : {
+        "architecture" : "arm64",
+        "deviceId" : "E0A4415E-98B8-4FC3-B2A8-C140B736E6C2",
+        "deviceName" : "ReplayXI Native Audit 26.5",
+        "modelName" : "Apple Vision Pro",
+        "osBuildNumber" : "23O470",
+        "osVersion" : "26.5",
+        "platform" : "visionOS Simulator"
+      },
+      "expectedFailures" : 0,
+      "failedTests" : 5,
+      "passedTests" : 0,
+      "skippedTests" : 0,
+      "testPlanConfiguration" : {
+        "configurationId" : "1",
+        "configurationName" : "Test Scheme Action"
+      }
+    }
+  ],
+  "environmentDescription" : "ReplayXI · Built with macOS 26.5.1",
+  "expectedFailures" : 0,
+  "failedTests" : 5,
+  "finishTime" : 1791149099.099,
+  "passedTests" : 0,
+  "result" : "Failed",
+  "skippedTests" : 0,
+  "startTime" : 1791149083.873,
+  "statistics" : [
+
+  ],
+  "testFailures" : [
+    {
+      "failureText" : "XCTAssertEqual failed: (\"5517e04a46800250d8f0fb28afb0a71709f8b47a3c6d32223954be8ef2d37dcc\") is not equal to (\"b929095326f8cae80bafaf3e35ae7ad8bb7ce24c806ad5ab29f912c3ffd239ef\") - Independent native baseline, not regenerated from candidate",
+      "targetName" : "ReplayXITests",
+      "testIdentifier" : 1,
+      "testIdentifierString" : "ReplayCutRunPhase138Tests/testActualCutReleaseAndProtectedContactNearLowFloorBonesAndRewind()",
+      "testIdentifierURL" : "test://com.apple.xcode/ReplayXI/ReplayXITests/ReplayCutRunPhase138Tests/testActualCutReleaseAndProtectedContactNearLowFloorBonesAndRewind",
+      "testName" : "testActualCutReleaseAndProtectedContactNearLowFloorBonesAndRewind()"
+    },
+    {
+      "failureText" : "XCTAssertEqual failed: (\"5517e04a46800250d8f0fb28afb0a71709f8b47a3c6d32223954be8ef2d37dcc\") is not equal to (\"b929095326f8cae80bafaf3e35ae7ad8bb7ce24c806ad5ab29f912c3ffd239ef\") - Independent cycle138 controls must remain byte-exact",
+      "targetName" : "ReplayXITests",
+      "testIdentifier" : 3,
+      "testIdentifierString" : "ReplayJointTransition139Tests/testArg10NativeJointStageBaselineContactCoreAndExactRewind()",
+      "testIdentifierURL" : "test://com.apple.xcode/ReplayXI/ReplayXITests/ReplayJointTransition139Tests/testArg10NativeJointStageBaselineContactCoreAndExactRewind",
+      "testName" : "testArg10NativeJointStageBaselineContactCoreAndExactRewind()"
+    },
+    {
+      "failureText" : "XCTAssertEqual failed: (\"0bef7685d21fa7105e990c949bceb3edca125fbe8ef53d659531d12bd7f01d35\") is not equal to (\"98be7ec4b8b6b7438d9b4f5aedd73b423bb839249b1fd0c243b463cff3fbd348\") - Independent cycle138 controls must remain byte-exact",
+      "targetName" : "ReplayXITests",
+      "testIdentifier" : 4,
+      "testIdentifierString" : "ReplayJointTransition139Tests/testFra5NativeJointStageBaselineBothControlsAndExactRewind()",
+      "testIdentifierURL" : "test://com.apple.xcode/ReplayXI/ReplayXITests/ReplayJointTransition139Tests/testFra5NativeJointStageBaselineBothControlsAndExactRewind",
+      "testName" : "testFra5NativeJointStageBaselineBothControlsAndExactRewind()"
+    },
+    {
+      "failureText" : "XCTAssertEqual failed: (\"f5301a1c8c15fd8fa9be5002ec228170ebcb6ecf3e1353cc164627afb31d2331\") is not equal to (\"961628c9bac18421b3c09ef3675b153480f0c699f2a75d58598622e1e124fc51\")",
+      "targetName" : "ReplayXITests",
+      "testIdentifier" : 2,
+      "testIdentifierString" : "ReplayHeaderHandoff141Tests/testMeaningfulHeaderAndFullSupportCoreIndependentBaselineReceipts()",
+      "testIdentifierURL" : "test://com.apple.xcode/ReplayXI/ReplayXITests/ReplayHeaderHandoff141Tests/testMeaningfulHeaderAndFullSupportCoreIndependentBaselineReceipts",
+      "testName" : "testMeaningfulHeaderAndFullSupportCoreIndependentBaselineReceipts()"
+    },
+    {
+      "failureText" : "XCTAssertGreaterThan failed: (\"0.99997437\") is not greater than (\"0.99999\")",
+      "targetName" : "ReplayXITests",
+      "testIdentifier" : 5,
+      "testIdentifierString" : "ReplayShapeAthletePresentationTests/testSkinnedStationsMatchStandingReferenceAndReturnAfterProblemAndSeek()",
+      "testIdentifierURL" : "test://com.apple.xcode/ReplayXI/ReplayXITests/ReplayShapeAthletePresentationTests/testSkinnedStationsMatchStandingReferenceAndReturnAfterProblemAndSeek",
+      "testName" : "testSkinnedStationsMatchStandingReferenceAndReturnAfterProblemAndSeek()"
+    }
+  ],
+  "title" : "Test - ReplayXI",
+  "topInsights" : [
+    {
+      "category" : "Common Failures",
+      "impact" : "20% of failures",
+      "text" : "4 runs of 1 test failed with XCTAssertGreaterThan failed: (\"0.9999752\") is not greater than (\"0.99999\")"
+    },
+    {
+      "category" : "Common Failures",
+      "impact" : "20% of failures",
+      "text" : "4 runs of 1 test failed with XCTAssertGreaterThan failed: (\"0.9999745\") is not greater than (\"0.99999\")"
+    },
+    {
+      "category" : "Common Failures",
+      "impact" : "20% of failures",
+      "text" : "2 runs of 1 test failed with XCTAssertLessThan failed: (\"0.0012925557\") is not less than (\"2e-05\")"
+    }
+  ],
+  "totalTestCount" : 5
+}
