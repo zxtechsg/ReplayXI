@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-05",
+  "generator": "Built-in image_gen",
+  "scope": "Fictional individual concepts, not real athlete likenesses or measured ancestry. Heritage labels are authored prompt intent, not inferred attributes.",
+  "uniform": "Neutral grey/navy football kit",
+  "pose": "Front-facing T-pose",
+  "runtimeAdmission": false,
+  "creditGuard": {
+    "minimumRemainingBalance": 944,
+    "observedBeforeFirstSubmission": 2005,
+    "observedAfterFirstSubmission": 465,
+    "additionalPaidJobsAllowed": false,
+    "note": "The shared balance fell by 1540 after one accepted job quoted at 55. Cause and actual charge are unverified. No further paid jobs while below the reserve."
+  },
+  "profiles": [
+    {
+      "id": "player-a",
+      "heritage": "Black African",
+      "features": "A fictional adult male footballer of Ghanaian heritage, with deep brown skin, a distinct natural face, short tightly curled black hair in a neat low taper, clean-shaven.",
+      "reference": "References/player-a-tpose.png",
+      "referenceSHA256": "188c8d85b9ba41036b9af62e5face4000b2a7e0426213cdd9b2bf14c7d418f6d",
+      "prompt": "Use case: stylized-concept.\nAsset type: realistic football game character reference for Tripo image-to-3D and Blender humanoid rigging.\nPrimary request: One original fictional adult male professional footballer, age about 25. Make this a believable individual, not a racial caricature, not an existing athlete or celebrity.\nSubject identity: A fictional adult male footballer of Ghanaian heritage, with deep brown skin, a distinct natural face, short tightly curled black hair in a neat low taper, clean-shaven.\nStyle: exceptionally detailed photorealistic PBR game-character render, realistic human anatomy, natural skin texture, subtle pores, believable eyes and natural hair. Not a drawing, not clay, not toy-like.\nBody: lean athletic football build, about 1.80 m tall with balanced natural proportions. No exaggeration in muscle size. Normal neck length, proportionate head, symmetrical limbs.\nClothing: plain fitted mid-grey short-sleeve crew-neck football jersey, plain dark navy football shorts ending above knee, plain mid-grey knee-high socks, plain black low-profile football boots. No wristbands, jewelry or accessories. Shirt and shorts are separate garments with clear waist boundary. Same neutral kit and body scale as the rest of the set.\nPose and framing: exact front-facing orthographic full-body T-pose for a humanoid auto-rig. Head upright facing directly at camera. Both arms straight out horizontally at shoulder height; elbows straight, wrists neutral, palms facing down, all ten fingers anatomically correct and separated gently. Straight legs, feet shoulder-width apart, toes forward, both feet flat at same height. Keep the entire body, all fingertips and boot soles inside the image, with 6% empty margin. Center the character. The character nearly fills the square frame.\nLighting and backdrop: even soft neutral studio illumination with very weak shadows. Plain opaque pale-grey background. No dramatic lighting, no ground plane, no cast shadow, no props, no ball.\nOutput: a high-resolution square single-character image, suitable for generating one 3D mesh. Skin and face should remain clearly legible. No text, numbers, team badges, sponsor marks, logos or watermark. No alternate views, portrait inset, additional people or multiple figures.",
+      "tripo": {
+        "status": "completed_exported_unrigged",
+        "assetID": "6c35fcbd-943c-4045-a44c-0a3b99aab05d",
+        "url": "https://studio.tripo3d.ai/workspace/generate/6c35fcbd-943c-4045-a44c-0a3b99aab05d",
+        "model": "H3.1 - Best Quality",
+        "privacy": "Private",
+        "quotedCredits": 55,
+        "actualChargeVerified": false,
+        "evidence": "tripo-player-a-complete.jpg",
+        "export": "Source/player-a-hd-source.glb",
+        "exportSHA256": "2b25690666877f3e090d5ce4e5d8e30702d6d02f497e5511de4ba9d3df1dcfc3",
+        "exportAudit": {
+          "validGLBHeader": true,
+          "bytes": 64793340,
+          "meshes": 1,
+          "materials": 1,
+          "embeddedImages": 3,
+          "uvPresent": true,
+          "triangles": 1965350,
+          "skins": 0,
+          "animations": 0,
+          "visualCheck": "Front preview resembles the uploaded reference, with distinct face and hair geometry. Back and animated deformation are not checked.",
+          "nextSteps": "Reduce topology in Blender, normalize world scale, rig, inspect multiple angles and animated joint deformation, then test native performance before admission."
+        }
+      }
+    },
+    {
+      "id": "player-b",
+      "heritage": "East Asian",
+      "features": "A fictional adult male footballer of Korean heritage, with a light-medium natural skin tone, a distinct natural face, short straight black hair with a tidy textured crop, clean-shaven.",
+      "reference": "References/player-b-tpose.png",
+      "referenceSHA256": "a0a9eda8877eeb94b4b6a0cc367b56a9d3d5952eda7e35284a02b8a2f48f45bb",
+      "prompt": "Use case: stylized-concept.\nAsset type: realistic football game character reference for Tripo image-to-3D and Blender humanoid rigging.\nPrimary request: One original fictional adult male professional footballer, age about 25. Make this a believable individual, not a racial caricature, not an existing athlete or celebrity.\nSubject identity: A fictional adult male footballer of Korean heritage, with a light-medium natural skin tone, a distinct natural face, short straight black hair with a tidy textured crop, clean-shaven.\nStyle: exceptionally detailed photorealistic PBR game-character render, realistic human anatomy, natural skin texture, subtle pores, believable eyes and natural hair. Not a drawing, not clay, not toy-like.\nBody: lean athletic football build, about 1.80 m tall with balanced natural proportions. No exaggeration in muscle size. Normal neck length, proportionate head, symmetrical limbs.\nClothing: plain fitted mid-grey short-sleeve crew-neck football jersey, plain dark navy football shorts ending above knee, plain mid-grey knee-high socks, plain black low-profile football boots. No wristbands, jewelry or accessories. Shirt and shorts are separate garments with clear waist boundary. Same neutral kit and body scale as the rest of the set.\nPose and framing: exact front-facing orthographic full-body T-pose for a humanoid auto-rig. Head upright facing directly at camera. Both arms straight out horizontally at shoulder height; elbows straight, wrists neutral, palms facing down, all ten fingers anatomically correct and separated gently. Straight legs, feet shoulder-width apart, toes forward, both feet flat at same height. Keep the entire body, all fingertips and boot soles inside the image, with 6% empty margin. Center the character. The character nearly fills the square frame.\nLighting and backdrop: even soft neutral studio illumination with very weak shadows. Plain opaque pale-grey background. No dramatic lighting, no ground plane, no cast shadow, no props, no ball.\nOutput: a high-resolution square single-character image, suitable for generating one 3D mesh. Skin and face should remain clearly legible. No text, numbers, team badges, sponsor marks, logos or watermark. No alternate views, portrait inset, additional people or multiple figures.",
+      "tripo": {
+        "status": "not_submitted_credit_reserve"
+      }
+    },
+    {
+      "id": "player-c",
+      "heritage": "South Asian",
+      "features": "A fictional adult male footballer of Indian heritage, with medium brown natural skin, a distinct natural face, short wavy black hair with a tidy low taper and subtle short stubble.",
+      "reference": "References/player-c-tpose.png",
+      "referenceSHA256": "03d808ed1969ebd308307124098d975b2c4e67a7b9a7cd5f9dc53a0ae7919780",
+      "prompt": "Use case: stylized-concept.\nAsset type: realistic football game character reference for Tripo image-to-3D and Blender humanoid rigging.\nPrimary request: One original fictional adult male professional footballer, age about 25. Make this a believable individual, not a racial caricature, not an existing athlete or celebrity.\nSubject identity: A fictional adult male footballer of Indian heritage, with medium brown natural skin, a distinct natural face, short wavy black hair with a tidy low taper and subtle short stubble.\nStyle: exceptionally detailed photorealistic PBR game-character render, realistic human anatomy, natural skin texture, subtle pores, believable eyes and natural hair. Not a drawing, not clay, not toy-like.\nBody: lean athletic football build, about 1.80 m tall with balanced natural proportions. No exaggeration in muscle size. Normal neck length, proportionate head, symmetrical limbs.\nClothing: plain fitted mid-grey short-sleeve crew-neck football jersey, plain dark navy football shorts ending above knee, plain mid-grey knee-high socks, plain black low-profile football boots. No wristbands, jewelry or accessories. Shirt and shorts are separate garments with clear waist boundary. Same neutral kit and body scale as the rest of the set.\nPose and framing: exact front-facing orthographic full-body T-pose for a humanoid auto-rig. Head upright facing directly at camera. Both arms straight out horizontally at shoulder height; elbows straight, wrists neutral, palms facing down, all ten fingers anatomically correct and separated gently. Straight legs, feet shoulder-width apart, toes forward, both feet flat at same height. Keep the entire body, all fingertips and boot soles inside the image, with 6% empty margin. Center the character. The character nearly fills the square frame.\nLighting and backdrop: even soft neutral studio illumination with very weak shadows. Plain opaque pale-grey background. No dramatic lighting, no ground plane, no cast shadow, no props, no ball.\nOutput: a high-resolution square single-character image, suitable for generating one 3D mesh. Skin and face should remain clearly legible. No text, numbers, team badges, sponsor marks, logos or watermark. No alternate views, portrait inset, additional people or multiple figures.",
+      "tripo": {
+        "status": "not_submitted_credit_reserve"
+      }
+    },
+    {
+      "id": "player-d",
+      "heritage": "Middle Eastern / North African",
+      "features": "A fictional adult male footballer of Moroccan heritage, with a warm olive natural skin tone, a distinct natural face, short dark curly hair and a neatly trimmed very short beard.",
+      "reference": "References/player-d-tpose.png",
+      "referenceSHA256": "0b3fa48f8dbaaed638739e65769b052fb74e5e7268d0f5ca1a838f53db89880b",
+      "prompt": "Use case: stylized-concept.\nAsset type: realistic football game character reference for Tripo image-to-3D and Blender humanoid rigging.\nPrimary request: One original fictional adult male professional footballer, age about 25. Make this a believable individual, not a racial caricature, not an existing athlete or celebrity.\nSubject identity: A fictional adult male footballer of Moroccan heritage, with a warm olive natural skin tone, a distinct natural face, short dark curly hair and a neatly trimmed very short beard.\nStyle: exceptionally detailed photorealistic PBR game-character render, realistic human anatomy, natural skin texture, subtle pores, believable eyes and natural hair. Not a drawing, not clay, not toy-like.\nBody: lean athletic football build, about 1.80 m tall with balanced natural proportions. No exaggeration in muscle size. Normal neck length, proportionate head, symmetrical limbs.\nClothing: plain fitted mid-grey short-sleeve crew-neck football jersey, plain dark navy football shorts ending above knee, plain mid-grey knee-high socks, plain black low-profile football boots. No wristbands, jewelry or accessories. Shirt and shorts are separate garments with clear waist boundary. Same neutral kit and body scale as the rest of the set.\nPose and framing: exact front-facing orthographic full-body T-pose for a humanoid auto-rig. Head upright facing directly at camera. Both arms straight out horizontally at shoulder height; elbows straight, wrists neutral, palms facing down, all ten fingers anatomically correct and separated gently. Straight legs, feet shoulder-width apart, toes forward, both feet flat at same height. Keep the entire body, all fingertips and boot soles inside the image, with 6% empty margin. Center the character. The character nearly fills the square frame.\nLighting and backdrop: even soft neutral studio illumination with very weak shadows. Plain opaque pale-grey background. No dramatic lighting, no ground plane, no cast shadow, no props, no ball.\nOutput: a high-resolution square single-character image, suitable for generating one 3D mesh. Skin and face should remain clearly legible. No text, numbers, team badges, sponsor marks, logos or watermark. No alternate views, portrait inset, additional people or multiple figures.",
+      "tripo": {
+        "status": "not_submitted_credit_reserve"
+      }
+    },
+    {
+      "id": "player-e",
+      "heritage": "European",
+      "features": "A fictional adult male footballer of European heritage, with light natural skin, a distinct natural face, short chestnut-brown wavy hair and a clean-shaven face.",
+      "reference": "References/player-e-tpose.png",
+      "referenceSHA256": "312bc5bbfedb061b7ca9075c7c0f3bbf6b9a0a3476f94f287f4e070be595f5bb",
+      "prompt": "Use case: stylized-concept.\nAsset type: realistic football game character reference for Tripo image-to-3D and Blender humanoid rigging.\nPrimary request: One original fictional adult male professional footballer, age about 25. Make this a believable individual, not a racial caricature, not an existing athlete or celebrity.\nSubject identity: A fictional adult male footballer of European heritage, with light natural skin, a distinct natural face, short chestnut-brown wavy hair and a clean-shaven face.\nStyle: exceptionally detailed photorealistic PBR game-character render, realistic human anatomy, natural skin texture, subtle pores, believable eyes and natural hair. Not a drawing, not clay, not toy-like.\nBody: lean athletic football build, about 1.80 m tall with balanced natural proportions. No exaggeration in muscle size. Normal neck length, proportionate head, symmetrical limbs.\nClothing: plain fitted mid-grey short-sleeve crew-neck football jersey, plain dark navy football shorts ending above knee, plain mid-grey knee-high socks, plain black low-profile football boots. No wristbands, jewelry or accessories. Shirt and shorts are separate garments with clear waist boundary. Same neutral kit and body scale as the rest of the set.\nPose and framing: exact front-facing orthographic full-body T-pose for a humanoid auto-rig. Head upright facing directly at camera. Both arms straight out horizontally at shoulder height; elbows straight, wrists neutral, palms facing down, all ten fingers anatomically correct and separated gently. Straight legs, feet shoulder-width apart, toes forward, both feet flat at same height. Keep the entire body, all fingertips and boot soles inside the image, with 6% empty margin. Center the character. The character nearly fills the square frame.\nLighting and backdrop: even soft neutral studio illumination with very weak shadows. Plain opaque pale-grey background. No dramatic lighting, no ground plane, no cast shadow, no props, no ball.\nOutput: a high-resolution square single-character image, suitable for generating one 3D mesh. Skin and face should remain clearly legible. No text, numbers, team badges, sponsor marks, logos or watermark. No alternate views, portrait inset, additional people or multiple figures.",
+      "tripo": {
+        "status": "not_submitted_credit_reserve"
+      }
+    }
+  ]
+}

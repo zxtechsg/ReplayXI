@@ -1,5 +1,5 @@
 {
-  "date": "2026-10-02",
+  "date": "2026-10-05",
   "startingBalance": 3145,
   "maximumCumulativeSpend": 2201,
   "minimumRemainingBalance": 944,
@@ -59,10 +59,31 @@
       "exportSHA256": "aae231097b214a73716697d2239043ddeea07541489753a0052c1bf97abba059",
       "reportedFaces": 1932614,
       "status": "first candidate rejected after visual inspection (missing/floating stands); one free retry started, balance unchanged. User supplied an OBJ replacement before retry completion. No Tripo stadium admitted to runtime."
+    },
+    {
+      "purpose": "First of five fictional, individually shaped footballer candidates",
+      "date": "2026-10-05",
+      "reference": "../../Assets/ReplayXI/PlayerDiversity171/References/player-a-tpose.png",
+      "referenceSHA256": "188c8d85b9ba41036b9af62e5face4000b2a7e0426213cdd9b2bf14c7d418f6d",
+      "model": "H3.1 - Best Quality",
+      "privacy": "Private",
+      "count": 1,
+      "quotedCredits": 55,
+      "balanceBeforeDisplayed": 2005,
+      "balanceAfterSubmissionDisplayed": 465,
+      "actualChargeVerified": false,
+      "assetID": "6c35fcbd-943c-4045-a44c-0a3b99aab05d",
+      "status": "completed; unrigged textured GLB exported and structurally checked. No runtime admission. All further paid work stopped because live balance is below the 944-credit reserve.",
+      "export": "../../Assets/ReplayXI/PlayerDiversity171/Source/player-a-hd-source.glb",
+      "exportSHA256": "2b25690666877f3e090d5ce4e5d8e30702d6d02f497e5511de4ba9d3df1dcfc3",
+      "reportedFaces": 1965350,
+      "reportedVertices": 1002524,
+      "exportSkinCount": 0
     }
   ],
   "verifiedCreditsSpent": 95,
-  "latestObservedBalance": 2115,
-  "unattributedBalanceDecrease": 935,
-  "balanceNote": "Shared balance was 2170 before the stadium job, and 2115 after its verified 55-credit charge. Other balance changes are unattributed. Recheck live balance before further spending; preserve the 944-credit floor."
+  "quotedPendingCharge": 55,
+  "latestObservedBalance": 465,
+  "unattributedBalanceDecrease": 2585,
+  "balanceNote": "Before the first diversity candidate, the page displayed 2005. After submission it displayed 465, a 1540 drop despite a 55-credit quote. Cause and actual charge are unverified; the unattributed decrease includes this pending job. No further paid jobs below the 944-credit floor."
 }
