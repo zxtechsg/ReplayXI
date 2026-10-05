@@ -5,7 +5,9 @@
   "scope": "Fictional individual concepts, not real athlete likenesses or measured ancestry. Heritage labels are authored prompt intent, not inferred attributes.",
   "uniform": "Neutral grey/navy football kit",
   "pose": "Front-facing T-pose",
-  "runtimeAdmission": false,
+  "runtimeAdmission": true,
+  "runtimeAdmittedProfiles": ["player-a"],
+  "runtimeNote": "Only Player A is rigged and admitted. Players B-E remain image references; no further Tripo credits spent during integration.",
   "creditGuard": {
     "minimumRemainingBalance": 944,
     "observedBeforeFirstSubmission": 2005,
@@ -20,6 +22,20 @@
       "features": "A fictional adult male footballer of Ghanaian heritage, with deep brown skin, a distinct natural face, short tightly curled black hair in a neat low taper, clean-shaven.",
       "reference": "References/player-a-tpose.png",
       "referenceSHA256": "188c8d85b9ba41036b9af62e5face4000b2a7e0426213cdd9b2bf14c7d418f6d",
+      "runtime": {
+        "admitted": true,
+        "date": "2026-10-05",
+        "rig": "Blender/PlayerA-Rig.blend",
+        "buildAudit": "Audit/ReplayXITripoPlayerABuildReport.json",
+        "nativeAudit": "Audit/NativeValidation172.json",
+        "nearTriangles": 10289,
+        "lowTriangles": 2744,
+        "skinJoints": 52,
+        "nominalHeightMetres": 1.82,
+        "kits": ["home", "away", "keeper"],
+        "selection": "Existing deterministic deep appearance slot on both teams; fictional casting, not real athlete likeness or ancestry matching.",
+        "limitations": "One new identity. Distance LOD has coarse cloth and hands; no new facial animation or motion capture. Uses retargeted existing idle/run with native football pose adapters."
+      },
       "prompt": "Use case: stylized-concept.\nAsset type: realistic football game character reference for Tripo image-to-3D and Blender humanoid rigging.\nPrimary request: One original fictional adult male professional footballer, age about 25. Make this a believable individual, not a racial caricature, not an existing athlete or celebrity.\nSubject identity: A fictional adult male footballer of Ghanaian heritage, with deep brown skin, a distinct natural face, short tightly curled black hair in a neat low taper, clean-shaven.\nStyle: exceptionally detailed photorealistic PBR game-character render, realistic human anatomy, natural skin texture, subtle pores, believable eyes and natural hair. Not a drawing, not clay, not toy-like.\nBody: lean athletic football build, about 1.80 m tall with balanced natural proportions. No exaggeration in muscle size. Normal neck length, proportionate head, symmetrical limbs.\nClothing: plain fitted mid-grey short-sleeve crew-neck football jersey, plain dark navy football shorts ending above knee, plain mid-grey knee-high socks, plain black low-profile football boots. No wristbands, jewelry or accessories. Shirt and shorts are separate garments with clear waist boundary. Same neutral kit and body scale as the rest of the set.\nPose and framing: exact front-facing orthographic full-body T-pose for a humanoid auto-rig. Head upright facing directly at camera. Both arms straight out horizontally at shoulder height; elbows straight, wrists neutral, palms facing down, all ten fingers anatomically correct and separated gently. Straight legs, feet shoulder-width apart, toes forward, both feet flat at same height. Keep the entire body, all fingertips and boot soles inside the image, with 6% empty margin. Center the character. The character nearly fills the square frame.\nLighting and backdrop: even soft neutral studio illumination with very weak shadows. Plain opaque pale-grey background. No dramatic lighting, no ground plane, no cast shadow, no props, no ball.\nOutput: a high-resolution square single-character image, suitable for generating one 3D mesh. Skin and face should remain clearly legible. No text, numbers, team badges, sponsor marks, logos or watermark. No alternate views, portrait inset, additional people or multiple figures.",
       "tripo": {
         "status": "completed_exported_unrigged",

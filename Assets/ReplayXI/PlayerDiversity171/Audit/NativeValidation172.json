@@ -1,0 +1,57 @@
+{
+  "date": "2026-10-05",
+  "scope": "Player A only; local offline integration",
+  "simulator": "Apple Vision Pro, visionOS 26.5, arm64",
+  "testResult": "Passed",
+  "passedTests": 36,
+  "failedTests": 0,
+  "skippedTests": 0,
+  "suiteEvidence": ".codex-derived/replayxi-diversity172/native-validation-final.xcresult",
+  "testSuites": [
+    "ReplayTripoDiversity172Tests",
+    "ReplayTripoPolish170Tests",
+    "ReplayTripoAthleteRuntimeTests",
+    "ReplayTripoAthleteContactTests",
+    "ReplayHeadAim168Tests",
+    "ReplayUpperBodyFlow169Tests",
+    "ReplayTripoAthleteVisualTests/testCapturesTripoDiversity172NativeViews"
+  ],
+  "releaseVisionOSBuild": "Passed, unsigned",
+  "releaseTexturePixelAudit": "All three Xcode-optimised PNGs retain the exact admitted decoded RGBA hashes",
+  "twoSidedMaterialRegression": "Passed for both teams and both LODs; material-guard.xcresult",
+  "physicalHeadsetTested": false,
+  "nativeMesh": {
+    "near": {"vertices": 7999, "triangles": 10289},
+    "low": {"vertices": 2590, "triangles": 2744},
+    "joints": 52,
+    "materialSlots": 1,
+    "maximumInfluences": 4
+  },
+  "textureBudget": {
+    "newAtlases": 3,
+    "size": [1024, 1024],
+    "additionalBaseRGBABytes": 12582912,
+    "totalBaseRGBABytes": 100663296,
+    "note": "Base RGBA only; excludes mipmaps, geometry, native staging and frame buffers. Not a headset FPS or total-memory measurement."
+  },
+  "fixesVerified": [
+    "T-rest retarget preserves body and arm shape",
+    "Hand weights avoid folded fingers and wrists",
+    "Home, away and keeper materials share the same body scale",
+    "Two-sided cloth removes native backface pinholes without duplicating geometry",
+    "12mm bounded contact-proxy margin corrects measured near/low floor penetration",
+    "Run-flight allowance is checked against the actual source pose; walk/stance bounds remain tight",
+    "Boot, weighted head, keeper reach and impact checks pass",
+    "Reverse seek, optional-asset fallback and warm asset/texture reuse pass"
+  ],
+  "previews": [
+    "../Preview/player-a-home-idle.png",
+    "../Preview/player-a-home-run.png",
+    "../Preview/player-a-away-idle.png",
+    "../Preview/player-a-away-low-run.png",
+    "../Preview/player-a-keeper-back.png",
+    "../Preview/player-a-head-turn.png"
+  ],
+  "blender": "5.2.1 LTS; all file-backed images in saved rig are packed",
+  "paidTripoJobsThisIntegration": 0
+}

@@ -81,6 +81,68 @@ final class ReplayTripoAthleteVisualTests: XCTestCase {
         withExtendedLifetime(liveInstances) {}
     }
 
+    func testCapturesTripoDiversity172NativeViews() async throws {
+        ReplayTripoAthleteProvider.resetForTesting()
+        ReplaySkinnedAthleteProvider.resetForTesting()
+        defer {
+            ReplayTripoAthleteProvider.resetForTesting()
+            ReplaySkinnedAthleteProvider.resetForTesting()
+        }
+
+        try ReplayTripoAthleteProvider.prewarm()
+        XCTAssertTrue(ReplayTripoAthleteProvider.diversityIsPrewarmed,
+            "Optional PlayerA geometry unavailable: \(ReplayTripoAthleteProvider.diversityPreparationErrorForTesting ?? "no error reported")")
+        let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay))
+        let home = try XCTUnwrap(scenario.player(id: "navy-lb"))
+        let away = try XCTUnwrap(scenario.player(id: "red-lb"))
+        let keeper = try XCTUnwrap(scenario.player(id: "navy-gk"))
+        let homeNear = try ReplayTripoAthleteProvider.makeDiverse(for: home, detail: .near)
+        let awayNear = try ReplayTripoAthleteProvider.makeDiverse(for: away, detail: .near)
+        let keeperNear = try ReplayTripoAthleteProvider.makeDiverse(for: keeper, detail: .near)
+        let awayLow = try ReplayTripoAthleteProvider.makeDiverse(for: away, detail: .lowDetail)
+        let liveInstances = [homeNear, awayNear, keeperNear, awayLow]
+        XCTAssertTrue(liveInstances.allSatisfy { $0.motion.rigProfile == .tripo52 && $0.model.jointNames.count == 52 })
+
+        let calibration = try await calibrate()
+        let idleTime = 1.25
+        XCTAssertTrue(update(homeNear, player: home, time: idleTime, speed: 0, stationary: true))
+        try await capture(homeNear.root, label: "diversity172-home-near-idle-front", player: home,
+                          view: .front, calibration: calibration)
+        XCTAssertTrue(update(awayNear, player: away, time: idleTime, speed: 0, stationary: true))
+        try await capture(awayNear.root, label: "diversity172-away-near-idle-front", player: away,
+                          view: .front, calibration: calibration)
+        XCTAssertTrue(update(keeperNear, player: keeper, time: idleTime, speed: 0, stationary: true))
+        try await capture(keeperNear.root, label: "diversity172-keeper-near-idle-back-number-\(keeper.shirtNumber)",
+                          player: keeper, view: .back, calibration: calibration)
+
+        let runTime = 13.6
+        XCTAssertTrue(update(homeNear, player: home, time: runTime, speed: 3.6, stationary: false))
+        try await capture(homeNear.root, label: "diversity172-home-near-run-three-quarter", player: home,
+                          view: .threeQuarter, calibration: calibration)
+        XCTAssertTrue(update(awayLow, player: away, time: runTime, speed: 3.6, stationary: false))
+        try await capture(awayLow.root, label: "diversity172-away-low-run-front", player: away,
+                          view: .front, calibration: calibration)
+
+        let headAimTime = 1.25
+        let headAimTarget: SIMD3<Float> = [1.8, 1.58, 3.2]
+        XCTAssertTrue(homeNear.update(at: headAimTime, track: home,
+            locomotion: home.locomotion(at: headAimTime), lookTarget: nil,
+            ballAction: nil, presentationPose: home.presentationPose(at: headAimTime),
+            allowsTrackLocomotionSampling: true))
+        let head = try XCTUnwrap(homeNear.motion.semanticJointIndices["head"])
+        let controlHead = homeNear.model.jointTransforms[head]
+        XCTAssertTrue(homeNear.update(at: headAimTime, track: home,
+            locomotion: home.locomotion(at: headAimTime), lookTarget: headAimTarget,
+            ballAction: nil, presentationPose: home.presentationPose(at: headAimTime),
+            allowsTrackLocomotionSampling: true))
+        XCTAssertNotEqual(homeNear.model.jointTransforms[head], controlHead,
+                          "The close-up capture must show the new head aim response")
+        try await capture(homeNear.root, label: "diversity172-home-near-head-aim-close", player: home,
+                          view: .front, calibration: calibration, closeUp: true)
+
+        withExtendedLifetime(liveInstances) {}
+    }
+
     /// Matched native body-local crop; only the cervical aim switch changes.
     func testReferenceHeadAim168CloseUpBeforeAfter() async throws {
         ReplayTripoAthleteProvider.resetForTesting()

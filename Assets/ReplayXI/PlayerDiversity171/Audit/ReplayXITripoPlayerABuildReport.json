@@ -1,0 +1,1034 @@
+{
+  "assets": {
+    "low": {
+      "authoredUSDPointCount": 2590,
+      "drawCalls": 1,
+      "jointCount": 52,
+      "sha256": "a35f7e7cdca279cbc3e8978dbced568b494f932d88f6925d704707609756879e",
+      "sourceVertices": 2590,
+      "triangles": 2744,
+      "vertices": 2590
+    },
+    "near": {
+      "authoredUSDPointCount": 7999,
+      "drawCalls": 1,
+      "jointCount": 52,
+      "sha256": "688434ce9398f7fdcda6480b09f6a80c281f754a3bad8591d83084699ecbab26",
+      "sourceVertices": 7999,
+      "triangles": 10289,
+      "vertices": 7999
+    }
+  },
+  "boots": {
+    "low": {
+      "left": {
+        "footJoint": "Hips/LeftUpLeg/LeftLeg/LeftFoot",
+        "restSoleWorld": [
+          0.2245493,
+          0.0007517,
+          0.0101324
+        ],
+        "solePoint": [
+          -0.0443668,
+          0.1234056,
+          -0.0518075
+        ],
+        "toeJoint": "Hips/LeftUpLeg/LeftLeg/LeftFoot/LeftToeBase"
+      },
+      "right": {
+        "footJoint": "Hips/RightUpLeg/RightLeg/RightFoot",
+        "restSoleWorld": [
+          -0.2237628,
+          0.0015928,
+          0.0054806
+        ],
+        "solePoint": [
+          -0.0315997,
+          0.1202432,
+          -0.0637407
+        ],
+        "toeJoint": "Hips/RightUpLeg/RightLeg/RightFoot/RightToeBase"
+      }
+    },
+    "near": {
+      "left": {
+        "footJoint": "Hips/LeftUpLeg/LeftLeg/LeftFoot",
+        "restSoleWorld": [
+          0.2226496,
+          -0.0003167,
+          0.0104454
+        ],
+        "solePoint": [
+          -0.043141,
+          0.123976,
+          -0.0535453
+        ],
+        "toeJoint": "Hips/LeftUpLeg/LeftLeg/LeftFoot/LeftToeBase"
+      },
+      "right": {
+        "footJoint": "Hips/RightUpLeg/RightLeg/RightFoot",
+        "restSoleWorld": [
+          -0.2244235,
+          9.08e-05,
+          0.0114845
+        ],
+        "solePoint": [
+          -0.030426,
+          0.1260051,
+          -0.0617005
+        ],
+        "toeJoint": "Hips/RightUpLeg/RightLeg/RightFoot/RightToeBase"
+      }
+    }
+  },
+  "clips": [
+    {
+      "durationSeconds": 3.4583332538604736,
+      "frames": 84,
+      "id": "idle"
+    },
+    {
+      "durationSeconds": 0.7916666865348816,
+      "frames": 20,
+      "id": "run"
+    }
+  ],
+  "contactPaddingMetres": 0.012,
+  "contactPaddingRationale": "Native weighted-pose test: 5.2 mm near and 6.6 mm low penetration at 6 mm padding; 12 mm covers the observed probe gap within the runtime 20 mm cap.",
+  "contacts": {
+    "low": {
+      "headProbeBoundsMax": [
+        0.0989487,
+        1.8179246,
+        0.1179114
+      ],
+      "headProbeBoundsMin": [
+        -0.0951723,
+        1.6427,
+        -0.1209669
+      ],
+      "totalVertices": 512,
+      "weightedHeaderProbes": 96
+    },
+    "near": {
+      "headProbeBoundsMax": [
+        0.0990733,
+        1.8196833,
+        0.1170487
+      ],
+      "headProbeBoundsMin": [
+        -0.098379,
+        1.6420935,
+        -0.1141074
+      ],
+      "totalVertices": 512,
+      "weightedHeaderProbes": 96
+    }
+  },
+  "files": {
+    "PlayerAKitsReport.json": {
+      "bytes": 1352,
+      "sha256": "0a046f49037ab222846ee76be00cd573cec6c89edb6fea898f40b85c619b9033"
+    },
+    "PlayerASkinPixelsAudit.json": {
+      "bytes": 2547,
+      "sha256": "c90175b777d108e6d2146709f26f75d7da86a37376e81ba47822080529db0a68"
+    },
+    "ReplayXITripoPlayerA.usdz": {
+      "bytes": 610698,
+      "sha256": "688434ce9398f7fdcda6480b09f6a80c281f754a3bad8591d83084699ecbab26"
+    },
+    "ReplayXITripoPlayerAAway.png": {
+      "bytes": 1312693,
+      "sha256": "c8e7f97ce1b247c095a054f7cf52fe781eb0bb6d0e620af7da1299a24bfefd09"
+    },
+    "ReplayXITripoPlayerAContactSurface.json": {
+      "bytes": 64027,
+      "sha256": "20cd8157804c9bf63f0f227c3bc48ea0e33758dc5f66f41ab77d3759c9ff5c28"
+    },
+    "ReplayXITripoPlayerAHome.png": {
+      "bytes": 1365947,
+      "sha256": "d3747e9a6e7be9eec537c70a1384635cc1a9261ed2165ec7cfc8a973d171ff30"
+    },
+    "ReplayXITripoPlayerAKeeper.png": {
+      "bytes": 1368858,
+      "sha256": "1ecb16154e4084dce7f34331f435144e2c31e14e9ad04c53a6dc18656651c90c"
+    },
+    "ReplayXITripoPlayerALow.usdz": {
+      "bytes": 311911,
+      "sha256": "a35f7e7cdca279cbc3e8978dbced568b494f932d88f6925d704707609756879e"
+    },
+    "ReplayXITripoPlayerALowContactSurface.json": {
+      "bytes": 64562,
+      "sha256": "0199ce5faed7df86281cddb4599c77c3dfcb6f6c34cb7e5052887d77eddb7576"
+    },
+    "ReplayXITripoPlayerAMotion.json": {
+      "bytes": 553591,
+      "sha256": "0ec69ffd45a2964c2ac174dcf7f82c8789476a7a6d72b4b8891bcd210836461d"
+    }
+  },
+  "geometry": {
+    "boundsMax": [
+      0.9141821,
+      1.8196833,
+      0.1682916
+    ],
+    "boundsMin": [
+      -0.9163216,
+      -0.0003167,
+      -0.1676376
+    ],
+    "jointCount": 52,
+    "materialCount": 1,
+    "nominalHeight": 1.82,
+    "pelvisRestHeight": 0.9773320540652137,
+    "restMinY": -0.0003166621186489078,
+    "triangles": 10289,
+    "vertices": 7999
+  },
+  "heightScale": 1.8611093208805345,
+  "normalMode": "source",
+  "numberPanel": {
+    "after": {
+      "back": {
+        "halfHeightMetres": 0.12,
+        "halfWidthMetres": 0.15,
+        "maximumClothDepthMetres": -0.01000002736210448,
+        "samples": [
+          {
+            "clip": "idle",
+            "frame": 0,
+            "maximumClothDepthMetres": -0.014530172975577932,
+            "shirtTriangles": 365
+          },
+          {
+            "clip": "idle",
+            "frame": 20,
+            "maximumClothDepthMetres": -0.014448489072735604,
+            "shirtTriangles": 364
+          },
+          {
+            "clip": "idle",
+            "frame": 40,
+            "maximumClothDepthMetres": -0.014399324584003587,
+            "shirtTriangles": 363
+          },
+          {
+            "clip": "idle",
+            "frame": 60,
+            "maximumClothDepthMetres": -0.014498555442646388,
+            "shirtTriangles": 361
+          },
+          {
+            "clip": "idle",
+            "frame": 83,
+            "maximumClothDepthMetres": -0.014530172975577932,
+            "shirtTriangles": 365
+          },
+          {
+            "clip": "run",
+            "frame": 0,
+            "maximumClothDepthMetres": -0.0136828260802494,
+            "shirtTriangles": 345
+          },
+          {
+            "clip": "run",
+            "frame": 1,
+            "maximumClothDepthMetres": -0.0136828260802494,
+            "shirtTriangles": 345
+          },
+          {
+            "clip": "run",
+            "frame": 2,
+            "maximumClothDepthMetres": -0.012607544483325128,
+            "shirtTriangles": 342
+          },
+          {
+            "clip": "run",
+            "frame": 3,
+            "maximumClothDepthMetres": -0.011305172001797592,
+            "shirtTriangles": 350
+          },
+          {
+            "clip": "run",
+            "frame": 4,
+            "maximumClothDepthMetres": -0.010568117939805277,
+            "shirtTriangles": 351
+          },
+          {
+            "clip": "run",
+            "frame": 5,
+            "maximumClothDepthMetres": -0.010147120458642522,
+            "shirtTriangles": 347
+          },
+          {
+            "clip": "run",
+            "frame": 6,
+            "maximumClothDepthMetres": -0.01000002736210448,
+            "shirtTriangles": 344
+          },
+          {
+            "clip": "run",
+            "frame": 7,
+            "maximumClothDepthMetres": -0.010106993097029116,
+            "shirtTriangles": 332
+          },
+          {
+            "clip": "run",
+            "frame": 8,
+            "maximumClothDepthMetres": -0.010249908778560357,
+            "shirtTriangles": 335
+          },
+          {
+            "clip": "run",
+            "frame": 9,
+            "maximumClothDepthMetres": -0.010555324183269543,
+            "shirtTriangles": 336
+          },
+          {
+            "clip": "run",
+            "frame": 10,
+            "maximumClothDepthMetres": -0.011479422003301543,
+            "shirtTriangles": 335
+          },
+          {
+            "clip": "run",
+            "frame": 11,
+            "maximumClothDepthMetres": -0.013602968101147361,
+            "shirtTriangles": 341
+          },
+          {
+            "clip": "run",
+            "frame": 12,
+            "maximumClothDepthMetres": -0.01262790098628308,
+            "shirtTriangles": 357
+          },
+          {
+            "clip": "run",
+            "frame": 13,
+            "maximumClothDepthMetres": -0.011795691530514019,
+            "shirtTriangles": 361
+          },
+          {
+            "clip": "run",
+            "frame": 14,
+            "maximumClothDepthMetres": -0.011189284704662072,
+            "shirtTriangles": 359
+          },
+          {
+            "clip": "run",
+            "frame": 15,
+            "maximumClothDepthMetres": -0.01085287947830238,
+            "shirtTriangles": 355
+          },
+          {
+            "clip": "run",
+            "frame": 16,
+            "maximumClothDepthMetres": -0.010858134305603118,
+            "shirtTriangles": 349
+          },
+          {
+            "clip": "run",
+            "frame": 17,
+            "maximumClothDepthMetres": -0.011424160310406828,
+            "shirtTriangles": 348
+          },
+          {
+            "clip": "run",
+            "frame": 18,
+            "maximumClothDepthMetres": -0.01237325086533414,
+            "shirtTriangles": 349
+          },
+          {
+            "clip": "run",
+            "frame": 19,
+            "maximumClothDepthMetres": -0.013682832109594978,
+            "shirtTriangles": 345
+          }
+        ]
+      },
+      "front": {
+        "halfHeightMetres": 0.065,
+        "halfWidthMetres": 0.075,
+        "maximumClothDepthMetres": -0.009999964705742569,
+        "samples": [
+          {
+            "clip": "idle",
+            "frame": 0,
+            "maximumClothDepthMetres": -0.014771355048310467,
+            "shirtTriangles": 110
+          },
+          {
+            "clip": "idle",
+            "frame": 20,
+            "maximumClothDepthMetres": -0.01482259349149701,
+            "shirtTriangles": 110
+          },
+          {
+            "clip": "idle",
+            "frame": 40,
+            "maximumClothDepthMetres": -0.01485485381888749,
+            "shirtTriangles": 110
+          },
+          {
+            "clip": "idle",
+            "frame": 60,
+            "maximumClothDepthMetres": -0.014833023579052612,
+            "shirtTriangles": 110
+          },
+          {
+            "clip": "idle",
+            "frame": 83,
+            "maximumClothDepthMetres": -0.014771355048310467,
+            "shirtTriangles": 110
+          },
+          {
+            "clip": "run",
+            "frame": 0,
+            "maximumClothDepthMetres": -0.009999964705742569,
+            "shirtTriangles": 119
+          },
+          {
+            "clip": "run",
+            "frame": 1,
+            "maximumClothDepthMetres": -0.009999964705742569,
+            "shirtTriangles": 119
+          },
+          {
+            "clip": "run",
+            "frame": 2,
+            "maximumClothDepthMetres": -0.011119801501558764,
+            "shirtTriangles": 125
+          },
+          {
+            "clip": "run",
+            "frame": 3,
+            "maximumClothDepthMetres": -0.012511436378278808,
+            "shirtTriangles": 128
+          },
+          {
+            "clip": "run",
+            "frame": 4,
+            "maximumClothDepthMetres": -0.013768961228202911,
+            "shirtTriangles": 126
+          },
+          {
+            "clip": "run",
+            "frame": 5,
+            "maximumClothDepthMetres": -0.01442832462255429,
+            "shirtTriangles": 126
+          },
+          {
+            "clip": "run",
+            "frame": 6,
+            "maximumClothDepthMetres": -0.014759412545146223,
+            "shirtTriangles": 125
+          },
+          {
+            "clip": "run",
+            "frame": 7,
+            "maximumClothDepthMetres": -0.01537068492722184,
+            "shirtTriangles": 130
+          },
+          {
+            "clip": "run",
+            "frame": 8,
+            "maximumClothDepthMetres": -0.016049788200278026,
+            "shirtTriangles": 130
+          },
+          {
+            "clip": "run",
+            "frame": 9,
+            "maximumClothDepthMetres": -0.01713222784897677,
+            "shirtTriangles": 128
+          },
+          {
+            "clip": "run",
+            "frame": 10,
+            "maximumClothDepthMetres": -0.016131143653378605,
+            "shirtTriangles": 122
+          },
+          {
+            "clip": "run",
+            "frame": 11,
+            "maximumClothDepthMetres": -0.016632253388580737,
+            "shirtTriangles": 111
+          },
+          {
+            "clip": "run",
+            "frame": 12,
+            "maximumClothDepthMetres": -0.016302184081271043,
+            "shirtTriangles": 110
+          },
+          {
+            "clip": "run",
+            "frame": 13,
+            "maximumClothDepthMetres": -0.015729721223721627,
+            "shirtTriangles": 108
+          },
+          {
+            "clip": "run",
+            "frame": 14,
+            "maximumClothDepthMetres": -0.016119692886896853,
+            "shirtTriangles": 108
+          },
+          {
+            "clip": "run",
+            "frame": 15,
+            "maximumClothDepthMetres": -0.016377275560676113,
+            "shirtTriangles": 107
+          },
+          {
+            "clip": "run",
+            "frame": 16,
+            "maximumClothDepthMetres": -0.016174136772376415,
+            "shirtTriangles": 111
+          },
+          {
+            "clip": "run",
+            "frame": 17,
+            "maximumClothDepthMetres": -0.013074328100825478,
+            "shirtTriangles": 113
+          },
+          {
+            "clip": "run",
+            "frame": 18,
+            "maximumClothDepthMetres": -0.011243598606245363,
+            "shirtTriangles": 119
+          },
+          {
+            "clip": "run",
+            "frame": 19,
+            "maximumClothDepthMetres": -0.009999975086624346,
+            "shirtTriangles": 119
+          }
+        ]
+      }
+    },
+    "before": {
+      "back": {
+        "halfHeightMetres": 0.12,
+        "halfWidthMetres": 0.15,
+        "maximumClothDepthMetres": 0.008406027635407542,
+        "samples": [
+          {
+            "clip": "idle",
+            "frame": 0,
+            "maximumClothDepthMetres": 0.003875882021933952,
+            "shirtTriangles": 365
+          },
+          {
+            "clip": "idle",
+            "frame": 20,
+            "maximumClothDepthMetres": 0.003957565924776335,
+            "shirtTriangles": 364
+          },
+          {
+            "clip": "idle",
+            "frame": 40,
+            "maximumClothDepthMetres": 0.004006730413508297,
+            "shirtTriangles": 363
+          },
+          {
+            "clip": "idle",
+            "frame": 60,
+            "maximumClothDepthMetres": 0.003907499554865551,
+            "shirtTriangles": 361
+          },
+          {
+            "clip": "idle",
+            "frame": 83,
+            "maximumClothDepthMetres": 0.003875882021933952,
+            "shirtTriangles": 365
+          },
+          {
+            "clip": "run",
+            "frame": 0,
+            "maximumClothDepthMetres": 0.004723228917262512,
+            "shirtTriangles": 345
+          },
+          {
+            "clip": "run",
+            "frame": 1,
+            "maximumClothDepthMetres": 0.004723228917262512,
+            "shirtTriangles": 345
+          },
+          {
+            "clip": "run",
+            "frame": 2,
+            "maximumClothDepthMetres": 0.005798510514186894,
+            "shirtTriangles": 342
+          },
+          {
+            "clip": "run",
+            "frame": 3,
+            "maximumClothDepthMetres": 0.007100882995714208,
+            "shirtTriangles": 350
+          },
+          {
+            "clip": "run",
+            "frame": 4,
+            "maximumClothDepthMetres": 0.007837937057706745,
+            "shirtTriangles": 351
+          },
+          {
+            "clip": "run",
+            "frame": 5,
+            "maximumClothDepthMetres": 0.008258934538869389,
+            "shirtTriangles": 347
+          },
+          {
+            "clip": "run",
+            "frame": 6,
+            "maximumClothDepthMetres": 0.008406027635407542,
+            "shirtTriangles": 344
+          },
+          {
+            "clip": "run",
+            "frame": 7,
+            "maximumClothDepthMetres": 0.008299061900482685,
+            "shirtTriangles": 332
+          },
+          {
+            "clip": "run",
+            "frame": 8,
+            "maximumClothDepthMetres": 0.008156146218951443,
+            "shirtTriangles": 335
+          },
+          {
+            "clip": "run",
+            "frame": 9,
+            "maximumClothDepthMetres": 0.00785073081424248,
+            "shirtTriangles": 336
+          },
+          {
+            "clip": "run",
+            "frame": 10,
+            "maximumClothDepthMetres": 0.00692663299421048,
+            "shirtTriangles": 335
+          },
+          {
+            "clip": "run",
+            "frame": 11,
+            "maximumClothDepthMetres": 0.004803086896364439,
+            "shirtTriangles": 341
+          },
+          {
+            "clip": "run",
+            "frame": 12,
+            "maximumClothDepthMetres": 0.0057781540112287755,
+            "shirtTriangles": 357
+          },
+          {
+            "clip": "run",
+            "frame": 13,
+            "maximumClothDepthMetres": 0.006610363466997893,
+            "shirtTriangles": 361
+          },
+          {
+            "clip": "run",
+            "frame": 14,
+            "maximumClothDepthMetres": 0.007216770292849839,
+            "shirtTriangles": 359
+          },
+          {
+            "clip": "run",
+            "frame": 15,
+            "maximumClothDepthMetres": 0.007553175519209421,
+            "shirtTriangles": 355
+          },
+          {
+            "clip": "run",
+            "frame": 16,
+            "maximumClothDepthMetres": 0.007547920691908794,
+            "shirtTriangles": 349
+          },
+          {
+            "clip": "run",
+            "frame": 17,
+            "maximumClothDepthMetres": 0.0069818946871051946,
+            "shirtTriangles": 348
+          },
+          {
+            "clip": "run",
+            "frame": 18,
+            "maximumClothDepthMetres": 0.00603280413217766,
+            "shirtTriangles": 349
+          },
+          {
+            "clip": "run",
+            "frame": 19,
+            "maximumClothDepthMetres": 0.0047232228879169336,
+            "shirtTriangles": 345
+          }
+        ]
+      },
+      "front": {
+        "halfHeightMetres": 0.065,
+        "halfWidthMetres": 0.075,
+        "maximumClothDepthMetres": 0.002424614696789899,
+        "samples": [
+          {
+            "clip": "idle",
+            "frame": 0,
+            "maximumClothDepthMetres": -0.0023467768154512986,
+            "shirtTriangles": 110
+          },
+          {
+            "clip": "idle",
+            "frame": 20,
+            "maximumClothDepthMetres": -0.002398015245231956,
+            "shirtTriangles": 110
+          },
+          {
+            "clip": "idle",
+            "frame": 40,
+            "maximumClothDepthMetres": -0.0024302749883158862,
+            "shirtTriangles": 110
+          },
+          {
+            "clip": "idle",
+            "frame": 60,
+            "maximumClothDepthMetres": -0.0024084453299483568,
+            "shirtTriangles": 110
+          },
+          {
+            "clip": "idle",
+            "frame": 83,
+            "maximumClothDepthMetres": -0.0023467768154512986,
+            "shirtTriangles": 110
+          },
+          {
+            "clip": "run",
+            "frame": 0,
+            "maximumClothDepthMetres": 0.002424614696789899,
+            "shirtTriangles": 119
+          },
+          {
+            "clip": "run",
+            "frame": 1,
+            "maximumClothDepthMetres": 0.002424614696789899,
+            "shirtTriangles": 119
+          },
+          {
+            "clip": "run",
+            "frame": 2,
+            "maximumClothDepthMetres": 0.0013047778859131775,
+            "shirtTriangles": 125
+          },
+          {
+            "clip": "run",
+            "frame": 3,
+            "maximumClothDepthMetres": -8.685699533044931e-05,
+            "shirtTriangles": 128
+          },
+          {
+            "clip": "run",
+            "frame": 4,
+            "maximumClothDepthMetres": -0.001344381783472611,
+            "shirtTriangles": 126
+          },
+          {
+            "clip": "run",
+            "frame": 5,
+            "maximumClothDepthMetres": -0.0020037450080941186,
+            "shirtTriangles": 126
+          },
+          {
+            "clip": "run",
+            "frame": 6,
+            "maximumClothDepthMetres": -0.0023348327110848683,
+            "shirtTriangles": 125
+          },
+          {
+            "clip": "run",
+            "frame": 7,
+            "maximumClothDepthMetres": -0.0029461049018797173,
+            "shirtTriangles": 130
+          },
+          {
+            "clip": "run",
+            "frame": 8,
+            "maximumClothDepthMetres": -0.0036252080410417806,
+            "shirtTriangles": 130
+          },
+          {
+            "clip": "run",
+            "frame": 9,
+            "maximumClothDepthMetres": -0.004707647570829085,
+            "shirtTriangles": 128
+          },
+          {
+            "clip": "run",
+            "frame": 10,
+            "maximumClothDepthMetres": -0.0037065635161633408,
+            "shirtTriangles": 122
+          },
+          {
+            "clip": "run",
+            "frame": 11,
+            "maximumClothDepthMetres": -0.004207673358445414,
+            "shirtTriangles": 111
+          },
+          {
+            "clip": "run",
+            "frame": 12,
+            "maximumClothDepthMetres": -0.0038776060059634854,
+            "shirtTriangles": 110
+          },
+          {
+            "clip": "run",
+            "frame": 13,
+            "maximumClothDepthMetres": -0.0033051431484141247,
+            "shirtTriangles": 108
+          },
+          {
+            "clip": "run",
+            "frame": 14,
+            "maximumClothDepthMetres": -0.003695114811589406,
+            "shirtTriangles": 108
+          },
+          {
+            "clip": "run",
+            "frame": 15,
+            "maximumClothDepthMetres": -0.003952697306930613,
+            "shirtTriangles": 107
+          },
+          {
+            "clip": "run",
+            "frame": 16,
+            "maximumClothDepthMetres": -0.0037495585584175085,
+            "shirtTriangles": 111
+          },
+          {
+            "clip": "run",
+            "frame": 17,
+            "maximumClothDepthMetres": -0.0006497483190010791,
+            "shirtTriangles": 113
+          },
+          {
+            "clip": "run",
+            "frame": 18,
+            "maximumClothDepthMetres": 0.0011809809822786689,
+            "shirtTriangles": 119
+          },
+          {
+            "clip": "run",
+            "frame": 19,
+            "maximumClothDepthMetres": 0.0024246043159090527,
+            "shirtTriangles": 119
+          }
+        ]
+      }
+    },
+    "outwardOffsetsMetres": {
+      "back": 0.018406027635407544,
+      "front": 0.012424614696789899
+    },
+    "targetClearanceMetres": 0.01
+  },
+  "poseBounds": [
+    {
+      "boundsMax": [
+        0.255734,
+        1.8184068,
+        0.2016793
+      ],
+      "boundsMin": [
+        -0.3291963,
+        0.0043768,
+        -0.1718428
+      ],
+      "clip": "idle",
+      "frame": 0
+    },
+    {
+      "boundsMax": [
+        0.2601795,
+        1.817807,
+        0.203851
+      ],
+      "boundsMin": [
+        -0.3247649,
+        0.0045742,
+        -0.1709867
+      ],
+      "clip": "idle",
+      "frame": 42
+    },
+    {
+      "boundsMax": [
+        0.2557429,
+        1.8184068,
+        0.2016782
+      ],
+      "boundsMin": [
+        -0.3291956,
+        0.0043767,
+        -0.1718428
+      ],
+      "clip": "idle",
+      "frame": 83
+    },
+    {
+      "boundsMax": [
+        0.3267268,
+        1.6670422,
+        0.40415
+      ],
+      "boundsMin": [
+        -0.2826685,
+        0.0171149,
+        -0.327917
+      ],
+      "clip": "run",
+      "frame": 0
+    },
+    {
+      "boundsMax": [
+        0.252934,
+        1.6766442,
+        0.3834429
+      ],
+      "boundsMin": [
+        -0.3431867,
+        0.0223528,
+        -0.2984846
+      ],
+      "clip": "run",
+      "frame": 10
+    },
+    {
+      "boundsMax": [
+        0.3267268,
+        1.6670423,
+        0.4041582
+      ],
+      "boundsMin": [
+        -0.2826683,
+        0.0171149,
+        -0.3279171
+      ],
+      "clip": "run",
+      "frame": 19
+    }
+  ],
+  "provenance": {
+    "kitVisualQA": "passed: matched original/home/away/keeper front and side renders; UV pixel audit in PlayerASkinPixelsAudit.json",
+    "kits": {
+      "away": {
+        "file": "ReplayXITripoPlayerAAway.png",
+        "pixelSHA256": "3f50a80cd465c4617f62d6531d0c587a2a85ee8cf2110913d1096dacf44607bf",
+        "sha256": "c8e7f97ce1b247c095a054f7cf52fe781eb0bb6d0e620af7da1299a24bfefd09",
+        "size": [
+          1024,
+          1024
+        ]
+      },
+      "home": {
+        "file": "ReplayXITripoPlayerAHome.png",
+        "pixelSHA256": "6f3a153e22a2c8a6de78bf72b3fa39bec9b699d8edef13c6df0ce828c1871f64",
+        "sha256": "d3747e9a6e7be9eec537c70a1384635cc1a9261ed2165ec7cfc8a973d171ff30",
+        "size": [
+          1024,
+          1024
+        ]
+      },
+      "keeper": {
+        "file": "ReplayXITripoPlayerAKeeper.png",
+        "pixelSHA256": "6e33cdd543d44f5dc0370cb9ec6d5e9819cb6928d5cb22cf6bfafc295241d78b",
+        "sha256": "1ecb16154e4084dce7f34331f435144e2c31e14e9ad04c53a6dc18656651c90c",
+        "size": [
+          1024,
+          1024
+        ]
+      }
+    },
+    "kitsReportSHA256": "0a046f49037ab222846ee76be00cd573cec6c89edb6fea898f40b85c619b9033",
+    "rigBasecolorSHA256": {
+      "low": "ebe28e4cabbd108c000bbbb25a5827a1ac1306bc7aa8a541938edb5b06489777",
+      "motion": "ebe28e4cabbd108c000bbbb25a5827a1ac1306bc7aa8a541938edb5b06489777",
+      "near": "ebe28e4cabbd108c000bbbb25a5827a1ac1306bc7aa8a541938edb5b06489777"
+    },
+    "skinPixelAuditSHA256": "c90175b777d108e6d2146709f26f75d7da86a37376e81ba47822080529db0a68",
+    "sourceBasecolorSHA256": "ebe28e4cabbd108c000bbbb25a5827a1ac1306bc7aa8a541938edb5b06489777",
+    "sourceGLBSHA256": "2b25690666877f3e090d5ce4e5d8e30702d6d02f497e5511de4ba9d3df1dcfc3",
+    "sourceImages": {
+      "ReplayXI_Player_A_HD_Source_basecolor.jpg": {
+        "bytes": 3022585,
+        "mimeType": "image/jpeg",
+        "sha256": "ebe28e4cabbd108c000bbbb25a5827a1ac1306bc7aa8a541938edb5b06489777"
+      },
+      "ReplayXI_Player_A_HD_Source_normal.png": {
+        "bytes": 4716994,
+        "mimeType": "image/png",
+        "sha256": "b27d73985af0af71c0bf612678823bda0a425a0374c84239dacf4dfb56c95232"
+      },
+      "ReplayXI_Player_A_HD_Source_rm.jpg": {
+        "bytes": 1386750,
+        "mimeType": "image/jpeg",
+        "sha256": "32d532391561d6c2a0f4034cbeec3c5a4243a85da3d5a287ea96fd0fa1119a54"
+      }
+    }
+  },
+  "runtimeManifest": {
+    "kits": {
+      "away": {
+        "file": "ReplayXITripoPlayerAAway.png",
+        "pixelSHA256": "3f50a80cd465c4617f62d6531d0c587a2a85ee8cf2110913d1096dacf44607bf",
+        "sha256": "c8e7f97ce1b247c095a054f7cf52fe781eb0bb6d0e620af7da1299a24bfefd09",
+        "size": [
+          1024,
+          1024
+        ]
+      },
+      "home": {
+        "file": "ReplayXITripoPlayerAHome.png",
+        "pixelSHA256": "6f3a153e22a2c8a6de78bf72b3fa39bec9b699d8edef13c6df0ce828c1871f64",
+        "sha256": "d3747e9a6e7be9eec537c70a1384635cc1a9261ed2165ec7cfc8a973d171ff30",
+        "size": [
+          1024,
+          1024
+        ]
+      },
+      "keeper": {
+        "file": "ReplayXITripoPlayerAKeeper.png",
+        "pixelSHA256": "6e33cdd543d44f5dc0370cb9ec6d5e9819cb6928d5cb22cf6bfafc295241d78b",
+        "sha256": "1ecb16154e4084dce7f34331f435144e2c31e14e9ad04c53a6dc18656651c90c",
+        "size": [
+          1024,
+          1024
+        ]
+      }
+    },
+    "low": {
+      "contactResource": "ReplayXITripoPlayerALowContactSurface.json",
+      "contactSHA256": "0199ce5faed7df86281cddb4599c77c3dfcb6f6c34cb7e5052887d77eddb7576",
+      "resource": "ReplayXITripoPlayerALow.usdz",
+      "sha256": "a35f7e7cdca279cbc3e8978dbced568b494f932d88f6925d704707609756879e",
+      "sourceVertices": 2590,
+      "triangles": 2744
+    },
+    "motion": {
+      "resource": "ReplayXITripoPlayerAMotion.json",
+      "sha256": "0ec69ffd45a2964c2ac174dcf7f82c8789476a7a6d72b4b8891bcd210836461d"
+    },
+    "near": {
+      "contactResource": "ReplayXITripoPlayerAContactSurface.json",
+      "contactSHA256": "20cd8157804c9bf63f0f227c3bc48ea0e33758dc5f66f41ab77d3759c9ff5c28",
+      "resource": "ReplayXITripoPlayerA.usdz",
+      "sha256": "688434ce9398f7fdcda6480b09f6a80c281f754a3bad8591d83084699ecbab26",
+      "sourceVertices": 7999,
+      "triangles": 10289
+    }
+  },
+  "sourceCommit": "player-a-glb-2b25690666877f3e090d5ce4e5d8e307",
+  "sourceHashes": {
+    "kitsReport": "0a046f49037ab222846ee76be00cd573cec6c89edb6fea898f40b85c619b9033",
+    "lowGLB": "ef0b41c06c34c2f97a2df9031750346a023662bf40a5093c8fbb54a74c0503a1",
+    "motionGLB": "d5a5f29647099ecbd4b2f8176e269a9a105d93ccb29793c0ce6ae749cfdeaeb2",
+    "nearGLB": "abc6fbd26d4144d29b83a36e5756483c5c5b9ba509ebeba994824ca416bfea00",
+    "sourceGLB": "2b25690666877f3e090d5ce4e5d8e30702d6d02f497e5511de4ba9d3df1dcfc3"
+  },
+  "usdTopologyMode": "source-vertex"
+}

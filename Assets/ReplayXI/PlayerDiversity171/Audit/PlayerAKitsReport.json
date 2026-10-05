@@ -1,0 +1,55 @@
+{
+  "mask": {
+    "minimumBlueToRedRatio": 0.86,
+    "protectedNeck": {
+      "halfWidthMetres": 0.09,
+      "minimumHeight": 0.835
+    },
+    "shirtHeight": [
+      0.49,
+      0.87
+    ],
+    "shortsHeight": [
+      0.345,
+      0.53
+    ],
+    "socksHeight": [
+      0.065,
+      0.305
+    ],
+    "sourceChromaProtected": true
+  },
+  "nearGLBSHA256": "abc6fbd26d4144d29b83a36e5756483c5c5b9ba509ebeba994824ca416bfea00",
+  "sameGeometryForBothTeams": true,
+  "sourceSHA256": "2b25690666877f3e090d5ce4e5d8e30702d6d02f497e5511de4ba9d3df1dcfc3",
+  "textures": [
+    {
+      "kit": "home",
+      "sha256": "d3747e9a6e7be9eec537c70a1384635cc1a9261ed2165ec7cfc8a973d171ff30",
+      "size": [
+        1024,
+        1024
+      ],
+      "texture": "ReplayXITripoPlayerAHome.png"
+    },
+    {
+      "kit": "away",
+      "sha256": "c8e7f97ce1b247c095a054f7cf52fe781eb0bb6d0e620af7da1299a24bfefd09",
+      "size": [
+        1024,
+        1024
+      ],
+      "texture": "ReplayXITripoPlayerAAway.png"
+    },
+    {
+      "kit": "keeper",
+      "sha256": "1ecb16154e4084dce7f34331f435144e2c31e14e9ad04c53a6dc18656651c90c",
+      "size": [
+        1024,
+        1024
+      ],
+      "texture": "ReplayXITripoPlayerAKeeper.png"
+    }
+  ],
+  "visualQA": "passed: matched original/home/away/keeper front and side renders; UV pixel audit in PlayerASkinPixelsAudit.json"
+}

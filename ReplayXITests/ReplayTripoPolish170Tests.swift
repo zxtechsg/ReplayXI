@@ -110,7 +110,7 @@ final class ReplayTripoPolish170Tests: XCTestCase {
         defer { ReplayTripoAthleteProvider.resetForTesting() }
         try ReplayTripoAthleteProvider.prewarm()
         XCTAssertEqual(ReplayTripoAthleteProvider.loadedAppearanceCount, 4)
-        XCTAssertEqual(ReplayTripoAthleteProvider.loadedBaseTextureBytes, 88_080_384)
+        XCTAssertEqual(ReplayTripoAthleteProvider.loadedBaseTextureBytes, 100_663_296)
         XCTAssertTrue(try XCTUnwrap(ReplayTripoAthleteProvider.motion).hasSlowRun)
         XCTAssertEqual(ReplayTripoAppearance.additionalBaseRGBABytes, 37_748_736)
         let scenario = try XCTUnwrap(FootballReferenceScenarios.all.first { $0.id == "final-36-counter-v2" })
@@ -174,10 +174,10 @@ final class ReplayTripoPolish170Tests: XCTestCase {
         ReplayTripoAthleteProvider.resetForTesting()
         defer { ReplayTripoAthleteProvider.resetForTesting() }
         try ReplayTripoAthleteProvider.prewarm()
-        XCTAssertEqual(ReplayTripoAthleteProvider.nativeAssetLoadAttemptsForTesting, 2)
-        XCTAssertEqual(ReplayTripoAthleteProvider.texturePreparationAttemptsForTesting, 12)
+        XCTAssertEqual(ReplayTripoAthleteProvider.nativeAssetLoadAttemptsForTesting, 4)
+        XCTAssertEqual(ReplayTripoAthleteProvider.texturePreparationAttemptsForTesting, 15)
         let scenario = try XCTUnwrap(FootballReferenceScenarios.all.first)
-        let skins = try scenario.players.map { try ReplayTripoAthleteProvider.make(for: $0) }
+        let skins = try scenario.players.map { try ReplayTripoAthleteProvider.makePreferred(for: $0, detail: .near) }
         for frame in 0..<60 {
             let time = Double(frame) / 30
             for (skin, player) in zip(skins, scenario.players) {
@@ -186,9 +186,9 @@ final class ReplayTripoPolish170Tests: XCTestCase {
             }
         }
         try ReplayTripoAthleteProvider.prewarm()
-        XCTAssertEqual(ReplayTripoAthleteProvider.nativeAssetLoadAttemptsForTesting, 2)
-        XCTAssertEqual(ReplayTripoAthleteProvider.texturePreparationAttemptsForTesting, 12)
-        XCTAssertEqual(ReplayTripoAthleteProvider.loadedBaseTextureBytes, 88_080_384)
+        XCTAssertEqual(ReplayTripoAthleteProvider.nativeAssetLoadAttemptsForTesting, 4)
+        XCTAssertEqual(ReplayTripoAthleteProvider.texturePreparationAttemptsForTesting, 15)
+        XCTAssertEqual(ReplayTripoAthleteProvider.loadedBaseTextureBytes, 100_663_296)
         withExtendedLifetime(skins) {}
     }
 

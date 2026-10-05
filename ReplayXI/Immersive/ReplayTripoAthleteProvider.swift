@@ -35,22 +35,33 @@ enum ReplayTripoAthleteProvider {
         let contacts: ReplaySkinnedAthleteContactSurface
         let boots: ReplaySkinnedAthleteBootMarkers
     }
+    private struct GeometryVariant {
+        let near: Skin
+        let low: Skin
+        let motion: ReplaySkinnedAthleteMotion
+        let kits: [PhysicallyBasedMaterial]
+    }
     private static var near: Skin?
     private static var low: Skin?
+    private static var diversity: GeometryVariant?
     private(set) static var motion: ReplaySkinnedAthleteMotion?
     private static var kits: [PhysicallyBasedMaterial] = []
     private static var appearanceKits: [ReplayTripoAppearance.Palette: [PhysicallyBasedMaterial]] = [:]
     static var loadedAppearanceCount: Int { appearanceKits.count + (kits.isEmpty ? 0 : 1) }
+    static var diversityIsPrewarmed: Bool { diversity != nil }
+    static var loadedGeometryCount: Int { (isPrewarmed ? 1 : 0) + (diversityIsPrewarmed ? 1 : 0) }
     /// Base RGBA levels only; excludes mipmaps, native staging and geometry.
     static var loadedBaseTextureBytes: Int {
         (kits.isEmpty ? 0 : decodedTextureBytes)
             + appearanceKits.count * 3 * ReplayTripoAppearance.textureSize * ReplayTripoAppearance.textureSize * 4
+            + (diversityIsPrewarmed ? ReplayTripoDiversityAssets.decodedTextureBytes : 0)
     }
     static var isPrewarmed: Bool { near != nil && low != nil && motion != nil && kits.count == 3 }
 
     #if DEBUG
     private(set) static var nativeAssetLoadAttemptsForTesting = 0
     private(set) static var texturePreparationAttemptsForTesting = 0
+    private(set) static var diversityPreparationErrorForTesting: String?
     #endif
 
     /// Both detail levels and all team kits are published together. An invalid
@@ -69,12 +80,12 @@ enum ReplayTripoAthleteProvider {
             contactName: "ReplayXITripoContactSurface", contactHash: contactSHA256,
             sourceVertices: skinVertices, importedVertices: importedSkinVertices,
             triangles: skinTriangles, detail: .near,
-            motion: preparedMotion, bundle: bundle)
+            motion: preparedMotion, motionHash: motionSHA256, bundle: bundle)
         let preparedLow = try loadSkin(name: "ReplayXITripoLow", hash: lowAssetSHA256,
             contactName: "ReplayXITripoLowContactSurface", contactHash: lowContactSHA256,
             sourceVertices: lowSkinVertices, importedVertices: lowImportedSkinVertices,
             triangles: lowSkinTriangles, detail: .lowDetail,
-            motion: preparedMotion, bundle: bundle)
+            motion: preparedMotion, motionHash: motionSHA256, bundle: bundle)
         var preparedKits: [PhysicallyBasedMaterial] = []
         for (index, kit) in ["Home", "Away", "Keeper"].enumerated() {
             preparedKits.append(try textureMaterial(name: "ReplayXITripo\(kit)", size: 2_048,
@@ -102,9 +113,42 @@ enum ReplayTripoAthleteProvider {
                 appearanceKits[palette] = prepared
             }
         }
+        // Publish a whole identity only after both levels, its own motion,
+        // contacts and team atlases pass admission. A partial download cannot
+        // give a player a different body when the detail level changes.
+        do {
+            diversity = try loadDiversity(in: bundle)
+        } catch {
+            #if DEBUG
+            diversityPreparationErrorForTesting = String(describing: error)
+            #endif
+        }
     }
 
-    private static func textureMaterial(name: String, size expectedSize: Int, pixelSHA256: String, bundle: Bundle) throws
+    private static func loadDiversity(in bundle: Bundle) throws -> GeometryVariant {
+        let source = ReplayTripoDiversityAssets.motion
+        let motion = try ReplaySkinnedAthleteMotion(
+            data: data(source.name, "json", hash: source.sha256, in: bundle), profile: .tripo52)
+        func skin(_ spec: ReplayTripoDiversityAssets.Skin,
+                  detail: ReplaySkinnedAthleteProvider.Detail) throws -> Skin {
+            try loadSkin(name: spec.asset.name, hash: spec.asset.sha256,
+                contactName: spec.contacts.name, contactHash: spec.contacts.sha256,
+                sourceVertices: spec.sourceVertices, importedVertices: spec.importedVertices,
+                triangles: spec.triangles, detail: detail, motion: motion,
+                motionHash: source.sha256, bundle: bundle)
+        }
+        let near = try skin(ReplayTripoDiversityAssets.near, detail: .near)
+        let low = try skin(ReplayTripoDiversityAssets.low, detail: .lowDetail)
+        let kits = try ReplayTripoDiversityAssets.atlases.map {
+            try textureMaterial(name: $0.name, size: ReplayTripoDiversityAssets.textureSize,
+                                pixelSHA256: $0.sha256, bundle: bundle, doubleSided: true)
+        }
+        guard kits.count == 3 else { throw ReplaySkinnedAthleteError.invalidMaterials }
+        return GeometryVariant(near: near, low: low, motion: motion, kits: kits)
+    }
+
+    private static func textureMaterial(name: String, size expectedSize: Int, pixelSHA256: String,
+                                        bundle: Bundle, doubleSided: Bool = false) throws
         -> PhysicallyBasedMaterial {
         #if DEBUG
         texturePreparationAttemptsForTesting += 1
@@ -128,18 +172,22 @@ enum ReplayTripoAthleteProvider {
         material.baseColor = .init(tint: .white, texture: .init(texture))
         material.roughness = .init(floatLiteral: 0.78)
         material.metallic = .init(floatLiteral: 0)
+        // The generated garment has thin folds that can turn inward in a pose.
+        // Retain both sides without duplicating mesh geometry or draw calls.
+        if doubleSided { material.faceCulling = .none }
         return material
     }
 
     private static func loadSkin(name: String, hash: String, contactName: String, contactHash: String,
                                  sourceVertices: Int, importedVertices: Int, triangles: Int,
                                  detail: ReplaySkinnedAthleteProvider.Detail,
-                                 motion: ReplaySkinnedAthleteMotion, bundle: Bundle) throws -> Skin {
+                                 motion: ReplaySkinnedAthleteMotion,
+                                 motionHash: String, bundle: Bundle) throws -> Skin {
         let url = try resource(name, "usdz", in: bundle)
         _ = try checkedData(url, hash: hash)
         let contact = try ReplaySkinnedAthleteContactSurface(
             data: data(contactName, "json", hash: contactHash, in: bundle), motion: motion,
-            assetSHA256: hash, motionSHA256: motionSHA256,
+            assetSHA256: hash, motionSHA256: motionHash,
             profile: detail == .near ? .tripoNear(sourceVertexCount: sourceVertices)
                                     : .tripoLow(sourceVertexCount: sourceVertices))
         guard (64...96).contains(contact.headerProbeCount) else {
@@ -178,13 +226,32 @@ enum ReplayTripoAthleteProvider {
         guard isPrewarmed, let motion, let skin = detail == .near ? near : low else {
             throw ReplaySkinnedAthleteError.notPrepared
         }
+        let palette = ReplayTripoAppearance.palette(for: player)
+        let playerKits = appearanceKits[palette] ?? kits
+        return try makeInstance(for: player, detail: detail, skin: skin, motion: motion, kits: playerKits)
+    }
+
+    /// Stable fictional casting; it carries no claim about a real player's ancestry.
+    static func prefersDiverseGeometry(for player: PlayerTrack) -> Bool {
+        ReplayTripoAppearance.palette(for: player) == .deep
+    }
+
+    static func makeDiverse(for player: PlayerTrack, detail: ReplaySkinnedAthleteProvider.Detail = .near) throws
+        -> ReplaySkinnedAthleteInstance {
+        guard let diversity else { throw ReplaySkinnedAthleteError.notPrepared }
+        return try makeInstance(for: player, detail: detail,
+            skin: detail == .near ? diversity.near : diversity.low,
+            motion: diversity.motion, kits: diversity.kits)
+    }
+
+    private static func makeInstance(for player: PlayerTrack, detail: ReplaySkinnedAthleteProvider.Detail,
+                                     skin: Skin, motion: ReplaySkinnedAthleteMotion,
+                                     kits: [PhysicallyBasedMaterial]) throws -> ReplaySkinnedAthleteInstance {
         let clone = skin.template.clone(recursive: true)
         clone.stopAllAnimations(recursive: true)
         guard let model = ReplaySkinnedAthleteProvider.skinnedModels(in: clone).first,
               var component = model.model else { throw ReplaySkinnedAthleteError.invalidSkeleton }
-        let palette = ReplayTripoAppearance.palette(for: player)
-        let playerKits = appearanceKits[palette] ?? kits
-        component.materials = [playerKits[player.isGoalkeeper ? 2 : (player.team == .home ? 0 : 1)]]
+        component.materials = [kits[player.isGoalkeeper ? 2 : (player.team == .home ? 0 : 1)]]
         model.model = component
         let configuration = ReplayAthleteConfiguration(player: player)
         let root = Entity()
@@ -209,6 +276,8 @@ enum ReplayTripoAthleteProvider {
     static var preferredLowIsReady: Bool { isPrewarmed || ReplaySkinnedAthleteProvider.isLowDetailPrewarmed }
     static func makePreferred(for player: PlayerTrack, detail: ReplaySkinnedAthleteProvider.Detail) throws
         -> ReplaySkinnedAthleteInstance {
+        if prefersDiverseGeometry(for: player), diversityIsPrewarmed,
+           let skin = try? makeDiverse(for: player, detail: detail) { return skin }
         if isPrewarmed, let skin = try? make(for: player, detail: detail) { return skin }
         return try ReplaySkinnedAthleteProvider.make(for: player, detail: detail)
     }
@@ -233,8 +302,9 @@ enum ReplayTripoAthleteProvider {
 
     #if DEBUG
     static func resetForTesting() {
-        near = nil; low = nil; motion = nil; kits = []; appearanceKits = [:]
+        near = nil; low = nil; motion = nil; kits = []; appearanceKits = [:]; diversity = nil
         nativeAssetLoadAttemptsForTesting = 0; texturePreparationAttemptsForTesting = 0
+        diversityPreparationErrorForTesting = nil
     }
     #endif
 }

@@ -478,7 +478,8 @@ def material(stage):
     return result
 
 
-def write_usd(path, joints, rests, binds, body, clips, source_hash, weld_uv_topology=False):
+def write_usd(path, joints, rests, binds, body, clips, source_hash, weld_uv_topology=False,
+              source_prefix="tripo-fbx-", runtime_motion_name="ReplayXITripoMotion.json"):
     usd_body = weld_body_uv_topology(body) if weld_uv_topology else {
         **body, "uvInterpolation": "vertex", "sourceVertices": body["vertices"]}
     stage = Usd.Stage.CreateNew(str(path))
@@ -490,8 +491,8 @@ def write_usd(path, joints, rests, binds, body, clips, source_hash, weld_uv_topo
     stage.SetEndTimeCode(max(len(clip["frames"]) - 1 for clip in clips))
     root = UsdSkel.Root.Define(stage, ROOT)
     stage.SetDefaultPrim(root.GetPrim())
-    stage.GetRootLayer().customLayerData = {"sourceCommit": "tripo-fbx-" + source_hash[:32],
-                                           "runtimeMotion": "ReplayXITripoMotion.json; exact local TRS joint order"}
+    stage.GetRootLayer().customLayerData = {"sourceCommit": source_prefix + source_hash[:32],
+                                           "runtimeMotion": runtime_motion_name + "; exact local TRS joint order"}
     skel = UsdSkel.Skeleton.Define(stage, ROOT + "/Skeleton")
     paths = [item["name"] for item in joints]
     skel.CreateJointsAttr(paths)
