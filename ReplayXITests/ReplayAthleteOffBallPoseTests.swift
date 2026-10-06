@@ -36,7 +36,7 @@ final class ReplayAthleteOffBallPoseTests: XCTestCase {
     private func sample(id: String = "offball-red-4", time: Double = 3,
                         speed: Float = 0, acceleration: Float = 0, action: Float = 0,
                         source: Float = 0, enabled: Bool = true) -> ReplayAthleteOffBallPose.Sample {
-        ReplayAthleteOffBallPose.sample(playerID: id, at: time,
+        ReplayAthleteOffBallPose.sample(animationSeed: player(id).animationSeed, at: time,
             locomotion: locomotion(speed: speed, acceleration: acceleration), look: look,
             actionInfluence: action, sourceFraction: source, enabled: enabled)
     }

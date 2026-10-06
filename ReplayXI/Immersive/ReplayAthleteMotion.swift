@@ -340,7 +340,7 @@ enum ReplayAthleteMotion {
             ? ReplayAthleteInteractionPose.sample(cue: interaction, at: time, track: track,
                                                   presentationPose: presentationPose)?.influence ?? 0 : 0
         let offBall = ReplayAthleteOffBallPose.sample(
-            playerID: track.id, at: time, locomotion: locomotion, look: look,
+            animationSeed: track.animationSeed, at: time, locomotion: locomotion, look: look,
             actionInfluence: max(interactionInfluence, ballAction?.influence ?? 0,
                 track.isGoalkeeper && stationaryPose == nil ? goalkeeperReadiness?.influence ?? 0 : 0),
             enabled: offBallEnabled)
@@ -557,7 +557,7 @@ enum ReplayAthleteMotion {
         let rearTravelAttention = 1 - smootherStep((abs(relativeTravelBearing) - 112) / 68)
         let travelDelta = clampAngleDelta(relativeTravelBearing, limit: 100) * rearTravelAttention
 
-        let scan = interpolatedScanTarget(for: track.id, at: finiteTime)
+        let scan = interpolatedScanTarget(seed: track.animationSeed, at: finiteTime)
         let scanAmplitude = 27 - (15 * sample.effort)
         let turnLead = sample.turnResponse * (8 - (3 * sample.effort))
         let isMoving = min(max((sample.speedMetresPerSecond - 0.18) / 1.5, 0), 1)
@@ -632,7 +632,7 @@ enum ReplayAthleteMotion {
         let boundedYawRadians = min(max(desiredYawDegrees, -yawLimit), yawLimit) * .pi / 180
 
         let pitchScan = interpolatedScanTarget(
-            for: track.id,
+            seed: track.animationSeed,
             at: finiteTime + 0.47,
             salt: 0x9E37_79B9
         ) * 1.8
@@ -1366,7 +1366,7 @@ enum ReplayAthleteMotion {
     /// sine-wave nod of the old rig.  The hash supplies per-player direction;
     /// smoother-step supplies zero velocity at each 1.55 second intention.
     private static func interpolatedScanTarget(
-        for playerID: String,
+        seed: UInt32,
         at time: TimeInterval,
         salt: UInt32 = 0
     ) -> Float {
@@ -1375,16 +1375,10 @@ enum ReplayAthleteMotion {
         let startIndex = Int64(floor(coordinate))
         let fraction = Float(coordinate - floor(coordinate))
         let blend = smootherStep(fraction)
-        let seed = stableSeed(playerID) ^ salt
+        let seed = seed ^ salt
         let start = scanTarget(seed: seed, index: startIndex)
         let end = scanTarget(seed: seed, index: startIndex + 1)
         return start + ((end - start) * blend)
-    }
-
-    private static func stableSeed(_ value: String) -> UInt32 {
-        value.utf8.reduce(UInt32(2_166_136_261)) { partial, byte in
-            (partial ^ UInt32(byte)) &* 16_777_619
-        }
     }
 
     private static func scanTarget(seed: UInt32, index: Int64) -> Float {

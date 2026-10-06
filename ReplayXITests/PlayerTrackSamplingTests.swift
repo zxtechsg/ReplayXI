@@ -133,6 +133,30 @@ final class PlayerTrackSamplingTests: XCTestCase {
         }
     }
 
+    func testAnimationSeedAndPhaseSurviveCodableRoundTripForVariedIDs() throws {
+        let expected: [(id: String, seed: UInt32)] = [
+            ("", 2_166_136_261),
+            ("sampling-test-player", 175_403_027),
+            ("arg-26", 106_780_438),
+            ("é-球", 2_906_375_608),
+        ]
+
+        for (id, seed) in expected {
+            let track = PlayerTrack(
+                id: id, displayName: "Seed test", role: "CM", shirtNumber: 8,
+                team: .home, isGoalkeeper: false, keyframes: []
+            )
+            let decoded = try JSONDecoder().decode(PlayerTrack.self, from: JSONEncoder().encode(track))
+            let phase = Float(seed % 628) / 100
+
+            XCTAssertEqual(track.animationSeed, seed)
+            XCTAssertEqual(decoded.animationSeed, seed)
+            XCTAssertEqual(track.motion(at: 0).locomotionPhase.bitPattern, phase.bitPattern)
+            XCTAssertEqual(decoded.gaitPhase(at: 0).bitPattern, phase.bitPattern)
+            XCTAssertEqual(decoded.stationaryLocomotion.motion.locomotionPhase.bitPattern, phase.bitPattern)
+        }
+    }
+
     func testLargeTelemetryTrackRemainsDeterministicUnderSeekStress() {
         let track = makeDenseTrack(frameCount: 16_384, duplicateStride: 113)
         let duration = track.keyframes.last!.time

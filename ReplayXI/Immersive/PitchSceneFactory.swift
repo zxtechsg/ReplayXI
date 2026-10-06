@@ -933,12 +933,10 @@ enum PitchSceneFactory {
         let isTriangleView = viewMode == .positional
         let showsIdealShape = isTriangleView
             && (showsIdealBranch || effectiveTriangleMode == .place)
-        let featuredTriangleIDs: Set<String> = isTriangleView
-            ? Set(scenario.formationTargets.map(\.playerID))
-            : []
-        let triangleTargetsByPlayerID = Dictionary(
-            uniqueKeysWithValues: scenario.formationTargets.map { ($0.playerID, $0) }
-        )
+        let triangleTargetsByPlayerID = isTriangleView
+            ? Dictionary(uniqueKeysWithValues: scenario.formationTargets.lazy.map { ($0.playerID, $0) })
+            : [:]
+        let featuredTriangleIDs = Set(triangleTargetsByPlayerID.keys)
         let sceneState = annotationCache(for: root)
         let playerPosesByID = sceneState?.refreshPlayerPoses(
             for: scenario.players,
@@ -999,12 +997,10 @@ enum PitchSceneFactory {
         let primaryTriangleDefenderID = isTriangleView
             ? primaryShapeDefenderID(in: scenario, time: time)
             : nil
+        var triangleVisiblePlayerIDs = featuredTriangleIDs
+        if let primaryTriangleDefenderID { triangleVisiblePlayerIDs.insert(primaryTriangleDefenderID) }
         let labelEnabledPlayerIDs: Set<String>? = if isTriangleView {
-            effectiveTriangleMode == .place
-                ? []
-                : featuredTriangleIDs.union(
-                    primaryTriangleDefenderID.map { Set([$0]) } ?? Set<String>()
-                )
+            effectiveTriangleMode == .place ? [] : triangleVisiblePlayerIDs
         } else {
             nil
         }
@@ -1057,7 +1053,7 @@ enum PitchSceneFactory {
                 firstPersonDetailedIDs
             } else if scenario.kind == .shapeLab && viewMode == .positional
                         && effectiveTriangleMode == .visualise {
-                featuredTriangleIDs.union(primaryTriangleDefenderID.map { Set([$0]) } ?? [])
+                triangleVisiblePlayerIDs
             } else {
                 [perspectiveID]
             }
@@ -1083,7 +1079,7 @@ enum PitchSceneFactory {
                 allowsFirstPerson: skinAdmission.allowsPOVLow
             )
             var admittedSkinDetails = Dictionary(
-                uniqueKeysWithValues: nearSkinIDs.map { ($0, ReplaySkinnedAthleteProvider.Detail.near) }
+                uniqueKeysWithValues: nearSkinIDs.lazy.map { ($0, ReplaySkinnedAthleteProvider.Detail.near) }
             )
             for id in lowDetailAdmission.playerIDs { admittedSkinDetails[id] = .lowDetail }
             // Release departed or promoted variants before roster iteration.
@@ -1095,10 +1091,9 @@ enum PitchSceneFactory {
                 }) {
                     sceneState.skinnedAthletes.removeValue(forKey: id)?.root.removeFromParent()
                 }
-                let admittedVariants = Set(admittedSkinDetails.map {
-                    SkinnedAthleteVariantKey(playerID: $0.key, detail: $0.value)
-                })
-                sceneState.skinnedAthleteFailedVariants.formIntersection(admittedVariants)
+                sceneState.skinnedAthleteFailedVariants = sceneState.skinnedAthleteFailedVariants.filter {
+                    admittedSkinDetails[$0.playerID] == $0.detail
+                }
             }
             for player in scenario.players {
                 guard let entity = sceneState?.playerEntity(for: player.id)
@@ -1134,10 +1129,7 @@ enum PitchSceneFactory {
                 )
                 if viewMode == .positional {
                     entity.isEnabled = effectiveTriangleMode == .visualise
-                        && (
-                            featuredTriangleIDs.contains(player.id)
-                                || player.id == primaryTriangleDefenderID
-                        )
+                        && triangleVisiblePlayerIDs.contains(player.id)
                 } else {
                     entity.isEnabled = true
                 }

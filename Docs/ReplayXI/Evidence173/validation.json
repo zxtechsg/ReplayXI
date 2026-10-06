@@ -1,0 +1,79 @@
+{
+  "date": "2026-10-06",
+  "baseline_commit": "d81f892",
+  "scope": "Local Replay XI optimisation; no feature, asset or quality setting changes.",
+  "optimisations": [
+    "Cache immutable PlayerTrack FNV animation seed once; reuse in gait, head scans, tactical attention and off-ball poses.",
+    "Prepare formation lookup only for positional views.",
+    "Share Shape visual-player membership between labels, skin admission and visibility.",
+    "Use lazy dictionary input sequences instead of temporary mapped arrays.",
+    "Filter failed skin variants against existing admissions instead of building another admission set.",
+    "Validate the single native Tripo mesh part with a lazy iterator."
+  ],
+  "app_code_net_line_change": -20,
+  "verification": {
+    "final_native_summary": {
+      "devicesAndConfigurations": [
+        {
+          "device": {
+            "architecture": "arm64",
+            "deviceId": "E0A4415E-98B8-4FC3-B2A8-C140B736E6C2",
+            "deviceName": "ReplayXI Native Audit 26.5",
+            "modelName": "Apple Vision Pro",
+            "osBuildNumber": "23O470",
+            "osVersion": "26.5",
+            "platform": "visionOS Simulator"
+          },
+          "expectedFailures": 0,
+          "failedTests": 0,
+          "passedTests": 94,
+          "skippedTests": 0,
+          "testPlanConfiguration": {
+            "configurationId": "1",
+            "configurationName": "Test Scheme Action"
+          }
+        }
+      ],
+      "environmentDescription": "ReplayXI · Built with macOS 26.5.1",
+      "expectedFailures": 0,
+      "failedTests": 0,
+      "finishTime": 1791273418.453,
+      "passedTests": 94,
+      "result": "Passed",
+      "skippedTests": 0,
+      "startTime": 1791273352.277,
+      "statistics": [],
+      "testFailures": [],
+      "title": "Test - ReplayXI",
+      "topInsights": [
+        {
+          "category": "Longest Test Runs",
+          "impact": "11% of duration",
+          "text": "2 longest test runs with outlier durations exceeding 2.94s (three standard deviations)"
+        }
+      ],
+      "totalTestCount": 94
+    },
+    "final_native_bundle": ".codex-derived/replayxi-optim173-final-tests.xcresult",
+    "release_device_build": "Passed; unsigned generic visionOS Release, exit 0.",
+    "release_device_derived_data": ".codex-derived/replayxi-optim173-release-device",
+    "initial_native_run": {
+      "passed": 85,
+      "failed": 1,
+      "bundle": ".codex-derived/replayxi-optim173-tests.xcresult"
+    },
+    "known_unchanged_failure": {
+      "test": "ReplayShapeAthletePresentationTests/testSkinnedStationsMatchStandingReferenceAndReturnAfterProblemAndSeek",
+      "assertion": "XCTAssertGreaterThan failed: (\"0.99997437\") is not greater than (\"0.99999\")",
+      "matching_pre_change_receipt": "Docs/ReplayXI/Evidence170/pre-pass-failures-summary.json",
+      "excluded_from_final_run": true,
+      "expectations_or_tolerances_changed": false
+    },
+    "diff_check": "Passed",
+    "unrelated_project_and_plist_changes": "Preserved and excluded from optimisation commit.",
+    "physical_headset_tested": false,
+    "app_fps_or_total_memory_measured": false
+  },
+  "new_paid_asset_service_spend": 0
+}
+

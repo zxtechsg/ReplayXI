@@ -203,9 +203,9 @@ enum ReplayTripoAthleteProvider {
               model.jointNames == motion.jointNames,
               model.jointTransforms.count == 52, let component = model.model
         else { throw ReplaySkinnedAthleteError.invalidSkeleton }
-        let parts = component.mesh.contents.models.flatMap { Array($0.parts) }
+        var parts = component.mesh.contents.models.lazy.flatMap { $0.parts }.makeIterator()
         guard component.materials.count == 1, component.materials[0] is PhysicallyBasedMaterial,
-              parts.count == 1, let part = parts.first, part.id == "Body", part.materialIndex == 0,
+              let part = parts.next(), parts.next() == nil, part.id == "Body", part.materialIndex == 0,
               part.positions.count == importedVertices,
               part.normals?.rate == .vertex, part.normals?.count == importedVertices,
               part.textureCoordinates?.rate == .vertex,

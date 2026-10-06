@@ -259,8 +259,9 @@ struct PlayerTrack: Identifiable, Codable, Hashable, Sendable {
         let supportsSmoothPresentation: Bool
         let cumulativeDistances: [Float]
         let cumulativeGaitPhases: [Float]
+        let animationSeed: UInt32
 
-        init(keyframes: [MotionKeyframe]) {
+        init(id: String, keyframes: [MotionKeyframe]) {
             var supportsBinaryLookup = true
             var supportsSmoothPresentation = true
             var cumulativeDistances = Array(repeating: Float.zero, count: keyframes.count)
@@ -297,6 +298,9 @@ struct PlayerTrack: Identifiable, Codable, Hashable, Sendable {
                 && supportsSmoothPresentation
             self.cumulativeDistances = cumulativeDistances
             self.cumulativeGaitPhases = cumulativeGaitPhases
+            self.animationSeed = id.utf8.reduce(UInt32(2_166_136_261)) { partial, byte in
+                (partial ^ UInt32(byte)) &* 16_777_619
+            }
         }
     }
 
@@ -326,7 +330,7 @@ struct PlayerTrack: Identifiable, Codable, Hashable, Sendable {
         self.team = team
         self.isGoalkeeper = isGoalkeeper
         self.keyframes = keyframes
-        samplingIndex = SamplingIndex(keyframes: keyframes)
+        samplingIndex = SamplingIndex(id: id, keyframes: keyframes)
     }
 
     init(from decoder: Decoder) throws {
@@ -820,13 +824,9 @@ struct PlayerTrack: Identifiable, Codable, Hashable, Sendable {
             + (h11 * endTangent)
     }
 
-    private var locomotionPhaseOffset: Float {
-        Float(
-            id.utf8.reduce(UInt32(2_166_136_261)) { partial, byte in
-                (partial ^ UInt32(byte)) &* 16_777_619
-            } % 628
-        ) / 100
-    }
+    var animationSeed: UInt32 { samplingIndex.animationSeed }
+
+    private var locomotionPhaseOffset: Float { Float(animationSeed % 628) / 100 }
 
     private static func gaitPhaseIncrement(
         from start: MotionKeyframe,

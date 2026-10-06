@@ -66,7 +66,7 @@ enum ReplayAthleteTacticalAttention {
         // inferred cue to zero around ±pi, like the bounded cervical solver.
         let rearFade = 1 - smooth((abs(delta) * 180 / .pi - 100) / 80)
         let closeThreat = smooth((threatDistance - 0.2) / 0.8)
-        let seed = stableSeed(player.id)
+        let seed = player.animationSeed
         let period = 5.8 + Double(seed % 251) / 100
         let phase = Double(seed % 1021) / 1021 * 2 * Double.pi
         let clock = min(max(time, -1_000_000), 1_000_000)
@@ -91,10 +91,6 @@ enum ReplayAthleteTacticalAttention {
             result = min(result, smooth(Float(outside / 0.6)))
         }
         return result
-    }
-
-    private static func stableSeed(_ id: String) -> UInt32 {
-        id.utf8.reduce(UInt32(2_166_136_261)) { ($0 ^ UInt32($1)) &* 16_777_619 }
     }
 
     private static func smooth(_ value: Float) -> Float {

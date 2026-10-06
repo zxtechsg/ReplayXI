@@ -68,7 +68,7 @@ enum ReplayAthleteOffBallPose {
         }
     }
 
-    static func sample(playerID: String, at time: TimeInterval,
+    static func sample(animationSeed: UInt32, at time: TimeInterval,
                        locomotion: PlayerLocomotionSample, look: ReplayAthleteLookPose,
                        actionInfluence: Float, sourceFraction: Float = 0,
                        retargetedArmReadiness: Float = 0,
@@ -84,9 +84,7 @@ enum ReplayAthleteOffBallPose {
         let speed = max(locomotion.speedMetresPerSecond, 0)
         let settled = 1 - smooth((speed - 0.35) / 2.45)
         let effort = locomotion.effort
-        let phase = Float(playerID.utf8.reduce(UInt32(2_166_136_261)) {
-            ($0 ^ UInt32($1)) &* 16_777_619
-        } % 65_521) / 65_521 * (2 * .pi)
+        let phase = Float(animationSeed % 65_521) / 65_521 * (2 * .pi)
         let seconds = Float(min(max(time, -1_000_000), 1_000_000))
         let quietYaw = sin(seconds * 0.71 + phase) * 0.012 * settled
         let breath = sin(seconds * 1.19 + phase * 1.73) * 0.006 * settled

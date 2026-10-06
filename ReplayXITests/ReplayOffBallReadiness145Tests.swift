@@ -98,10 +98,10 @@ final class ReplayOffBallReadiness145Tests: XCTestCase {
                     }
                     let baseLook = ReplayAthleteMotion.lookPose(for: player, at: time, locomotion: locomotion,
                         targetWorldPosition: candidate.look, presentationPose: pose)
-                    let offBall = ReplayAthleteOffBallPose.sample(playerID: player.id, at: time,
+                    let offBall = ReplayAthleteOffBallPose.sample(animationSeed: player.animationSeed, at: time,
                         locomotion: locomotion, look: baseLook, actionInfluence: 0,
                         retargetedArmReadiness: candidate.readiness)
-                    let oldOffBall = ReplayAthleteOffBallPose.sample(playerID: player.id, at: time,
+                    let oldOffBall = ReplayAthleteOffBallPose.sample(animationSeed: player.animationSeed, at: time,
                         locomotion: locomotion, look: baseLook, actionInfluence: 0)
                     var armRows: [[String: Any]] = []
                     for side in ["left", "right"] {
@@ -276,10 +276,10 @@ final class ReplayOffBallReadiness145Tests: XCTestCase {
         let look = ReplayAthleteLookPose(neckYawRadians: 0.2, headYawRadians: 0.3,
                                         neckPitchRadians: 0.02, headPitchRadians: 0.03)
         func sample(_ readiness: Float, action: Float = 0) -> ReplayAthleteOffBallPose.Sample {
-            ReplayAthleteOffBallPose.sample(playerID: player.id, at: 3, locomotion: player.stationaryLocomotion,
+            ReplayAthleteOffBallPose.sample(animationSeed: player.animationSeed, at: 3, locomotion: player.stationaryLocomotion,
                 look: look, actionInfluence: action, retargetedArmReadiness: readiness)
         }
-        let original = ReplayAthleteOffBallPose.sample(playerID: player.id, at: 3,
+        let original = ReplayAthleteOffBallPose.sample(animationSeed: player.animationSeed, at: 3,
             locomotion: player.stationaryLocomotion, look: look, actionInfluence: 0)
         XCTAssertEqual(sample(0), original); XCTAssertEqual(sample(-1), original)
         XCTAssertEqual(sample(1).armSetWeight, 0); XCTAssertEqual(sample(2), sample(1))

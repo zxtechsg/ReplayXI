@@ -482,7 +482,7 @@ final class ReplaySkinnedAthleteInstance {
         let preservesReadyArms = true
         #endif
         let offBall = ReplayAthleteOffBallPose.sample(
-            playerID: track.id, at: time, locomotion: locomotion, look: baseLook,
+            animationSeed: track.animationSeed, at: time, locomotion: locomotion, look: baseLook,
             actionInfluence: max(interactionSample?.influence ?? 0, ballAction?.influence ?? 0,
                                  keeper?.influence ?? 0),
             sourceFraction: 1 - influence,
