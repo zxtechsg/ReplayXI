@@ -155,6 +155,22 @@ final class ReplayXIWireLoopbackTests: XCTestCase {
         listener.cancel()
     }
 
+    func testDisconnectedHeaderRendersAtTop() throws {
+        let link = ReplayXIMacLink()
+        let view = CoachWindow().environment(link).frame(width: 1360, height: 840)
+        let host = NSHostingView(rootView: view)
+        host.frame = NSRect(x: 0, y: 0, width: 1360, height: 840)
+        host.layoutSubtreeIfNeeded()
+        host.displayIfNeeded()
+        let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: bitmap)
+        let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+        XCTAssertGreaterThan(png.count, 10_000)
+        let output = URL(fileURLWithPath: "/private/tmp/replayxi-mac-qa", isDirectory: true)
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        try png.write(to: output.appendingPathComponent("replayxi-coach-disconnected-1360x840.png"))
+    }
+
     private static var sampleState: ReplayXIWireState {
         .init(revision: 1, scenarioID: "test", playhead: 12, playing: false,
             rate: 1, viewMode: "tacticalTable", perspectiveID: "player", duration: 60,

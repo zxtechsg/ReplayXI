@@ -49,6 +49,7 @@ struct CoachWindow: View {
     var body: some View {
         VStack(spacing: 0) {
             connectionBar
+                .fixedSize(horizontal: false, vertical: true)
             Divider()
             if let state {
                 HStack(spacing: 0) {
@@ -78,7 +79,7 @@ struct CoachWindow: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .onChange(of: state?.playhead) { _, value in
+        .onChange(of: state?.playhead, initial: true) { _, value in
             if !scrubbing, let value { draftTime = value }
         }
         .onChange(of: selectedMarkID) { _, _ in loadInspector() }
@@ -123,14 +124,45 @@ struct CoachWindow: View {
     }
 
     private func playbackBar(_ state: ReplayXIWireState) -> some View {
-        HStack(spacing: 8) {
-            Picker("Scenario", selection: Binding(
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                scenarioPicker(state)
+                transportControls(state)
+                viewPicker(state)
+                povPicker(state)
+                speedPicker(state)
+            }
+            .fixedSize(horizontal: true, vertical: false)
+
+            VStack(spacing: 6) {
+                HStack(spacing: 8) {
+                    scenarioPicker(state)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    transportControls(state)
+                    speedPicker(state)
+                }
+                HStack(spacing: 8) {
+                    viewPicker(state)
+                    povPicker(state)
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+        .controlSize(.small)
+    }
+
+    private func scenarioPicker(_ state: ReplayXIWireState) -> some View {
+        Picker("Scenario", selection: Binding(
                 get: { state.scenarioID },
                 set: { link.send(.init(name: "scenario", scenarioID: $0)) }
             )) {
                 ForEach(state.scenarios) { scenario in Text(scenario.title).tag(scenario.id) }
             }
             .frame(maxWidth: 320)
+    }
+
+    private func transportControls(_ state: ReplayXIWireState) -> some View {
+        HStack(spacing: 8) {
             Button(state.playing ? "Pause" : "Play") {
                 link.send(.init(name: "play", value: !state.playing))
             }
@@ -139,7 +171,11 @@ struct CoachWindow: View {
                 .keyboardShortcut(.leftArrow, modifiers: [])
             Button("+5s") { link.send(.init(name: "seek", time: min(state.duration, state.playhead + 5))) }
                 .keyboardShortcut(.rightArrow, modifiers: [])
-            Picker("View", selection: Binding(
+        }
+    }
+
+    private func viewPicker(_ state: ReplayXIWireState) -> some View {
+        Picker("View", selection: Binding(
                 get: { state.viewMode },
                 set: { link.send(.init(name: "view", viewMode: $0)) }
             )) {
@@ -149,7 +185,10 @@ struct CoachWindow: View {
                 Text("Player POV").tag("firstPerson")
             }
             .frame(width: 180)
-            Picker("POV", selection: Binding(
+    }
+
+    private func povPicker(_ state: ReplayXIWireState) -> some View {
+        Picker("POV", selection: Binding(
                 get: { state.perspectiveID },
                 set: { link.send(.init(name: "pov", playerID: $0)) }
             )) {
@@ -158,7 +197,10 @@ struct CoachWindow: View {
                 }
             }
             .frame(width: 165)
-            Picker("Speed", selection: Binding(
+    }
+
+    private func speedPicker(_ state: ReplayXIWireState) -> some View {
+        Picker("Speed", selection: Binding(
                 get: { state.rate },
                 set: { link.send(.init(name: "rate", rate: $0)) }
             )) {
@@ -167,8 +209,6 @@ struct CoachWindow: View {
                 }
             }
             .frame(width: 105)
-        }
-        .controlSize(.small)
     }
 
     private func timeline(_ state: ReplayXIWireState) -> some View {
