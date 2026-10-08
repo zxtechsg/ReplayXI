@@ -128,8 +128,57 @@ final class AnnotationHandleDragControllerTests: XCTestCase {
         let deniedStart = try XCTUnwrap(completion.range(of: "guard acceptsMatchInteraction else")?.lowerBound)
         let deniedEnd = try XCTUnwrap(completion.range(of: "if draggedAnnotationTarget != nil")?.lowerBound)
         let denied = completion[deniedStart..<deniedEnd]
-        XCTAssertTrue(denied.contains("handleInputSample(value, target: target), point: nil"))
+        let compactDenied = String(denied.filter { !$0.isWhitespace })
+        XCTAssertTrue(compactDenied.contains("handleInputSample(value,target:target),point:nil,in:store)"))
+        XCTAssertTrue(compactDenied.contains("handleInputSample(value,target:target),controlLocation:nil,in:store)"))
         XCTAssertFalse(denied.contains("cancelCurrent"), "Rejected native events must not cancel a replacement owner")
+    }
+
+    func testArcControlDragPreservesFull3DPointAndOneUndo() throws {
+        let (store, mark, controller) = try fixture()
+        let source = NSObject(), token = UUID()
+        let baseline = mark.resolvedCurve.controlPoint(for: mark)
+        let final = SIMD3<Float>(-17, 4.2, -12)
+        XCTAssertTrue(controller.preview(sample(token, mark, source, time: 1, role: .control),
+                                         controlLocation: [0.1, 0.2, 0.1],
+                                         startLocation: .zero, in: store))
+        let firstPreview = try XCTUnwrap(store.marks.first { $0.id == mark.id })
+        let firstPoint = firstPreview.resolvedCurve.controlPoint(for: firstPreview)
+        XCTAssertEqual(firstPoint.y, baseline.y + 0.2, accuracy: 0.001)
+        XCTAssertTrue(controller.preview(sample(token, mark, source, time: 2, role: .control),
+                                         controlLocation: final - baseline,
+                                         startLocation: .zero, in: store))
+        XCTAssertTrue(controller.finish(sample(token, mark, source, time: 3, role: .control),
+                                        controlLocation: final - baseline, in: store))
+        let updated = try XCTUnwrap(store.marks.first { $0.id == mark.id })
+        let actual = updated.resolvedCurve.controlPoint(for: updated)
+        XCTAssertEqual(actual.x, final.x, accuracy: 0.001)
+        XCTAssertEqual(actual.y, final.y, accuracy: 0.001)
+        XCTAssertEqual(actual.z, final.z, accuracy: 0.001)
+        XCTAssertTrue(store.undoAnnotationEdit())
+        XCTAssertEqual(store.marks.first { $0.id == mark.id }, mark)
+    }
+
+    func testArcControlCancelAndStaleEndCannotReplaceNewPreview() throws {
+        let (store, mark, controller) = try fixture()
+        let source = NSObject(), a = UUID(), b = UUID()
+        XCTAssertTrue(controller.preview(sample(a, mark, source, time: 1, role: .control),
+                                         controlLocation: [0.1, 0.2, 0.1],
+                                         startLocation: .zero, in: store))
+        XCTAssertTrue(controller.cancel(in: store, gestureID: a))
+        XCTAssertEqual(store.marks.first { $0.id == mark.id }, mark)
+        XCTAssertTrue(controller.preview(sample(b, mark, source, time: 3, role: .control),
+                                         controlLocation: [0.2, 0.3, 0.2],
+                                         startLocation: .zero, in: store))
+        let replacement = store.marks
+        XCTAssertFalse(controller.finish(sample(a, mark, source, time: 4, role: .control),
+                                         controlLocation: [2, 4, 3], in: store))
+        XCTAssertFalse(controller.finish(sample(nil, mark, source, time: 2, role: .control),
+                                         controlLocation: nil, in: store))
+        XCTAssertEqual(store.marks, replacement)
+        XCTAssertTrue(store.isCoachMarkCurvePreviewOwner(id: mark.id, gestureID: b))
+        XCTAssertTrue(controller.finish(sample(b, mark, source, time: 5, role: .control),
+                                        controlLocation: [0.2, 0.3, 0.2], in: store))
     }
 
     private func sample(_ id: UUID?, _ mark: CoachMark, _ source: NSObject, time: Double,

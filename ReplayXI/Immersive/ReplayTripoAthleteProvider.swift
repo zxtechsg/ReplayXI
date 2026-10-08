@@ -23,6 +23,7 @@ enum ReplayTripoAthleteProvider {
     static let lowImportedSkinVertices = 3_267
     static let lowSkinTriangles = 1_964
     static let materialDrawsPerInstance = 3 // One skin plus front/back numbers.
+    static let diverseMaterialDrawsPerInstance = 4 // Plus the source head-island bridge.
     static let decodedTextureBytes = 3 * 2_048 * 2_048 * 4 // Base levels only.
     private static let kitPixelHashes = [
         "800ab6749d04b18694f0a9413f9e83a10a3606d2f4394a705de11b8564f9634b",
@@ -34,6 +35,8 @@ enum ReplayTripoAthleteProvider {
         let template: Entity
         let contacts: ReplaySkinnedAthleteContactSurface
         let boots: ReplaySkinnedAthleteBootMarkers
+        let numberSurface: ReplaySkinnedNumberSurface?
+        let requiresNeckBridge: Bool
     }
     private struct GeometryVariant {
         let near: Skin
@@ -46,6 +49,7 @@ enum ReplayTripoAthleteProvider {
     private static var diversity: GeometryVariant?
     private(set) static var motion: ReplaySkinnedAthleteMotion?
     private static var kits: [PhysicallyBasedMaterial] = []
+    private static let playerANeckMesh = MeshResource.generateCylinder(height: 1, radius: 0.052)
     private static var appearanceKits: [ReplayTripoAppearance.Palette: [PhysicallyBasedMaterial]] = [:]
     static var loadedAppearanceCount: Int { appearanceKits.count + (kits.isEmpty ? 0 : 1) }
     static var diversityIsPrewarmed: Bool { diversity != nil }
@@ -126,6 +130,7 @@ enum ReplayTripoAthleteProvider {
     }
 
     private static func loadDiversity(in bundle: Bundle) throws -> GeometryVariant {
+        _ = playerANeckMesh // Build with the other immutable meshes before immersion.
         let source = ReplayTripoDiversityAssets.motion
         let motion = try ReplaySkinnedAthleteMotion(
             data: data(source.name, "json", hash: source.sha256, in: bundle), profile: .tripo52)
@@ -135,7 +140,7 @@ enum ReplayTripoAthleteProvider {
                 contactName: spec.contacts.name, contactHash: spec.contacts.sha256,
                 sourceVertices: spec.sourceVertices, importedVertices: spec.importedVertices,
                 triangles: spec.triangles, detail: detail, motion: motion,
-                motionHash: source.sha256, bundle: bundle)
+                motionHash: source.sha256, bundle: bundle, requiresNeckBridge: true)
         }
         let near = try skin(ReplayTripoDiversityAssets.near, detail: .near)
         let low = try skin(ReplayTripoDiversityAssets.low, detail: .lowDetail)
@@ -182,7 +187,8 @@ enum ReplayTripoAthleteProvider {
                                  sourceVertices: Int, importedVertices: Int, triangles: Int,
                                  detail: ReplaySkinnedAthleteProvider.Detail,
                                  motion: ReplaySkinnedAthleteMotion,
-                                 motionHash: String, bundle: Bundle) throws -> Skin {
+                                 motionHash: String, bundle: Bundle,
+                                 requiresNeckBridge: Bool = false) throws -> Skin {
         let url = try resource(name, "usdz", in: bundle)
         _ = try checkedData(url, hash: hash)
         let contact = try ReplaySkinnedAthleteContactSurface(
@@ -218,7 +224,9 @@ enum ReplayTripoAthleteProvider {
         guard let _ = ReplaySkinnedAthleteFootballPose(motion: motion, bootMarkers: boots),
               let _ = ReplaySkinnedAthleteImpactPose(motion: motion, contactSurface: contact)
         else { throw ReplaySkinnedAthleteError.invalidSkeleton }
-        return Skin(template: loaded, contacts: contact, boots: boots)
+        return Skin(template: loaded, contacts: contact, boots: boots,
+                    numberSurface: ReplaySkinnedNumberSurface(model: model, motion: motion),
+                    requiresNeckBridge: requiresNeckBridge)
     }
 
     static func make(for player: PlayerTrack, detail: ReplaySkinnedAthleteProvider.Detail = .near) throws
@@ -231,9 +239,10 @@ enum ReplayTripoAthleteProvider {
         return try makeInstance(for: player, detail: detail, skin: skin, motion: motion, kits: playerKits)
     }
 
-    /// Stable fictional casting; it carries no claim about a real player's ancestry.
+    /// Distribute the two verified geometries across each team. Kit palette is
+    /// independent: a skin tone does not determine a player's body/face shape.
     static func prefersDiverseGeometry(for player: PlayerTrack) -> Bool {
-        ReplayTripoAppearance.palette(for: player) == .deep
+        !player.shirtNumber.isMultiple(of: 2)
     }
 
     static func makeDiverse(for player: PlayerTrack, detail: ReplaySkinnedAthleteProvider.Detail = .near) throws
@@ -266,8 +275,24 @@ enum ReplayTripoAthleteProvider {
         back.name = "skinned-shirt-number"
         clone.addChild(front)
         clone.addChild(back)
+        var neckBridge: ModelEntity?
+        if skin.requiresNeckBridge {
+            // The Player A source contains a detached head mesh island. This
+            // small FK-driven bridge stays inside its head/collar envelope.
+            // The tint is sampled from a verified common skin texel (410,260)
+            // in all three unchanged 1024 px Player A kit atlases.
+            var skinMaterial = PhysicallyBasedMaterial()
+            skinMaterial.baseColor = .init(tint: UIColor(red: 75 / 255, green: 56 / 255,
+                blue: 52 / 255, alpha: 1))
+            skinMaterial.roughness = .init(floatLiteral: 0.78)
+            let bridge = ModelEntity(mesh: playerANeckMesh, materials: [skinMaterial])
+            bridge.name = "skinned-neck-bridge"
+            clone.addChild(bridge)
+            neckBridge = bridge
+        }
         return ReplaySkinnedAthleteInstance(root: root, skinRoot: clone, model: model, front: front, back: back,
-            playerID: player.id, motion: motion, contactSurface: skin.contacts, detail: detail, bootMarkers: skin.boots)
+            playerID: player.id, motion: motion, contactSurface: skin.contacts, detail: detail,
+            bootMarkers: skin.boots, numberSurface: skin.numberSurface, neckBridge: neckBridge)
     }
 
     // The scene cache still owns instances; render selection is local and does

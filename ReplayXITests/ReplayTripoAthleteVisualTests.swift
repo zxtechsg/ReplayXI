@@ -42,6 +42,10 @@ final class ReplayTripoAthleteVisualTests: XCTestCase {
             XCTAssertTrue(update(instance, player: player, time: idleTime, speed: 0, stationary: true))
             try await capture(instance.root, label: "\(name)-near-idle-front", player: player,
                               view: .front, calibration: calibration)
+            if name == "home" {
+                try await capture(instance.root, label: "home-near-shirt-surface-close", player: player,
+                                  view: .front, calibration: calibration, closeUp: true)
+            }
         }
         // Diagnostic separates geometry/normal shading from atlas seams.
         var flat = PhysicallyBasedMaterial()
@@ -108,6 +112,17 @@ final class ReplayTripoAthleteVisualTests: XCTestCase {
         XCTAssertTrue(update(homeNear, player: home, time: idleTime, speed: 0, stationary: true))
         try await capture(homeNear.root, label: "diversity172-home-near-idle-front", player: home,
                           view: .front, calibration: calibration)
+        try await capture(homeNear.root, label: "diversity172-home-near-neck-and-shirt-close", player: home,
+                          view: .front, calibration: calibration, closeUp: true)
+        let idleJoints = homeNear.model.jointTransforms
+        homeNear.model.jointTransforms = homeNear.motion.restPose.translations.indices.map { index in
+            Transform(scale: homeNear.motion.restPose.scales[index],
+                      rotation: homeNear.motion.restPose.rotations[index],
+                      translation: homeNear.motion.restPose.translations[index])
+        }
+        try await capture(homeNear.root, label: "diversity172-home-near-rest-source-front", player: home,
+                          view: .front, calibration: calibration, closeUp: true)
+        homeNear.model.jointTransforms = idleJoints
         XCTAssertTrue(update(awayNear, player: away, time: idleTime, speed: 0, stationary: true))
         try await capture(awayNear.root, label: "diversity172-away-near-idle-front", player: away,
                           view: .front, calibration: calibration)
@@ -122,6 +137,8 @@ final class ReplayTripoAthleteVisualTests: XCTestCase {
         XCTAssertTrue(update(awayLow, player: away, time: runTime, speed: 3.6, stationary: false))
         try await capture(awayLow.root, label: "diversity172-away-low-run-front", player: away,
                           view: .front, calibration: calibration)
+        try await capture(awayLow.root, label: "diversity172-away-low-run-neck-close", player: away,
+                          view: .front, calibration: calibration, closeUp: true)
 
         let headAimTime = 1.25
         let headAimTarget: SIMD3<Float> = [1.8, 1.58, 3.2]

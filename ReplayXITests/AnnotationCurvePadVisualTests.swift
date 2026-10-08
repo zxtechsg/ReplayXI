@@ -7,6 +7,30 @@ import XCTest
 /// screenshot of the full immersive deck, spatial glass or headset comfort.
 @MainActor
 final class AnnotationCurvePadVisualTests: XCTestCase {
+    func testNativeThirdPointEditorAtDefaultAndLargestTextSizes() throws {
+        for (name, size) in [("default", DynamicTypeSize.large), ("accessibility5", .accessibility5)] {
+            let (store, mark) = try makeArc()
+            let width: CGFloat = size.isAccessibilitySize ? 540 : 660
+            let view = AnnotationArcPointEditor(markID: mark.id, color: ReplayTheme.cyan)
+                .environment(store).environment(\.dynamicTypeSize, size)
+                .environment(\.colorScheme, .dark).padding(24)
+                .frame(width: width, alignment: .leading)
+                .background(Color(red: 0.04, green: 0.06, blue: 0.08))
+            let renderer = ImageRenderer(content: view)
+            renderer.scale = 1
+            renderer.proposedSize = ProposedViewSize(width: width, height: nil)
+            let image = try XCTUnwrap(renderer.uiImage)
+            XCTAssertEqual(image.size.width, width, accuracy: 1)
+            XCTAssertGreaterThanOrEqual(image.size.height, 140)
+            let data = try XCTUnwrap(image.pngData())
+            XCTAssertGreaterThan(data.count, 2_048)
+            let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.png")
+            attachment.name = "arc-third-point-\(name)"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+    }
+
     func testNativeParametricPadAtDefaultAndLargestTextSizes() throws {
         for (name, size) in [("default", DynamicTypeSize.large), ("accessibility5", .accessibility5)] {
             let (store, mark) = try makeArc()

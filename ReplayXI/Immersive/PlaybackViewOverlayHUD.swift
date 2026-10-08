@@ -11,18 +11,21 @@ struct PlaybackViewOverlayHUD: View {
     @Binding var showsPlaybackAnnotations: Bool
     @Binding var emphasizesBall: Bool
     let recenterControls: () -> Void
+    let resetWorldPlacement: () -> Void
     var surfaceControls: ReplaySurfacePlacementControls? = nil
     private let usesSpatialGlass: Bool
     @State private var isExpanded = false
     @State private var section: PlaybackViewShelf = .camera
 
     init(showsPlaybackAnnotations: Binding<Bool>, emphasizesBall: Binding<Bool>,
-         recenterControls: @escaping () -> Void, surfaceControls: ReplaySurfacePlacementControls? = nil,
+         recenterControls: @escaping () -> Void, resetWorldPlacement: @escaping () -> Void = {},
+         surfaceControls: ReplaySurfacePlacementControls? = nil,
          initialSection: PlaybackViewShelf = .camera, initiallyExpanded: Bool = false,
          usesSpatialGlass: Bool = true) {
         self._showsPlaybackAnnotations = showsPlaybackAnnotations
         self._emphasizesBall = emphasizesBall
         self.recenterControls = recenterControls
+        self.resetWorldPlacement = resetWorldPlacement
         self.surfaceControls = surfaceControls
         self.usesSpatialGlass = usesSpatialGlass
         self._section = State(initialValue: initialSection)
@@ -122,6 +125,26 @@ struct PlaybackViewOverlayHUD: View {
                         isEditingGeometry: store.hasActiveCoachMarkGeometryPreview
                     ))
                     .accessibilityHint("Places the workspace in front of you, then leaves it fixed in the room")
+                    if store.viewMode == .tacticalTable || store.viewMode == .touchline {
+                        Text("Pinch both hands. Move together to place the pitch; spread or close to resize.")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.76))
+                            .fixedSize(horizontal: false, vertical: true)
+                        if surfaceControls?.hasPlacement == true {
+                            Text("Surface pitch fixed. Reset its surface placement to use the two-hand gesture.")
+                                .font(.caption)
+                                .foregroundStyle(.yellow)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Button(action: resetWorldPlacement) {
+                            Label("Reset pitch & stadium", systemImage: "arrow.counterclockwise")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(maxWidth: .infinity, minHeight: 60)
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(surfaceControls?.hasPlacement == true)
+                        .accessibilityHint("Restores the default pitch and stadium placement")
+                    }
                     environmentChoices
                     if store.viewMode == .tacticalTable,
                        ReplayEnvironmentMode.effective(environmentModeRawValue, isPhysicalPractice: false) == .room,

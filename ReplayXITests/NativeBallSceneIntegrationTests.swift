@@ -8,6 +8,46 @@ import XCTest
 /// planned-touch completeness has its own solver/scenario regression tests.
 @MainActor
 final class NativeBallSceneIntegrationTests: XCTestCase {
+    func testPOVInputsReadOnlyFromMatchingLiveRoot() async throws {
+        let scenario = try XCTUnwrap(FootballReferenceScenarios.all.first { $0.id == "final-81-volley-v2" })
+        let recording = try await prepare(scenario)
+        let root = PitchSceneFactory.makeMatchRoot(for: scenario, nativeRecording: recording)
+        defer { for child in Array(root.children) { child.removeFromParent() } }
+        let player = try XCTUnwrap(scenario.players.first { !$0.isGoalkeeper })
+        let time = 2.417
+        let locomotion = player.locomotion(at: time)
+        let inputs = try XCTUnwrap(PitchSceneFactory.povMotionInputs(
+            in: root, scenarioID: scenario.id, player: player, at: time, locomotion: locomotion))
+        XCTAssertEqual(inputs.contacts.count, recording.touches.filter { $0.playerID == player.id }.count)
+        XCTAssertEqual(inputs.slowRunWeight,
+                       PitchSceneFactory.slowRunTimelinesForTesting(in: root)[player.id]?.weight(at: time) ?? 0)
+        XCTAssertEqual(inputs.armCutAdmission?.envelopeWeight,
+                       PitchSceneFactory.armCutTimelinesForTesting(in: root)[player.id]?
+                        .admission(at: time, locomotion: locomotion)?.envelopeWeight)
+        let firstTouch = try XCTUnwrap(recording.touches.first)
+        let contactPlayer = try XCTUnwrap(scenario.player(id: firstTouch.playerID))
+        let contactInputs = try XCTUnwrap(PitchSceneFactory.povMotionInputs(
+            in: root, scenarioID: scenario.id, player: contactPlayer,
+            at: firstTouch.time, locomotion: contactPlayer.locomotion(at: firstTouch.time)))
+        XCTAssertEqual(contactInputs.interaction?.contactTime, firstTouch.time)
+        XCTAssertEqual(contactInputs.contacts.map(\.contactTime),
+                       recording.touches.filter { $0.playerID == contactPlayer.id }.map(\.time))
+        if let shotTouch = recording.touches.first(where: { $0.kind == .shot }),
+           let shotPlayer = scenario.player(id: shotTouch.playerID),
+           let keeper = scenario.players.first(where: { $0.isGoalkeeper && $0.team != shotPlayer.team }) {
+            let shotInputs = try XCTUnwrap(PitchSceneFactory.povMotionInputs(
+                in: root, scenarioID: scenario.id, player: keeper, at: shotTouch.time,
+                locomotion: keeper.locomotion(at: shotTouch.time)))
+            XCTAssertEqual(shotInputs.shot,
+                           ReplayFootballShotTimeline(touches: recording.touches, players: scenario.players)
+                            .latestOpposingShot(for: keeper, at: shotTouch.time))
+        }
+        XCTAssertNil(PitchSceneFactory.povMotionInputs(in: root, scenarioID: "other-match",
+            player: player, at: time, locomotion: locomotion))
+        XCTAssertNil(PitchSceneFactory.povMotionInputs(in: Entity(), scenarioID: scenario.id,
+            player: player, at: time, locomotion: locomotion))
+    }
+
     func testEachPreparedStudyUsesTheNativeRecordingInTableAndPlayerViews() async throws {
         ReplayNativeBallPhysics.resetCacheForTesting()
         defer { ReplayNativeBallPhysics.resetCacheForTesting() }

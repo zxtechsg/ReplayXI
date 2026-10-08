@@ -1264,7 +1264,7 @@ final class ReplayXITests: XCTestCase {
         XCTAssertFalse(try XCTUnwrap(compactLabel.findEntity(named: "team-strip")).isEnabled)
         XCTAssertTrue(try XCTUnwrap(selectedLabel.findEntity(named: "label-board")).isEnabled)
         XCTAssertTrue(try XCTUnwrap(selectedLabel.findEntity(named: "team-strip")).isEnabled)
-        XCTAssertLessThan(
+        XCTAssertEqual(
             PlaybackSpatialLabels.tacticalLabelHeight(team: .home, shirtNumber: 7),
             PlaybackSpatialLabels.tacticalLabelHeight(team: .away, shirtNumber: 2)
         )
@@ -1359,7 +1359,7 @@ final class ReplayXITests: XCTestCase {
         XCTAssertEqual(distantScale, 0.62, accuracy: 0.000_1)
         XCTAssertEqual(
             PlaybackSpatialLabels.firstPersonLabelHeight(forDistance: 200),
-            2.36,
+            2.32,
             accuracy: 0.000_1
         )
 
@@ -1399,7 +1399,9 @@ final class ReplayXITests: XCTestCase {
         ).presentationPose(at: 16)
         XCTAssertTrue(markRoot.isEnabled)
         XCTAssertEqual(label.position.x, targetPose.position.x, accuracy: 0.000_1)
-        XCTAssertEqual(label.position.y, 9.40, accuracy: 0.000_1)
+        XCTAssertEqual(label.position.y, 3.00, accuracy: 0.000_1)
+        XCTAssertFalse(try XCTUnwrap(root.findEntity(named: "player-label-red-lb")).isEnabled,
+                       "A named coach card replaces the ordinary identity chip")
         XCTAssertEqual(label.position.z, targetPose.position.z, accuracy: 0.000_1)
 
         PitchSceneFactory.update(

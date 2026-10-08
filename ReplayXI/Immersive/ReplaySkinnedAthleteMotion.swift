@@ -89,6 +89,7 @@ struct ReplaySkinnedAthleteMotion: Sendable {
     let headSubtreeJointIndices: [Int]
     let cervicalSubtreeJointIndices: [Int]
     let numberAnchors: NumberAnchors
+    private let cervicalIndices: Set<Int>
     let footContacts: [String: FootContact]
     let geometry: Geometry
     let restPose: Pose
@@ -247,6 +248,7 @@ struct ReplaySkinnedAthleteMotion: Sendable {
         }
         self.headSubtreeJointIndices = branch(root: semantics["head"]!)
         self.cervicalSubtreeJointIndices = branch(root: semantics["neck"]!)
+        self.cervicalIndices = [semantics["neck"]!, semantics["head"]!]
         self.geometry = Geometry(nominalHeight: document.geometry.nominalHeight, restMinY: document.geometry.restMinY)
         self.numberAnchors = NumberAnchors(
             jointIndex: numberIndex,
@@ -345,29 +347,32 @@ struct ReplaySkinnedAthleteMotion: Sendable {
 
     func sample(
         clip: ClipID, at time: TimeInterval, looping: Bool = true,
-        rebuildingModelSpace: Bool = true, into pose: inout Pose
+        rebuildingModelSpace: Bool = true, smoothCervical: Bool = false, into pose: inout Pose
     ) {
         ensureBuffer(&pose)
         let selected = clip == .idle ? idle : run
         #if DEBUG
         Self.sampleCounter.add(idle: clip == .idle ? 1 : 0, fast: clip == .run ? 1 : 0)
         #endif
-        writeSample(selected, at: time, looping: looping, rebuildingModelSpace: rebuildingModelSpace, into: &pose)
+        writeSample(selected, at: time, looping: looping, rebuildingModelSpace: rebuildingModelSpace,
+                    smoothCervical: smoothCervical, into: &pose)
     }
 
     private func writeSample(_ selected: Clip, at time: TimeInterval, looping: Bool,
-                             rebuildingModelSpace: Bool, into pose: inout Pose) {
+                             rebuildingModelSpace: Bool, smoothCervical: Bool, into pose: inout Pose) {
         let span = Self.span(in: selected, time: time, looping: looping)
-        writeSample(selected, span: span, rebuildingModelSpace: rebuildingModelSpace, into: &pose)
+        writeSample(selected, span: span, rebuildingModelSpace: rebuildingModelSpace,
+                    smoothCervical: smoothCervical && looping, into: &pose)
     }
 
     private func writeSample(_ selected: Clip, span: SampleSpan,
-                             rebuildingModelSpace: Bool, into pose: inout Pose) {
+                             rebuildingModelSpace: Bool, smoothCervical: Bool, into pose: inout Pose) {
         let first = selected.frames[span.lower]
         let second = selected.frames[span.upper]
         for index in joints.indices {
             pose.translations[index] = Self.lerp(first.translations[index], second.translations[index], span.weight)
-            pose.rotations[index] = Self.shortestSlerp(first.rotations[index], second.rotations[index], span.weight)
+            pose.rotations[index] = rotation(in: selected, span: span, joint: index,
+                                             smoothCervical: smoothCervical)
             pose.scales[index] = Self.lerp(first.scales[index], second.scales[index], span.weight)
         }
         if rebuildingModelSpace { Self.rebuildHierarchy(joints: joints, pose: &pose) }
@@ -378,7 +383,7 @@ struct ReplaySkinnedAthleteMotion: Sendable {
     func sample(
         time: TimeInterval, locomotionEffort: Float, gaitPhase: Float,
         slowRunWeight: Float = 0,
-        rebuildingModelSpace: Bool = true, into pose: inout Pose
+        rebuildingModelSpace: Bool = true, smoothCervical: Bool = false, into pose: inout Pose
     ) {
         ensureBuffer(&pose)
         let effort = locomotionEffort.isFinite ? min(max(locomotionEffort, 0), 1) : 0
@@ -387,7 +392,8 @@ struct ReplaySkinnedAthleteMotion: Sendable {
         // Most athletes are fully idle or running. Avoid sampling a second clip
         // at these endpoints and keep a full run exactly independent of idle time.
         if runWeight <= 0 {
-            sample(clip: .idle, at: time, rebuildingModelSpace: rebuildingModelSpace, into: &pose)
+            sample(clip: .idle, at: time, rebuildingModelSpace: rebuildingModelSpace,
+                   smoothCervical: smoothCervical, into: &pose)
             return
         }
         let phase = gaitPhase.isFinite ? Double(gaitPhase) : 0
@@ -396,7 +402,8 @@ struct ReplaySkinnedAthleteMotion: Sendable {
         let slowWeight = slowRunWeight.isFinite ? min(max(slowRunWeight, 0), 1) : 0
         if slowWeight > 0, let slowRun {
             sampleWithSlowRun(slowRun, time: time, phaseFraction: phaseFraction, runWeight: runWeight,
-                              slowWeight: slowWeight, rebuildingModelSpace: rebuildingModelSpace, into: &pose)
+                              slowWeight: slowWeight, rebuildingModelSpace: rebuildingModelSpace,
+                              smoothCervical: smoothCervical, into: &pose)
             return
         }
         if runWeight >= 1 {
@@ -404,7 +411,7 @@ struct ReplaySkinnedAthleteMotion: Sendable {
             Self.sampleCounter.add(fast: 1)
             #endif
             writeSample(run, span: Self.span(in: run, phaseTime: runTime),
-                        rebuildingModelSpace: rebuildingModelSpace, into: &pose)
+                        rebuildingModelSpace: rebuildingModelSpace, smoothCervical: smoothCervical, into: &pose)
             return
         }
         let idleSpan = Self.span(in: idle, time: time, looping: true)
@@ -417,8 +424,8 @@ struct ReplaySkinnedAthleteMotion: Sendable {
         for index in joints.indices {
             let idleTranslation = Self.lerp(idleStart.translations[index], idleEnd.translations[index], idleSpan.weight)
             let runTranslation = Self.lerp(runStart.translations[index], runEnd.translations[index], runSpan.weight)
-            let idleRotation = Self.shortestSlerp(idleStart.rotations[index], idleEnd.rotations[index], idleSpan.weight)
-            let runRotation = Self.shortestSlerp(runStart.rotations[index], runEnd.rotations[index], runSpan.weight)
+            let idleRotation = rotation(in: idle, span: idleSpan, joint: index, smoothCervical: smoothCervical)
+            let runRotation = rotation(in: run, span: runSpan, joint: index, smoothCervical: smoothCervical)
             let idleScale = Self.lerp(idleStart.scales[index], idleEnd.scales[index], idleSpan.weight)
             let runScale = Self.lerp(runStart.scales[index], runEnd.scales[index], runSpan.weight)
             pose.translations[index] = Self.lerp(idleTranslation, runTranslation, runWeight)
@@ -433,14 +440,14 @@ struct ReplaySkinnedAthleteMotion: Sendable {
     /// Only triple overlap reads three clips; zero-weight clips are not sampled.
     private func sampleWithSlowRun(_ slow: Clip, time: TimeInterval, phaseFraction: Double,
                                    runWeight: Float, slowWeight: Float,
-                                   rebuildingModelSpace: Bool, into pose: inout Pose) {
+                                   rebuildingModelSpace: Bool, smoothCervical: Bool, into pose: inout Pose) {
         let slowTime = phaseFraction * slow.duration
         if runWeight >= 1, slowWeight >= 1 {
             #if DEBUG
             Self.sampleCounter.add(slow: 1)
             #endif
             writeSample(slow, span: Self.span(in: slow, phaseTime: slowTime),
-                        rebuildingModelSpace: rebuildingModelSpace, into: &pose)
+                        rebuildingModelSpace: rebuildingModelSpace, smoothCervical: smoothCervical, into: &pose)
             return
         }
         let slowSpan = Self.span(in: slow, phaseTime: slowTime)
@@ -457,12 +464,14 @@ struct ReplaySkinnedAthleteMotion: Sendable {
             let primaryStart = usesFastOnly ? run.frames[primarySpan.lower] : slowStart
             let primaryEnd = usesFastOnly ? run.frames[primarySpan.upper] : slowEnd
             var translation = Self.lerp(primaryStart.translations[index], primaryEnd.translations[index], primarySpan.weight)
-            var rotation = Self.shortestSlerp(primaryStart.rotations[index], primaryEnd.rotations[index], primarySpan.weight)
+            var rotation = self.rotation(in: usesFastOnly ? run : slow, span: primarySpan,
+                                         joint: index, smoothCervical: smoothCervical)
             var scale = Self.lerp(primaryStart.scales[index], primaryEnd.scales[index], primarySpan.weight)
             if let fastSpan, !isUnchanged {
                 let first = run.frames[fastSpan.lower], second = run.frames[fastSpan.upper]
                 let fastTranslation = Self.lerp(first.translations[index], second.translations[index], fastSpan.weight)
-                let fastRotation = Self.shortestSlerp(first.rotations[index], second.rotations[index], fastSpan.weight)
+                let fastRotation = self.rotation(in: run, span: fastSpan,
+                                                 joint: index, smoothCervical: smoothCervical)
                 let fastScale = Self.lerp(first.scales[index], second.scales[index], fastSpan.weight)
                 translation = Self.lerp(fastTranslation, translation, slowWeight)
                 rotation = Self.shortestSlerp(fastRotation, rotation, slowWeight)
@@ -471,7 +480,8 @@ struct ReplaySkinnedAthleteMotion: Sendable {
             if let idleSpan {
                 let first = idle.frames[idleSpan.lower], second = idle.frames[idleSpan.upper]
                 let idleTranslation = Self.lerp(first.translations[index], second.translations[index], idleSpan.weight)
-                let idleRotation = Self.shortestSlerp(first.rotations[index], second.rotations[index], idleSpan.weight)
+                let idleRotation = self.rotation(in: idle, span: idleSpan,
+                                                 joint: index, smoothCervical: smoothCervical)
                 let idleScale = Self.lerp(first.scales[index], second.scales[index], idleSpan.weight)
                 translation = Self.lerp(idleTranslation, translation, runWeight)
                 rotation = Self.shortestSlerp(idleRotation, rotation, runWeight)
@@ -579,6 +589,26 @@ struct ReplaySkinnedAthleteMotion: Sendable {
     private static func shortestSlerp(_ start: simd_quatf, _ end: simd_quatf, _ weight: Float) -> simd_quatf {
         let target = simd_dot(start.vector, end.vector) < 0 ? simd_quatf(vector: -end.vector) : end
         return simd_normalize(simd_slerp(start, target, weight))
+    }
+
+    /// Source clips are keyed at 24 Hz. A spherical spline removes angular
+    /// velocity corners from the neck/head only; foot and contact channels
+    /// keep their exact sampled transforms. Both clips duplicate the first
+    /// pose at the final key, so the neighbours wrap inside that duplicate.
+    private func rotation(in clip: Clip, span: SampleSpan, joint: Int,
+                          smoothCervical: Bool) -> simd_quatf {
+        let first = clip.frames[span.lower].rotations[joint]
+        let second = clip.frames[span.upper].rotations[joint]
+        guard smoothCervical, cervicalIndices.contains(joint), span.lower != span.upper else {
+            return Self.shortestSlerp(first, second, span.weight)
+        }
+        let last = clip.frames.count - 1
+        let before = clip.frames[span.lower == 0 ? max(last - 1, 0) : span.lower - 1].rotations[joint]
+        let after = clip.frames[span.upper == last ? min(1, last) : span.upper + 1].rotations[joint]
+        let q0 = simd_dot(before.vector, first.vector) < 0 ? simd_quatf(vector: -before.vector) : before
+        let q2 = simd_dot(second.vector, first.vector) < 0 ? simd_quatf(vector: -second.vector) : second
+        let q3 = simd_dot(after.vector, q2.vector) < 0 ? simd_quatf(vector: -after.vector) : after
+        return simd_normalize(simd_spline(q0, first, q2, q3, span.weight))
     }
 
     private static func vector(_ values: [Float], bound: Float) throws -> SIMD3<Float> {

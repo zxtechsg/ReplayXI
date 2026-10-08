@@ -12,6 +12,9 @@ struct CoachMarkCurve: Codable, Hashable, Sendable {
     /// Opt-in pitch-space bend direction, measured from +X towards +Z.
     /// Nil keeps the original chord-relative horizontal basis exactly.
     var bendBearingDegrees: Float?
+    /// Explicit third-point displacement from the endpoint midpoint, in pitch
+    /// metres. Nil preserves all legacy curve arithmetic and saved geometry.
+    var controlOffset: SIMD3<Float>?
 
     static let maximumBend: Float = 12
     static let maximumLift: Float = 4
@@ -19,14 +22,15 @@ struct CoachMarkCurve: Codable, Hashable, Sendable {
     static let segmentCount = 32
 
     init(bend: Float, lift: Float, rollDegrees: Float = 0,
-         bendBearingDegrees: Float? = nil) {
+         bendBearingDegrees: Float? = nil, controlOffset: SIMD3<Float>? = nil) {
         self.bend = bend
         self.lift = lift
         self.rollDegrees = rollDegrees
         self.bendBearingDegrees = bendBearingDegrees
+        self.controlOffset = controlOffset
     }
 
-    private enum CodingKeys: String, CodingKey { case bend, lift, rollDegrees, bendBearingDegrees }
+    private enum CodingKeys: String, CodingKey { case bend, lift, rollDegrees, bendBearingDegrees, controlOffset }
 
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -34,6 +38,7 @@ struct CoachMarkCurve: Codable, Hashable, Sendable {
         lift = try container.decode(Float.self, forKey: .lift)
         rollDegrees = try container.decodeIfPresent(Float.self, forKey: .rollDegrees) ?? 0
         bendBearingDegrees = try container.decodeIfPresent(Float.self, forKey: .bendBearingDegrees)
+        controlOffset = try container.decodeIfPresent(SIMD3<Float>.self, forKey: .controlOffset)
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -42,6 +47,7 @@ struct CoachMarkCurve: Codable, Hashable, Sendable {
         try container.encode(lift, forKey: .lift)
         if rollDegrees != 0 { try container.encode(rollDegrees, forKey: .rollDegrees) }
         try container.encodeIfPresent(bendBearingDegrees, forKey: .bendBearingDegrees)
+        try container.encodeIfPresent(controlOffset, forKey: .controlOffset)
     }
 
     var isValid: Bool {
@@ -50,7 +56,13 @@ struct CoachMarkCurve: Codable, Hashable, Sendable {
             && (0...Self.maximumLift).contains(lift)
             && abs(rollDegrees) <= Self.maximumRollDegrees
             && (bendBearingDegrees.map { $0.isFinite && (-180...180).contains($0) } ?? true)
+            && (controlOffset.map {
+                $0.x.isFinite && $0.y.isFinite && $0.z.isFinite
+                    && abs($0.x) <= 68 && abs($0.y) <= 12 && abs($0.z) <= 105
+            } ?? true)
     }
+
+    var hasFixedControlFrame: Bool { bendBearingDegrees != nil || controlOffset != nil }
 
     static func initial(start: PitchPoint, end: PitchPoint) -> Self {
         Self(bend: min(max(ReplayGeometry.distance(start, end) * 0.18, 0.6), 6), lift: 0)
@@ -60,7 +72,7 @@ struct CoachMarkCurve: Codable, Hashable, Sendable {
     /// A vertical legacy chord has no effective bend; preserve that geometry
     /// while choosing +Z as the direction for a subsequent bend adjustment.
     func stabilized(start: PitchPoint, end: PitchPoint) -> Self {
-        guard bendBearingDegrees == nil else { return self }
+        guard !hasFixedControlFrame else { return self }
         let dx = end.x - start.x, dz = end.z - start.z
         let length = hypot(dx, dz)
         guard length.isFinite else { return self }
@@ -77,16 +89,30 @@ struct CoachMarkCurve: Codable, Hashable, Sendable {
              // Do not turn malformed framed input into a valid legacy curve.
              // Authored bearings are normalized by atan2; validation rejects
              // malformed persisted/remote values rather than changing them.
-             bendBearingDegrees: bendBearingDegrees)
+             bendBearingDegrees: bendBearingDegrees, controlOffset: controlOffset)
     }
 
     /// Midpoint displacement before pitch/floor clipping, in metres. Scaling
     /// this value preserves the existing bend/lift direction, including saves.
-    var amount: Float { hypot(bend, lift) }
+    var amount: Float { controlOffset.map { simd_length($0) * 0.5 } ?? hypot(bend, lift) }
 
     func adjusting(amountDelta: Float, angleDelta: Float) -> Self {
         guard amountDelta.isFinite, angleDelta.isFinite else { return self }
         let safe = clamped()
+        if let offset = safe.controlOffset {
+            let length = simd_length(offset)
+            let direction = length > 0.0001 ? offset / length : SIMD3<Float>(0, 0, 1)
+            let target = max(length + amountDelta * 2, 0)
+            let limits = SIMD3<Float>(68, 12, 105)
+            var bounded = target
+            for axis in 0..<3 where abs(direction[axis]) > 0.0001 {
+                bounded = min(bounded, limits[axis] / abs(direction[axis]))
+            }
+            return Self(bend: safe.bend, lift: safe.lift,
+                        rollDegrees: safe.rollDegrees + angleDelta,
+                        bendBearingDegrees: safe.bendBearingDegrees,
+                        controlOffset: direction * bounded).clamped()
+        }
         if amountDelta == 0 {
             return Self(bend: safe.bend, lift: safe.lift,
                         rollDegrees: safe.rollDegrees + angleDelta,
@@ -101,6 +127,27 @@ struct CoachMarkCurve: Codable, Hashable, Sendable {
         return Self(bend: direction.x * target, lift: direction.y * target,
                     rollDegrees: safe.rollDegrees + angleDelta,
                     bendBearingDegrees: safe.bendBearingDegrees).clamped()
+    }
+
+    func offsetting(horizontal: Float, vertical: Float) -> Self {
+        guard horizontal.isFinite, vertical.isFinite else { return self }
+        var result = self
+        if var offset = controlOffset {
+            offset.x = min(max(offset.x + horizontal * 2, -68), 68)
+            offset.y = min(max(offset.y + vertical * 2, -12), 12)
+            result.controlOffset = offset
+        } else {
+            result.bend += horizontal
+            result.lift += vertical
+        }
+        return result.clamped()
+    }
+
+    func settingControlPoint(_ point: SIMD3<Float>, for mark: CoachMark) -> Self {
+        let midpoint = SIMD3<Float>((mark.start.x + mark.end.x) * 0.5,
+            (mark.resolvedStartElevation + mark.resolvedEndElevation) * 0.5,
+            (mark.start.z + mark.end.z) * 0.5)
+        return Self(bend: 0, lift: 0, bendBearingDegrees: 0, controlOffset: point - midpoint)
     }
 
     func controlPoint(for mark: CoachMark) -> SIMD3<Float> {
@@ -128,7 +175,9 @@ struct CoachMarkCurve: Codable, Hashable, Sendable {
             (mark.resolvedStartElevation + mark.resolvedEndElevation) * 0.5,
             (mark.start.z + mark.end.z) * 0.5)
         var offset: SIMD3<Float>
-        if let bearing = safe.bendBearingDegrees {
+        if let explicit = safe.controlOffset {
+            offset = explicit
+        } else if let bearing = safe.bendBearingDegrees {
             let radians = bearing * .pi / 180
             offset = SIMD3<Float>(cos(radians) * safe.bend * 2,
                                   safe.lift * 2, sin(radians) * safe.bend * 2)

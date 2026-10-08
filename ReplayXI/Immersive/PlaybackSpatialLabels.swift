@@ -52,7 +52,7 @@ enum PlaybackSpatialLabels {
     /// remaining bodies stay on the board as formation context and remain
     /// selectable through their body targets.
     static let tacticalFocusedPlayerLabelLimit = 5
-    static let tacticalContextLabelScale: Float = 2.85
+    static let tacticalContextLabelScale: Float = 2.40
     static let firstPersonMaximumLabelDistance: Float = 32
     // At close range the front/back shirt number is already readable. Hiding
     // the floating plate there prevents a tag from covering the athlete's face
@@ -138,6 +138,7 @@ enum PlaybackSpatialLabels {
         enabledPlayerIDs: Set<String>? = nil,
         firstPersonVisiblePlayerIDs: [String]? = nil,
         focusedPlayerIDs: Set<String>? = nil,
+        replacedByAnnotationPlayerIDs: Set<String>? = nil,
         acceptsInput: Bool = true
     ) {
         guard let labelsRoot = root.children.first(where: { $0.name == "player-labels-root" }) else {
@@ -167,9 +168,8 @@ enum PlaybackSpatialLabels {
             viewMode: viewMode,
             perspectiveID: perspectiveID
         )
-        // Tabletop rigs are intentionally exaggerated for readability. Lift
-        // the independent identity layer clear of their heads so shirt number
-        // and role never disappear inside a selected player's body.
+        // Keep the identity layer above the stable head envelope. Its height
+        // is independent of gait, so tags do not bob during playback.
         let defaultLabelHeight: Float = 2.16
 
         for player in scenario.players {
@@ -218,6 +218,7 @@ enum PlaybackSpatialLabels {
             let passesFocusFilter = viewMode != .tacticalTable
                 || focusedPlayerIDs?.contains(player.id) != false
             let isVisible = passesBaseFilter && passesFocusFilter
+                && replacedByAnnotationPlayerIDs?.contains(player.id) != true
             setVisibility(isVisible, on: label)
             guard isVisible,
                   let pose = candidatePose ?? posesByPlayerID[player.id] else { continue }
@@ -250,8 +251,6 @@ enum PlaybackSpatialLabels {
             let resolvedHeight: Float = switch viewMode {
             case .firstPerson:
                 firstPersonLabelHeight(forDistance: distance)
-                    + (player.team == .away ? 0.16 : 0)
-                    + (player.shirtNumber.isMultiple(of: 2) ? 0 : 0.08)
             case .tacticalTable:
                 max(tacticalLabelHeight(team: player.team, shirtNumber: player.shirtNumber), minimumReviewHeight)
             case .touchline, .positional:
@@ -607,18 +606,17 @@ enum PlaybackSpatialLabels {
         min(max(0.31 + (max(distance, 0) * 0.009), 0.34), 0.58)
     }
 
-    static func firstPersonLabelHeight(forDistance distance: Float) -> Float {
-        2.20 + min(max(distance, 0) * 0.005, 0.16)
+    static func firstPersonLabelHeight(forDistance _: Float) -> Float {
+        // A common band keeps the selected outline 0.15 m above the 2.05 m
+        // head envelope even at its largest POV scale (0.62 × 0.38 m).
+        2.32
     }
 
-    /// A fixed team-and-shirt lane keeps compressed tactical formations
-    /// readable without frame-to-frame collision solving (and its jitter).
-    /// Labels remain directly above their player in X/Z, so acquisition stays
-    /// obvious while opposing tags no longer occupy the same vertical band.
-    static func tacticalLabelHeight(team: FootballTeam, shirtNumber: Int) -> Float {
-        let teamBand: Float = team == .home ? 6.20 : 7.85
-        let shirtBand: Float = shirtNumber.isMultiple(of: 2) ? 0 : 0.72
-        return teamBand + shirtBand
+    /// Compact identity chips sit at one stable head band. Selection uses a
+    /// taller card and minimumTagHeight places that card at the same clearance.
+    static func tacticalLabelHeight(team _: FootballTeam, shirtNumber _: Int) -> Float {
+        ReplayAthleteReviewLayout.minimumTagHeight(athleteScale: 1,
+            labelScale: tacticalContextLabelScale)
     }
 
     private static func observerPoint(

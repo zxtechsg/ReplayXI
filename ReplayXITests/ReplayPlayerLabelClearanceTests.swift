@@ -1,4 +1,5 @@
 import RealityKit
+import UIKit
 import XCTest
 @testable import ReplayXI
 
@@ -55,6 +56,28 @@ final class ReplayPlayerLabelClearanceTests: XCTestCase {
         }
     }
 
+    func testFallbackHeadAndTableMarkerHaveNoVerticalAirGap() throws {
+        let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay))
+        let player = try XCTUnwrap(scenario.players.first)
+        let far = try ReplayAthleteFactory.make(for: player, lod: .far)
+        let torso = try XCTUnwrap(far.root.findEntity(named: "torso"))
+        let head = try XCTUnwrap(far.root.findEntity(named: "head"))
+        XCTAssertLessThanOrEqual(head.visualBounds(relativeTo: far.root).min.y,
+                                 torso.visualBounds(relativeTo: far.root).max.y,
+                                 "The cold far fallback must sit inside the shirt collar")
+
+        let marker = PitchSceneFactory.makeTableMarker(
+            shirtColor: .white, trimColor: .blue, limbColor: .white,
+            skinColor: .brown, facingColor: .green)
+        let markerTorso = try XCTUnwrap(marker.findEntity(named: "table-marker-body"))
+        let markerNeck = try XCTUnwrap(marker.findEntity(named: "table-marker-neck"))
+        let markerHead = try XCTUnwrap(marker.findEntity(named: "table-marker-head"))
+        XCTAssertLessThanOrEqual(markerNeck.visualBounds(relativeTo: marker).min.y,
+                                 markerTorso.visualBounds(relativeTo: marker).max.y)
+        XCTAssertLessThanOrEqual(markerHead.visualBounds(relativeTo: marker).min.y,
+                                 markerNeck.visualBounds(relativeTo: marker).max.y)
+    }
+
     func testFirstPersonRetainsDistanceBandsAndHidesWearerTag() throws {
         let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay))
         let root = PitchSceneFactory.makeMatchRoot(for: scenario)
@@ -67,8 +90,6 @@ final class ReplayPlayerLabelClearanceTests: XCTestCase {
             guard label.isEnabled else { continue }
             let distance = ReplayGeometry.distance(viewer, player.presentationPose(at: 13.6).position)
             let expected = PlaybackSpatialLabels.firstPersonLabelHeight(forDistance: distance)
-                + (player.team == .away ? 0.16 : 0)
-                + (player.shirtNumber.isMultiple(of: 2) ? 0 : 0.08)
             XCTAssertEqual(label.position.y, expected)
             XCTAssertEqual(label.scale.x, PlaybackSpatialLabels.firstPersonLabelScale(forDistance: distance))
         }

@@ -45,7 +45,7 @@ final class ReplayFarAthleteHeadTests: XCTestCase {
         XCTAssertEqual(ReplayFarAthleteHeadProvider.preparationAttemptCount, 0)
         XCTAssertEqual(ReplayFarAthleteHeadProvider.meshLoadCount, 0)
         XCTAssertEqual(rig.metrics, .init(modelEntities: 7, verticesPerInstance: 399, trianglesPerInstance: 574))
-        XCTAssertEqual(rig.joints[.headRoot].position.y, 0.170)
+        XCTAssertEqual(rig.joints[.headRoot].position.y, 0.140)
         let head = try XCTUnwrap(rig.root.findEntity(named: "head") as? ModelEntity)
         XCTAssertTrue(try XCTUnwrap(head.model).materials.first is SimpleMaterial)
     }
@@ -96,7 +96,7 @@ final class ReplayFarAthleteHeadTests: XCTestCase {
         let (_, player) = try fixture()
         let rig = try ReplayAthleteFactory.make(for: player, lod: .far)
         XCTAssertEqual(rig.metrics, .init(modelEntities: 7, verticesPerInstance: 399, trianglesPerInstance: 574))
-        XCTAssertEqual(rig.joints[.headRoot].position.y, 0.170)
+        XCTAssertEqual(rig.joints[.headRoot].position.y, 0.140)
         XCTAssertNil(ReplayFarAthleteHeadProvider.make(appearance: .replayXI(index: 2)))
     }
 

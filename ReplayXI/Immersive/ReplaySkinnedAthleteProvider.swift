@@ -236,6 +236,89 @@ enum ReplaySkinnedAthleteProvider {
     #endif
 }
 
+/// A few weighted shirt vertices under each number, selected once from the
+/// admitted mesh. The number plane follows the same joint matrices as cloth;
+/// no mesh readback or search occurs while a replay is running.
+struct ReplaySkinnedNumberSurface {
+    struct Influence {
+        let joint: Int
+        let localPoint: SIMD4<Float>
+        let weight: Float
+    }
+    struct Probe {
+        let influences: [Influence]
+
+        func position(in pose: ReplaySkinnedAthleteMotion.Pose) -> SIMD3<Float> {
+            var point = SIMD4<Float>.zero
+            for influence in influences where influence.weight > 0 {
+                point += pose.modelSpaceTransforms[influence.joint]
+                    * influence.localPoint * influence.weight
+            }
+            return SIMD3(point.x, point.y, point.z)
+        }
+    }
+
+    let front: [Probe]
+    let back: [Probe]
+
+    @MainActor
+    init?(model: ModelEntity, motion: ReplaySkinnedAthleteMotion) {
+        guard motion.rigProfile == .tripo52,
+              let contents = model.model?.mesh.contents,
+              let part = contents.models.first?.parts.first,
+              let skeleton = contents.skeletons.first,
+              let weights = part.jointInfluences?.influences.elements,
+              weights.count == part.positions.count * 4,
+              skeleton.joints.count == motion.joints.count else { return nil }
+        let restChest = motion.restPose.modelSpaceTransforms[motion.numberAnchors.jointIndex]
+        let frontCentre = restChest * SIMD4(motion.numberAnchors.front, 1)
+        let backCentre = restChest * SIMD4(motion.numberAnchors.back, 1)
+        let positions = part.positions.elements
+        func probes(centre: SIMD4<Float>, side: Float) -> [Probe] {
+            var choices: [Int: (index: Int, depth: Float)] = [:]
+            for (index, point) in positions.enumerated() {
+                let dx = point.x - centre.x, dy = point.y - centre.y
+                guard abs(dx) < 0.115, abs(dy) < 0.075, side * point.z > 0.04 else { continue }
+                let column = min(Int((dx + 0.115) / (0.230 / 3)), 2)
+                let row = min(Int((dy + 0.075) / (0.150 / 3)), 2)
+                let cell = row * 3 + column
+                let depth = side * point.z
+                if choices[cell].map({ depth > $0.depth }) ?? true {
+                    choices[cell] = (index, depth)
+                }
+            }
+            return choices.keys.sorted().compactMap { cell in
+                guard let chosen = choices[cell] else { return nil }
+                let index = chosen.index
+                let point = SIMD4(positions[index], 1)
+                let influences = weights[(index * 4)..<(index * 4 + 4)].compactMap { influence -> Influence? in
+                    guard influence.weight > 0,
+                          skeleton.joints.indices.contains(influence.jointIndex) else { return nil }
+                    return Influence(joint: influence.jointIndex,
+                        localPoint: skeleton.joints[influence.jointIndex].inverseBindPoseMatrix * point,
+                        weight: influence.weight)
+                }
+                return influences.isEmpty ? nil : Probe(influences: influences)
+            }
+        }
+        front = probes(centre: frontCentre, side: 1)
+        back = probes(centre: backCentre, side: -1)
+        guard front.count >= 3, back.count >= 3 else { return nil }
+    }
+
+    /// Signed distance from the old chest anchor to the deformed outermost
+    /// shirt vertex. Four millimetres of air avoids z-fighting at the surface.
+    func offset(forFront isFront: Bool, pose: ReplaySkinnedAthleteMotion.Pose,
+                chest: simd_float4x4, anchor: SIMD3<Float>, restInverse: simd_quatf) -> Float {
+        let origin4 = chest * SIMD4(anchor, 1)
+        let origin = SIMD3(origin4.x, origin4.y, origin4.z)
+        let normal = simd_quatf(chest).act(restInverse.act([0, 0, 1]))
+        let depths = (isFront ? front : back).map { simd_dot($0.position(in: pose) - origin, normal) }
+        let outside = isFront ? (depths.max() ?? 0) + 0.004 : (depths.min() ?? 0) - 0.004
+        return min(max(outside, -0.06), 0.06)
+    }
+}
+
 @MainActor
 final class ReplaySkinnedAthleteInstance {
     let detail: ReplaySkinnedAthleteProvider.Detail
@@ -268,6 +351,7 @@ final class ReplaySkinnedAthleteInstance {
     let model: ModelEntity
     let front: ModelEntity
     let back: ModelEntity
+    let neckBridge: ModelEntity?
     private let skinRoot: Entity
     let motion: ReplaySkinnedAthleteMotion
     let contactSurface: ReplaySkinnedAthleteContactSurface
@@ -276,6 +360,7 @@ final class ReplaySkinnedAthleteInstance {
     private var transforms: [Transform]
     private let frontLocal: simd_float4x4
     private let backLocal: simd_float4x4
+    let numberSurface: ReplaySkinnedNumberSurface?
     private let neckIndex: Int
     private let headIndex: Int
     private let inverseRestChestRotation: simd_quatf
@@ -291,7 +376,9 @@ final class ReplaySkinnedAthleteInstance {
     init(root: Entity, skinRoot: Entity, model: ModelEntity, front: ModelEntity, back: ModelEntity,
          playerID: String, motion: ReplaySkinnedAthleteMotion, contactSurface: ReplaySkinnedAthleteContactSurface,
          detail: ReplaySkinnedAthleteProvider.Detail = .near,
-         bootMarkers: ReplaySkinnedAthleteBootMarkers? = nil) {
+         bootMarkers: ReplaySkinnedAthleteBootMarkers? = nil,
+         numberSurface: ReplaySkinnedNumberSurface? = nil,
+         neckBridge: ModelEntity? = nil) {
         self.detail = detail
         self.root = root
         self.skinRoot = skinRoot
@@ -302,6 +389,8 @@ final class ReplaySkinnedAthleteInstance {
         self.motion = motion
         self.contactSurface = contactSurface
         self.bootMarkers = bootMarkers
+        self.numberSurface = numberSurface
+        self.neckBridge = neckBridge
         pose = motion.makePoseBuffer()
         footballPose = ReplaySkinnedAthleteFootballPose(motion: motion, bootMarkers: bootMarkers)
         impactPose = ReplaySkinnedAthleteImpactPose(motion: motion, contactSurface: contactSurface)
@@ -320,9 +409,8 @@ final class ReplaySkinnedAthleteInstance {
         let restRotation = simd_quatf(motion.restPose.modelSpaceTransforms[chest])
         inverseRestChestRotation = restRotation.inverse
         restHeadRotation = simd_quatf(motion.restPose.modelSpaceTransforms[headIndex])
-        // The Tripo shirt's weighted folds protrude past its rest-pose number
-        // anchors. A small skin-local clearance avoids clipped/z-fighting
-        // digits while preserving attachment to the animated chest joint.
+        // The Tripo shirt uses weighted surface probes below. Keep the fixed
+        // clearance only as a fallback if those probes fail admission.
         let numberClearance: Float = motion.rigProfile == .tripo52 ? 0.022 : 0
         let numberNormal = restRotation.inverse.act(SIMD3<Float>(0, 0, numberClearance))
         frontLocal = Transform(scale: .init(repeating: 0.115), rotation: restRotation.inverse,
@@ -330,6 +418,17 @@ final class ReplaySkinnedAthleteInstance {
         backLocal = Transform(scale: .init(repeating: 0.23),
                               rotation: restRotation.inverse * simd_quatf(angle: .pi, axis: [0, 1, 0]),
                               translation: motion.numberAnchors.back - numberNormal).matrix
+    }
+
+    /// Horizontal head direction in the player's unfaced local space. The
+    /// caller composes player facing; this reads the same final FK as the skin.
+    func headForwardInPlayerLocalSpace() -> SIMD3<Float>? {
+        let headRotation = simd_quatf(pose.modelSpaceTransforms[headIndex])
+        let forward = simd_normalize(headRotation * restHeadRotation.inverse).act(SIMD3<Float>(0, 0, 1))
+        let planar = SIMD3<Float>(forward.x * root.scale.x, 0, forward.z * root.scale.z)
+        let length = simd_length(planar)
+        guard length.isFinite, length > 0.1 else { return nil }
+        return planar / length
     }
 
     /// Supplied locomotion is authoritative by default, including deliberate
@@ -385,7 +484,10 @@ final class ReplaySkinnedAthleteInstance {
         #endif
         motion.sample(time: time, locomotionEffort: upperBodyEffort,
                       gaitPhase: gaitPhase, slowRunWeight: slowWeight,
-                      rebuildingModelSpace: false, into: &pose)
+                      rebuildingModelSpace: false,
+                      smoothCervical: stationaryPose == nil && impact == nil
+                          && ballAction == nil && interaction == nil,
+                      into: &pose)
         #if DEBUG
         poseStageObserverForTesting?(.source, pose)
         #endif
@@ -578,9 +680,31 @@ final class ReplaySkinnedAthleteInstance {
                                           translation: pose.translations[index])
         }
         model.jointTransforms = transforms
+        if let neckBridge {
+            let neck4 = pose.modelSpaceTransforms[neckIndex].columns.3
+            let head4 = pose.modelSpaceTransforms[headIndex].columns.3
+            let neck = SIMD3(neck4.x, neck4.y, neck4.z)
+            let head = SIMD3(head4.x, head4.y, head4.z)
+            let axis = head - neck
+            let length = simd_length(axis)
+            if length.isFinite && length > 0.05 && length < 0.25 {
+                neckBridge.position = (neck + head) * 0.5
+                neckBridge.orientation = simd_quatf(from: [0, 1, 0], to: axis / length)
+                neckBridge.scale = [1, length + 0.09, 1]
+            }
+        }
         let chest = pose.modelSpaceTransforms[motion.numberAnchors.jointIndex]
-        front.transform = Transform(matrix: chest * frontLocal)
-        back.transform = Transform(matrix: chest * backLocal)
+        var resolvedFront = frontLocal, resolvedBack = backLocal
+        if let numberSurface {
+            let frontOffset = numberSurface.offset(forFront: true, pose: pose, chest: chest,
+                anchor: motion.numberAnchors.front, restInverse: inverseRestChestRotation) - 0.022
+            let backOffset = numberSurface.offset(forFront: false, pose: pose, chest: chest,
+                anchor: motion.numberAnchors.back, restInverse: inverseRestChestRotation) + 0.022
+            resolvedFront.columns.3 += SIMD4(inverseRestChestRotation.act([0, 0, frontOffset]), 0)
+            resolvedBack.columns.3 += SIMD4(inverseRestChestRotation.act([0, 0, backOffset]), 0)
+        }
+        front.transform = Transform(matrix: chest * resolvedFront)
+        back.transform = Transform(matrix: chest * resolvedBack)
         skinRoot.position.y = -motion.geometry.restMinY
         return true
     }

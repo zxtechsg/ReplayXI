@@ -4,6 +4,14 @@
 <dict>
 	<key>CFBundleDisplayName</key>
 	<string>Replay XI</string>
+	<key>NSHandsTrackingUsageDescription</key>
+	<string>Replay XI uses hand pinches to move and resize the replay pitch. Hand data stays on this device.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Connect to Replay XI Coach on your local network for live playback and annotation control.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_replayxi-coach._tcp</string>
+	</array>
 	<key>NSWorldSensingUsageDescription</key>
 	<string>Replay XI detects floors and tables so you can place the replay pitch on a real surface. Room data stays on this device.</string>
 	<key>UIApplicationSceneManifest</key>

@@ -81,6 +81,9 @@ final class ReplayStore {
     var followsCoach = true
     var isLocallyPaused = false
     var localRole: SquadRole = .coach
+    /// Render-owned, transient pitch-local ball sample for the Mac preview.
+    /// Never saved, shared via Group Activities, or observed at frame rate.
+    @ObservationIgnored var macRenderedBallSample: (scenarioID: String, time: TimeInterval, position: SIMD3<Float>)? = nil
     private(set) var isCollaborationActive = false
     /// A coach may inspect a tapped player locally before deliberately sharing
     /// that POV. Shared snapshots preserve the last published squad view while
@@ -584,7 +587,7 @@ final class ReplayStore {
     /// coach can see, before any endpoint or curve control changes it.
     func editableCoachMarkCurve(_ mark: CoachMark, at time: TimeInterval) -> CoachMarkCurve {
         let pose = mark.sampled(at: time)
-        if let curve = pose.curve, curve.bendBearingDegrees != nil { return curve }
+        if let curve = pose.curve, curve.hasFixedControlFrame { return curve }
         let geometry = presentedCoachMarkGeometry(mark, at: time)
         let curve = pose.curve ?? .initial(start: geometry.start, end: geometry.end)
         return curve.stabilized(start: geometry.start, end: geometry.end)
@@ -1084,6 +1087,80 @@ final class ReplayStore {
         statusMessage = "\(selectedTool.title) annotation added"
         emitSnapshot()
         return mark
+    }
+
+    /// One desktop edit uses the same validation, history and autosave as a
+    /// spatial edit. Network services never assign the marks array directly.
+    @discardableResult
+    func addMacCoachMark(kind: CoachMarkKind, start: PitchPoint, end: PitchPoint,
+                         startElevation: Float, endElevation: Float, label: String,
+                         curve: CoachMarkCurve? = nil) -> CoachMark? {
+        guard allowsAnnotationAuthoring(), allowsMutationOutsideEndpointPreview(),
+              allowsAnnotationAtCurrentTime(), pendingAnnotationTimingEditID == nil,
+              localRole == .coach, !isDrawing,
+              marks.count < Self.maximumSharedCoachMarks, kind != .playerLabel else { return nil }
+        let mark = CoachMark(kind: kind, start: start, end: end,
+            startElevation: startElevation, endElevation: endElevation,
+            curve: kind == .arc ? curve ?? .initial(start: start, end: end).stabilized(start: start, end: end) : nil,
+            label: label.trimmingCharacters(in: .whitespacesAndNewlines),
+            revealTime: playhead, hideTime: defaultCoachMarkHideTime)
+        guard CoachMarkGeometryPolicy.acceptsEditing(kind: kind, start: start, end: end,
+            startElevation: startElevation, endElevation: endElevation, curve: mark.curve),
+            isValidSharedMark(mark, for: selectedScenario) else {
+            statusMessage = "Choose valid annotation points and a short label"
+            return nil
+        }
+        isPlaying = false
+        marks.append(mark)
+        statusMessage = "\(kind.title) added from Mac"
+        emitSnapshot()
+        return mark
+    }
+
+    @discardableResult
+    func setMacCoachMarkPose(id: UUID, start: PitchPoint, end: PitchPoint,
+                            startElevation: Float, endElevation: Float,
+                            controlPoint: SIMD3<Float>? = nil) -> Bool {
+        guard allowsAnnotationAuthoring(), allowsMutationOutsideEndpointPreview(),
+              pendingAnnotationTimingEditID == nil, !hasActiveTimelineScrub, !isDrawing, localRole == .coach,
+              !selectedScenarioAuthoredCoachMarkIDs.contains(id),
+              let index = marks.firstIndex(where: { $0.id == id }),
+              marks[index].kind.requiresTwoPitchPoints else { return false }
+        let mark = marks[index]
+        guard allowsCoachMarkPoseRecording(mark) else { return false }
+        var replacement = markReplacingGeometry(mark, start: start, end: end,
+            startElevation: startElevation, endElevation: endElevation, resolvingTrackOffsetsAt: playhead)
+        if let controlPoint {
+            guard mark.kind == .arc, Self.isValidArcControlPoint(controlPoint) else { return false }
+            replacement = markReplacingGeometry(mark, start: start, end: end,
+                curve: replacement.resolvedCurve.settingControlPoint(controlPoint, for: replacement),
+                startElevation: startElevation, endElevation: endElevation, resolvingTrackOffsetsAt: playhead)
+        }
+        guard replacement != mark,
+              CoachMarkGeometryPolicy.acceptsEditing(kind: mark.kind, start: start, end: end,
+                startElevation: startElevation, endElevation: endElevation, curve: replacement.curve),
+              allowsSafeArcKeyframeIntervals(replacement),
+              isValidSharedMark(replacement, for: selectedScenario) else { return false }
+        marks[index] = replacement
+        isPlaying = false
+        statusMessage = "3D annotation updated"
+        emitSnapshot()
+        return true
+    }
+
+    @discardableResult
+    func updateCoachMarkArcControlPoint(id: UUID, point: SIMD3<Float>) -> Bool {
+        guard let mark = marks.first(where: { $0.id == id && $0.kind == .arc }) else { return false }
+        let pose = mark.sampled(at: playhead)
+        let geometry = presentedCoachMarkGeometry(mark, at: playhead)
+        return setMacCoachMarkPose(id: id, start: geometry.start, end: geometry.end,
+            startElevation: pose.resolvedStartElevation, endElevation: pose.resolvedEndElevation,
+            controlPoint: point)
+    }
+
+    private static func isValidArcControlPoint(_ point: SIMD3<Float>) -> Bool {
+        isPointOnPitch(PitchPoint(x: point.x, z: point.z))
+            && point.y.isFinite && (0...CoachMarkCurve.maximumLift * 3).contains(point.y)
     }
 
     /// Creates a complete player-attached annotation from one player tap. The
@@ -2024,10 +2101,7 @@ final class ReplayStore {
               bendDelta.isFinite, liftDelta.isFinite,
               let mark = marks.first(where: { $0.id == id }), mark.kind == .arc else { return false }
         let baseline = editableCoachMarkCurve(mark, at: playhead)
-        var curve = baseline
-        curve.bend += bendDelta
-        curve.lift += liftDelta
-        curve = curve.clamped()
+        let curve = baseline.offsetting(horizontal: bendDelta, vertical: liftDelta)
         guard curve != baseline else { return false }
         let resolved = presentedCoachMarkGeometry(mark, at: playhead)
         return updateCoachMarkGeometry(id: id, start: resolved.start, end: resolved.end, curve: curve)
@@ -3216,7 +3290,7 @@ final class ReplayStore {
         ) && CoachMarkGeometryPolicy.accepts(elevation: mark.endElevation)
         // Preserve permissive legacy payloads. Newly framed arcs must have a
         // readable 3D chord, including their stored fallback when tracked.
-        let hasValidFramedArc = mark.kind != .arc || mark.curve?.bendBearingDegrees == nil
+        let hasValidFramedArc = mark.kind != .arc || mark.curve?.hasFixedControlFrame != true
             || CoachMarkGeometryPolicy.acceptsEditing(kind: mark.kind,
                 start: mark.start, end: mark.end, startElevation: mark.startElevation,
                 endElevation: mark.endElevation, curve: mark.curve)
@@ -3352,6 +3426,8 @@ final class ReplayStore {
         start: PitchPoint,
         end: PitchPoint,
         curve: CoachMarkCurve? = nil,
+        startElevation: Float? = nil,
+        endElevation: Float? = nil,
         resolvingTrackOffsetsAt time: TimeInterval? = nil
     ) -> CoachMark {
         func adjustedAnchor(
@@ -3375,7 +3451,9 @@ final class ReplayStore {
         let original = pendingCoachMarkGeometryBaselines[mark.id].map {
             markRestoringGeometry(mark, from: $0)
         } ?? mark
-        if isUnchangedArcGeometry(original, start: start, end: end, curve: curve) { return original }
+        if (startElevation == nil || startElevation == posed.resolvedStartElevation),
+           (endElevation == nil || endElevation == posed.resolvedEndElevation),
+           isUnchangedArcGeometry(original, start: start, end: end, curve: curve) { return original }
         var editedCurve = curve ?? posed.curve
         if mark.kind == .arc {
             let baseline = editableCoachMarkCurve(mark, at: editTime)
@@ -3391,8 +3469,8 @@ final class ReplayStore {
             kind: mark.kind,
             start: start,
             end: end,
-            startElevation: posed.startElevation,
-            endElevation: posed.endElevation,
+            startElevation: startElevation ?? posed.startElevation,
+            endElevation: endElevation ?? posed.endElevation,
             curve: editedCurve,
             label: mark.label,
             revealTime: mark.revealTime,

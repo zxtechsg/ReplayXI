@@ -7,7 +7,7 @@ enum ReplayAthleteReviewLayout {
     /// including their appearance scales and locomotion. It stays constant as
     /// heads turn: labels must not bob with animation or query mesh bounds each
     /// frame. This is a presentation allowance, not a human-height claim.
-    static let headClearanceEnvelope: Float = 2.30
+    static let headClearanceEnvelope: Float = 2.05
 
     static func focusScale(
         viewMode: ReplayViewMode,
@@ -26,6 +26,6 @@ enum ReplayAthleteReviewLayout {
         // The selected outline is the tallest visible tag piece (0.38 m).
         // Reserve its lower half even for compact tags; selection then changes
         // neither tag height nor its minimum clearance.
-        headClearanceEnvelope * athleteScale + 0.19 * labelScale + 0.10
+        headClearanceEnvelope * athleteScale + 0.19 * labelScale + 0.15
     }
 }

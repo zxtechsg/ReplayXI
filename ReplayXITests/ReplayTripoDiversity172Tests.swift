@@ -28,7 +28,7 @@ final class ReplayTripoDiversity172Tests: XCTestCase {
 
     private func deepTrack(for team: FootballTeam, id: String = "diversity-player",
                            isGoalkeeper: Bool = false, displayName: String = "Fictional player") -> PlayerTrack {
-        // Keep the existing deterministic appearance slot: .deep is home #3 / away #1.
+        // These numbers select Player A under the geometry assignment.
         track(team: team, shirtNumber: team == .home ? 3 : 1, id: id,
               isGoalkeeper: isGoalkeeper, displayName: displayName)
     }
@@ -39,10 +39,15 @@ final class ReplayTripoDiversity172Tests: XCTestCase {
                 let first = track(team: team, shirtNumber: shirtNumber, id: "stable-a")
                 let renamed = track(team: team, shirtNumber: shirtNumber, id: "stable-b",
                                     displayName: "Another fictional name")
-                let expected = ReplayTripoAppearance.palette(for: first) == .deep
+                let expected = !shirtNumber.isMultiple(of: 2)
                 XCTAssertEqual(ReplayTripoAthleteProvider.prefersDiverseGeometry(for: first), expected)
                 XCTAssertEqual(ReplayTripoAthleteProvider.prefersDiverseGeometry(for: renamed), expected,
                                "Selection must not depend on a player name or ID")
+
+                let sameNumberOtherTeam = track(team: team == .home ? .away : .home,
+                    shirtNumber: shirtNumber, id: "stable-other-team")
+                XCTAssertEqual(ReplayTripoAthleteProvider.prefersDiverseGeometry(for: sameNumberOtherTeam),
+                               expected, "Kit palette must not determine geometry")
 
                 let keeper = deepTrack(for: team, id: "keeper-\(team.rawValue)", isGoalkeeper: true)
                 XCTAssertTrue(ReplayTripoAthleteProvider.prefersDiverseGeometry(for: keeper),
@@ -112,6 +117,19 @@ final class ReplayTripoDiversity172Tests: XCTestCase {
                 seek(3.1); seek(0.4); seek(1.25)
                 XCTAssertEqual(skin.model.jointTransforms, expected,
                                "Seeking backwards must reproduce the same pose")
+
+                let bridge = try XCTUnwrap(skin.neckBridge)
+                let neckIndex = try XCTUnwrap(skin.motion.semanticJointIndices["neck"])
+                let headIndex = try XCTUnwrap(skin.motion.semanticJointIndices["head"])
+                let neck4 = skin.pose.modelSpaceTransforms[neckIndex].columns.3
+                let head4 = skin.pose.modelSpaceTransforms[headIndex].columns.3
+                let neck = SIMD3<Float>(neck4.x, neck4.y, neck4.z)
+                let headPoint = SIMD3<Float>(head4.x, head4.y, head4.z)
+                XCTAssertLessThan(simd_distance(bridge.position, (neck + headPoint) * 0.5), 0.000_01)
+                XCTAssertEqual(bridge.scale.y, simd_distance(neck, headPoint) + 0.09, accuracy: 0.000_01)
+                XCTAssertGreaterThan(bridge.scale.y, 0.09)
+                XCTAssertLessThan(bridge.scale.y, 0.34,
+                                  "The bridge cannot grow into a disconnected long tube")
 
                 let head = try XCTUnwrap(skin.motion.semanticJointIndices["head"])
                 let leftShoulder = try XCTUnwrap(skin.motion.semanticJointIndices["leftShoulder"])
@@ -256,14 +274,17 @@ final class ReplayTripoDiversity172Tests: XCTestCase {
             XCTAssertLessThanOrEqual(abs(simd_distance(nearestHead, header.contactBallWorldPosition)
                 - ReplayNativeBallPhysics.radius), 0.03,
                 "\(detail) actual weighted head surface must meet the ball")
+            let surface = try XCTUnwrap(skin.numberSurface)
             let chest = skin.pose.modelSpaceTransforms[skin.motion.numberAnchors.jointIndex]
             let restChestRotation = simd_quatf(skin.motion.restPose.modelSpaceTransforms[
                 skin.motion.numberAnchors.jointIndex]).inverse
-            let frontAnchor = skin.motion.numberAnchors.front
-                + restChestRotation.act(SIMD3<Float>(0, 0, 0.022))
-            let front = chest * SIMD4(frontAnchor, 1)
-            XCTAssertLessThan(simd_distance(skin.front.position, SIMD3(front.x, front.y, front.z)), 0.000_01,
-                              "\(detail) front number must stay attached to the PlayerA chest")
+            let normal = simd_quatf(chest).act(restChestRotation.act([0, 0, 1]))
+            let frontDepth = surface.front.map {
+                simd_dot($0.position(in: skin.pose) - skin.front.position, normal)
+            }.max() ?? 1
+            XCTAssertLessThanOrEqual(frontDepth, -0.003,
+                "\(detail) front number must track Player A's weighted shirt")
+            XCTAssertNotNil(skin.neckBridge, "Player A's disconnected source head needs a visible FK bridge")
 
             let keeperSkin = try ReplayTripoAthleteProvider.makeDiverse(for: goalkeeper, detail: detail)
             XCTAssertTrue(keeperSkin.update(at: 1, track: goalkeeper,

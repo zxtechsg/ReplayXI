@@ -31,6 +31,10 @@ struct FootballImmersiveView: View {
     @State private var controlPlacementRevision = 0
     @State private var workspaceMove = PlaybackWorkspaceMove()
     @State private var movingWorkspace: Entity?
+    @State private var worldTracking = ReplayWorldGestureTracking()
+    @State private var povReference: ReplayPOVReference?
+    @State private var currentMatchRoot: Entity?
+    @State private var worldPlacement = ReplayWorldPlacement()
     @State private var pitchTrackingOwner = UUID()
     @State private var nativeAdmission = NativeReplaySceneAdmission()
     @State private var nativePreparationRetry = 0
@@ -107,6 +111,8 @@ struct FootballImmersiveView: View {
             }
             if let root {
                 updateMatchRoot(root)
+            } else {
+                currentMatchRoot = nil
             }
             updateEnvironment(in: content, matchRoot: root)
             addAttachments(
@@ -136,6 +142,8 @@ struct FootballImmersiveView: View {
 
             if let root {
                 updateMatchRoot(root)
+            } else {
+                currentMatchRoot = nil
             }
             updateEnvironment(in: content, matchRoot: root)
             // Recenter only on explicit request, never on head or player motion.
@@ -199,6 +207,7 @@ struct FootballImmersiveView: View {
                         showsPlaybackAnnotations: $showsPlaybackAnnotations,
                         emphasizesBall: $emphasizesBall,
                         recenterControls: recenterControls,
+                        resetWorldPlacement: resetWorldPlacement,
                         surfaceControls: pitchSurfaceControls
                     )
                     .frame(width: viewHUDLayout.attachmentWidth)
@@ -289,6 +298,28 @@ struct FootballImmersiveView: View {
                 sharedSpace.stopTracking(for: pitchTrackingOwner)
             }
         }
+        .task(id: store.selectedScenario.kind) {
+            // Shape Lab already owns a world-tracking session for its physical
+            // stations. Its positional view has no two-hand pitch control.
+            guard store.selectedScenario.kind != .shapeLab else { return }
+            let tracking = ReplayWorldGestureTracking()
+            worldTracking = tracking
+            await tracking.start()
+            defer { tracking.stop() }
+            while !Task.isCancelled {
+                if store.roomPresentation.owns(roomPresentationID), !store.isClosingImmersive {
+                    capturePOVReferenceIfNeeded()
+                    let canAdjust = canAdjustWorldPlacement
+                    let pinches = canAdjust ? tracking.pinchMidpoints() : nil
+                    let mayStartPlacement = canAdjust && pinches != nil
+                    if worldPlacement.isActive || mayStartPlacement {
+                        worldPlacement.update(left: pinches?.0, right: pinches?.1,
+                                              allowed: canAdjust)
+                    }
+                }
+                try? await Task.sleep(for: .milliseconds(40))
+            }
+        }
         .task {
             let clock = ContinuousClock()
             var previous = clock.now
@@ -316,6 +347,9 @@ struct FootballImmersiveView: View {
             annotationEntry?.cancel(roomID: roomPresentationID)
             nativeAdmission.cancel()
             cancelWorkspaceMove()
+            worldPlacement.update(left: nil, right: nil, allowed: false)
+            povReference = nil
+            currentMatchRoot = nil
             accessibilityActivationSubscription?.cancel()
             accessibilityActivationSubscription = nil
             // An old view must not pause, close or edit a newly opened room.
@@ -326,6 +360,7 @@ struct FootballImmersiveView: View {
                 sharedSpace.stopTracking(for: pitchTrackingOwner)
                 return
             }
+            store.macRenderedBallSample = nil
             cancelInterruptedSpatialInteraction()
             if store.isDrawing {
                 store.cancelDrawing()
@@ -354,10 +389,25 @@ struct FootballImmersiveView: View {
         }
         .onChange(of: store.selectedScenarioID) { _, _ in
             cancelSurfaceSearch()
+            if store.roomPresentation.owns(roomPresentationID) {
+                store.macRenderedBallSample = nil
+            }
             cancelWorkspaceMove(rejectCurrentGesture: workspaceMove.isActive)
             annotationStroke = nil
             annotationHandleDrag.cancelCurrent(in: store)
             selectedAnnotationID = nil
+            povReference = nil
+            currentMatchRoot = nil
+            worldPlacement.reset()
+        }
+        .onChange(of: store.viewMode) { _, _ in
+            povReference = nil
+            worldPlacement.update(left: nil, right: nil, allowed: false)
+            capturePOVReferenceIfNeeded()
+        }
+        .onChange(of: store.activePerspectiveID) { _, _ in
+            povReference = nil
+            capturePOVReferenceIfNeeded()
         }
         .onChange(of: controlDeckPresetRawValue) { _, _ in
             cancelWorkspaceMove(rejectCurrentGesture: workspaceMove.isActive)
@@ -486,9 +536,19 @@ struct FootballImmersiveView: View {
         if stadium?.isEnabled != enabled { stadium?.isEnabled = enabled }
         if lighting?.isEnabled != enabled { lighting?.isEnabled = enabled }
         guard enabled, let stadium else { return }
-        // POV shares pitch coordinates. Table/touchline keeps the full-size
-        // bowl around the wearer; miniature front stands hide annotation tools.
-        let wanted = store.viewMode == .firstPerson ? (matchRoot?.transform ?? .identity) : .identity
+        // The stadium follows POV directly. In review views it scales and
+        // moves around the pitch centre, while its default size stays intact.
+        let wanted: Transform
+        if store.viewMode == .firstPerson {
+            wanted = matchRoot?.transform ?? .identity
+        } else if let matchRoot {
+            let pivot = matchRoot.position - worldPlacement.offset
+            wanted = Transform(scale: SIMD3<Float>(repeating: worldPlacement.scale),
+                               rotation: simd_quatf(angle: 0, axis: [0, 1, 0]),
+                               translation: worldPlacement.offset + pivot * (1 - worldPlacement.scale))
+        } else {
+            wanted = .identity
+        }
         if stadium.transform != wanted { stadium.transform = wanted }
     }
 
@@ -623,9 +683,36 @@ struct FootballImmersiveView: View {
             emphasizesBall: emphasizesBall,
             playerDetail: playerDetail
         )
+        if currentMatchRoot !== root { currentMatchRoot = root }
+        // The Mac overview reads the exact local ball pose used by the scene.
+        // This pitch-space sample is scalar state and never invalidates the UI.
+        if store.roomPresentation.owns(roomPresentationID) {
+            if let ball = root.children.first(where: { $0.name == "ball" && $0.isEnabled }) {
+                store.macRenderedBallSample = (
+                    scenarioID: store.selectedScenarioID,
+                    time: store.playhead,
+                    position: ball.position
+                )
+            } else {
+                store.macRenderedBallSample = nil
+            }
+        }
         if surfaceModeIsAvailable, let surfacePlacement {
             root.transform = Transform(matrix: surfacePlacement.worldTransform)
             root.scale = SIMD3<Float>(repeating: 0.0255 * surfacePlacement.scaleFactor)
+        } else if store.viewMode == .firstPerson,
+                  let povReference,
+                  povReference.scenarioID == store.selectedScenarioID,
+                  povReference.playerID == store.activePerspectiveID,
+                  let player = store.activePerspective {
+            // The captured rotation stays fixed. Only player translation is
+            // sampled on later frames, leaving headset free look untouched.
+            let playerPoint = store.presentedPlayerPose(for: player, at: store.playhead).position
+            let rotation = simd_quatf(angle: povReference.rootYaw, axis: [0, 1, 0])
+            root.orientation = rotation
+            root.position = -rotation.act(SIMD3<Float>(playerPoint.x, 0, playerPoint.z))
+        } else if store.viewMode == .tacticalTable || store.viewMode == .touchline {
+            root.transform = ReplayWorldPlacement.apply(worldPlacement, to: root.transform)
         }
         applyLocalOverlayVisibility(to: root)
     }
@@ -660,6 +747,122 @@ struct FootballImmersiveView: View {
             && !workspaceMove.isActive && !store.isDrawing && annotationStroke == nil
             && !store.hasActiveTimelineScrub && !store.hasActiveCoachMarkGeometryPreview
             && store.pendingAnnotationTimingEditID == nil
+    }
+
+    private var canAdjustWorldPlacement: Bool {
+        acceptsMatchInteraction && store.canChangePlaybackView
+            && (store.viewMode == .tacticalTable || store.viewMode == .touchline)
+            && surfacePlacement == nil && surfaceScanRequest == nil
+            && !workspaceMove.isActive
+            && !store.isDrawing && annotationStroke == nil
+            && !store.hasActiveTimelineScrub && !store.hasActiveCoachMarkGeometryPreview
+            && store.pendingAnnotationTimingEditID == nil
+            && store.triangleLockMode != .place
+    }
+
+    private func capturePOVReferenceIfNeeded() {
+        guard store.viewMode == .firstPerson, acceptsMatchInteraction,
+              let player = store.activePerspective else { return }
+        if povReference?.scenarioID == store.selectedScenarioID,
+           povReference?.playerID == player.id { return }
+        guard let currentMatchRoot,
+              currentMatchRoot.name == "match-root-\(store.selectedScenarioID)" else { return }
+        guard let deviceYaw = worldTracking.deviceYaw() else { return }
+        let time = store.playhead
+        let pose = store.presentedPlayerPose(for: player, at: time)
+        let recording = preparedNativeRecording
+        let ball = recording?.pose(at: time) ?? store.selectedScenario.ball.pose(at: time)
+        let ballPoint = SIMD3<Float>(ball.position.x, ball.height, ball.position.z)
+        let stationaryPose = store.playerPresentation.stationaryPose(
+            for: player, at: time, facing: ball.position
+        )
+        let locomotion = stationaryPose == nil
+            ? player.locomotion(at: time) : player.stationaryLocomotion
+        let nativeInputs = recording.flatMap { _ in
+            PitchSceneFactory.povMotionInputs(
+                in: currentMatchRoot, scenarioID: store.selectedScenarioID,
+                player: player, at: time, locomotion: locomotion
+            )
+        }
+        // A newly selected study may have a prepared recording before its
+        // matching scene cache exists. Retry next frame; do not lock a guess.
+        if recording != nil && nativeInputs == nil { return }
+        let lookTarget: SIMD3<Float>
+        if recording != nil && stationaryPose == nil {
+            let poses = Dictionary(uniqueKeysWithValues: store.selectedScenario.players.map {
+                ($0.id, store.presentedPlayerPose(for: $0, at: time))
+            })
+            lookTarget = ReplayAthleteTacticalAttention.target(
+                for: player, at: time, pose: pose, ball: ballPoint,
+                players: store.selectedScenario.players, poses: poses,
+                contacts: nativeInputs?.contacts ?? []
+            )
+        } else {
+            lookTarget = ballPoint
+        }
+        let look = ReplayAthleteMotion.lookPose(
+            for: player, at: time,
+            targetWorldPosition: lookTarget,
+            presentationPose: pose
+        )
+        let headForward = renderedHeadForwardAtPOVEntry(
+            for: player, at: time, pose: pose, ballPoint: ballPoint,
+            lookTarget: lookTarget, locomotion: locomotion,
+            stationaryPose: stationaryPose, recording: recording,
+            nativeInputs: nativeInputs
+        )
+        guard let yaw = ReplayPOVReference.rootYaw(
+            deviceYaw: deviceYaw, playerFacingDegrees: pose.facingDegrees,
+            renderedHeadForward: headForward,
+            fallbackLookYawRadians: look.neckYawRadians + look.headYawRadians
+        ) else { return }
+        povReference = ReplayPOVReference(scenarioID: store.selectedScenarioID,
+                                           playerID: player.id, rootYaw: yaw)
+    }
+
+    /// POV hides the wearer's rig, so sample a detached prepared skin exactly
+    /// once when the player changes. Never load/prewarm a model from this path.
+    private func renderedHeadForwardAtPOVEntry(
+        for player: PlayerTrack, at time: TimeInterval, pose: PlayerPose,
+        ballPoint: SIMD3<Float>, lookTarget: SIMD3<Float>,
+        locomotion: PlayerLocomotionSample, stationaryPose: PlayerPose?,
+        recording: ReplayNativeBallPhysics.Recording?,
+        nativeInputs: PitchSceneFactory.POVMotionInputs?
+    ) -> SIMD3<Float>? {
+        guard ReplayTripoAthleteProvider.preferredIsReady,
+              let skin = try? ReplayTripoAthleteProvider.makePreferred(for: player, detail: .near)
+        else { return nil }
+        let interaction = nativeInputs?.interaction
+        let ballAction = recording == nil
+            ? ReplayAthleteMotion.ballActionPose(
+                for: player, ballTrack: store.selectedScenario.ball, at: time
+            ) : nil
+        let actionInfluence = max(ballAction?.influence ?? 0,
+            ReplayAthleteInteractionPose.sample(cue: interaction, at: time,
+                track: player, presentationPose: pose)?.influence ?? 0)
+        let keeperReadiness = player.isGoalkeeper && recording != nil && stationaryPose == nil
+            ? ReplayGoalkeeperReadiness.sample(
+                track: player, at: time, presentationPose: pose, ballPosition: ballPoint,
+                shot: nativeInputs?.shot,
+                actionInfluence: actionInfluence, enabled: true, locomotion: locomotion
+            ) : nil
+        guard skin.update(
+            at: time, track: player, locomotion: locomotion,
+            lookTarget: stationaryPose == nil ? lookTarget : ballPoint,
+            ballAction: ballAction, stationaryPose: stationaryPose,
+            interaction: interaction, presentationPose: recording == nil ? nil : pose,
+            goalkeeperReadiness: keeperReadiness,
+            allowsTrackLocomotionSampling: stationaryPose == nil,
+            slowRunWeight: nativeInputs?.slowRunWeight ?? 0,
+            armCutAdmission: nativeInputs?.armCutAdmission
+        ) else { return nil }
+        return skin.headForwardInPlayerLocalSpace()
+    }
+
+    private func resetWorldPlacement() {
+        guard acceptsMatchInteraction, !worldPlacement.isActive else { return }
+        worldPlacement.reset()
+        store.statusMessage = "Pitch and stadium reset to their default placement"
     }
 
     private func findPitchSurface() {
@@ -714,6 +917,7 @@ struct FootballImmersiveView: View {
             return
         }
         store.setPlaying(false, broadcast: false)
+        worldPlacement.reset()
         surfacePlacement = current
         surfaceStatusText = "Placed on \(current.surfaceKind.rawValue.lowercased()). Controls stay in place."
         surfaceCandidate = nil
@@ -797,6 +1001,7 @@ struct FootballImmersiveView: View {
                 }
                 .onChanged { value in
                     guard acceptsRoomInteraction else { return }
+                    guard !worldPlacement.isActive else { return }
                     if handleWorkspaceDragChanged(value) { return }
                     guard acceptsMatchInteraction else { return }
                     guard !workspaceMove.isActive else { return }
@@ -812,7 +1017,8 @@ struct FootballImmersiveView: View {
     private func handleSpatialTap(
         _ value: EntityTargetValue<SpatialTapGesture.Value>
     ) {
-        guard acceptsMatchInteraction, !workspaceMove.isActive else { return }
+        guard acceptsMatchInteraction, !workspaceMove.isActive,
+              !worldPlacement.isActive else { return }
         if PlaybackWorkspaceGrabHandle.ancestor(of: value.entity) != nil { return }
         guard PlaybackSpatialInteractionPolicy.acceptsPitchInteraction(
             hasActiveEndpointPreview: store.hasActiveCoachMarkGeometryPreview,
@@ -905,9 +1111,21 @@ struct FootballImmersiveView: View {
     ) {
         guard showsPlaybackAnnotations,
               let target = AnnotationSceneAffordance.targetAncestor(of: value.entity),
-              target.role == .start || target.role == .end,
+              target.role == .start || target.role == .end || target.role == .control,
               let matchRoot = matchRootAncestor(of: value.entity)
         else { return }
+
+        if target.role == .control {
+            let point = value.convert(value.location3D, from: .local, to: matchRoot)
+            let start = value.convert(value.startLocation3D, from: .local, to: matchRoot)
+            guard annotationHandleDrag.preview(
+                handleInputSample(value, target: target),
+                controlLocation: SIMD3<Float>(point.x, point.y, point.z),
+                startLocation: SIMD3<Float>(start.x, start.y, start.z), in: store
+            ) else { return }
+            selectedAnnotationID = target.markID
+            return
+        }
 
         guard let point = pitchPoint(
             for: value,
@@ -923,6 +1141,14 @@ struct FootballImmersiveView: View {
     ) {
         guard showsPlaybackAnnotations,
               let target = AnnotationSceneAffordance.targetAncestor(of: value.entity) else { return }
+        if target.role == .control {
+            let point = matchRootAncestor(of: value.entity).map {
+                value.convert(value.location3D, from: .local, to: $0)
+            }.map { SIMD3<Float>($0.x, $0.y, $0.z) }
+            _ = annotationHandleDrag.finish(handleInputSample(value, target: target),
+                                            controlLocation: point, in: store)
+            return
+        }
         let point = matchRootAncestor(of: value.entity).flatMap {
             pitchPoint(for: value, fallback3D: value.location3D, in: $0)
         }
@@ -1020,13 +1246,20 @@ struct FootballImmersiveView: View {
     private func handleSpatialDragEnded(
         _ value: EntityTargetValue<DragGesture.Value>
     ) {
+        if worldPlacement.isActive { return }
         if workspaceMove.isActive || PlaybackWorkspaceGrabHandle.ancestor(of: value.entity) != nil {
             finishWorkspaceMove(value)
             return
         }
         guard acceptsMatchInteraction else {
             if let target = AnnotationSceneAffordance.targetAncestor(of: value.entity) {
-                _ = annotationHandleDrag.finish(handleInputSample(value, target: target), point: nil, in: store)
+                if target.role == .control {
+                    _ = annotationHandleDrag.finish(handleInputSample(value, target: target),
+                                                    controlLocation: nil, in: store)
+                } else {
+                    _ = annotationHandleDrag.finish(handleInputSample(value, target: target),
+                                                    point: nil, in: store)
+                }
             }
             annotationStroke = nil
             return
@@ -2148,6 +2381,20 @@ private struct ImmersiveControlDeck: View {
                   let mark = store.marks.last else { return }
             guard !PlaybackAnnotationActionsRoute.keepsSelectedInsertion(
                 insertedID: mark.id, selectedID: selectedAnnotationID, panel: inlinePanel) else { return }
+            if mark.kind == .arc {
+                // An arc has a third spatial point. Expose it immediately
+                // after start/end placement instead of hiding it in Events.
+                selectedAnnotationID = mark.id
+                inlinePanel = .annotationGeometry(mark.id)
+                showsPlaybackAnnotations = true
+                showsAnnotationTools = false
+                showsDecisionStrip = false
+                showsEventStrip = false
+                showsPlayerGrid = false
+                showsToolsShelf = false
+                annotationConfirmation = "MOVE CURVE · SET THE THIRD POINT"
+                return
+            }
             annotationConfirmation = "\(mark.kind.title.uppercased()) SAVED · \(formatTime(mark.revealTime))"
             // Saving is the end of the spatial gesture, not an instruction to
             // open another editing workflow. Keep the compact draw shelf ready
@@ -3097,10 +3344,14 @@ private struct ImmersiveControlDeck: View {
                 annotationEndpointGeometryRow(mark)
                 if mark.kind == .arc {
                     Divider()
+                    AnnotationArcPointEditor(markID: mark.id, color: annotationColor(for: mark.kind))
+                        .id(mark.id)
+                    DisclosureGroup("Curve & angle") {
                     AnnotationCurveAdjustmentPad(markID: mark.id, color: annotationColor(for: mark.kind)) {
                         annotationConfirmation = "CURVE UPDATED"
                     }
                     .id(mark.id)
+                    }
                 }
             }
         }

@@ -19,10 +19,7 @@ final class AnnotationCurveAdjustmentController {
             switch self {
             case .shape: return curve.adjusting(amountDelta: horizontal, angleDelta: vertical)
             case .offset:
-                var adjusted = curve
-                adjusted.bend += horizontal
-                adjusted.lift += vertical
-                return adjusted.clamped()
+                return curve.offsetting(horizontal: horizontal, vertical: vertical)
             }
         }
     }

@@ -1075,7 +1075,7 @@ enum CoachMarkGeometryPolicy {
     static func acceptsEditing(kind: CoachMarkKind, start: PitchPoint, end: PitchPoint,
                                startElevation: Float? = nil, endElevation: Float? = nil,
                                curve: CoachMarkCurve? = nil) -> Bool {
-        guard kind == .arc, let curve, curve.bendBearingDegrees != nil else {
+        guard kind == .arc, let curve, curve.hasFixedControlFrame else {
             return accepts(kind: kind, start: start, end: end)
         }
         guard curve.isValid, accepts(elevation: startElevation), accepts(elevation: endElevation),

@@ -11,6 +11,7 @@ enum AnnotationSceneTargetRole: String, Equatable, Sendable {
     case body
     case start
     case end
+    case control
     case attachedPlayer
 }
 
@@ -49,11 +50,13 @@ enum AnnotationSceneAffordance {
     private static let attachedRootName = "annotation-selection-attached-player"
     private static let startHandleName = "annotation-selection-start-handle"
     private static let endHandleName = "annotation-selection-end-handle"
+    private static let controlHandleName = "annotation-selection-control-handle"
     private static let labelOutlineName = "annotation-selection-label-outline"
     private static let stateNamePrefix = "annotation-selection-state-"
     private static let markNamePrefix = "mark-"
     private static let startTargetPrefix = "annotation-target-start-"
     private static let endTargetPrefix = "annotation-target-end-"
+    private static let controlTargetPrefix = "annotation-target-control-"
     private static let attachedTargetPrefix = "annotation-target-attached-player-"
     private static let spaceBodyTargetPrefix = "annotation-space-body-target-"
 
@@ -136,6 +139,7 @@ enum AnnotationSceneAffordance {
 
         root.addChild(makeHandle(name: startHandleName, label: "START"))
         root.addChild(makeHandle(name: endHandleName, label: "END"))
+        root.addChild(makeHandle(name: controlHandleName, label: "CURVE"))
 
         let labelOutline = ModelEntity(
             mesh: labelOutlineMesh,
@@ -403,6 +407,14 @@ enum AnnotationSceneAffordance {
         let zone = selection.children.first { $0.name == zoneRootName }
         let startHandle = selection.children.first { isStartHandleName($0.name) }
         let endHandle = selection.children.first { isEndHandleName($0.name) }
+        let controlHandle = selection.children.first { isControlHandleName($0.name) }
+        controlHandle?.isEnabled = mark.kind == .arc && isEditable
+        if mark.kind == .arc, isEditable {
+            let control = mark.resolvedCurve.controlPoint(for: mark)
+            configureHandle(controlHandle, at: PitchPoint(x: control.x, z: control.z),
+                observer: observer, scale: scale, lift: lift, elevation: control.y,
+                viewMode: viewMode, labelHeight: 0.45)
+        }
         let attached = selection.children.first { isAttachedTargetName($0.name) }
         if let outline = selection.children.first(where: { $0.name == labelOutlineName }) {
             configureLabelOutline(outline, for: mark, matching: selectedLabel)
@@ -632,7 +644,8 @@ enum AnnotationSceneAffordance {
         scale: Float,
         lift: Float,
         elevation: Float,
-        viewMode: ReplayViewMode
+        viewMode: ReplayViewMode,
+        labelHeight: Float? = nil
     ) {
         guard let handle else { return }
         let spatialLift = lift + elevation
@@ -644,7 +657,7 @@ enum AnnotationSceneAffordance {
             stem.scale = [1, stemHeight / scale, 1]
         }
         if let label = handle.children.first(where: { $0.name == "annotation-handle-label" }) {
-            let labelHeight = handleLabelHeight(for: viewMode)
+            let labelHeight = labelHeight ?? handleLabelHeight(for: viewMode)
             label.position.y = labelHeight
             label.orientation = simd_quatf(
                 angle: atan2(observer.x - point.x, observer.z - point.z),
@@ -786,6 +799,10 @@ enum AnnotationSceneAffordance {
             end.name = endTargetPrefix + mark.id.uuidString
             setAccessibility(on: end, label: "End of \(mark.kind.title) annotation", value: "Edit end point")
         }
+        if let control = selection.children.first(where: { isControlHandleName($0.name) }) {
+            control.name = controlTargetPrefix + mark.id.uuidString
+            setAccessibility(on: control, label: "Third point of arc annotation", value: "Drag in three dimensions")
+        }
         if let attached = selection.children.first(where: { isAttachedTargetName($0.name) }) {
             attached.name = attachedTargetPrefix + mark.id.uuidString
             setAccessibility(on: attached, label: "Player attached annotation", value: "Tracked player target")
@@ -816,6 +833,7 @@ enum AnnotationSceneAffordance {
         let candidates: [(String, AnnotationSceneTargetRole)] = [
             (startTargetPrefix, .start),
             (endTargetPrefix, .end),
+            (controlTargetPrefix, .control),
             (attachedTargetPrefix, .attachedPlayer)
         ]
         for (prefix, role) in candidates where name.hasPrefix(prefix) {
@@ -833,6 +851,10 @@ enum AnnotationSceneAffordance {
 
     private static func isEndHandleName(_ name: String) -> Bool {
         name == endHandleName || name.hasPrefix(endTargetPrefix)
+    }
+
+    private static func isControlHandleName(_ name: String) -> Bool {
+        name == controlHandleName || name.hasPrefix(controlTargetPrefix)
     }
 
     private static func isAttachedTargetName(_ name: String) -> Bool {

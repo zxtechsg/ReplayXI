@@ -84,7 +84,24 @@ extension CoachMark {
         }
         var resolvedCurve: CoachMarkCurve?
         if let x = a.curve, let y = b.curve {
-            if x.bendBearingDegrees == nil && y.bendBearingDegrees == nil {
+            if x.controlOffset != nil || y.controlOffset != nil {
+                if t == 0 { resolvedCurve = x }
+                else if t == 1 { resolvedCurve = y }
+                else {
+                    func control(_ frame: CoachMarkKeyframe, _ curve: CoachMarkCurve) -> SIMD3<Float> {
+                        curve.controlPoint(for: CoachMark(id: id, kind: .arc,
+                            start: frame.start, end: frame.end,
+                            startElevation: frame.startElevation, endElevation: frame.endElevation,
+                            curve: curve, label: label, revealTime: revealTime))
+                    }
+                    let c0 = control(a, x), c1 = control(b, y)
+                    let sampledMark = CoachMark(id: id, kind: .arc,
+                        start: point(a.start, b.start), end: point(a.end, b.end),
+                        startElevation: mix(a.startElevation, b.startElevation),
+                        endElevation: mix(a.endElevation, b.endElevation), label: label, revealTime: revealTime)
+                    resolvedCurve = x.settingControlPoint(c0 + (c1 - c0) * t, for: sampledMark)
+                }
+            } else if x.bendBearingDegrees == nil && y.bendBearingDegrees == nil {
                 // Saved legacy intervals keep the original arithmetic/order,
                 // including their current-chord basis and roll tie behavior.
                 resolvedCurve = CoachMarkCurve(bend: mix(x.bend, y.bend), lift: mix(x.lift, y.lift),
@@ -172,11 +189,11 @@ extension CoachMark {
             return simd_length_squared(d + t * v) >= minimum * minimum
         }
         // A lone framed key holds forever and still needs a usable roll axis.
-        for frame in frames where frame.curve?.bendBearingDegrees != nil {
+        for frame in frames where frame.curve?.hasFixedControlFrame == true {
             guard isSafe(frame, frame) else { return false }
         }
         for (a, b) in zip(frames, frames.dropFirst())
-            where a.curve?.bendBearingDegrees != nil || b.curve?.bendBearingDegrees != nil {
+            where a.curve?.hasFixedControlFrame == true || b.curve?.hasFixedControlFrame == true {
             guard isSafe(a, b) else { return false }
         }
         return true

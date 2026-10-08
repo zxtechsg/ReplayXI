@@ -28,6 +28,50 @@ final class ReplayTripoAthleteRuntimeTests: XCTestCase {
                                                     turnRateDegreesPerSecond: turn))
     }
 
+    func testNativeShirtNumberDepthDiagnostic() throws {
+        try ReplayTripoAthleteProvider.prewarm()
+        let track = try player()
+        var rows: [[String: Any]] = []
+        for detail in [ReplaySkinnedAthleteProvider.Detail.near, .lowDetail] {
+            let skin = try ReplayTripoAthleteProvider.make(for: track, detail: detail)
+            for time in [1.25, 13.6] {
+                let speed: Float = time < 2 ? 0 : 3.6
+                XCTAssertTrue(skin.update(at: time, track: track,
+                    locomotion: locomotion(track, time: time, speed: speed),
+                    lookTarget: nil, ballAction: nil,
+                    stationaryPose: speed == 0 ? track.presentationPose(at: time) : nil,
+                    allowsOffBallPose: false))
+                let contents = try XCTUnwrap(skin.model.model).mesh.contents
+                let part = try XCTUnwrap(contents.models.first?.parts.first)
+                let skeleton = try XCTUnwrap(contents.skeletons.first)
+                let weights = try XCTUnwrap(part.jointInfluences).influences.elements
+                let numberInverse = simd_inverse(skin.front.transform.matrix)
+                var maximumDepth = -Float.infinity
+                var sampled = 0
+                for (index, vertex) in part.positions.elements.enumerated() {
+                    var point = SIMD4<Float>.zero
+                    for influence in weights[(index * 4)..<(index * 4 + 4)] where influence.weight > 0 {
+                        point += skin.pose.modelSpaceTransforms[influence.jointIndex]
+                            * skeleton.joints[influence.jointIndex].inverseBindPoseMatrix
+                            * SIMD4(vertex, 1) * influence.weight
+                    }
+                    let local = numberInverse * point
+                    guard abs(local.x) < 0.31, abs(local.y) < 0.51 else { continue }
+                    sampled += 1
+                    maximumDepth = max(maximumDepth, local.z)
+                }
+                XCTAssertGreaterThan(sampled, 0)
+                rows.append(["detail": detail == .near ? "near" : "low", "time": time,
+                             "vertices": sampled, "shirtPastNumberMetres": (maximumDepth - 0.009) * 0.115])
+            }
+        }
+        let attachment = XCTAttachment(data: try JSONSerialization.data(withJSONObject: rows,
+            options: [.prettyPrinted, .sortedKeys]), uniformTypeIdentifier: "public.json")
+        attachment.name = "ReplayXI-NumberDepth-Diagnostic.json"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     func testNewRigHasSharedMeshesIndependentPosesAndEqualTeamScale() throws {
         try ReplayTripoAthleteProvider.prewarm()
         XCTAssertTrue(ReplayTripoAthleteProvider.isPrewarmed)
@@ -71,6 +115,7 @@ final class ReplayTripoAthleteRuntimeTests: XCTestCase {
             XCTAssertEqual(first.back.name, "skinned-shirt-number")
         }
         XCTAssertEqual(ReplayTripoAthleteProvider.materialDrawsPerInstance, 3)
+        XCTAssertEqual(ReplayTripoAthleteProvider.diverseMaterialDrawsPerInstance, 4)
         XCTAssertEqual(ReplayTripoAthleteProvider.decodedTextureBytes, 50_331_648)
     }
 
@@ -145,15 +190,14 @@ final class ReplayTripoAthleteRuntimeTests: XCTestCase {
             XCTAssertEqual(skin.model.jointTransforms, expected)
             XCTAssertEqual(skin.front.transform, front)
             XCTAssertEqual(skin.back.transform, back)
+            let surface = try XCTUnwrap(skin.numberSurface)
             let chest = skin.pose.modelSpaceTransforms[skin.motion.numberAnchors.jointIndex]
             let restChest = skin.motion.restPose.modelSpaceTransforms[skin.motion.numberAnchors.jointIndex]
-            let clearance = simd_quatf(restChest).inverse.act(SIMD3<Float>(0, 0, 0.022))
-            let expectedFront = chest * SIMD4(skin.motion.numberAnchors.front + clearance, 1)
-            let expectedBack = chest * SIMD4(skin.motion.numberAnchors.back - clearance, 1)
-            XCTAssertLessThan(simd_distance(skin.front.position,
-                SIMD3(expectedFront.x, expectedFront.y, expectedFront.z)), 0.00001)
-            XCTAssertLessThan(simd_distance(skin.back.position,
-                SIMD3(expectedBack.x, expectedBack.y, expectedBack.z)), 0.00001)
+            let normal = simd_quatf(chest).act(simd_quatf(restChest).inverse.act([0, 0, 1]))
+            let frontDepths = surface.front.map { simd_dot($0.position(in: skin.pose) - skin.front.position, normal) }
+            let backDepths = surface.back.map { simd_dot($0.position(in: skin.pose) - skin.back.position, normal) }
+            XCTAssertLessThanOrEqual(frontDepths.max() ?? 1, -0.003)
+            XCTAssertGreaterThanOrEqual(backDepths.min() ?? -1, 0.003)
         }
     }
 

@@ -179,6 +179,42 @@ final class ReplaySkinnedAthleteMotionTests: XCTestCase {
         XCTAssertEqual(simd_length(pose.rotations[2].vector), 1, accuracy: 0.000_01)
     }
 
+    func testCervicalSplineSoftensKeyVelocityWithoutChangingBodyOrSeeking() throws {
+        var document = fixture()
+        mutateFrame(&document, frame: 1) {
+            var rotations = $0["rotations"] as! [[Double]]
+            rotations[3] = [0, sin(Double.pi / 6), 0, cos(Double.pi / 6)]
+            rotations[4] = [0, sin(Double.pi / 4), 0, cos(Double.pi / 4)]
+            $0["rotations"] = rotations
+        }
+        let motion = try ReplaySkinnedAthleteMotion(data: data(document))
+        let neck = try XCTUnwrap(motion.semanticJointIndices["neck"])
+        let head = try XCTUnwrap(motion.semanticJointIndices["head"])
+        var plain = motion.makePoseBuffer(), smooth = motion.makePoseBuffer()
+        motion.sample(clip: .run, at: 0.49, smoothCervical: false, into: &plain)
+        motion.sample(clip: .run, at: 0.49, smoothCervical: true, into: &smooth)
+        let plainBefore = plain, smoothBefore = smooth
+        motion.sample(clip: .run, at: 0.50, smoothCervical: false, into: &plain)
+        motion.sample(clip: .run, at: 0.50, smoothCervical: true, into: &smooth)
+        for index in [neck, head] {
+            func angularGap(_ a: simd_quatf, _ b: simd_quatf) -> Float {
+                2 * acos(min(abs(simd_dot(a.vector, b.vector)), 1))
+            }
+            XCTAssertLessThan(angularGap(smoothBefore.rotations[index], smooth.rotations[index]),
+                              angularGap(plainBefore.rotations[index], plain.rotations[index]) * 0.5)
+            XCTAssertEqual(simd_length(smooth.rotations[index].vector), 1, accuracy: 0.000_01)
+        }
+        for index in motion.joints.indices where index != neck && index != head {
+            XCTAssertEqual(smoothBefore.rotations[index].vector, plainBefore.rotations[index].vector)
+            XCTAssertEqual(smoothBefore.translations[index], plainBefore.translations[index])
+        }
+        let expected = smooth
+        motion.sample(clip: .run, at: 0.12, smoothCervical: true, into: &smooth)
+        motion.sample(clip: .run, at: 0.50, smoothCervical: true, into: &smooth)
+        XCTAssertEqual(smooth.rotations[neck].vector, expected.rotations[neck].vector)
+        XCTAssertEqual(smooth.rotations[head].vector, expected.rotations[head].vector)
+    }
+
     func testRandomSeeksAreDeterministicAndClipLoopingHandlesNegativeTime() throws {
         let motion = try ReplaySkinnedAthleteMotion(data: data(fixture()))
         var pose = motion.makePoseBuffer()

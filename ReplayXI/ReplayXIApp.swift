@@ -7,6 +7,7 @@ struct ReplayXIApp: App {
     @State private var sharedSpace: LocalPitchAnchorCoordinator
     @State private var comparisonSession = ReplayConversionPreviewSession()
     @State private var annotationEntry = ReplayAnnotationEntrySession()
+    @State private var macCoachService: ReplayXILocalCoachService
     @AppStorage(ReplayEnvironmentMode.storageKey) private var environmentModeRawValue =
         ReplayEnvironmentMode.defaultSelection.rawValue
 
@@ -48,15 +49,19 @@ struct ReplayXIApp: App {
         }
         _store = State(initialValue: store)
         _sharedSpace = State(initialValue: sharedSpace)
+        _macCoachService = State(initialValue: ReplayXILocalCoachService(store: store))
     }
 
     var body: some Scene {
         WindowGroup(id: "ReplayDashboard") {
-            ReplayDashboardView()
-                .environment(store)
-                .environment(sharedSpace)
-                .environment(comparisonSession)
-                .environment(annotationEntry)
+            VStack(spacing: 0) {
+                ReplayDashboardView()
+                ReplayXIMacPairingBar(service: macCoachService)
+            }
+            .environment(store)
+            .environment(sharedSpace)
+            .environment(comparisonSession)
+            .environment(annotationEntry)
         }
         .defaultSize(width: 1_380, height: 820)
         .onChange(of: scenePhase) { _, phase in

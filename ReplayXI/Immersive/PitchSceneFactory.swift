@@ -115,6 +115,32 @@ enum PitchSceneFactory {
         }
     }
 
+    /// Exact immutable inputs used by the live renderer, sampled for the
+    /// first-person wearer's one-off hidden skin at view entry.
+    struct POVMotionInputs {
+        let interaction: ReplayAthleteInteractionCue?
+        let contacts: [ReplayAthleteInteractionCue]
+        let slowRunWeight: Float
+        let armCutAdmission: ReplayArmCutTimeline.Admission?
+        let shot: ReplayGoalkeeperReadiness.Shot?
+    }
+
+    static func povMotionInputs(
+        in root: Entity, scenarioID: String, player: PlayerTrack,
+        at time: TimeInterval, locomotion: PlayerLocomotionSample
+    ) -> POVMotionInputs? {
+        guard root.name == "match-root-\(scenarioID)", time.isFinite,
+              let cache = root.components[NativeBallCache.self] else { return nil }
+        return POVMotionInputs(
+            interaction: cache.interaction(for: player.id, at: time),
+            contacts: cache.interactions[player.id] ?? [],
+            slowRunWeight: cache.slowRunTimelines[player.id]?.weight(at: time) ?? 0,
+            armCutAdmission: cache.armCutTimelines[player.id]?.admission(
+                at: time, locomotion: locomotion),
+            shot: cache.shots.latestOpposingShot(for: player, at: time)
+        )
+    }
+
     /// Procedural model descendants are fixed when a rig is built. Skin
     /// admission changes their visibility, but time/pose updates do not.
     private struct ProceduralVisualState: Component {
@@ -580,6 +606,7 @@ enum PitchSceneFactory {
     private static let rigContactShadowMesh = MeshResource.generateCylinder(height: 0.008, radius: 0.30)
     private static let tableMarkerBaseMesh = MeshResource.generateCylinder(height: 0.055, radius: 0.34)
     private static let tableMarkerHeadMesh = MeshResource.generateSphere(radius: 0.15)
+    private static let tableMarkerNeckMesh = MeshResource.generateCylinder(height: 0.15, radius: 0.059)
     private static let tableMarkerFacingMesh = MeshResource.generateBox(
         size: [0.13, 0.055, 0.42], cornerRadius: 0.045
     )
@@ -1574,6 +1601,23 @@ enum PitchSceneFactory {
             presentedPlayerPoses: playerPosesByID
         )
 
+        updateMarkLabels(
+            cache: annotationCache,
+            scenario: scenario,
+            posesByPlayerID: playerPosesByID,
+            viewMode: viewMode,
+            perspectiveID: perspectiveID,
+            focus: spatialFocus,
+            time: time
+        )
+        // A visible authored player card already contains shirt and name.
+        // Replace that player's small identity chip so both can share the
+        // close head band without covering each other.
+        let replacedPlayerIDs = Set(annotationCache?.bindings.compactMap { binding -> String? in
+            guard binding.mark.kind == .playerLabel,
+                  binding.label.value?.isEnabled == true else { return nil }
+            return binding.mark.playerID
+        } ?? [])
         PlaybackSpatialLabels.updatePlayerLabels(
             in: root,
             scenario: scenario,
@@ -1583,16 +1627,8 @@ enum PitchSceneFactory {
             enabledPlayerIDs: labelEnabledPlayerIDs,
             firstPersonVisiblePlayerIDs: firstPersonVisibleIDs,
             focusedPlayerIDs: focusedPlayerIDs,
+            replacedByAnnotationPlayerIDs: replacedPlayerIDs.isEmpty ? nil : replacedPlayerIDs,
             acceptsInput: !suspendsPlayerPickingForAnnotationEdit
-        )
-        updateMarkLabels(
-            cache: annotationCache,
-            scenario: scenario,
-            posesByPlayerID: playerPosesByID,
-            viewMode: viewMode,
-            perspectiveID: perspectiveID,
-            focus: spatialFocus,
-            time: time
         )
         let selectedBinding = spatialFocus.selectedMarkID.flatMap {
             annotationCache?.bindingsByID[$0]
@@ -2379,7 +2415,7 @@ enum PitchSceneFactory {
         return root
     }
 
-    private static func makeTableMarker(
+    static func makeTableMarker(
         shirtColor: UIColor,
         trimColor: UIColor,
         limbColor: UIColor,
@@ -2390,7 +2426,7 @@ enum PitchSceneFactory {
         root.name = "table-marker"
 
         // Background players retain a recognisable football silhouette instead
-        // of dropping to a pawn. Nine unlit draws keep all 22 players readable
+        // of dropping to a pawn. Ten unlit draws keep all 22 players readable
         // while reserving the detailed articulated rig for tactical focus.
         let base = ModelEntity(
             mesh: tableMarkerBaseMesh,
@@ -2430,6 +2466,14 @@ enum PitchSceneFactory {
         body.position.y = 1.28
         body.scale = [0.246, 0.27, 0.145]
         root.addChild(body)
+
+        // The body tops at 1.55 m while the head starts at 1.558 m. Bridge
+        // that visible air gap and retain overlap as the table marker scales.
+        let neck = ModelEntity(mesh: tableMarkerNeckMesh,
+                               materials: [UnlitMaterial(color: skinColor, applyPostProcessToneMap: false)])
+        neck.name = "table-marker-neck"
+        neck.position.y = 1.565
+        root.addChild(neck)
 
         for (side, x) in [("left", Float(-0.14)), ("right", Float(0.14))] {
             let leg = Entity()
@@ -4001,10 +4045,12 @@ enum PitchSceneFactory {
                 }
             }
             let playerLabelHeight: Float = switch viewMode {
-            case .firstPerson: 2.45
-            case .tacticalTable: 9.40
-            case .touchline: 4.20
-            case .positional: 6.40
+            case .firstPerson: 2.30
+            // Board half-heights after view scaling are 0.72, 0.27 and 0.42 m.
+            // Each card clears the 2.05 m head envelope by about 0.2 m.
+            case .tacticalTable: 3.00
+            case .touchline: 2.52
+            case .positional: 2.68
             }
             let spatialLabelElevation: Float = if mark.kind == .playerLabel {
                 0
@@ -4177,7 +4223,7 @@ enum PitchSceneFactory {
 
     /// The economical squad LOD remains a genuinely animated football body.
     /// It shares the telemetry-derived gait clock with the articulated rig,
-    /// but moves its existing nine render pieces instead of adding more draws.
+    /// but moves its existing ten render pieces instead of adding more draws.
     private static func animateTableMarker(
         of entity: Entity,
         track: PlayerTrack,
@@ -4220,6 +4266,7 @@ enum PitchSceneFactory {
         // Compatibility fallback for a future mesh-generation failure.
         guard let shorts = directChild(named: "table-marker-shorts", of: marker),
               let body = directChild(named: "table-marker-body", of: marker),
+              let neck = directChild(named: "table-marker-neck", of: marker),
               let head = directChild(named: "table-marker-head", of: marker),
               let leftLeg = directChild(named: "table-marker-left-leg", of: marker),
               let rightLeg = directChild(named: "table-marker-right-leg", of: marker),
@@ -4250,6 +4297,8 @@ enum PitchSceneFactory {
         shorts.position.x = sideSway
         body.position.y = 1.28 + bob
         body.position.x = sideSway * 0.72
+        neck.position.y = 1.565 + bob
+        neck.position.x = sideSway * 0.57
         head.position.y = 1.72 + bob
         head.position.x = sideSway * 0.45
         leftLeg.position.y = 0.87 + bob

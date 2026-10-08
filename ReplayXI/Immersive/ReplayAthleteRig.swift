@@ -522,10 +522,12 @@ enum ReplayAthleteFactory {
 
         let headRoot = Entity()
         headRoot.name = ReplayAthleteJoint.headRoot.rawValue
-        // The authored face includes its own neck. Seat that neckline inside
-        // the collar and omit the old neck shell, which otherwise intersects
-        // the jaw as a broad untextured block when the head scans or tilts.
-        headRoot.position = [0, texturedHead == nil ? 0.170 : 0.125, 0]
+        // Keep the lower head/neck inside the 1.615 m torso collar. The old
+        // far fallback centre left a 25 mm vertical air gap (1.640 vs 1.615 m);
+        // lowering only that head removes the open seam without a squad draw.
+        // Authored heads retain their signed 125 mm placement contract.
+        let headSeat: Float = texturedHead == nil ? (lod == .far ? 0.140 : 0.170) : 0.125
+        headRoot.position = [0, headSeat, 0]
         neck.addChild(headRoot)
         if let texturedHead {
             headRoot.addChild(texturedHead)

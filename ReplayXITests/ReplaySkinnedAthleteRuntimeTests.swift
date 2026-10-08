@@ -61,6 +61,28 @@ final class ReplaySkinnedAthleteRuntimeTests: XCTestCase {
         XCTAssertLessThan(simd_distance(skin.front.position, SIMD3(expected.x, expected.y, expected.z)), 0.00001)
     }
 
+    func testPOVHeadForwardMatchesFinalRenderedHeadFKAndRewind() throws {
+        let (player, skin) = try prepare()
+        let time = 12.0
+        let locomotion = jogging(player, at: time)
+        XCTAssertTrue(skin.update(at: time, track: player, locomotion: locomotion,
+                                  lookTarget: [12, 1.5, 25], ballAction: nil))
+        let actual = try XCTUnwrap(skin.headForwardInPlayerLocalSpace())
+        let index = try XCTUnwrap(skin.motion.semanticJointIndices["head"])
+        let finalRotation = simd_quatf(skin.pose.modelSpaceTransforms[index])
+        let restRotation = simd_quatf(skin.motion.restPose.modelSpaceTransforms[index])
+        let headForward = simd_normalize(finalRotation * restRotation.inverse).act(SIMD3<Float>(0, 0, 1))
+        let scaled = SIMD3<Float>(headForward.x * skin.root.scale.x, 0,
+                                  headForward.z * skin.root.scale.z)
+        XCTAssertLessThan(simd_distance(actual, simd_normalize(scaled)), 0.000_01)
+        XCTAssertEqual(simd_length(actual), 1, accuracy: 0.000_01)
+        XCTAssertTrue(skin.update(at: 17, track: player, locomotion: jogging(player, at: 17),
+                                  lookTarget: [-8, 1.5, 30], ballAction: nil))
+        XCTAssertTrue(skin.update(at: time, track: player, locomotion: locomotion,
+                                  lookTarget: [12, 1.5, 25], ballAction: nil))
+        XCTAssertLessThan(simd_distance(actual, try XCTUnwrap(skin.headForwardInPlayerLocalSpace())), 0.000_01)
+    }
+
     func testTurningHeadDoesNotDragShouldersWithNeck() throws {
         let (player, skin) = try prepare()
         let time = 12.0
