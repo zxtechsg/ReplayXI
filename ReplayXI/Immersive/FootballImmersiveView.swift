@@ -271,6 +271,7 @@ struct FootballImmersiveView: View {
         .onChange(of: sharedSpace.surfaceDetectionStatus) { _, _ in refreshSurfaceCandidate() }
         .onChange(of: surfaceModeIsAvailable) { _, available in
             if !available { cancelSurfaceSearch() }
+            reconcileWorldPlacementForCurrentView()
         }
         .task(id: store.selectedScenario.kind) {
             guard !Task.isCancelled, store.roomPresentation.owns(roomPresentationID),
@@ -314,7 +315,8 @@ struct FootballImmersiveView: View {
                     let mayStartPlacement = canAdjust && pinches != nil
                     if worldPlacement.isActive || mayStartPlacement {
                         worldPlacement.update(left: pinches?.0, right: pinches?.1,
-                                              allowed: canAdjust)
+                                              allowed: canAdjust,
+                                              minimumOffsetY: store.viewMode == .touchline ? 0 : -0.6)
                     }
                 }
                 try? await Task.sleep(for: .milliseconds(40))
@@ -402,7 +404,7 @@ struct FootballImmersiveView: View {
         }
         .onChange(of: store.viewMode) { _, _ in
             povReference = nil
-            worldPlacement.update(left: nil, right: nil, allowed: false)
+            reconcileWorldPlacementForCurrentView()
             capturePOVReferenceIfNeeded()
         }
         .onChange(of: store.activePerspectiveID) { _, _ in
@@ -536,16 +538,17 @@ struct FootballImmersiveView: View {
         if stadium?.isEnabled != enabled { stadium?.isEnabled = enabled }
         if lighting?.isEnabled != enabled { lighting?.isEnabled = enabled }
         guard enabled, let stadium else { return }
+        let placement = renderedWorldPlacement
         // The stadium follows POV directly. In review views it scales and
         // moves around the pitch centre, while its default size stays intact.
         let wanted: Transform
         if store.viewMode == .firstPerson {
             wanted = matchRoot?.transform ?? .identity
         } else if let matchRoot {
-            let pivot = matchRoot.position - worldPlacement.offset
-            wanted = Transform(scale: SIMD3<Float>(repeating: worldPlacement.scale),
+            let pivot = matchRoot.position - placement.offset
+            wanted = Transform(scale: SIMD3<Float>(repeating: placement.scale),
                                rotation: simd_quatf(angle: 0, axis: [0, 1, 0]),
-                               translation: worldPlacement.offset + pivot * (1 - worldPlacement.scale))
+                               translation: placement.offset + pivot * (1 - placement.scale))
         } else {
             wanted = .identity
         }
@@ -712,7 +715,7 @@ struct FootballImmersiveView: View {
             root.orientation = rotation
             root.position = -rotation.act(SIMD3<Float>(playerPoint.x, 0, playerPoint.z))
         } else if store.viewMode == .tacticalTable || store.viewMode == .touchline {
-            root.transform = ReplayWorldPlacement.apply(worldPlacement, to: root.transform)
+            root.transform = ReplayWorldPlacement.apply(renderedWorldPlacement, to: root.transform)
         }
         applyLocalOverlayVisibility(to: root)
     }
@@ -722,13 +725,34 @@ struct FootballImmersiveView: View {
             && ReplayEnvironmentMode.effective(environmentModeRawValue, isPhysicalPractice: false) == .room
     }
 
+    private var hasActiveSurfacePlacement: Bool {
+        surfaceModeIsAvailable && surfacePlacement != nil
+    }
+
+    private var renderedWorldPlacement: ReplayWorldPlacement {
+        var placement = worldPlacement
+        if store.viewMode == .touchline { placement.constrainVerticalOffset(minimumY: 0) }
+        return placement
+    }
+
+    private func reconcileWorldPlacementForCurrentView() {
+        worldPlacement.update(left: nil, right: nil, allowed: false)
+        if hasActiveSurfacePlacement {
+            // An inactive Stadium/Touchline adjustment must not appear when
+            // the saved Room Table anchor becomes active again.
+            worldPlacement.reset()
+        } else if store.viewMode == .touchline {
+            worldPlacement.constrainVerticalOffset(minimumY: 0)
+        }
+    }
+
     private var pitchSurfaceControls: ReplaySurfacePlacementControls {
         ReplaySurfacePlacementControls(
             targetLabel: surfaceCandidate?.surfaceKind.rawValue.capitalized,
             statusText: surfaceStatusText,
             isBusy: surfaceSearchIsBusy,
             isScanning: surfaceScanRequest != nil,
-            hasPlacement: surfacePlacement != nil,
+            hasPlacement: hasActiveSurfacePlacement,
             canEdit: canEditPitchPlacement,
             findSurface: findPitchSurface, place: placePitchOnSurface,
             reset: resetPitchSurface, cancel: cancelSurfaceSearch)
@@ -752,7 +776,7 @@ struct FootballImmersiveView: View {
     private var canAdjustWorldPlacement: Bool {
         acceptsMatchInteraction && store.canChangePlaybackView
             && (store.viewMode == .tacticalTable || store.viewMode == .touchline)
-            && surfacePlacement == nil && surfaceScanRequest == nil
+            && !hasActiveSurfacePlacement && surfaceScanRequest == nil
             && !workspaceMove.isActive
             && !store.isDrawing && annotationStroke == nil
             && !store.hasActiveTimelineScrub && !store.hasActiveCoachMarkGeometryPreview

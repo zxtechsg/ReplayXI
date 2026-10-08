@@ -274,16 +274,10 @@ final class ReplayTripoDiversity172Tests: XCTestCase {
             XCTAssertLessThanOrEqual(abs(simd_distance(nearestHead, header.contactBallWorldPosition)
                 - ReplayNativeBallPhysics.radius), 0.03,
                 "\(detail) actual weighted head surface must meet the ball")
-            let surface = try XCTUnwrap(skin.numberSurface)
-            let chest = skin.pose.modelSpaceTransforms[skin.motion.numberAnchors.jointIndex]
-            let restChestRotation = simd_quatf(skin.motion.restPose.modelSpaceTransforms[
-                skin.motion.numberAnchors.jointIndex]).inverse
-            let normal = simd_quatf(chest).act(restChestRotation.act([0, 0, 1]))
-            let frontDepth = surface.front.map {
-                simd_dot($0.position(in: skin.pose) - skin.front.position, normal)
-            }.max() ?? 1
-            XCTAssertLessThanOrEqual(frontDepth, -0.003,
-                "\(detail) front number must track Player A's weighted shirt")
+            XCTAssertTrue(skin.numbersUseShirtSkin,
+                "\(detail) Player A number must share the shirt skeleton")
+            XCTAssertEqual(skin.front.jointTransforms, skin.model.jointTransforms)
+            XCTAssertEqual(skin.back.jointTransforms, skin.model.jointTransforms)
             XCTAssertNotNil(skin.neckBridge, "Player A's disconnected source head needs a visible FK bridge")
 
             let keeperSkin = try ReplayTripoAthleteProvider.makeDiverse(for: goalkeeper, detail: detail)

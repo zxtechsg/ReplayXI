@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import Metal
 import RealityKit
 import UIKit
 
@@ -47,6 +48,9 @@ enum ReplayTripoAthleteProvider {
     private static var near: Skin?
     private static var low: Skin?
     private static var diversity: GeometryVariant?
+    private static var numberMeshes: [String: (front: MeshResource, back: MeshResource)] = [:]
+    private static var numberMasks: [Int: TextureResource] = [:]
+    static var loadedNumberMaskBaseBytes: Int { numberMasks.count * 256 * 256 * 4 }
     private(set) static var motion: ReplaySkinnedAthleteMotion?
     private static var kits: [PhysicallyBasedMaterial] = []
     private static let playerANeckMesh = MeshResource.generateCylinder(height: 1, radius: 0.052)
@@ -59,6 +63,7 @@ enum ReplayTripoAthleteProvider {
         (kits.isEmpty ? 0 : decodedTextureBytes)
             + appearanceKits.count * 3 * ReplayTripoAppearance.textureSize * ReplayTripoAppearance.textureSize * 4
             + (diversityIsPrewarmed ? ReplayTripoDiversityAssets.decodedTextureBytes : 0)
+            + loadedNumberMaskBaseBytes
     }
     static var isPrewarmed: Bool { near != nil && low != nil && motion != nil && kits.count == 3 }
 
@@ -268,10 +273,41 @@ enum ReplayTripoAthleteProvider {
         root.scale = [configuration.appearance.widthScale, configuration.appearance.heightScale, 1]
         root.addChild(clone)
         let digits = try ReplayAthleteMeshLibrary.jerseyNumber(player.shirtNumber)
-        let ink = UnlitMaterial(color: configuration.kit.number.uiColor, applyPostProcessToneMap: false)
-        let front = ModelEntity(mesh: digits.mesh, materials: [ink])
+        var ink = UnlitMaterial(color: configuration.kit.number.uiColor, applyPostProcessToneMap: false)
+        let numberKey = "\(skin.requiresNeckBridge)-\(detail)-\(player.shirtNumber)"
+        let conforming: (front: MeshResource, back: MeshResource)?
+        if let cached = numberMeshes[numberKey] {
+            conforming = cached
+        } else if let surface = skin.numberSurface,
+                  let frontMesh = try surface.clothDecalMesh(from: digits.mesh, isFront: true, scale: 0.115),
+                  let backMesh = try surface.clothDecalMesh(from: digits.mesh, isFront: false, scale: 0.23) {
+            conforming = (frontMesh, backMesh)
+            numberMeshes[numberKey] = (frontMesh, backMesh)
+        } else { conforming = nil }
+        if conforming != nil {
+            let mask: TextureResource
+            if let cached = numberMasks[player.shirtNumber] { mask = cached }
+            else {
+                mask = try numberMask(for: player.shirtNumber, digit: digits.mesh)
+                numberMasks[player.shirtNumber] = mask
+            }
+            let descriptor = MTLSamplerDescriptor()
+            descriptor.sAddressMode = .clampToZero
+            descriptor.tAddressMode = .clampToZero
+            descriptor.minFilter = .linear
+            descriptor.magFilter = .linear
+            descriptor.mipFilter = .linear
+            let sampler = MaterialParameters.Texture.Sampler(descriptor)
+            ink.color = .init(tint: configuration.kit.number.uiColor,
+                texture: .init(mask, sampler: sampler))
+            // Native A/B showed alpha cutout perforating thin strokes. Blended
+            // opacity keeps the same cached cloth decal and solid ink.
+            ink.opacityThreshold = nil
+            ink.blending = .transparent(opacity: .init(texture: ink.color.texture))
+        }
+        let front = ModelEntity(mesh: conforming?.front ?? digits.mesh, materials: [ink])
         front.name = "skinned-chest-number"
-        let back = ModelEntity(mesh: digits.mesh, materials: [ink])
+        let back = ModelEntity(mesh: conforming?.back ?? digits.mesh, materials: [ink])
         back.name = "skinned-shirt-number"
         clone.addChild(front)
         clone.addChild(back)
@@ -292,7 +328,42 @@ enum ReplayTripoAthleteProvider {
         }
         return ReplaySkinnedAthleteInstance(root: root, skinRoot: clone, model: model, front: front, back: back,
             playerID: player.id, motion: motion, contactSurface: skin.contacts, detail: detail,
-            bootMarkers: skin.boots, numberSurface: skin.numberSurface, neckBridge: neckBridge)
+            bootMarkers: skin.boots, numberSurface: skin.numberSurface,
+            numbersUseShirtSkin: conforming != nil, neckBridge: neckBridge)
+    }
+
+    private static func numberMask(for number: Int, digit: MeshResource) throws -> TextureResource {
+        let image = try numberMaskImage(digit: digit)
+        return try TextureResource(image: image,
+            withName: "replay-shirt-number-mask-\(number)",
+            options: .init(semantic: .color, mipmapsMode: .allocateAndGenerateAll))
+    }
+
+    static func numberMaskImage(digit: MeshResource) throws -> CGImage {
+        guard let bounds = ReplaySkinnedNumberSurface.DecalBounds(digit: digit),
+              let part = digit.contents.models.first?.parts.first,
+              let indices = part.triangleIndices?.elements,
+              let context = CGContext(data: nil, width: 256, height: 256, bitsPerComponent: 8,
+                  bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+            throw ReplaySkinnedAthleteError.invalidMaterials
+        }
+        context.clear(CGRect(x: 0, y: 0, width: 256, height: 256))
+        context.setFillColor(UIColor.white.cgColor)
+        let positions = part.positions.elements
+        for base in stride(from: 0, to: indices.count, by: 3) {
+            let points = (0..<3).map { positions[Int(indices[base + $0])] }
+            let uv = points.map { bounds.uv([$0.x, $0.y]) }
+            context.move(to: CGPoint(x: CGFloat(uv[0].x) * 256, y: CGFloat(uv[0].y) * 256))
+            for corner in 1..<3 {
+                context.addLine(to: CGPoint(x: CGFloat(uv[corner].x) * 256,
+                                            y: CGFloat(uv[corner].y) * 256))
+            }
+            context.closePath()
+            context.fillPath()
+        }
+        guard let image = context.makeImage() else { throw ReplaySkinnedAthleteError.invalidMaterials }
+        return image
     }
 
     // The scene cache still owns instances; render selection is local and does
@@ -328,6 +399,7 @@ enum ReplayTripoAthleteProvider {
     #if DEBUG
     static func resetForTesting() {
         near = nil; low = nil; motion = nil; kits = []; appearanceKits = [:]; diversity = nil
+        numberMeshes = [:]; numberMasks = [:]
         nativeAssetLoadAttemptsForTesting = 0; texturePreparationAttemptsForTesting = 0
         diversityPreparationErrorForTesting = nil
     }

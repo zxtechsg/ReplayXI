@@ -6,8 +6,8 @@ import simd
 /// Device-local pose and hand samples. No replay state is stored in ARKit.
 @MainActor
 final class ReplayWorldGestureTracking {
-    private let session = ARKitSession()
-    private let world = WorldTrackingProvider()
+    private var session = ARKitSession()
+    private var world = WorldTrackingProvider()
     private let hands = HandTrackingProvider()
     private(set) var tracksHands = false
 
@@ -28,8 +28,18 @@ final class ReplayWorldGestureTracking {
             try await session.run([world, hands])
             tracksHands = true
         } catch {
-            // A failed hand provider must not also disable POV alignment.
-            try? await session.run([world])
+            // A failed run stops its providers. Reusing `world` can assert, so
+            // recover POV tracking with a fresh session and provider pair.
+            guard !Task.isCancelled else { return }
+            let fallbackSession = ARKitSession()
+            let fallbackWorld = WorldTrackingProvider()
+            do {
+                try await fallbackSession.run([fallbackWorld])
+                session = fallbackSession
+                world = fallbackWorld
+            } catch {
+                fallbackSession.stop()
+            }
         }
     }
 
@@ -114,7 +124,8 @@ struct ReplayWorldPlacement: Equatable {
 
     var isActive: Bool { baseline != nil }
 
-    mutating func update(left: SIMD3<Float>?, right: SIMD3<Float>?, allowed: Bool) {
+    mutating func update(left: SIMD3<Float>?, right: SIMD3<Float>?, allowed: Bool,
+                         minimumOffsetY: Float = -0.6) {
         guard allowed, let left, let right, Self.finite(left), Self.finite(right) else {
             baseline = nil
             return
@@ -130,9 +141,16 @@ struct ReplayWorldPlacement: Equatable {
         let delta = midpoint - baseline.midpoint
         offset = SIMD3(
             min(max(baseline.offset.x + delta.x, -1.5), 1.5),
-            min(max(baseline.offset.y + delta.y, -0.6), 0.6),
+            min(max(baseline.offset.y + delta.y, minimumOffsetY), 0.6),
             min(max(baseline.offset.z + delta.z, -2.0), 2.0)
         )
+    }
+
+    mutating func constrainVerticalOffset(minimumY: Float) {
+        let bounded = min(max(offset.y, minimumY), 0.6)
+        guard bounded != offset.y else { return }
+        offset.y = bounded
+        baseline = nil
     }
 
     mutating func reset() {

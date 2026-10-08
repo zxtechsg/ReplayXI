@@ -188,7 +188,10 @@ final class ReplayTripoPolish170Tests: XCTestCase {
         try ReplayTripoAthleteProvider.prewarm()
         XCTAssertEqual(ReplayTripoAthleteProvider.nativeAssetLoadAttemptsForTesting, 4)
         XCTAssertEqual(ReplayTripoAthleteProvider.texturePreparationAttemptsForTesting, 15)
-        XCTAssertEqual(ReplayTripoAthleteProvider.loadedBaseTextureBytes, 100_663_296)
+        XCTAssertEqual(ReplayTripoAthleteProvider.loadedNumberMaskBaseBytes,
+            Set(scenario.players.map(\.shirtNumber)).count * 256 * 256 * 4)
+        XCTAssertEqual(ReplayTripoAthleteProvider.loadedBaseTextureBytes,
+            100_663_296 + ReplayTripoAthleteProvider.loadedNumberMaskBaseBytes)
         withExtendedLifetime(skins) {}
     }
 

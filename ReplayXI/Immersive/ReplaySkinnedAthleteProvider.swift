@@ -247,6 +247,7 @@ struct ReplaySkinnedNumberSurface {
     }
     struct Probe {
         let influences: [Influence]
+        let restOffset: SIMD2<Float>
 
         func position(in pose: ReplaySkinnedAthleteMotion.Pose) -> SIMD3<Float> {
             var point = SIMD4<Float>.zero
@@ -258,8 +259,86 @@ struct ReplaySkinnedNumberSurface {
         }
     }
 
+    private struct Vertex {
+        let probe: Probe
+        let depth: Float
+    }
+
+    private struct Triangle {
+        let a: Vertex
+        let b: Vertex
+        let c: Vertex
+
+        func sample(at point: SIMD2<Float>) -> (probe: Probe, depth: Float)? {
+            let pa = a.probe.restOffset, pb = b.probe.restOffset, pc = c.probe.restOffset
+            let denominator = (pb.y - pc.y) * (pa.x - pc.x) + (pc.x - pb.x) * (pa.y - pc.y)
+            guard abs(denominator) > 0.000_000_1 else { return nil }
+            let wa = ((pb.y - pc.y) * (point.x - pc.x) + (pc.x - pb.x) * (point.y - pc.y)) / denominator
+            let wb = ((pc.y - pa.y) * (point.x - pc.x) + (pa.x - pc.x) * (point.y - pc.y)) / denominator
+            let wc = 1 - wa - wb
+            guard min(wa, wb, wc) >= -0.000_1 else { return nil }
+            var influences: [Influence] = []
+            for (vertex, weight) in [(a, wa), (b, wb), (c, wc)] where weight > 0 {
+                influences.append(contentsOf: vertex.probe.influences.map {
+                    Influence(joint: $0.joint, localPoint: $0.localPoint, weight: $0.weight * weight)
+                })
+            }
+            return (Probe(influences: influences, restOffset: point),
+                    a.depth * wa + b.depth * wb + c.depth * wc)
+        }
+
+    }
+
+    struct Footprint {
+        let minX: Float
+        let maxX: Float
+        let minY: Float
+        let maxY: Float
+
+        static func digit(_ digit: ModelEntity, scale: Float, mirroredX: Bool) -> Self? {
+            guard let part = digit.model?.mesh.contents.models.first?.parts.first else { return nil }
+            let positions = part.positions.elements
+            guard !positions.isEmpty else { return nil }
+            let xs = positions.map { (mirroredX ? -$0.x : $0.x) * scale }
+            let ys = positions.map { $0.y * scale }
+            let margin: Float = 0.004
+            return .init(minX: (xs.min() ?? 0) - margin, maxX: (xs.max() ?? 0) + margin,
+                         minY: (ys.min() ?? 0) - margin, maxY: (ys.max() ?? 0) + margin)
+        }
+
+        func contains(_ point: SIMD2<Float>) -> Bool {
+            point.x >= minX && point.x <= maxX && point.y >= minY && point.y <= maxY
+        }
+    }
+
     let front: [Probe]
     let back: [Probe]
+    private let frontTriangles: [Triangle]
+    private let backTriangles: [Triangle]
+    private let frontCentre: SIMD3<Float>
+    private let backCentre: SIMD3<Float>
+    private let bodyContents: MeshResource.Contents
+
+    struct DecalBounds {
+        let min: SIMD2<Float>
+        let max: SIMD2<Float>
+
+        init?(digit: MeshResource) {
+            guard let positions = digit.contents.models.first?.parts.first?.positions.elements,
+                  !positions.isEmpty else { return nil }
+            let xs = positions.map(\.x), ys = positions.map(\.y)
+            guard let minX = xs.min(), let maxX = xs.max(),
+                  let minY = ys.min(), let maxY = ys.max() else { return nil }
+            let padX = Swift.max((maxX - minX) * 0.04, 0.015)
+            let padY = Swift.max((maxY - minY) * 0.04, 0.015)
+            min = [minX - padX, minY - padY]
+            max = [maxX + padX, maxY + padY]
+        }
+
+        func uv(_ point: SIMD2<Float>) -> SIMD2<Float> {
+            (point - min) / (max - min)
+        }
+    }
 
     @MainActor
     init?(model: ModelEntity, motion: ReplaySkinnedAthleteMotion) {
@@ -273,23 +352,14 @@ struct ReplaySkinnedNumberSurface {
         let restChest = motion.restPose.modelSpaceTransforms[motion.numberAnchors.jointIndex]
         let frontCentre = restChest * SIMD4(motion.numberAnchors.front, 1)
         let backCentre = restChest * SIMD4(motion.numberAnchors.back, 1)
+        self.frontCentre = SIMD3(frontCentre.x, frontCentre.y, frontCentre.z)
+        self.backCentre = SIMD3(backCentre.x, backCentre.y, backCentre.z)
+        bodyContents = contents
         let positions = part.positions.elements
-        func probes(centre: SIMD4<Float>, side: Float) -> [Probe] {
-            var choices: [Int: (index: Int, depth: Float)] = [:]
+        func candidates(centre: SIMD4<Float>, side: Float) -> (probes: [Probe], triangles: [Triangle]) {
+            var vertices: [Vertex?] = Array(repeating: nil, count: positions.count)
             for (index, point) in positions.enumerated() {
                 let dx = point.x - centre.x, dy = point.y - centre.y
-                guard abs(dx) < 0.115, abs(dy) < 0.075, side * point.z > 0.04 else { continue }
-                let column = min(Int((dx + 0.115) / (0.230 / 3)), 2)
-                let row = min(Int((dy + 0.075) / (0.150 / 3)), 2)
-                let cell = row * 3 + column
-                let depth = side * point.z
-                if choices[cell].map({ depth > $0.depth }) ?? true {
-                    choices[cell] = (index, depth)
-                }
-            }
-            return choices.keys.sorted().compactMap { cell in
-                guard let chosen = choices[cell] else { return nil }
-                let index = chosen.index
                 let point = SIMD4(positions[index], 1)
                 let influences = weights[(index * 4)..<(index * 4 + 4)].compactMap { influence -> Influence? in
                     guard influence.weight > 0,
@@ -298,23 +368,140 @@ struct ReplaySkinnedNumberSurface {
                         localPoint: skeleton.joints[influence.jointIndex].inverseBindPoseMatrix * point,
                         weight: influence.weight)
                 }
-                return influences.isEmpty ? nil : Probe(influences: influences)
+                if !influences.isEmpty {
+                    vertices[index] = Vertex(probe: Probe(influences: influences,
+                        restOffset: [dx, dy]), depth: point.z)
+                }
             }
+            var triangles: [Triangle] = []
+            if let indices = part.triangleIndices?.elements {
+                for base in stride(from: 0, through: indices.count - 3, by: 3) {
+                    guard let a = vertices[Int(indices[base])],
+                          let b = vertices[Int(indices[base + 1])],
+                          let c = vertices[Int(indices[base + 2])] else { continue }
+                    let xs = [a.probe.restOffset.x, b.probe.restOffset.x, c.probe.restOffset.x]
+                    let ys = [a.probe.restOffset.y, b.probe.restOffset.y, c.probe.restOffset.y]
+                    // Low-detail torso triangles can span the full glyph even
+                    // when none of their corners falls inside the glyph area.
+                    guard (xs.min() ?? .infinity) < 0.26,
+                          (xs.max() ?? -.infinity) > -0.26,
+                          (ys.min() ?? .infinity) < 0.24,
+                          (ys.max() ?? -.infinity) > -0.24,
+                          max(side * a.depth, side * b.depth, side * c.depth) > 0.04
+                    else { continue }
+                    triangles.append(Triangle(a: a, b: b, c: c))
+                }
+            }
+            let probes = vertices.compactMap { vertex -> Probe? in
+                guard let vertex,
+                      abs(vertex.probe.restOffset.x) < 0.26,
+                      abs(vertex.probe.restOffset.y) < 0.24,
+                      side * vertex.depth > 0.04 else { return nil }
+                return vertex.probe
+            }
+            return (probes, triangles)
         }
-        front = probes(centre: frontCentre, side: 1)
-        back = probes(centre: backCentre, side: -1)
-        guard front.count >= 3, back.count >= 3 else { return nil }
+        let frontCandidates = candidates(centre: frontCentre, side: 1)
+        let backCandidates = candidates(centre: backCentre, side: -1)
+        front = frontCandidates.probes
+        back = backCandidates.probes
+        frontTriangles = frontCandidates.triangles
+        backTriangles = backCandidates.triangles
+        guard !front.isEmpty, !back.isEmpty else { return nil }
+    }
+
+    /// Duplicate shirt triangles, not a rigid plane. Each decal vertex keeps
+    /// the source shirt's four weights, so the visible ink follows fabric FK.
+    @MainActor
+    func clothDecalMesh(from digit: MeshResource, isFront: Bool, scale: Float) throws -> MeshResource? {
+        guard let bounds = DecalBounds(digit: digit),
+              let sourcePart = bodyContents.models.first?.parts.first,
+              let sourceIndices = sourcePart.triangleIndices?.elements,
+              let sourceWeights = sourcePart.jointInfluences?.influences.elements,
+              let skeleton = bodyContents.skeletons.first else { return nil }
+        let sourcePositions = sourcePart.positions.elements
+        let sourceNormals = sourcePart.normals?.elements
+        let centre = isFront ? frontCentre : backCentre
+        let side: Float = isFront ? 1 : -1
+        let minX = centre.x + side * bounds.min.x * scale
+        let maxX = centre.x + side * bounds.max.x * scale
+        let minY = centre.y + bounds.min.y * scale
+        let maxY = centre.y + bounds.max.y * scale
+        let xLo = min(minX, maxX), xHi = max(minX, maxX)
+        var positions: [SIMD3<Float>] = []
+        var normals: [SIMD3<Float>] = []
+        var uvs: [SIMD2<Float>] = []
+        var weights: [MeshJointInfluence] = []
+        var indices: [UInt32] = []
+        for base in stride(from: 0, to: sourceIndices.count, by: 3) {
+            let corners = (0..<3).map { Int(sourceIndices[base + $0]) }
+            let points = corners.map { sourcePositions[$0] }
+            let xs = points.map(\.x), ys = points.map(\.y)
+            guard (xs.min() ?? .infinity) <= xHi, (xs.max() ?? -.infinity) >= xLo,
+                  (ys.min() ?? .infinity) <= maxY, (ys.max() ?? -.infinity) >= minY,
+                  points.map({ side * $0.z }).max() ?? 0 > 0.04 else { continue }
+            let first = UInt32(positions.count)
+            for (corner, point) in zip(corners, points) {
+                positions.append(point + SIMD3<Float>(0, 0, side * 0.005))
+                normals.append(sourceNormals?[corner] ?? SIMD3<Float>(0, 0, side))
+                uvs.append(bounds.uv([side * (point.x - centre.x) / scale,
+                                       (point.y - centre.y) / scale]))
+                weights.append(contentsOf: sourceWeights[(corner * 4)..<(corner * 4 + 4)])
+            }
+            indices.append(contentsOf: [first, first + 1, first + 2])
+        }
+        guard !indices.isEmpty else { return nil }
+        var part = MeshResource.Part(id: "shirt-decal-part", materialIndex: 0)
+        part.positions = MeshBuffers.Positions(positions)
+        part.normals = MeshBuffers.Normals(normals)
+        part.textureCoordinates = MeshBuffers.TextureCoordinates(uvs)
+        part.triangleIndices = MeshBuffers.TriangleIndices(indices)
+        part.skeletonID = skeleton.id
+        part.jointInfluences = MeshResource.JointInfluences(
+            influences: MeshBuffers.JointInfluences(weights), influencesPerVertex: 4)
+        var contents = MeshResource.Contents()
+        contents.models = MeshModelCollection([MeshResource.Model(id: "shirt-decal", parts: [part])])
+        contents.instances = MeshInstanceCollection([MeshResource.Instance(id: "shirt-decal-instance",
+            model: "shirt-decal")])
+        contents.skeletons = MeshSkeletonCollection([skeleton])
+        return try MeshResource.generate(from: contents)
     }
 
     /// Signed distance from the old chest anchor to the deformed outermost
     /// shirt vertex. Four millimetres of air avoids z-fighting at the surface.
+    func probes(forFront isFront: Bool, footprint: Footprint) -> [Probe] {
+        var selected = (isFront ? front : back).filter { footprint.contains($0.restOffset) }
+        let triangles = isFront ? frontTriangles : backTriangles
+        for fx: Float in [0.04, 0.5, 0.96] {
+            for fy: Float in [0.04, 0.5, 0.96] {
+                let point = SIMD2<Float>(footprint.minX + (footprint.maxX - footprint.minX) * fx,
+                                         footprint.minY + (footprint.maxY - footprint.minY) * fy)
+                var outer: (probe: Probe, depth: Float)?
+                for triangle in triangles {
+                    guard let sample = triangle.sample(at: point) else { continue }
+                    if outer == nil || (isFront ? sample.depth > outer!.depth : sample.depth < outer!.depth) {
+                        outer = sample
+                    }
+                }
+                if let outer { selected.append(outer.probe) }
+            }
+        }
+        return selected
+    }
+
     func offset(forFront isFront: Bool, pose: ReplaySkinnedAthleteMotion.Pose,
-                chest: simd_float4x4, anchor: SIMD3<Float>, restInverse: simd_quatf) -> Float {
+                chest: simd_float4x4, anchor: SIMD3<Float>, restInverse: simd_quatf,
+                probes: [Probe]) -> Float {
         let origin4 = chest * SIMD4(anchor, 1)
         let origin = SIMD3(origin4.x, origin4.y, origin4.z)
         let normal = simd_quatf(chest).act(restInverse.act([0, 0, 1]))
-        let depths = (isFront ? front : back).map { simd_dot($0.position(in: pose) - origin, normal) }
-        let outside = isFront ? (depths.max() ?? 0) + 0.004 : (depths.min() ?? 0) - 0.004
+        guard !probes.isEmpty else { return isFront ? 0.022 : -0.022 }
+        var extreme = isFront ? -Float.infinity : Float.infinity
+        for probe in probes {
+            let depth = simd_dot(probe.position(in: pose) - origin, normal)
+            extreme = isFront ? max(extreme, depth) : min(extreme, depth)
+        }
+        let outside = extreme + (isFront ? 0.004 : -0.004)
         return min(max(outside, -0.06), 0.06)
     }
 }
@@ -361,6 +548,11 @@ final class ReplaySkinnedAthleteInstance {
     private let frontLocal: simd_float4x4
     private let backLocal: simd_float4x4
     let numberSurface: ReplaySkinnedNumberSurface?
+    let numbersUseShirtSkin: Bool
+    let numberFrontFootprint: ReplaySkinnedNumberSurface.Footprint?
+    let numberBackFootprint: ReplaySkinnedNumberSurface.Footprint?
+    let numberFrontProbes: [ReplaySkinnedNumberSurface.Probe]
+    let numberBackProbes: [ReplaySkinnedNumberSurface.Probe]
     private let neckIndex: Int
     private let headIndex: Int
     private let inverseRestChestRotation: simd_quatf
@@ -374,10 +566,12 @@ final class ReplaySkinnedAthleteInstance {
     private let turnInPlace: ReplaySkinnedAthleteTurnInPlace?
 
     init(root: Entity, skinRoot: Entity, model: ModelEntity, front: ModelEntity, back: ModelEntity,
-         playerID: String, motion: ReplaySkinnedAthleteMotion, contactSurface: ReplaySkinnedAthleteContactSurface,
+         playerID: String, motion: ReplaySkinnedAthleteMotion,
+         contactSurface: ReplaySkinnedAthleteContactSurface,
          detail: ReplaySkinnedAthleteProvider.Detail = .near,
          bootMarkers: ReplaySkinnedAthleteBootMarkers? = nil,
          numberSurface: ReplaySkinnedNumberSurface? = nil,
+         numbersUseShirtSkin: Bool = false,
          neckBridge: ModelEntity? = nil) {
         self.detail = detail
         self.root = root
@@ -390,6 +584,15 @@ final class ReplaySkinnedAthleteInstance {
         self.contactSurface = contactSurface
         self.bootMarkers = bootMarkers
         self.numberSurface = numberSurface
+        self.numbersUseShirtSkin = numbersUseShirtSkin
+        let frontFootprint = numbersUseShirtSkin ? nil
+            : ReplaySkinnedNumberSurface.Footprint.digit(front, scale: 0.115, mirroredX: false)
+        let backFootprint = numbersUseShirtSkin ? nil
+            : ReplaySkinnedNumberSurface.Footprint.digit(back, scale: 0.23, mirroredX: true)
+        numberFrontFootprint = frontFootprint
+        numberBackFootprint = backFootprint
+        numberFrontProbes = frontFootprint.flatMap { numberSurface?.probes(forFront: true, footprint: $0) } ?? []
+        numberBackProbes = backFootprint.flatMap { numberSurface?.probes(forFront: false, footprint: $0) } ?? []
         self.neckBridge = neckBridge
         pose = motion.makePoseBuffer()
         footballPose = ReplaySkinnedAthleteFootballPose(motion: motion, bootMarkers: bootMarkers)
@@ -680,6 +883,10 @@ final class ReplaySkinnedAthleteInstance {
                                           translation: pose.translations[index])
         }
         model.jointTransforms = transforms
+        if numbersUseShirtSkin {
+            front.jointTransforms = transforms
+            back.jointTransforms = transforms
+        }
         if let neckBridge {
             let neck4 = pose.modelSpaceTransforms[neckIndex].columns.3
             let head4 = pose.modelSpaceTransforms[headIndex].columns.3
@@ -695,16 +902,24 @@ final class ReplaySkinnedAthleteInstance {
         }
         let chest = pose.modelSpaceTransforms[motion.numberAnchors.jointIndex]
         var resolvedFront = frontLocal, resolvedBack = backLocal
-        if let numberSurface {
-            let frontOffset = numberSurface.offset(forFront: true, pose: pose, chest: chest,
-                anchor: motion.numberAnchors.front, restInverse: inverseRestChestRotation) - 0.022
-            let backOffset = numberSurface.offset(forFront: false, pose: pose, chest: chest,
-                anchor: motion.numberAnchors.back, restInverse: inverseRestChestRotation) + 0.022
-            resolvedFront.columns.3 += SIMD4(inverseRestChestRotation.act([0, 0, frontOffset]), 0)
-            resolvedBack.columns.3 += SIMD4(inverseRestChestRotation.act([0, 0, backOffset]), 0)
+        if !numbersUseShirtSkin, let numberSurface {
+            if !numberFrontProbes.isEmpty {
+                let frontOffset = numberSurface.offset(forFront: true, pose: pose, chest: chest,
+                    anchor: motion.numberAnchors.front, restInverse: inverseRestChestRotation,
+                    probes: numberFrontProbes) - 0.022
+                resolvedFront.columns.3 += SIMD4(inverseRestChestRotation.act([0, 0, frontOffset]), 0)
+            }
+            if !numberBackProbes.isEmpty {
+                let backOffset = numberSurface.offset(forFront: false, pose: pose, chest: chest,
+                    anchor: motion.numberAnchors.back, restInverse: inverseRestChestRotation,
+                    probes: numberBackProbes) + 0.022
+                resolvedBack.columns.3 += SIMD4(inverseRestChestRotation.act([0, 0, backOffset]), 0)
+            }
         }
-        front.transform = Transform(matrix: chest * resolvedFront)
-        back.transform = Transform(matrix: chest * resolvedBack)
+        if !numbersUseShirtSkin {
+            front.transform = Transform(matrix: chest * resolvedFront)
+            back.transform = Transform(matrix: chest * resolvedBack)
+        }
         skinRoot.position.y = -motion.geometry.restMinY
         return true
     }

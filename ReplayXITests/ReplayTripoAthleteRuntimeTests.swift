@@ -1,4 +1,5 @@
 import RealityKit
+import UIKit
 import XCTest
 @testable import ReplayXI
 
@@ -28,41 +29,76 @@ final class ReplayTripoAthleteRuntimeTests: XCTestCase {
                                                     turnRateDegreesPerSecond: turn))
     }
 
+    func testCPUJerseyMaskHasSolidInk() throws {
+        let digit = try ReplayAthleteMeshLibrary.jerseyNumber(3).mesh
+        let image = try ReplayTripoAthleteProvider.numberMaskImage(digit: digit)
+        let attachment = XCTAttachment(image: UIImage(cgImage: image))
+        attachment.name = "ReplayXI-CPU-JerseyMask-3.png"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        let bounds = try XCTUnwrap(ReplaySkinnedNumberSurface.DecalBounds(digit: digit))
+        let part = try XCTUnwrap(digit.contents.models.first?.parts.first)
+        let indices = try XCTUnwrap(part.triangleIndices).elements
+        let positions = part.positions.elements
+        let data = try XCTUnwrap(image.dataProvider?.data)
+        let bytes = try XCTUnwrap(CFDataGetBytePtr(data))
+        var solid = 0, samples = 0
+        for base in stride(from: 0, to: indices.count, by: 3) {
+            let a = positions[Int(indices[base])], b = positions[Int(indices[base + 1])],
+                c = positions[Int(indices[base + 2])]
+            // Side walls and chamfers project onto ink edges and may be
+            // antialiased; sample only broad front-face interiors.
+            let projectedArea = abs((b.x - a.x) * (c.y - a.y)
+                - (b.y - a.y) * (c.x - a.x))
+            guard projectedArea > 0.001 else { continue }
+            let uv = bounds.uv([(a.x + b.x + c.x) / 3, (a.y + b.y + c.y) / 3])
+            let x = min(max(Int(uv.x * 256), 0), 255)
+            let y = min(max(Int((1 - uv.y) * 256), 0), 255)
+            let alpha = bytes[y * image.bytesPerRow + x * 4 + 3]
+            samples += 1
+            if alpha > 230 { solid += 1 }
+        }
+        XCTAssertGreaterThan(samples, 10)
+        XCTAssertGreaterThan(solid, samples * 3 / 4, "CPU mask itself should not perforate glyph ink")
+        XCTAssertEqual(bytes[3], 0, "The outside corner must remain transparent")
+    }
+
     func testNativeShirtNumberDepthDiagnostic() throws {
         try ReplayTripoAthleteProvider.prewarm()
-        let track = try player()
+        let source = try player()
         var rows: [[String: Any]] = []
-        for detail in [ReplaySkinnedAthleteProvider.Detail.near, .lowDetail] {
-            let skin = try ReplayTripoAthleteProvider.make(for: track, detail: detail)
-            for time in [1.25, 13.6] {
-                let speed: Float = time < 2 ? 0 : 3.6
-                XCTAssertTrue(skin.update(at: time, track: track,
-                    locomotion: locomotion(track, time: time, speed: speed),
-                    lookTarget: nil, ballAction: nil,
-                    stationaryPose: speed == 0 ? track.presentationPose(at: time) : nil,
-                    allowsOffBallPose: false))
-                let contents = try XCTUnwrap(skin.model.model).mesh.contents
-                let part = try XCTUnwrap(contents.models.first?.parts.first)
-                let skeleton = try XCTUnwrap(contents.skeletons.first)
-                let weights = try XCTUnwrap(part.jointInfluences).influences.elements
-                let numberInverse = simd_inverse(skin.front.transform.matrix)
-                var maximumDepth = -Float.infinity
-                var sampled = 0
-                for (index, vertex) in part.positions.elements.enumerated() {
-                    var point = SIMD4<Float>.zero
-                    for influence in weights[(index * 4)..<(index * 4 + 4)] where influence.weight > 0 {
-                        point += skin.pose.modelSpaceTransforms[influence.jointIndex]
-                            * skeleton.joints[influence.jointIndex].inverseBindPoseMatrix
-                            * SIMD4(vertex, 1) * influence.weight
+        for geometry in ["base", "diverse"] {
+            for number in [1, 7, 11, 26] {
+                let track = PlayerTrack(id: "number-depth-\(geometry)-\(number)",
+                    displayName: source.displayName, role: source.role, shirtNumber: number,
+                    team: source.team, isGoalkeeper: false, keyframes: source.keyframes)
+                for detail in [ReplaySkinnedAthleteProvider.Detail.near, .lowDetail] {
+                    let skin = try geometry == "diverse"
+                        ? ReplayTripoAthleteProvider.makeDiverse(for: track, detail: detail)
+                        : ReplayTripoAthleteProvider.make(for: track, detail: detail)
+                    for time in [1.25, 13.6, 1.25] {
+                        let speed: Float = time < 2 ? 0 : 3.6
+                        XCTAssertTrue(skin.update(at: time, track: track,
+                            locomotion: locomotion(track, time: time, speed: speed),
+                            lookTarget: nil, ballAction: nil,
+                            stationaryPose: speed == 0 ? track.presentationPose(at: time) : nil,
+                            allowsOffBallPose: false))
+                        for isFront in [true, false] {
+                            XCTAssertTrue(skin.numbersUseShirtSkin,
+                                "Missing skinned digit: \(geometry) #\(number) \(detail) \(isFront ? "front" : "back")")
+                            guard skin.numbersUseShirtSkin else { continue }
+                            let clearances = try numberClearances(skin, number: number, isFront: isFront)
+                            XCTAssertGreaterThanOrEqual(clearances.count, 3)
+                            XCTAssertGreaterThanOrEqual(clearances.min() ?? -1, 0.002)
+                            XCTAssertLessThanOrEqual(clearances.max() ?? 1, 0.012)
+                            rows.append(["geometry": geometry, "number": number,
+                                "detail": detail == .near ? "near" : "low", "time": time,
+                                "side": isFront ? "front" : "back", "witnesses": clearances.count,
+                                "minimumClearanceMetres": clearances.min() ?? -1,
+                                "maximumClearanceMetres": clearances.max() ?? -1])
+                        }
                     }
-                    let local = numberInverse * point
-                    guard abs(local.x) < 0.31, abs(local.y) < 0.51 else { continue }
-                    sampled += 1
-                    maximumDepth = max(maximumDepth, local.z)
                 }
-                XCTAssertGreaterThan(sampled, 0)
-                rows.append(["detail": detail == .near ? "near" : "low", "time": time,
-                             "vertices": sampled, "shirtPastNumberMetres": (maximumDepth - 0.009) * 0.115])
             }
         }
         let attachment = XCTAttachment(data: try JSONSerialization.data(withJSONObject: rows,
@@ -70,6 +106,162 @@ final class ReplayTripoAthleteRuntimeTests: XCTestCase {
         attachment.name = "ReplayXI-NumberDepth-Diagnostic.json"
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+
+    /// Independent check from the imported triangle/weight buffer. The low
+    /// mesh can have no shirt vertex inside a narrow #1, so vertex-only depth
+    /// tests cannot verify that number's actual fabric surface.
+    func testSparseNumberHasIndependentWeightedTriangleWitness() throws {
+        try ReplayTripoAthleteProvider.prewarm()
+        let source = try player()
+        var rows: [[String: Any]] = []
+        for geometry in ["base", "diverse"] {
+            let track = PlayerTrack(id: "triangle-number-\(geometry)", displayName: source.displayName,
+                role: source.role, shirtNumber: 1, team: source.team,
+                isGoalkeeper: false, keyframes: source.keyframes)
+            for detail in [ReplaySkinnedAthleteProvider.Detail.near, .lowDetail] {
+                let skin = try geometry == "diverse"
+                    ? ReplayTripoAthleteProvider.makeDiverse(for: track, detail: detail)
+                    : ReplayTripoAthleteProvider.make(for: track, detail: detail)
+                for time in [1.25, 13.6] {
+                    let speed: Float = time < 2 ? 0 : 3.6
+                    XCTAssertTrue(skin.update(at: time, track: track,
+                        locomotion: locomotion(track, time: time, speed: speed),
+                        lookTarget: nil, ballAction: nil,
+                        stationaryPose: speed == 0 ? track.presentationPose(at: time) : nil,
+                        allowsOffBallPose: false))
+                    for isFront in [true, false] {
+                        XCTAssertTrue(skin.numbersUseShirtSkin,
+                            "Missing skinned digit: \(geometry) #1 \(detail) \(isFront ? "front" : "back")")
+                        guard skin.numbersUseShirtSkin else { continue }
+                        let clearances = try numberClearances(skin, number: 1, isFront: isFront)
+                        XCTAssertGreaterThanOrEqual(clearances.count, 3,
+                            "Visible #1 ink samples need imported torso triangles")
+                        XCTAssertGreaterThanOrEqual(clearances.min() ?? -1, 0.002)
+                        XCTAssertLessThanOrEqual(clearances.max() ?? 1, 0.012)
+                        rows.append(["geometry": geometry, "detail": detail == .near ? "near" : "low",
+                            "time": time, "side": isFront ? "front" : "back",
+                            "witnesses": clearances.count,
+                            "minimumClearanceMetres": clearances.min() ?? -1,
+                            "maximumClearanceMetres": clearances.max() ?? -1])
+                    }
+                }
+            }
+        }
+        let attachment = XCTAttachment(data: try JSONSerialization.data(withJSONObject: rows,
+            options: [.prettyPrinted, .sortedKeys]), uniformTypeIdentifier: "public.json")
+        attachment.name = "ReplayXI-IndependentNumberTriangle-Witness.json"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    private func numberClearances(_ skin: ReplaySkinnedAthleteInstance, number: Int,
+                                  isFront: Bool) throws -> [Float] {
+        let digit = isFront ? skin.front : skin.back
+        let contents = try XCTUnwrap(digit.model).mesh.contents
+        let part = try XCTUnwrap(contents.models.first?.parts.first)
+        let skeleton = try XCTUnwrap(contents.skeletons.first)
+        let weights = try XCTUnwrap(part.jointInfluences).influences.elements
+        let indices = try XCTUnwrap(part.triangleIndices).elements
+        let inkPart = try XCTUnwrap(ReplayAthleteMeshLibrary.jerseyNumber(number)
+            .mesh.contents.models.first?.parts.first)
+        let inkIndices = try XCTUnwrap(inkPart.triangleIndices).elements
+        let inkPositions = inkPart.positions.elements
+        XCTAssertEqual(digit.jointTransforms, skin.model.jointTransforms)
+        let chestIndex = skin.motion.numberAnchors.jointIndex
+        let chest = skin.pose.modelSpaceTransforms[chestIndex]
+        let rest = skin.motion.restPose.modelSpaceTransforms[chestIndex]
+        let frontNormal = simd_quatf(chest).act(simd_quatf(rest).inverse.act([0, 0, 1]))
+        let outward = isFront ? frontNormal : -frontNormal
+        let positions = part.positions.elements
+        let centre4 = skin.motion.restPose.modelSpaceTransforms[chestIndex]
+            * SIMD4(isFront ? skin.motion.numberAnchors.front : skin.motion.numberAnchors.back, 1)
+        let centre = SIMD3<Float>(centre4.x, centre4.y, centre4.z)
+        let side: Float = isFront ? 1 : -1
+        let scale: Float = isFront ? 0.115 : 0.23
+        let step = max(inkIndices.count / (3 * 20), 1) * 3
+        var clearances: [Float] = []
+        for base in stride(from: 0, to: inkIndices.count, by: step) {
+            let a = inkPositions[Int(inkIndices[base])]
+            let b = inkPositions[Int(inkIndices[base + 1])]
+            let c = inkPositions[Int(inkIndices[base + 2])]
+            // A centroid inside the original glyph is visible alpha, unlike
+            // the transparent corners of the cloned cloth triangles.
+            let inkXY = SIMD2<Float>((a.x + b.x + c.x) / 3, (a.y + b.y + c.y) / 3)
+            let target = SIMD2<Float>(centre.x + side * inkXY.x * scale,
+                                      centre.y + inkXY.y * scale)
+            guard let shirt = try rawShirtTriangleWitness(skin, isFront: isFront,
+                restPoint: target) else { continue }
+            var selected: (corners: [Int], barycentric: SIMD3<Float>, depth: Float)?
+            for decalBase in stride(from: 0, to: indices.count, by: 3) {
+                let ids = (0..<3).map { Int(indices[decalBase + $0]) }
+                let p = ids.map { positions[$0] }
+                let denominator = (p[1].y - p[2].y) * (p[0].x - p[2].x)
+                    + (p[2].x - p[1].x) * (p[0].y - p[2].y)
+                guard abs(denominator) > 0.000_000_1 else { continue }
+                let wa = ((p[1].y - p[2].y) * (target.x - p[2].x)
+                    + (p[2].x - p[1].x) * (target.y - p[2].y)) / denominator
+                let wb = ((p[2].y - p[0].y) * (target.x - p[2].x)
+                    + (p[0].x - p[2].x) * (target.y - p[2].y)) / denominator
+                let wc = 1 - wa - wb
+                guard min(wa, wb, wc) >= -0.000_1 else { continue }
+                let depth = p[0].z * wa + p[1].z * wb + p[2].z * wc
+                if selected == nil || side * depth > side * selected!.depth {
+                    selected = (ids, [wa, wb, wc], depth)
+                }
+            }
+            guard let selected else { continue }
+            var ink = SIMD3<Float>.zero
+            for (corner, index) in selected.corners.enumerated() {
+                var posed = SIMD4<Float>.zero
+                for influence in weights[(index * 4)..<(index * 4 + 4)] where influence.weight > 0 {
+                    posed += skin.pose.modelSpaceTransforms[influence.jointIndex]
+                        * skeleton.joints[influence.jointIndex].inverseBindPoseMatrix
+                        * SIMD4(positions[index], 1) * influence.weight
+                }
+                ink += SIMD3(posed.x, posed.y, posed.z) * selected.barycentric[corner]
+            }
+            clearances.append(simd_dot(ink - shirt, outward))
+        }
+        return clearances
+    }
+
+    private func rawShirtTriangleWitness(_ skin: ReplaySkinnedAthleteInstance, isFront: Bool,
+                                         restPoint target: SIMD2<Float>) throws -> SIMD3<Float>? {
+        let contents = try XCTUnwrap(skin.model.model).mesh.contents
+        let part = try XCTUnwrap(contents.models.first?.parts.first)
+        let skeleton = try XCTUnwrap(contents.skeletons.first)
+        let weights = try XCTUnwrap(part.jointInfluences).influences.elements
+        let indices = try XCTUnwrap(part.triangleIndices).elements
+        let positions = part.positions.elements
+        var chosen: (indices: [Int], weights: SIMD3<Float>, depth: Float)?
+        for base in stride(from: 0, to: indices.count, by: 3) {
+            let vertexIDs = [Int(indices[base]), Int(indices[base + 1]), Int(indices[base + 2])]
+            let a = positions[vertexIDs[0]], b = positions[vertexIDs[1]], c = positions[vertexIDs[2]]
+            let denominator = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y)
+            guard abs(denominator) > 0.000_000_1 else { continue }
+            let wa = ((b.y - c.y) * (target.x - c.x) + (c.x - b.x) * (target.y - c.y)) / denominator
+            let wb = ((c.y - a.y) * (target.x - c.x) + (a.x - c.x) * (target.y - c.y)) / denominator
+            let wc = 1 - wa - wb
+            guard min(wa, wb, wc) >= -0.000_1 else { continue }
+            let depth = a.z * wa + b.z * wb + c.z * wc
+            guard (isFront ? depth : -depth) > 0.04 else { continue }
+            if chosen == nil || (isFront ? depth > chosen!.depth : depth < chosen!.depth) {
+                chosen = (vertexIDs, [wa, wb, wc], depth)
+            }
+        }
+        guard let chosen else { return nil }
+        var result = SIMD3<Float>.zero
+        for (corner, index) in chosen.indices.enumerated() {
+            var posed = SIMD4<Float>.zero
+            for influence in weights[(index * 4)..<(index * 4 + 4)] where influence.weight > 0 {
+                posed += skin.pose.modelSpaceTransforms[influence.jointIndex]
+                    * skeleton.joints[influence.jointIndex].inverseBindPoseMatrix
+                    * SIMD4(positions[index], 1) * influence.weight
+            }
+            result += SIMD3(posed.x, posed.y, posed.z) * chosen.weights[corner]
+        }
+        return result
     }
 
     func testNewRigHasSharedMeshesIndependentPosesAndEqualTeamScale() throws {
@@ -80,6 +272,11 @@ final class ReplayTripoAthleteRuntimeTests: XCTestCase {
         for detail in [ReplaySkinnedAthleteProvider.Detail.near, .lowDetail] {
             let first = try ReplayTripoAthleteProvider.make(for: home, detail: detail)
             let second = try ReplayTripoAthleteProvider.make(for: away, detail: detail)
+            let maskBytes = ReplayTripoAthleteProvider.loadedNumberMaskBaseBytes
+            let sameNumber = try ReplayTripoAthleteProvider.make(for: home, detail: detail)
+            XCTAssertTrue(first.front.model?.mesh === sameNumber.front.model?.mesh)
+            XCTAssertTrue(first.back.model?.mesh === sameNumber.back.model?.mesh)
+            XCTAssertEqual(ReplayTripoAthleteProvider.loadedNumberMaskBaseBytes, maskBytes)
             XCTAssertEqual(first.motion.rigProfile, .tripo52)
             XCTAssertEqual(first.model.jointNames.count, 52)
             XCTAssertEqual(first.model.jointNames, first.motion.jointNames)
@@ -190,14 +387,11 @@ final class ReplayTripoAthleteRuntimeTests: XCTestCase {
             XCTAssertEqual(skin.model.jointTransforms, expected)
             XCTAssertEqual(skin.front.transform, front)
             XCTAssertEqual(skin.back.transform, back)
-            let surface = try XCTUnwrap(skin.numberSurface)
-            let chest = skin.pose.modelSpaceTransforms[skin.motion.numberAnchors.jointIndex]
-            let restChest = skin.motion.restPose.modelSpaceTransforms[skin.motion.numberAnchors.jointIndex]
-            let normal = simd_quatf(chest).act(simd_quatf(restChest).inverse.act([0, 0, 1]))
-            let frontDepths = surface.front.map { simd_dot($0.position(in: skin.pose) - skin.front.position, normal) }
-            let backDepths = surface.back.map { simd_dot($0.position(in: skin.pose) - skin.back.position, normal) }
-            XCTAssertLessThanOrEqual(frontDepths.max() ?? 1, -0.003)
-            XCTAssertGreaterThanOrEqual(backDepths.min() ?? -1, 0.003)
+            XCTAssertTrue(skin.numbersUseShirtSkin, "Missing skinned #7 digit at \(detail)")
+            XCTAssertEqual(skin.front.jointTransforms, skin.model.jointTransforms)
+            XCTAssertEqual(skin.back.jointTransforms, skin.model.jointTransforms)
+            XCTAssertEqual(skin.front.jointNames, skin.model.jointNames)
+            XCTAssertEqual(skin.back.jointNames, skin.model.jointNames)
         }
     }
 

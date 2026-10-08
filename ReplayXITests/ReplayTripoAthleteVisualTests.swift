@@ -14,6 +14,39 @@ private final class ReplayTripoCaptureCompletion: @unchecked Sendable {
 
 @MainActor
 final class ReplayTripoAthleteVisualTests: XCTestCase {
+    func testNumberAlphaMaterialAB() async throws {
+        ReplayTripoAthleteProvider.resetForTesting()
+        defer { ReplayTripoAthleteProvider.resetForTesting() }
+        try ReplayTripoAthleteProvider.prewarm()
+        let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay))
+        let player = try XCTUnwrap(scenario.player(id: "navy-gk"))
+        let skin = try ReplayTripoAthleteProvider.makeDiverse(for: player, detail: .near)
+        XCTAssertTrue(update(skin, player: player, time: 1.25, speed: 0, stationary: true))
+        let calibration = try await calibrate()
+        let original = try XCTUnwrap(skin.back.model)
+        let ink = try XCTUnwrap(original.materials.first as? UnlitMaterial)
+        let texture = try XCTUnwrap(ink.color.texture)
+        try await capture(skin.root, label: "number-alpha-production-double-mask", player: player,
+            view: .back, calibration: calibration, closeUp: true)
+
+        var baseAlphaOnly = ink
+        baseAlphaOnly.blending = .transparent(opacity: .init(scale: 1))
+        var component = original
+        component.materials = [baseAlphaOnly]
+        skin.back.model = component
+        try await capture(skin.root, label: "number-alpha-base-texture-only", player: player,
+            view: .back, calibration: calibration, closeUp: true)
+
+        var opacityOnly = ink
+        opacityOnly.color = .init(tint: ink.color.tint)
+        opacityOnly.blending = .transparent(opacity: .init(texture: texture))
+        component.materials = [opacityOnly]
+        skin.back.model = component
+        try await capture(skin.root, label: "number-alpha-opacity-mask-only", player: player,
+            view: .back, calibration: calibration, closeUp: true)
+        skin.back.model = original
+    }
+
     func testCapturesTripoNearAndLowNativePlayerViews() async throws {
         ReplayTripoAthleteProvider.resetForTesting()
         ReplaySkinnedAthleteProvider.resetForTesting()
@@ -121,7 +154,7 @@ final class ReplayTripoAthleteVisualTests: XCTestCase {
                       translation: homeNear.motion.restPose.translations[index])
         }
         try await capture(homeNear.root, label: "diversity172-home-near-rest-source-front", player: home,
-                          view: .front, calibration: calibration, closeUp: true)
+                          view: .front, calibration: calibration)
         homeNear.model.jointTransforms = idleJoints
         XCTAssertTrue(update(awayNear, player: away, time: idleTime, speed: 0, stationary: true))
         try await capture(awayNear.root, label: "diversity172-away-near-idle-front", player: away,
