@@ -333,37 +333,77 @@ enum ReplayTripoAthleteProvider {
     }
 
     private static func numberMask(for number: Int, digit: MeshResource) throws -> TextureResource {
-        let image = try numberMaskImage(digit: digit)
+        let image = try numberMaskImage(number: number, digit: digit)
         return try TextureResource(image: image,
             withName: "replay-shirt-number-mask-\(number)",
             options: .init(semantic: .color, mipmapsMode: .allocateAndGenerateAll))
     }
 
-    static func numberMaskImage(digit: MeshResource) throws -> CGImage {
-        guard let bounds = ReplaySkinnedNumberSurface.DecalBounds(digit: digit),
-              let part = digit.contents.models.first?.parts.first,
-              let indices = part.triangleIndices?.elements,
-              let context = CGContext(data: nil, width: 256, height: 256, bitsPerComponent: 8,
-                  bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
-                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+    /// A bold system numeral is rasterized once, then projected onto the
+    /// original weighted shirt triangles. The seven-segment mesh stays as the
+    /// no-texture fallback, but does not determine the close-player typography.
+    static func numberMaskImage(number: Int, digit: MeshResource) throws -> CGImage {
+        guard ReplaySkinnedNumberSurface.DecalBounds(digit: digit) != nil else {
             throw ReplaySkinnedAthleteError.invalidMaterials
         }
-        context.clear(CGRect(x: 0, y: 0, width: 256, height: 256))
-        context.setFillColor(UIColor.white.cgColor)
-        let positions = part.positions.elements
-        for base in stride(from: 0, to: indices.count, by: 3) {
-            let points = (0..<3).map { positions[Int(indices[base + $0])] }
-            let uv = points.map { bounds.uv([$0.x, $0.y]) }
-            context.move(to: CGPoint(x: CGFloat(uv[0].x) * 256, y: CGFloat(uv[0].y) * 256))
-            for corner in 1..<3 {
-                context.addLine(to: CGPoint(x: CGFloat(uv[corner].x) * 256,
-                                            y: CGFloat(uv[corner].y) * 256))
-            }
-            context.closePath()
-            context.fillPath()
+        let label = String(min(max(number, 0), 99))
+        let previewFont = UIFont.monospacedDigitSystemFont(ofSize: 220, weight: .heavy)
+        let measured = (label as NSString).size(withAttributes: [.font: previewFont])
+        guard measured.width > 0, measured.height > 0 else {
+            throw ReplaySkinnedAthleteError.invalidMaterials
         }
-        guard let image = context.makeImage() else { throw ReplaySkinnedAthleteError.invalidMaterials }
-        return image
+        let font = UIFont.monospacedDigitSystemFont(ofSize: 220 * min(216 / measured.width,
+            216 / measured.height), weight: .heavy)
+        let size = (label as NSString).size(withAttributes: [.font: font])
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = false
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 256, height: 256), format: format)
+        let image = renderer.image { _ in
+            (label as NSString).draw(at: CGPoint(x: (256 - size.width) * 0.5,
+                                              y: (256 - size.height) * 0.5),
+                                     withAttributes: [.font: font, .foregroundColor: UIColor.white])
+        }
+        func rgbaContext() -> CGContext? {
+            CGContext(data: nil, width: 256, height: 256, bitsPerComponent: 8,
+                bytesPerRow: 256 * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        }
+        guard let raw = image.cgImage, let source = rgbaContext() else {
+            throw ReplaySkinnedAthleteError.invalidMaterials
+        }
+        source.draw(raw, in: CGRect(x: 0, y: 0, width: 256, height: 256))
+        guard let bytes = source.data?.assumingMemoryBound(to: UInt8.self) else {
+            throw ReplaySkinnedAthleteError.invalidMaterials
+        }
+        var minX = 256, minY = 256, maxX = -1, maxY = -1
+        for y in 0..<256 {
+            for x in 0..<256 where bytes[y * source.bytesPerRow + x * 4 + 3] > 8 {
+                minX = min(minX, x); minY = min(minY, y)
+                maxX = max(maxX, x); maxY = max(maxY, y)
+            }
+        }
+        guard maxX >= minX, maxY >= minY,
+              let canonical = source.makeImage(),
+              let cropped = canonical.cropping(to: CGRect(x: minX, y: minY,
+                  width: maxX - minX + 1, height: maxY - minY + 1)) else {
+            throw ReplaySkinnedAthleteError.invalidMaterials
+        }
+        // UIFont line metrics include much unused space. Fill the actual ink
+        // to a 216 px box, leaving 20 px transparent border for shirt seams.
+        let fit = min(216 / CGFloat(cropped.width), 216 / CGFloat(cropped.height))
+        let inkSize = CGSize(width: CGFloat(cropped.width) * fit,
+                             height: CGFloat(cropped.height) * fit)
+        guard let normalized = rgbaContext() else {
+            throw ReplaySkinnedAthleteError.invalidMaterials
+        }
+        normalized.draw(cropped, in: CGRect(
+            x: (256 - inkSize.width) * 0.5, y: (256 - inkSize.height) * 0.5,
+            width: inkSize.width, height: inkSize.height))
+        guard let cgImage = normalized.makeImage() else {
+            throw ReplaySkinnedAthleteError.invalidMaterials
+        }
+        return cgImage
     }
 
     // The scene cache still owns instances; render selection is local and does

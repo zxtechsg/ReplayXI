@@ -5,6 +5,7 @@ import XCTest
 
 @MainActor
 final class ReplayTripoAthleteRuntimeTests: XCTestCase {
+    private var maskSamplesByNumber: [Int: [SIMD2<Float>]] = [:]
     override func setUp() {
         super.setUp()
         ReplayTripoAthleteProvider.resetForTesting()
@@ -31,36 +32,47 @@ final class ReplayTripoAthleteRuntimeTests: XCTestCase {
 
     func testCPUJerseyMaskHasSolidInk() throws {
         let digit = try ReplayAthleteMeshLibrary.jerseyNumber(3).mesh
-        let image = try ReplayTripoAthleteProvider.numberMaskImage(digit: digit)
+        let image = try ReplayTripoAthleteProvider.numberMaskImage(number: 3, digit: digit)
         let attachment = XCTAttachment(image: UIImage(cgImage: image))
         attachment.name = "ReplayXI-CPU-JerseyMask-3.png"
         attachment.lifetime = .keepAlways
         add(attachment)
-        let bounds = try XCTUnwrap(ReplaySkinnedNumberSurface.DecalBounds(digit: digit))
-        let part = try XCTUnwrap(digit.contents.models.first?.parts.first)
-        let indices = try XCTUnwrap(part.triangleIndices).elements
-        let positions = part.positions.elements
         let data = try XCTUnwrap(image.dataProvider?.data)
         let bytes = try XCTUnwrap(CFDataGetBytePtr(data))
-        var solid = 0, samples = 0
-        for base in stride(from: 0, to: indices.count, by: 3) {
-            let a = positions[Int(indices[base])], b = positions[Int(indices[base + 1])],
-                c = positions[Int(indices[base + 2])]
-            // Side walls and chamfers project onto ink edges and may be
-            // antialiased; sample only broad front-face interiors.
-            let projectedArea = abs((b.x - a.x) * (c.y - a.y)
-                - (b.y - a.y) * (c.x - a.x))
-            guard projectedArea > 0.001 else { continue }
-            let uv = bounds.uv([(a.x + b.x + c.x) / 3, (a.y + b.y + c.y) / 3])
-            let x = min(max(Int(uv.x * 256), 0), 255)
-            let y = min(max(Int((1 - uv.y) * 256), 0), 255)
-            let alpha = bytes[y * image.bytesPerRow + x * 4 + 3]
-            samples += 1
-            if alpha > 230 { solid += 1 }
+        var solid = 0, minX = 256, maxX = 0, minY = 256, maxY = 0
+        for y in 0..<256 {
+            for x in 0..<256 where bytes[y * image.bytesPerRow + x * 4 + 3] > 230 {
+                solid += 1
+                minX = min(minX, x); maxX = max(maxX, x)
+                minY = min(minY, y); maxY = max(maxY, y)
+            }
         }
-        XCTAssertGreaterThan(samples, 10)
-        XCTAssertGreaterThan(solid, samples * 3 / 4, "CPU mask itself should not perforate glyph ink")
+        XCTAssertGreaterThan(solid, 3_500, "The bold numeral needs a substantial solid interior")
+        XCTAssertLessThan(solid, 30_000, "The background must remain mostly clear")
+        XCTAssertGreaterThanOrEqual(max(maxX - minX, maxY - minY), 205,
+            "Actual glyph ink should fill the shirt decal box, not only its font line box")
+        XCTAssertGreaterThanOrEqual(minX, 8); XCTAssertLessThanOrEqual(maxX, 247)
+        XCTAssertGreaterThanOrEqual(minY, 8); XCTAssertLessThanOrEqual(maxY, 247)
         XCTAssertEqual(bytes[3], 0, "The outside corner must remain transparent")
+    }
+
+    private func visibleNumberUVs(_ number: Int, digit: MeshResource) throws -> [SIMD2<Float>] {
+        if let cached = maskSamplesByNumber[number] { return cached }
+        let image = try ReplayTripoAthleteProvider.numberMaskImage(number: number, digit: digit)
+        let data = try XCTUnwrap(image.dataProvider?.data)
+        let bytes = try XCTUnwrap(CFDataGetBytePtr(data))
+        var samples: [SIMD2<Float>] = []
+        for y in stride(from: 12, to: 244, by: 12) {
+            for x in stride(from: 12, to: 244, by: 12)
+                where bytes[y * image.bytesPerRow + x * 4 + 3] > 230 {
+                samples.append([(Float(x) + 0.5) / 256, 1 - (Float(y) + 0.5) / 256])
+            }
+        }
+        XCTAssertGreaterThan(samples.count, 12, "Visible mask pixels must exist across the numeral")
+        let step = max(samples.count / 24, 1)
+        let selected = stride(from: 0, to: samples.count, by: step).map { samples[$0] }
+        maskSamplesByNumber[number] = selected
+        return selected
     }
 
     func testNativeShirtNumberDepthDiagnostic() throws {
@@ -163,10 +175,9 @@ final class ReplayTripoAthleteRuntimeTests: XCTestCase {
         let skeleton = try XCTUnwrap(contents.skeletons.first)
         let weights = try XCTUnwrap(part.jointInfluences).influences.elements
         let indices = try XCTUnwrap(part.triangleIndices).elements
-        let inkPart = try XCTUnwrap(ReplayAthleteMeshLibrary.jerseyNumber(number)
-            .mesh.contents.models.first?.parts.first)
-        let inkIndices = try XCTUnwrap(inkPart.triangleIndices).elements
-        let inkPositions = inkPart.positions.elements
+        let inkMesh = try ReplayAthleteMeshLibrary.jerseyNumber(number).mesh
+        let bounds = try XCTUnwrap(ReplaySkinnedNumberSurface.DecalBounds(digit: inkMesh))
+        let visibleUVs = try visibleNumberUVs(number, digit: inkMesh)
         XCTAssertEqual(digit.jointTransforms, skin.model.jointTransforms)
         let chestIndex = skin.motion.numberAnchors.jointIndex
         let chest = skin.pose.modelSpaceTransforms[chestIndex]
@@ -179,15 +190,11 @@ final class ReplayTripoAthleteRuntimeTests: XCTestCase {
         let centre = SIMD3<Float>(centre4.x, centre4.y, centre4.z)
         let side: Float = isFront ? 1 : -1
         let scale: Float = isFront ? 0.115 : 0.23
-        let step = max(inkIndices.count / (3 * 20), 1) * 3
         var clearances: [Float] = []
-        for base in stride(from: 0, to: inkIndices.count, by: step) {
-            let a = inkPositions[Int(inkIndices[base])]
-            let b = inkPositions[Int(inkIndices[base + 1])]
-            let c = inkPositions[Int(inkIndices[base + 2])]
-            // A centroid inside the original glyph is visible alpha, unlike
-            // the transparent corners of the cloned cloth triangles.
-            let inkXY = SIMD2<Float>((a.x + b.x + c.x) / 3, (a.y + b.y + c.y) / 3)
+        for uv in visibleUVs {
+            // These UVs are opaque in the generated mask; transparent cloth
+            // decal corners are not counted as visible-number evidence.
+            let inkXY = bounds.min + uv * (bounds.max - bounds.min)
             let target = SIMD2<Float>(centre.x + side * inkXY.x * scale,
                                       centre.y + inkXY.y * scale)
             guard let shirt = try rawShirtTriangleWitness(skin, isFront: isFront,
