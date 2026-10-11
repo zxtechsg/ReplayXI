@@ -336,6 +336,14 @@ enum PitchSceneFactory {
         var playerLabelFocus: SpatialReviewFocus = .normal
         var focusedPlayerIDs: Set<String>?
         var firstPersonDetailedPlayerIDs: [String] = []
+        // Discrete lens styles change rarely, while their geometry moves each
+        // frame. Avoid rebuilding RealityKit materials on unchanged frames.
+        var laneMaterialKeys: [Int] = [-1, -1, -1]
+        var triangleMaterialIsIdeal: Bool?
+        #if DEBUG
+        var laneMaterialWrites = 0
+        var triangleMaterialWrites = 0
+        #endif
         var importedAthlete: ReplayImportedAthleteInstance?
         var importedAthleteAttemptedPlayerID: String?
         var skinnedAthletes: [String: ReplaySkinnedAthleteInstance] = [:]
@@ -494,6 +502,23 @@ enum PitchSceneFactory {
         let entityIndexBuilds: Int
         let poseRefreshes: Int
     }
+
+    #if DEBUG
+    struct PresentationMaterialDiagnostics: Equatable {
+        let laneWrites: Int
+        let triangleWrites: Int
+    }
+
+    static func presentationMaterialDiagnostics(for root: Entity) -> PresentationMaterialDiagnostics {
+        guard let cache = annotationSceneCaches[ObjectIdentifier(root)], cache.root === root else {
+            return PresentationMaterialDiagnostics(laneWrites: 0, triangleWrites: 0)
+        }
+        return PresentationMaterialDiagnostics(
+            laneWrites: cache.laneMaterialWrites,
+            triangleWrites: cache.triangleMaterialWrites
+        )
+    }
+    #endif
 
     /// Narrow regression seam for proving that presentation updates reuse the
     /// factory's semantic bindings rather than walking joint names at 30 Hz.
@@ -1686,7 +1711,8 @@ enum PitchSceneFactory {
             time: time,
             mode: effectiveTriangleMode,
             visible: isTriangleView,
-            showsIdeal: showsIdealShape
+            showsIdeal: showsIdealShape,
+            sceneState: sceneState
         )
         let showsFullField = viewMode == .tacticalTable || viewMode == .firstPerson
         if let pitch = directChild(named: "pitch", of: root) {
@@ -1703,7 +1729,8 @@ enum PitchSceneFactory {
             )
         }
         directChild(named: "annotation-surface", of: root)?.isEnabled = isDrawing
-        updateLanes(in: root, scenario: scenario, time: time, visible: showsLaneLens)
+        updateLanes(in: root, scenario: scenario, time: time, visible: showsLaneLens,
+                    sceneState: sceneState)
         applyPresentation(
             root: root,
             scenario: scenario,
@@ -2745,7 +2772,8 @@ enum PitchSceneFactory {
         time: TimeInterval,
         mode: TriangleLockMode,
         visible: Bool,
-        showsIdeal: Bool
+        showsIdeal: Bool,
+        sceneState: AnnotationSceneCache?
     ) {
         guard let shapeRoot = directChild(named: "triangle-shape-root", of: root) else { return }
         shapeRoot.isEnabled = visible && scenario.formationTargets.count >= 3
@@ -2761,6 +2789,8 @@ enum PitchSceneFactory {
         let color = showsIdeal
             ? UIColor(red: 0.78, green: 0.94, blue: 0.19, alpha: 0.88)
             : UIColor(red: 1.0, green: 0.42, blue: 0.12, alpha: 0.68)
+        let updatesMaterial = sceneState?.triangleMaterialIsIdeal != showsIdeal
+        if updatesMaterial { sceneState?.triangleMaterialIsIdeal = showsIdeal }
         let edgePhysicalWidth: Float = mode == .place ? 0.025 : 0.007
         let nodePhysicalRadius: Float = mode == .place ? 0.070 : 0.024
 
@@ -2774,7 +2804,12 @@ enum PitchSceneFactory {
                 edge.position = [(start.x + end.x) / 2, 0.030 / scale, (start.z + end.z) / 2]
                 edge.scale = [edgePhysicalWidth / scale, edgePhysicalWidth / scale, length]
                 edge.orientation = simd_quatf(angle: atan2(dx, dz), axis: [0, 1, 0])
-                edge.model?.materials = [UnlitMaterial(color: color)]
+                if updatesMaterial {
+                    edge.model?.materials = [UnlitMaterial(color: color)]
+                    #if DEBUG
+                    sceneState?.triangleMaterialWrites &+= 1
+                    #endif
+                }
             }
 
             if let node = directChild(named: "triangle-node-\(index)", of: shapeRoot) as? ModelEntity {
@@ -2784,7 +2819,12 @@ enum PitchSceneFactory {
                     0.018 / scale,
                     (nodePhysicalRadius * 2) / scale
                 ]
-                node.model?.materials = [UnlitMaterial(color: color)]
+                if updatesMaterial {
+                    node.model?.materials = [UnlitMaterial(color: color)]
+                    #if DEBUG
+                    sceneState?.triangleMaterialWrites &+= 1
+                    #endif
+                }
             }
         }
     }
@@ -2911,7 +2951,8 @@ enum PitchSceneFactory {
         return root
     }
 
-    private static func updateLanes(in root: Entity, scenario: ReplayScenario, time: TimeInterval, visible: Bool) {
+    private static func updateLanes(in root: Entity, scenario: ReplayScenario, time: TimeInterval,
+                                    visible: Bool, sceneState: AnnotationSceneCache?) {
         guard let lanesRoot = directChild(named: "lanes-root", of: root) else { return }
         lanesRoot.isEnabled = visible
         guard visible,
@@ -2929,14 +2970,24 @@ enum PitchSceneFactory {
             let end = target.presentationPose(at: time).position
             let clearance = ReplayGeometry.laneClearance(from: start, to: end, defenders: defenders)
             let color: UIColor
+            let materialKey: Int
             if shirtNumber == 6 {
+                materialKey = 0
                 color = UIColor.white.withAlphaComponent(0.48)
             } else if clearance > 1.75 {
+                materialKey = 1
                 color = UIColor(red: 0.22, green: 0.91, blue: 0.88, alpha: 0.78)
             } else {
+                materialKey = 2
                 color = UIColor(red: 1.0, green: 0.25, blue: 0.34, alpha: 0.72)
             }
-            lane.model?.materials = [UnlitMaterial(color: color)]
+            if sceneState?.laneMaterialKeys[index] != materialKey {
+                lane.model?.materials = [UnlitMaterial(color: color)]
+                sceneState?.laneMaterialKeys[index] = materialKey
+                #if DEBUG
+                sceneState?.laneMaterialWrites &+= 1
+                #endif
+            }
             setSegmentTransform(lane, from: start, to: end, y: 0.09)
         }
     }

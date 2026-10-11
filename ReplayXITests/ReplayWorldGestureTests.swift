@@ -46,6 +46,25 @@ final class ReplayWorldGestureTests: XCTestCase {
         }
     }
 
+    func testPOVEntryWaitCommitsFallbackOnceTrackingDeadlineExpires() {
+        XCTAssertFalse(ReplayPOVEntryPolicy.shouldUseFallback(startedAt: 10, now: 10.4))
+        XCTAssertTrue(ReplayPOVEntryPolicy.shouldUseFallback(startedAt: 10, now: 10.61))
+        XCTAssertFalse(ReplayPOVEntryPolicy.shouldUseFallback(startedAt: .nan, now: 11))
+        XCTAssertFalse(ReplayPOVEntryPolicy.shouldUseFallback(startedAt: 10, now: .infinity))
+    }
+
+    func testPOVSceneIsHiddenUntilItsOwnReferenceIsCaptured() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let view = try String(contentsOf: root.appendingPathComponent(
+            "ReplayXI/Immersive/FootballImmersiveView.swift"), encoding: .utf8)
+        XCTAssertTrue(view.contains("root.isEnabled = store.viewMode != .firstPerson || hasCurrentPOVReference"))
+        XCTAssertTrue(view.contains("let visible = enabled && (store.viewMode != .firstPerson || hasCurrentPOVReference)"))
+        XCTAssertTrue(view.contains("let trackedYaw = worldTracking.deviceYaw()"))
+        XCTAssertTrue(view.contains("let deviceYaw = trackedYaw ?? 0"))
+        XCTAssertTrue(view.contains("guard worldTracking.hasResolvedWorldStartup else { return }"))
+        XCTAssertTrue(view.contains("let startup = Task { await tracking.start() }"))
+    }
+
     func testTwoHandsMoveAndResizeWithBoundsAndReset() {
         var placement = ReplayWorldPlacement()
         placement.update(left: [-0.2, 0, -0.5], right: [0.2, 0, -0.5], allowed: true)

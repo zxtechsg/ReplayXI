@@ -9,34 +9,50 @@ final class ReplayWorldGestureTracking {
     private var session = ARKitSession()
     private var world = WorldTrackingProvider()
     private let hands = HandTrackingProvider()
+    private(set) var hasResolvedWorldStartup = false
+    private(set) var tracksWorld = false
     private(set) var tracksHands = false
 
     func start() async {
-        guard WorldTrackingProvider.isSupported else { return }
+        guard !Task.isCancelled else { return }
+        guard WorldTrackingProvider.isSupported else {
+            hasResolvedWorldStartup = true
+            return
+        }
         do {
             try await session.run([world])
         } catch {
+            hasResolvedWorldStartup = true
             return
         }
+        hasResolvedWorldStartup = true
+        guard !Task.isCancelled else { session.stop(); return }
+        tracksWorld = true
         guard HandTrackingProvider.isSupported else { return }
         let authorization = await session.queryAuthorization(for: [.handTracking])[.handTracking]
+        guard !Task.isCancelled else { session.stop(); tracksWorld = false; return }
         let permission = authorization == .notDetermined
             ? await session.requestAuthorization(for: [.handTracking])[.handTracking]
             : authorization
+        guard !Task.isCancelled else { session.stop(); tracksWorld = false; return }
         guard permission == .allowed else { return }
         do {
             try await session.run([world, hands])
+            guard !Task.isCancelled else { session.stop(); tracksWorld = false; return }
             tracksHands = true
         } catch {
             // A failed run stops its providers. Reusing `world` can assert, so
             // recover POV tracking with a fresh session and provider pair.
+            tracksWorld = false
             guard !Task.isCancelled else { return }
             let fallbackSession = ARKitSession()
             let fallbackWorld = WorldTrackingProvider()
             do {
                 try await fallbackSession.run([fallbackWorld])
+                guard !Task.isCancelled else { fallbackSession.stop(); return }
                 session = fallbackSession
                 world = fallbackWorld
+                tracksWorld = true
             } catch {
                 fallbackSession.stop()
             }
@@ -45,10 +61,13 @@ final class ReplayWorldGestureTracking {
 
     func stop() {
         session.stop()
+        hasResolvedWorldStartup = false
+        tracksWorld = false
         tracksHands = false
     }
 
     func deviceYaw() -> Float? {
+        guard tracksWorld else { return nil }
         guard let anchor = world.queryDeviceAnchor(atTimestamp: CACurrentMediaTime()),
               anchor.isTracked else { return nil }
         let forward = -SIMD2(anchor.originFromAnchorTransform.columns.2.x,
@@ -105,6 +124,18 @@ struct ReplayPOVReference: Equatable {
         }
         return rootYaw(deviceYaw: deviceYaw, playerFacingDegrees: playerFacingDegrees,
                        lookYawRadians: fallbackLookYawRadians)
+    }
+}
+
+/// A POV entry waits briefly for the headset pose. After the deadline it
+/// commits one fixed fallback instead of showing a wrong bearing and snapping
+/// the whole world later when tracking arrives.
+enum ReplayPOVEntryPolicy {
+    static let trackingWaitSeconds: TimeInterval = 0.6
+
+    static func shouldUseFallback(startedAt: TimeInterval, now: TimeInterval) -> Bool {
+        guard startedAt.isFinite, now.isFinite else { return false }
+        return now - startedAt >= trackingWaitSeconds
     }
 }
 

@@ -33,6 +33,7 @@ struct FootballImmersiveView: View {
     @State private var movingWorkspace: Entity?
     @State private var worldTracking = ReplayWorldGestureTracking()
     @State private var povReference: ReplayPOVReference?
+    @State private var povEntryStartedAt: TimeInterval?
     @State private var currentMatchRoot: Entity?
     @State private var worldPlacement = ReplayWorldPlacement()
     @State private var pitchTrackingOwner = UUID()
@@ -305,8 +306,10 @@ struct FootballImmersiveView: View {
             guard store.selectedScenario.kind != .shapeLab else { return }
             let tracking = ReplayWorldGestureTracking()
             worldTracking = tracking
-            await tracking.start()
-            defer { tracking.stop() }
+            // World pose can become ready before the user answers the separate
+            // hand permission prompt. Keep POV entry and its fallback polling.
+            let startup = Task { await tracking.start() }
+            defer { startup.cancel(); tracking.stop() }
             while !Task.isCancelled {
                 if store.roomPresentation.owns(roomPresentationID), !store.isClosingImmersive {
                     capturePOVReferenceIfNeeded()
@@ -351,6 +354,7 @@ struct FootballImmersiveView: View {
             cancelWorkspaceMove()
             worldPlacement.update(left: nil, right: nil, allowed: false)
             povReference = nil
+            povEntryStartedAt = nil
             currentMatchRoot = nil
             accessibilityActivationSubscription?.cancel()
             accessibilityActivationSubscription = nil
@@ -399,16 +403,19 @@ struct FootballImmersiveView: View {
             annotationHandleDrag.cancelCurrent(in: store)
             selectedAnnotationID = nil
             povReference = nil
+            povEntryStartedAt = nil
             currentMatchRoot = nil
             worldPlacement.reset()
         }
         .onChange(of: store.viewMode) { _, _ in
             povReference = nil
+            povEntryStartedAt = nil
             reconcileWorldPlacementForCurrentView()
             capturePOVReferenceIfNeeded()
         }
         .onChange(of: store.activePerspectiveID) { _, _ in
             povReference = nil
+            povEntryStartedAt = nil
             capturePOVReferenceIfNeeded()
         }
         .onChange(of: controlDeckPresetRawValue) { _, _ in
@@ -513,6 +520,7 @@ struct FootballImmersiveView: View {
         let mode = ReplayEnvironmentMode.effective(environmentModeRawValue,
             isPhysicalPractice: store.selectedScenario.kind == .shapeLab || store.triangleLockMode == .place)
         let enabled = mode == .stadium
+        let visible = enabled && (store.viewMode != .firstPerson || hasCurrentPOVReference)
         // Keep resources and entities through toggle/seek changes. No model
         // import, texture creation or collision work belongs in playback ticks.
         var sky = content.entities.first { $0.name == ReplayStadiumEnvironment.skyRootName }
@@ -534,9 +542,9 @@ struct FootballImmersiveView: View {
             content.add(made)
             lighting = made
         }
-        if sky?.isEnabled != enabled { sky?.isEnabled = enabled }
-        if stadium?.isEnabled != enabled { stadium?.isEnabled = enabled }
-        if lighting?.isEnabled != enabled { lighting?.isEnabled = enabled }
+        if sky?.isEnabled != visible { sky?.isEnabled = visible }
+        if stadium?.isEnabled != visible { stadium?.isEnabled = visible }
+        if lighting?.isEnabled != visible { lighting?.isEnabled = visible }
         guard enabled, let stadium else { return }
         let placement = renderedWorldPlacement
         // The stadium follows POV directly. In review views it scales and
@@ -717,7 +725,17 @@ struct FootballImmersiveView: View {
         } else if store.viewMode == .tacticalTable || store.viewMode == .touchline {
             root.transform = ReplayWorldPlacement.apply(renderedWorldPlacement, to: root.transform)
         }
+        // Factory's temporary default POV bearing must never be visible.
+        // A captured reference is immutable for this player entry, so later
+        // tracking changes cannot rotate the wearer's view.
+        root.isEnabled = store.viewMode != .firstPerson || hasCurrentPOVReference
         applyLocalOverlayVisibility(to: root)
+    }
+
+    private var hasCurrentPOVReference: Bool {
+        store.viewMode == .firstPerson
+            && povReference?.scenarioID == store.selectedScenarioID
+            && povReference?.playerID == store.activePerspectiveID
     }
 
     private var surfaceModeIsAvailable: Bool {
@@ -791,7 +809,19 @@ struct FootballImmersiveView: View {
            povReference?.playerID == player.id { return }
         guard let currentMatchRoot,
               currentMatchRoot.name == "match-root-\(store.selectedScenarioID)" else { return }
-        guard let deviceYaw = worldTracking.deviceYaw() else { return }
+        // Wait for the world-tracking permission result. A slow system prompt
+        // is not a tracking failure and must not lock an arbitrary fallback.
+        guard worldTracking.hasResolvedWorldStartup else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        if povEntryStartedAt == nil { povEntryStartedAt = now }
+        let trackedYaw = worldTracking.deviceYaw()
+        let waitExpired = ReplayPOVEntryPolicy.shouldUseFallback(
+            startedAt: povEntryStartedAt ?? now, now: now
+        )
+        guard trackedYaw != nil || waitExpired else { return }
+        // If tracking is unavailable, use one stable bearing. Never replace
+        // it mid-POV when ARKit eventually reports a pose.
+        let deviceYaw = trackedYaw ?? 0
         let time = store.playhead
         let pose = store.presentedPlayerPose(for: player, at: time)
         let recording = preparedNativeRecording
@@ -809,8 +839,9 @@ struct FootballImmersiveView: View {
             )
         }
         // A newly selected study may have a prepared recording before its
-        // matching scene cache exists. Retry next frame; do not lock a guess.
-        if recording != nil && nativeInputs == nil { return }
+        // matching scene cache exists. Wait briefly for the exact cues, then
+        // use a stable estimated gaze rather than hide POV indefinitely.
+        if recording != nil && nativeInputs == nil && !waitExpired { return }
         let lookTarget: SIMD3<Float>
         if recording != nil && stationaryPose == nil {
             let poses = Dictionary(uniqueKeysWithValues: store.selectedScenario.players.map {
@@ -842,6 +873,10 @@ struct FootballImmersiveView: View {
         ) else { return }
         povReference = ReplayPOVReference(scenarioID: store.selectedScenarioID,
                                            playerID: player.id, rootYaw: yaw)
+        povEntryStartedAt = nil
+        if trackedYaw == nil || (recording != nil && nativeInputs == nil) {
+            store.statusMessage = "POV used an estimated bearing. Switch views and return to realign."
+        }
     }
 
     /// POV hides the wearer's rig, so sample a detached prepared skin exactly

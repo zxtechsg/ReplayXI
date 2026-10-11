@@ -42,6 +42,42 @@ final class ReplaySceneWorkDiagnosticsTests: XCTestCase {
         try recordFullSquad(lowDetail: true, farFaces: true)
     }
 
+    func testUnchangedLensStylesDoNotRewriteMaterialsOnPlaybackFrames() throws {
+        let laneScenario = try XCTUnwrap(DemoScenarios.scenario(for: .passingChannels))
+        let laneRoot = PitchSceneFactory.makeMatchRoot(for: laneScenario)
+        defer { for child in Array(laneRoot.children) { child.removeFromParent() } }
+        func updateLanes() {
+            PitchSceneFactory.update(root: laneRoot, scenario: laneScenario, time: 10,
+                viewMode: .tacticalTable, perspectiveID: laneScenario.defaultPerspectiveID,
+                marks: [], showsLaneLens: true, isDrawing: false,
+                positionalOriginTransform: nil)
+        }
+        updateLanes()
+        let firstLaneWrites = PitchSceneFactory.presentationMaterialDiagnostics(for: laneRoot).laneWrites
+        XCTAssertEqual(firstLaneWrites, 3)
+        for _ in 0..<12 { updateLanes() }
+        XCTAssertEqual(PitchSceneFactory.presentationMaterialDiagnostics(for: laneRoot).laneWrites,
+                       firstLaneWrites)
+
+        let shapeScenario = try XCTUnwrap(DemoScenarios.scenario(for: .shapeLab))
+        let shapeRoot = PitchSceneFactory.makeMatchRoot(for: shapeScenario)
+        defer { for child in Array(shapeRoot.children) { child.removeFromParent() } }
+        func updateShape(ideal: Bool) {
+            PitchSceneFactory.update(root: shapeRoot, scenario: shapeScenario, time: 10,
+                viewMode: .positional, perspectiveID: shapeScenario.defaultPerspectiveID,
+                marks: [], showsLaneLens: false, isDrawing: false,
+                positionalOriginTransform: nil, showsIdealBranch: ideal)
+        }
+        updateShape(ideal: false)
+        XCTAssertEqual(PitchSceneFactory.presentationMaterialDiagnostics(for: shapeRoot).triangleWrites, 6)
+        for _ in 0..<12 { updateShape(ideal: false) }
+        XCTAssertEqual(PitchSceneFactory.presentationMaterialDiagnostics(for: shapeRoot).triangleWrites, 6)
+        updateShape(ideal: true)
+        XCTAssertEqual(PitchSceneFactory.presentationMaterialDiagnostics(for: shapeRoot).triangleWrites, 12)
+        updateShape(ideal: true)
+        XCTAssertEqual(PitchSceneFactory.presentationMaterialDiagnostics(for: shapeRoot).triangleWrites, 12)
+    }
+
     func testRecordsAllFiveNativeReferenceScenesAcrossViewsForwardReverseAndPaused() async throws {
         try XCTSkipIf(ReplayImportedAthleteFeatureGate.isEnabled,
                       "Measures the default current-asset path, not the opt-in legacy pilot")
