@@ -40,6 +40,60 @@ final class ReplayConversionPreviewTests: XCTestCase {
         XCTAssertNotEqual(session.capture?.id, previousID)
     }
 
+    func testRoomClockPolicyKeepsStoreTimeThroughClosingAndBlocksTransitionCalibration() {
+        let id = "study-a"
+        XCTAssertFalse(ReplayReferenceRoomClockPolicy.matches(
+            isPresenting: false, scenarioID: id, captureScenarioID: id))
+        XCTAssertTrue(ReplayReferenceRoomClockPolicy.matches(
+            isPresenting: true, scenarioID: id, captureScenarioID: id))
+        XCTAssertFalse(ReplayReferenceRoomClockPolicy.matches(
+            isPresenting: true, scenarioID: "study-b", captureScenarioID: id))
+        XCTAssertTrue(ReplayReferenceRoomClockPolicy.canCalibrate(
+            isPresenting: false, isTransitioning: false, matchesCapture: false))
+        XCTAssertTrue(ReplayReferenceRoomClockPolicy.canCalibrate(
+            isPresenting: true, isTransitioning: false, matchesCapture: true))
+        XCTAssertFalse(ReplayReferenceRoomClockPolicy.canCalibrate(
+            isPresenting: true, isTransitioning: true, matchesCapture: true),
+            "A matching room still cannot calibrate while opening or closing")
+        XCTAssertFalse(ReplayReferenceRoomClockPolicy.canCalibrate(
+            isPresenting: true, isTransitioning: false, matchesCapture: false))
+    }
+
+    func testExternallyOpenedMatchingRoomHandsFinalTimeBackOnce() throws {
+        let scenario = try XCTUnwrap(FootballReferenceScenarios.all.first)
+        let session = ReplayConversionPreviewSession()
+        session.capture(scenario: scenario, marks: [], playhead: 2,
+            perspectiveID: scenario.defaultPerspectiveID)
+        session.isPlaying = true
+        // This does not call the comparison window's Enter action.
+        session.reconcileRoomClock(isPresenting: true, scenarioID: scenario.id, roomPlayhead: 3)
+        XCTAssertFalse(session.isPlaying)
+        XCTAssertEqual(session.playhead, 2)
+        session.reconcileRoomClock(isPresenting: true, scenarioID: scenario.id, roomPlayhead: 8)
+        XCTAssertEqual(session.playhead, 2, "Closing is still a room presentation")
+        session.reconcileRoomClock(isPresenting: false, scenarioID: scenario.id, roomPlayhead: 9)
+        XCTAssertEqual(session.playhead, 9)
+        session.seek(to: 4)
+        session.reconcileRoomClock(isPresenting: false, scenarioID: scenario.id, roomPlayhead: 10)
+        XCTAssertEqual(session.playhead, 4, "A later preview seek must stay independent")
+    }
+
+    func testMismatchedRoomCannotHandItsTimeToCapturedStudy() throws {
+        let scenarios = FootballReferenceScenarios.all
+        let first = try XCTUnwrap(scenarios.first)
+        let other = try XCTUnwrap(scenarios.first { $0.id != first.id })
+        let session = ReplayConversionPreviewSession()
+        session.capture(scenario: first, marks: [], playhead: 2,
+            perspectiveID: first.defaultPerspectiveID)
+        session.reconcileRoomClock(isPresenting: true, scenarioID: other.id, roomPlayhead: 8)
+        session.reconcileRoomClock(isPresenting: false, scenarioID: other.id, roomPlayhead: 9)
+        XCTAssertEqual(session.playhead, 2)
+        session.reconcileRoomClock(isPresenting: true, scenarioID: first.id, roomPlayhead: 5)
+        session.reconcileRoomClock(isPresenting: true, scenarioID: other.id, roomPlayhead: 10)
+        session.reconcileRoomClock(isPresenting: false, scenarioID: other.id, roomPlayhead: 11)
+        XCTAssertEqual(session.playhead, 2, "A later study switch must not copy its final clock")
+    }
+
     func testPreviewClockIsBoundedSeekableAndStopsAtEnd() throws {
         let scenario = try XCTUnwrap(FootballReferenceScenarios.all.first)
         let session = ReplayConversionPreviewSession()
@@ -227,9 +281,27 @@ final class ReplayConversionPreviewTests: XCTestCase {
         }
         XCTAssertEqual(player.currentTime().seconds, 0.8, accuracy: 0.03)
         XCTAssertEqual(player.rate, 0)
+        local.suspendLink(message: "Return to this study to link its video.")
+        XCTAssertEqual(local.alignmentMessage, "Return to this study to link its video.")
+        XCTAssertNotNil(local.alignment, "Changing rooms must not discard the matched clip")
+        local.synchronize(replayTime: 0.8, playing: false, replayRate: 1)
+        XCTAssertNil(local.alignmentMessage)
         local.synchronize(replayTime: 10, playing: true, replayRate: 1)
         XCTAssertEqual(local.alignmentMessage, "Outside this clip")
         XCTAssertEqual(player.rate, 0)
+        local.synchronize(replayTime: 0.4, playing: false, replayRate: 1)
+        XCTAssertTrue(local.isSeeking)
+        let originalStart = local.alignmentStart
+        local.isTimelineLinked = false
+        local.setAlignmentStart(replayTime: 0.4)
+        XCTAssertEqual(local.alignmentStart, originalStart,
+                       "A match point must not capture a frame while a seek is unfinished")
+        XCTAssertEqual(local.alignmentMessage, "Wait for the clip to finish seeking.")
+        for _ in 0..<200 where local.isSeeking { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertFalse(local.isSeeking)
+        local.setAlignmentStart(replayTime: 0.4)
+        XCTAssertNil(local.alignmentMessage)
+        XCTAssertEqual(local.alignmentStart?.replay, 0.4)
         local.clear()
         XCTAssertNil(local.alignment)
         XCTAssertNil(local.alignmentStart)

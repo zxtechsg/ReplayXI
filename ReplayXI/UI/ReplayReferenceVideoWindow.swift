@@ -28,9 +28,10 @@ struct ReplayReferenceVideoWindow: View {
         .frame(minWidth: 1_120, minHeight: 680)
         .background(.black.opacity(0.76))
         .preferredColorScheme(.dark)
-        .onChange(of: roomIsPresenting) { _, isPresenting in
-            if isPresenting { session.isPlaying = false }
-        }
+        .onAppear { reconcileRoomClock() }
+        .onChange(of: roomIsPresenting) { _, _ in reconcileRoomClock() }
+        .onChange(of: store.selectedScenarioID) { _, _ in reconcileRoomClock() }
+        .onChange(of: session.capture?.id) { _, _ in reconcileRoomClock() }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { session.isPlaying = false }
         }
@@ -47,6 +48,11 @@ struct ReplayReferenceVideoWindow: View {
                 previous = now
             }
         }
+    }
+
+    private func reconcileRoomClock() {
+        session.reconcileRoomClock(isPresenting: roomIsPresenting,
+            scenarioID: store.selectedScenarioID, roomPlayhead: store.playhead)
     }
 
     private func comparison(_ capture: ReplayConversionPreviewSession.Capture) -> some View {
@@ -86,11 +92,18 @@ struct ReplayReferenceVideoWindow: View {
                     if roomIsPresenting {
                         VStack(spacing: 16) {
                             Image(systemName: "vision.pro").font(.system(size: 42))
-                            Text("3D room active").font(.title3.weight(.semibold))
+                            Text(store.selectedScenarioID == capture.scenario.id
+                                ? "3D room active" : "Another study is active")
+                                .font(.title3.weight(.semibold))
                             Text("Move this video window beside the pitch.")
                                 .font(.subheadline).foregroundStyle(.secondary)
                             Text("POVs and annotation tools are in the room.")
                                 .font(.caption).foregroundStyle(.secondary)
+                            if store.selectedScenarioID != capture.scenario.id {
+                                Button("Return to this study") { enterRoom(capture) }
+                                    .buttonStyle(.bordered)
+                                    .disabled(ReplayAnnotationEntryPolicy.navigationBlockReason(in: store) != nil)
+                            }
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {

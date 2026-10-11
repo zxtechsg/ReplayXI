@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 
 struct ReplayReferenceSourceVideo: View {
     @Environment(ReplayConversionPreviewSession.self) private var session
+    @Environment(ReplayStore.self) private var store
     let reference: ReplayVideoReference?
     @State private var source: Source = .none
     @State private var showsImporter = false
@@ -16,6 +17,32 @@ struct ReplayReferenceSourceVideo: View {
     @State private var isVisible = false
     @State private var showsAlignmentHelp = false
     private enum Source { case none, official, local }
+
+    private var roomIsPresenting: Bool {
+        store.isImmersiveOpen || store.isOpeningImmersive || store.isClosingImmersive
+    }
+
+    private var roomIsTransitioning: Bool {
+        store.isOpeningImmersive || store.isClosingImmersive
+    }
+
+    private var roomMatchesCapture: Bool {
+        ReplayReferenceRoomClockPolicy.matches(
+            isPresenting: roomIsPresenting,
+            scenarioID: store.selectedScenarioID,
+            captureScenarioID: session.capture?.scenario.id
+        )
+    }
+
+    private var canMatchTimes: Bool {
+        ReplayReferenceRoomClockPolicy.canCalibrate(
+            isPresenting: roomIsPresenting,
+            isTransitioning: roomIsTransitioning,
+            matchesCapture: roomMatchesCapture
+        )
+    }
+
+    private var replayTime: TimeInterval { roomMatchesCapture ? store.playhead : session.playhead }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -105,16 +132,24 @@ struct ReplayReferenceSourceVideo: View {
             guard !Task.isCancelled, source == .official, !embedReady, embedError == nil else { return }
             embedError = "The source is taking too long to load."
         }
-        .onAppear { isVisible = true }
+        .onAppear { isVisible = true; syncLocalVideo() }
         .onChange(of: session.playhead) { _, _ in syncLocalVideo() }
         .onChange(of: session.isPlaying) { _, _ in syncLocalVideo() }
         .onChange(of: session.playbackRate) { _, _ in syncLocalVideo() }
         .onChange(of: local.isTimelineLinked) { _, _ in syncLocalVideo() }
+        .onChange(of: store.playhead) { _, _ in if roomMatchesCapture { syncLocalVideo() } }
+        .onChange(of: store.isPlaying) { _, _ in if roomMatchesCapture { syncLocalVideo() } }
+        .onChange(of: store.playbackRate) { _, _ in if roomMatchesCapture { syncLocalVideo() } }
+        .onChange(of: store.isImmersiveOpen) { _, _ in syncLocalVideo() }
+        .onChange(of: roomIsPresenting) { _, _ in syncLocalVideo() }
+        .onChange(of: roomIsTransitioning) { _, _ in syncLocalVideo() }
+        .onChange(of: store.selectedScenarioID) { _, _ in syncLocalVideo() }
         .onDisappear {
             isVisible = false
             localLoadTask?.cancel()
             localLoadTask = nil
             local.clear()
+            source = .none
         }
     }
 
@@ -122,19 +157,19 @@ struct ReplayReferenceSourceVideo: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
                 Button {
-                    session.isPlaying = false
-                    local.setAlignmentStart(replayTime: session.playhead)
+                    pauseReplay()
+                    local.setAlignmentStart(replayTime: replayTime)
                 } label: {
                     Label("Match A", systemImage: local.alignmentStart == nil ? "1.circle" : "1.circle.fill")
                 }
-                .disabled(local.isTimelineLinked)
+                .disabled(local.isTimelineLinked || local.isSeeking || !canMatchTimes)
                 Button {
-                    session.isPlaying = false
-                    local.setAlignmentEnd(replayTime: session.playhead)
+                    pauseReplay()
+                    local.setAlignmentEnd(replayTime: replayTime)
                 } label: {
                     Label("Match B", systemImage: local.alignment == nil ? "2.circle" : "2.circle.fill")
                 }
-                .disabled(local.alignmentStart == nil || local.isTimelineLinked)
+                .disabled(local.alignmentStart == nil || local.isTimelineLinked || local.isSeeking || !canMatchTimes)
                 Toggle("Link", isOn: $local.isTimelineLinked)
                     .toggleStyle(.button)
                     .disabled(local.alignment == nil)
@@ -165,9 +200,26 @@ struct ReplayReferenceSourceVideo: View {
     }
 
     private func syncLocalVideo() {
-        guard isVisible, source == .local else { return }
-        local.synchronize(replayTime: session.playhead, playing: session.isPlaying,
-                          replayRate: session.playbackRate)
+        guard isVisible else { return }
+        // Reconcile before reading session.playhead. The child and parent
+        // onChange callbacks have no guaranteed order at final room close.
+        session.reconcileRoomClock(isPresenting: roomIsPresenting,
+            scenarioID: store.selectedScenarioID, roomPlayhead: store.playhead)
+        guard source == .local else { return }
+        guard canMatchTimes else {
+            local.suspendLink(message: roomMatchesCapture
+                ? "Wait for the room transition to finish."
+                : "Return to this study to link its video.")
+            return
+        }
+        local.synchronize(replayTime: replayTime,
+                          playing: roomMatchesCapture ? store.isPlaying : session.isPlaying,
+                          replayRate: roomMatchesCapture ? store.playbackRate : session.playbackRate)
+    }
+
+    private func pauseReplay() {
+        session.isPlaying = false
+        if roomMatchesCapture { store.setPlaying(false, broadcast: false) }
     }
 
     private var consent: some View {
@@ -228,11 +280,18 @@ final class ReplayLocalReferencePlayer {
     private(set) var alignmentStart: ReplayReferenceTimeAlignment.Anchor?
     private(set) var alignment: ReplayReferenceTimeAlignment?
     private(set) var alignmentMessage: String?
-    var isTimelineLinked = false
+    private(set) var isSeeking = false
+    var isTimelineLinked = false {
+        didSet {
+            if oldValue, !isTimelineLinked {
+                player?.pause()
+                pendingSeek = nil
+            }
+        }
+    }
     @ObservationIgnored private var scopedURL: URL?
     @ObservationIgnored private var generation = UUID()
     @ObservationIgnored private var itemObservation: NSKeyValueObservation?
-    @ObservationIgnored private var seekInFlight = false
     @ObservationIgnored private var pendingSeek: TimeInterval?
 
     func open(_ url: URL) async {
@@ -278,6 +337,7 @@ final class ReplayLocalReferencePlayer {
 
     func setAlignmentStart(replayTime: TimeInterval) {
         guard let player, replayTime.isFinite, replayTime >= 0 else { return }
+        guard !isSeeking else { alignmentMessage = "Wait for the clip to finish seeking."; return }
         player.pause()
         let time = player.currentTime().seconds
         guard time.isFinite, time >= 0, time <= duration else { return }
@@ -287,6 +347,7 @@ final class ReplayLocalReferencePlayer {
 
     func setAlignmentEnd(replayTime: TimeInterval) {
         guard let player, let start = alignmentStart else { return }
+        guard !isSeeking else { alignmentMessage = "Wait for the clip to finish seeking."; return }
         player.pause()
         guard let map = ReplayReferenceTimeAlignment(start: start,
             end: .init(replay: replayTime, video: player.currentTime().seconds),
@@ -330,16 +391,23 @@ final class ReplayLocalReferencePlayer {
         } else { player.pause() }
     }
 
+    func suspendLink(message: String) {
+        guard isTimelineLinked else { return }
+        pendingSeek = nil
+        player?.pause()
+        alignmentMessage = message
+    }
+
     private func seekVideo(to time: TimeInterval) {
         guard let player else { return }
-        if seekInFlight { pendingSeek = time; return }
-        seekInFlight = true
+        if isSeeking { pendingSeek = time; return }
+        isSeeking = true
         let request = generation
         player.seek(to: CMTime(seconds: time, preferredTimescale: 600),
                     toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self, request == self.generation else { return }
-                self.seekInFlight = false
+                self.isSeeking = false
                 if let next = self.pendingSeek {
                     self.pendingSeek = nil
                     self.seekVideo(to: next)
@@ -352,7 +420,7 @@ final class ReplayLocalReferencePlayer {
         generation = UUID()
         resetAlignment()
         duration = 0
-        seekInFlight = false
+        isSeeking = false
         player?.pause()
         player?.replaceCurrentItem(with: nil)
         player = nil

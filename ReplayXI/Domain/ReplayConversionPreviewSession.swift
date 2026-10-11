@@ -20,9 +20,11 @@ final class ReplayConversionPreviewSession {
     private(set) var playhead: TimeInterval = 0
     var isPlaying = false
     var playbackRate: Double = 1
+    @ObservationIgnored private var presentedMatchingRoom = false
 
     func capture(scenario: ReplayScenario, marks: [CoachMark],
                  playhead: TimeInterval, perspectiveID: String) {
+        presentedMatchingRoom = false
         capture = Capture(scenario: scenario, marks: marks,
             perspectiveID: scenario.player(id: perspectiveID) == nil
                 ? scenario.defaultPerspectiveID : perspectiveID,
@@ -30,6 +32,21 @@ final class ReplayConversionPreviewSession {
         isPlaying = false
         playbackRate = 1
         seek(to: playhead)
+    }
+
+    /// Room callbacks can finish in either order. Retain its final clock only
+    /// after the whole presentation has closed, including rooms opened from
+    /// somewhere other than this comparison window.
+    func reconcileRoomClock(isPresenting: Bool, scenarioID: String,
+                            roomPlayhead: TimeInterval) {
+        let matches = capture?.scenario.id == scenarioID
+        if isPresenting {
+            if isPlaying { isPlaying = false }
+            if matches { presentedMatchingRoom = true }
+        } else {
+            if presentedMatchingRoom && matches { seek(to: roomPlayhead) }
+            presentedMatchingRoom = false
+        }
     }
 
     func seek(to time: TimeInterval) {
@@ -50,6 +67,18 @@ final class ReplayConversionPreviewSession {
         // Resume never jumps through a whole clip after the window was inactive.
         seek(to: playhead + min(elapsed, 0.1) * min(playbackRate, 4))
         if playhead >= capture.scenario.duration { isPlaying = false }
+    }
+}
+
+enum ReplayReferenceRoomClockPolicy {
+    static func matches(isPresenting: Bool, scenarioID: String,
+                        captureScenarioID: String?) -> Bool {
+        isPresenting && captureScenarioID == scenarioID
+    }
+
+    static func canCalibrate(isPresenting: Bool, isTransitioning: Bool,
+                             matchesCapture: Bool) -> Bool {
+        !isPresenting || (!isTransitioning && matchesCapture)
     }
 }
 
