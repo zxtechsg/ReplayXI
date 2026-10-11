@@ -1,5 +1,7 @@
 # Player, POV and Mac controls — 174
 
+Historical receipt. Pass [175](RECORDING_FIXES_175.md) replaces the seven-segment jersey mask with bold digits, adds linked local-video time and updates the Mac link to protocol v2. Rebuild both apps together.
+
 ## Use
 
 1. Build Replay XI for Vision Pro. In its dashboard, choose **Start Mac link**.
