@@ -4,6 +4,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct ReplayReferenceSourceVideo: View {
+    @Environment(ReplayConversionPreviewSession.self) private var session
     let reference: ReplayVideoReference?
     @State private var source: Source = .none
     @State private var showsImporter = false
@@ -13,6 +14,7 @@ struct ReplayReferenceSourceVideo: View {
     @State private var local = ReplayLocalReferencePlayer()
     @State private var localLoadTask: Task<Void, Never>?
     @State private var isVisible = false
+    @State private var showsAlignmentHelp = false
     private enum Source { case none, official, local }
 
     var body: some View {
@@ -47,6 +49,7 @@ struct ReplayReferenceSourceVideo: View {
                     if let player = local.player, local.error == nil {
                         VideoPlayer(player: player)
                             .clipShape(RoundedRectangle(cornerRadius: 18))
+                            .allowsHitTesting(!local.isTimelineLinked)
                     } else if let error = local.error {
                         sourceError(error)
                     } else {
@@ -58,7 +61,8 @@ struct ReplayReferenceSourceVideo: View {
             .frame(maxWidth: .infinity)
             if source == .local {
                 Text(local.filename).font(.subheadline).lineLimit(1).truncationMode(.middle)
-                Text("Your clip is a reference only. The 3D demo is unchanged.")
+                if local.player != nil { alignmentControls }
+                Text("Time matching only · No video conversion")
                     .font(.caption).foregroundStyle(.secondary)
                 if reference != nil {
                     Button("Use official reference") {
@@ -102,12 +106,68 @@ struct ReplayReferenceSourceVideo: View {
             embedError = "The source is taking too long to load."
         }
         .onAppear { isVisible = true }
+        .onChange(of: session.playhead) { _, _ in syncLocalVideo() }
+        .onChange(of: session.isPlaying) { _, _ in syncLocalVideo() }
+        .onChange(of: session.playbackRate) { _, _ in syncLocalVideo() }
+        .onChange(of: local.isTimelineLinked) { _, _ in syncLocalVideo() }
         .onDisappear {
             isVisible = false
             localLoadTask?.cancel()
             localLoadTask = nil
             local.clear()
         }
+    }
+
+    private var alignmentControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                Button {
+                    session.isPlaying = false
+                    local.setAlignmentStart(replayTime: session.playhead)
+                } label: {
+                    Label("Match A", systemImage: local.alignmentStart == nil ? "1.circle" : "1.circle.fill")
+                }
+                .disabled(local.isTimelineLinked)
+                Button {
+                    session.isPlaying = false
+                    local.setAlignmentEnd(replayTime: session.playhead)
+                } label: {
+                    Label("Match B", systemImage: local.alignment == nil ? "2.circle" : "2.circle.fill")
+                }
+                .disabled(local.alignmentStart == nil || local.isTimelineLinked)
+                Toggle("Link", isOn: $local.isTimelineLinked)
+                    .toggleStyle(.button)
+                    .disabled(local.alignment == nil)
+                    .accessibilityHint("Use the 3D timeline to control both views after matching two moments.")
+                Button { showsAlignmentHelp.toggle() } label: {
+                    Image(systemName: "info.circle").frame(width: 28, height: 28)
+                }
+                    .accessibilityLabel("Time match help and reset")
+                    .popover(isPresented: $showsAlignmentHelp) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Match two moments").font(.headline)
+                            Text("Pause both views at the same moment. Tap A.\nChoose a later moment in both. Tap B.\nTurn on Link, then use the 3D timeline.")
+                                .font(.subheadline).fixedSize(horizontal: false, vertical: true)
+                            Button("Reset time match", role: .destructive) {
+                                local.resetAlignment()
+                                showsAlignmentHelp = false
+                            }
+                        }.padding(22).frame(width: 340)
+                    }
+            }
+            .buttonStyle(.bordered)
+            Text(local.alignmentMessage ?? (local.isTimelineLinked
+                ? "Linked · Replay controls both views"
+                : local.alignment == nil ? "Match two moments, then link timelines" : "Time match ready"))
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func syncLocalVideo() {
+        guard isVisible, source == .local else { return }
+        local.synchronize(replayTime: session.playhead, playing: session.isPlaying,
+                          replayRate: session.playbackRate)
     }
 
     private var consent: some View {
@@ -164,9 +224,16 @@ final class ReplayLocalReferencePlayer {
     private(set) var player: AVPlayer?
     private(set) var filename = "Local clip"
     private(set) var error: String?
+    private(set) var duration: TimeInterval = 0
+    private(set) var alignmentStart: ReplayReferenceTimeAlignment.Anchor?
+    private(set) var alignment: ReplayReferenceTimeAlignment?
+    private(set) var alignmentMessage: String?
+    var isTimelineLinked = false
     @ObservationIgnored private var scopedURL: URL?
     @ObservationIgnored private var generation = UUID()
     @ObservationIgnored private var itemObservation: NSKeyValueObservation?
+    @ObservationIgnored private var seekInFlight = false
+    @ObservationIgnored private var pendingSeek: TimeInterval?
 
     func open(_ url: URL) async {
         guard !Task.isCancelled else { return }
@@ -188,6 +255,7 @@ final class ReplayLocalReferencePlayer {
             }
             let item = AVPlayerItem(asset: asset)
             player = AVPlayer(playerItem: item)
+            self.duration = duration
             itemObservation = item.observe(\.status, options: [.new]) { [weak self] item, _ in
                 let failed = item.status == .failed
                 Task { @MainActor [weak self] in
@@ -208,8 +276,83 @@ final class ReplayLocalReferencePlayer {
         error = "The clip could not open. Please choose it again."
     }
 
+    func setAlignmentStart(replayTime: TimeInterval) {
+        guard let player, replayTime.isFinite, replayTime >= 0 else { return }
+        player.pause()
+        let time = player.currentTime().seconds
+        guard time.isFinite, time >= 0, time <= duration else { return }
+        resetAlignment()
+        alignmentStart = .init(replay: replayTime, video: time)
+    }
+
+    func setAlignmentEnd(replayTime: TimeInterval) {
+        guard let player, let start = alignmentStart else { return }
+        player.pause()
+        guard let map = ReplayReferenceTimeAlignment(start: start,
+            end: .init(replay: replayTime, video: player.currentTime().seconds),
+            videoDuration: duration) else {
+            alignmentMessage = "Choose a later moment in both views (0.25–4× time scale)."
+            return
+        }
+        alignment = map
+        alignmentMessage = nil
+    }
+
+    func resetAlignment() {
+        if isTimelineLinked { player?.pause() }
+        isTimelineLinked = false
+        alignmentStart = nil
+        alignment = nil
+        alignmentMessage = nil
+        pendingSeek = nil
+    }
+
+    func synchronize(replayTime: TimeInterval, playing: Bool, replayRate: Double) {
+        guard let player else { return }
+        guard isTimelineLinked, let alignment else { return }
+        guard let target = alignment.videoTime(for: replayTime), replayRate.isFinite,
+              (0.1...4).contains(replayRate * alignment.rate) else {
+            player.pause()
+            alignmentMessage = alignment.videoTime(for: replayTime) == nil
+                ? "Outside this clip" : "Use a slower replay speed to link video."
+            return
+        }
+        alignmentMessage = nil
+        let current = player.currentTime().seconds
+        // AVPlayer runs between updates. Only correct meaningful drift; scrub
+        // seeks coalesce while one decoder seek is in flight.
+        if !current.isFinite || abs(current - target) > (playing ? 0.18 : 0.025) {
+            seekVideo(to: target)
+        }
+        if playing {
+            let rate = Float(replayRate * alignment.rate)
+            if player.rate != rate { player.rate = rate }
+        } else { player.pause() }
+    }
+
+    private func seekVideo(to time: TimeInterval) {
+        guard let player else { return }
+        if seekInFlight { pendingSeek = time; return }
+        seekInFlight = true
+        let request = generation
+        player.seek(to: CMTime(seconds: time, preferredTimescale: 600),
+                    toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, request == self.generation else { return }
+                self.seekInFlight = false
+                if let next = self.pendingSeek {
+                    self.pendingSeek = nil
+                    self.seekVideo(to: next)
+                }
+            }
+        }
+    }
+
     func clear() {
         generation = UUID()
+        resetAlignment()
+        duration = 0
+        seekInFlight = false
         player?.pause()
         player?.replaceCurrentItem(with: nil)
         player = nil

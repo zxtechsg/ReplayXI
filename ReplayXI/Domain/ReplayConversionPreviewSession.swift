@@ -53,6 +53,41 @@ final class ReplayConversionPreviewSession {
     }
 }
 
+/// Two human-matched moments align a local clip to an authored replay. This is
+/// a time calibration only: it never changes tracks or claims video conversion.
+struct ReplayReferenceTimeAlignment: Equatable, Sendable {
+    struct Anchor: Equatable, Sendable {
+        let replay: TimeInterval
+        let video: TimeInterval
+    }
+
+    let start: Anchor
+    let end: Anchor
+    let videoDuration: TimeInterval
+    var rate: Double { (end.video - start.video) / (end.replay - start.replay) }
+
+    init?(start: Anchor, end: Anchor, videoDuration: TimeInterval) {
+        guard videoDuration.isFinite, videoDuration > 0,
+              start.replay.isFinite, end.replay.isFinite,
+              start.video.isFinite, end.video.isFinite,
+              start.replay >= 0, end.replay - start.replay >= 0.1,
+              start.video >= 0, end.video <= videoDuration,
+              end.video - start.video >= 0.1 else { return nil }
+        let ratio = (end.video - start.video) / (end.replay - start.replay)
+        guard (0.25...4).contains(ratio) else { return nil }
+        self.start = start
+        self.end = end
+        self.videoDuration = videoDuration
+    }
+
+    func videoTime(for replayTime: TimeInterval) -> TimeInterval? {
+        guard replayTime.isFinite else { return nil }
+        let time = start.video + (replayTime - start.replay) * rate
+        guard time >= 0, time <= videoDuration else { return nil }
+        return time
+    }
+}
+
 /// All strings interpolated into the player document are restricted before use.
 /// The app identity follows YouTube's documented native-WebView requirement.
 enum ReplayReferenceEmbed {

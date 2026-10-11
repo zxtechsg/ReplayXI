@@ -82,8 +82,6 @@ struct ReplayReferenceVideoWindow: View {
                     HStack {
                         Label("Authored 3D replay", systemImage: "cube.transparent")
                             .font(.headline)
-                        Spacer()
-                        Text("Not time-aligned").font(.caption).foregroundStyle(.secondary)
                     }
                     if roomIsPresenting {
                         VStack(spacing: 16) {
@@ -131,7 +129,7 @@ struct ReplayReferenceVideoWindow: View {
                             .accessibilityHint("Opens drawing tools at the paused 3D replay time. Marks are saved on the replay, not the video.")
                         }
                         Text(ReplayAnnotationEntryPolicy.navigationBlockReason(in: store)
-                            ?? "Timed marks are saved on the 3D replay. Source video is separate.")
+                            ?? "Marks stay on the 3D replay. Local clips can use a linked timeline.")
                             .font(.caption).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                         if hasRequestedRoom {

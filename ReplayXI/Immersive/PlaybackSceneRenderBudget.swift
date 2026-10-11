@@ -6,6 +6,9 @@ import Foundation
 /// one instant.
 enum PlaybackSceneRenderBudget {
     static let normalAnnotationDrawLimit = 18
+    // Every mark kind costs at least four draws, even before keyed elevation
+    // guides are counted. Keep this in sync with estimatedDraws(for:).
+    private static let minimumAnnotationDraws = 4
     // An elevated press/danger mark includes two ground tethers. Reserve room
     // for all thirteen draws so the selected mark remains complete.
     static let decisionAnnotationDrawLimit = 13
@@ -62,6 +65,9 @@ enum PlaybackSceneRenderBudget {
         selectedID: UUID?,
         selectedIsEditable: Bool,
         decisionReviewIsVisible: Bool,
+        sampledDrawCost: (CoachMark, TimeInterval) -> Int = {
+            PlaybackSceneRenderBudget.estimatedDraws(for: $0, at: $1)
+        },
         isEligible: (CoachMark) -> Bool = { _ in true }
     ) -> Set<UUID> {
         // Presentation-hidden marks must not reserve either geometry or
@@ -95,16 +101,22 @@ enum PlaybackSceneRenderBudget {
 
         if let selected {
             result.insert(selected.id)
-            consumedDraws += estimatedDraws(for: selected, at: time)
+            consumedDraws += sampledDrawCost(selected, time)
         }
 
         for index in priorityIndices {
+            // No remaining kind can fit. In a dense keyed history this avoids
+            // sampling the many unseen 64-key tracks after admission fills.
+            guard drawLimit - consumedDraws >= minimumAnnotationDraws else { break }
             guard marks.indices.contains(index) else { continue }
             let mark = marks[index]
             guard mark.id != selected?.id,
                   isEligible(mark),
                   mark.isVisible(at: time) else { continue }
-            let cost = estimatedDraws(for: mark, at: time)
+            // Keyframes may add guides but never reduce the kind's base cost.
+            // Do not interpolate a track that cannot fit even at ground level.
+            guard estimatedDraws(for: mark.kind) <= drawLimit - consumedDraws else { continue }
+            let cost = sampledDrawCost(mark, time)
             guard consumedDraws + cost <= drawLimit else { continue }
             result.insert(mark.id)
             consumedDraws += cost

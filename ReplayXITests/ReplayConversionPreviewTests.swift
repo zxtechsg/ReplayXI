@@ -85,6 +85,37 @@ final class ReplayConversionPreviewTests: XCTestCase {
         XCTAssertTrue(ReplayReferenceEmbed.errorMessage(code: 153).contains("verify"))
     }
 
+    func testLocalTimeAlignmentMatchesBothAnchorsAndScalesBetweenThem() throws {
+        let map = try XCTUnwrap(ReplayReferenceTimeAlignment(
+            start: .init(replay: 2, video: 25), end: .init(replay: 10, video: 37), videoDuration: 60))
+        XCTAssertEqual(map.rate, 1.5)
+        XCTAssertEqual(map.videoTime(for: 2), 25)
+        XCTAssertEqual(map.videoTime(for: 10), 37)
+        XCTAssertEqual(map.videoTime(for: 6), 31)
+        XCTAssertEqual(map.videoTime(for: 0), 22, "An offset may extend before the first matched moment")
+        XCTAssertNil(map.videoTime(for: 30), "Do not invent frames beyond the clip")
+        XCTAssertNil(map.videoTime(for: .nan))
+    }
+
+    func testLocalTimeAlignmentRejectsReversedTinyAndExtremeSpans() {
+        func map(_ r0: Double, _ v0: Double, _ r1: Double, _ v1: Double, _ duration: Double = 60)
+            -> ReplayReferenceTimeAlignment? {
+            .init(start: .init(replay: r0, video: v0), end: .init(replay: r1, video: v1), videoDuration: duration)
+        }
+        XCTAssertNil(map(2, 10, 1, 11))
+        XCTAssertNil(map(1, 10, 2, 9))
+        XCTAssertNil(map(0, 0, 0.05, 0.1))
+        XCTAssertNil(map(0, 0, 1, 5))
+        XCTAssertNil(map(0, 0, 1, 0.2))
+        XCTAssertNil(map(-1, 0, 2, 2))
+        XCTAssertNil(map(0, -1, 2, 2))
+        XCTAssertNil(map(0, 0, 2, 61))
+        XCTAssertNil(map(0, 0, 2, 2, .infinity))
+        XCTAssertNil(map(.nan, 0, 2, 2))
+        XCTAssertNotNil(map(0, 0, 1, 0.25))
+        XCTAssertNotNil(map(0, 0, 1, 4))
+    }
+
     func testPreviewLayoutFitsBothAxesAndRejectsNonFiniteSizes() {
         let landscape = ReplayComparisonPitchLayout(width: 0.65, height: 0.4)
         XCTAssertLessThanOrEqual(landscape.scale * 120, 0.65)
@@ -142,10 +173,22 @@ final class ReplayConversionPreviewTests: XCTestCase {
         let duration = try await item.asset.load(.duration).seconds
         XCTAssertTrue(playable)
         XCTAssertGreaterThan(duration, 0)
+        XCTAssertEqual(local.duration, duration)
+        local.setAlignmentStart(replayTime: 0)
+        XCTAssertNotNil(local.alignmentStart)
+        local.setAlignmentEnd(replayTime: 0)
+        XCTAssertNotNil(local.alignmentMessage, "The same instant cannot establish a time scale")
+        XCTAssertNil(local.alignment)
+        local.isTimelineLinked = true
+        local.resetAlignment()
+        XCTAssertNil(local.alignmentStart)
+        XCTAssertNil(local.alignmentMessage)
+        XCTAssertFalse(local.isTimelineLinked)
         local.clear()
         XCTAssertNil(local.player)
         XCTAssertNil(player.currentItem, "Clear must detach the item, not just hide its UI")
         XCTAssertNil(local.error)
+        XCTAssertEqual(local.duration, 0)
     }
 
     func testCancelledLocalOpenDoesNotAcquireAPlayerOrReplaceCurrentState() async {
@@ -162,7 +205,39 @@ final class ReplayConversionPreviewTests: XCTestCase {
         XCTAssertEqual(local.filename, "Local clip")
     }
 
-    private func writeTinyVideo(to url: URL) async throws {
+    func testLinkedLocalTimelineSeeksLatestTimeAndClearDropsCalibration() async throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("replayxi-alignment-test-\(UUID().uuidString).mp4")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try await writeTinyVideo(to: url, frameCount: 60)
+        let local = ReplayLocalReferencePlayer()
+        await local.open(url)
+        let player = try XCTUnwrap(local.player)
+        local.setAlignmentStart(replayTime: 0)
+        await player.seek(to: CMTime(seconds: 1, preferredTimescale: 600),
+                          toleranceBefore: .zero, toleranceAfter: .zero)
+        local.setAlignmentEnd(replayTime: 1)
+        XCTAssertNotNil(local.alignment)
+        local.isTimelineLinked = true
+        for time in [0.2, 0.7, 0.3, 0.8] {
+            local.synchronize(replayTime: time, playing: false, replayRate: 1)
+        }
+        for _ in 0..<200 where abs(player.currentTime().seconds - 0.8) > 0.03 {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertEqual(player.currentTime().seconds, 0.8, accuracy: 0.03)
+        XCTAssertEqual(player.rate, 0)
+        local.synchronize(replayTime: 10, playing: true, replayRate: 1)
+        XCTAssertEqual(local.alignmentMessage, "Outside this clip")
+        XCTAssertEqual(player.rate, 0)
+        local.clear()
+        XCTAssertNil(local.alignment)
+        XCTAssertNil(local.alignmentStart)
+        XCTAssertFalse(local.isTimelineLinked)
+        XCTAssertNil(player.currentItem)
+    }
+
+    private func writeTinyVideo(to url: URL, frameCount: Int = 3) async throws {
         let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
             AVVideoCodecKey: AVVideoCodecType.h264,
@@ -182,7 +257,7 @@ final class ReplayConversionPreviewTests: XCTestCase {
         writer.startSession(atSourceTime: .zero)
         do {
             let pool = try XCTUnwrap(adaptor.pixelBufferPool)
-            for frame in 0..<3 {
+            for frame in 0..<frameCount {
                 for _ in 0..<200 where !input.isReadyForMoreMediaData {
                     try await Task.sleep(for: .milliseconds(5))
                 }
@@ -192,7 +267,7 @@ final class ReplayConversionPreviewTests: XCTestCase {
                       let buffer else { throw FixtureError.pixelBufferUnavailable }
                 CVPixelBufferLockBaseAddress(buffer, [])
                 if let base = CVPixelBufferGetBaseAddress(buffer) {
-                    memset(base, Int32(40 + frame * 40),
+                    memset(base, Int32((40 + frame * 40) % 256),
                            CVPixelBufferGetBytesPerRow(buffer) * CVPixelBufferGetHeight(buffer))
                 }
                 CVPixelBufferUnlockBaseAddress(buffer, [])
@@ -200,7 +275,7 @@ final class ReplayConversionPreviewTests: XCTestCase {
                 else { throw writer.error ?? FixtureError.writerUnavailable }
             }
             input.markAsFinished()
-            writer.endSession(atSourceTime: CMTime(value: 3, timescale: 30))
+            writer.endSession(atSourceTime: CMTime(value: Int64(frameCount), timescale: 30))
             await writer.finishWriting()
             guard writer.status == .completed else { throw writer.error ?? FixtureError.writerUnavailable }
         } catch {
