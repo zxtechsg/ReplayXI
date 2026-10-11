@@ -130,7 +130,7 @@ struct ReplayXIWirePoint3: Codable, Equatable {
     var z: Float
 }
 
-struct ReplayXIWirePlayer: Codable, Identifiable {
+struct ReplayXIWirePlayer: Codable, Equatable, Identifiable {
     var id: String
     var name: String
     var number: Int
@@ -138,13 +138,13 @@ struct ReplayXIWirePlayer: Codable, Identifiable {
     var position: ReplayXIWirePoint
 }
 
-struct ReplayXIWireScenario: Codable, Identifiable {
+struct ReplayXIWireScenario: Codable, Equatable, Identifiable {
     var id: String
     var title: String
     var duration: Double
 }
 
-struct ReplayXIWireMark: Codable, Identifiable {
+struct ReplayXIWireMark: Codable, Equatable, Identifiable {
     var id: UUID
     var kind: String
     var start: ReplayXIWirePoint
@@ -161,7 +161,7 @@ struct ReplayXIWireMark: Codable, Identifiable {
     var encodedMark: Data
 }
 
-struct ReplayXIWireState: Codable {
+struct ReplayXIWireState: Codable, Equatable {
     var revision: UInt64
     var scenarioID: String
     var playhead: Double

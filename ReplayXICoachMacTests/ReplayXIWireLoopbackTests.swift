@@ -68,6 +68,36 @@ final class ReplayXIWireLoopbackTests: XCTestCase {
         XCTAssertEqual(decoded.controlPoint, mark.controlPoint)
     }
 
+    func testStateValueEqualityTracksEveryChangingWireComponent() throws {
+        var baseline = Self.previewState
+        baseline.revision = 0 // Same basis as the service's change detection.
+        let canonical = try ReplayXIWire.encoder.encode(baseline)
+        let decoded = try ReplayXIWire.decoder.decode(ReplayXIWireState.self, from: canonical)
+        XCTAssertEqual(decoded, baseline)
+        XCTAssertEqual(try ReplayXIWire.encoder.encode(decoded), canonical)
+
+        func changed(_ field: String, _ mutate: (inout ReplayXIWireState) -> Void) throws {
+            var next = baseline
+            mutate(&next)
+            XCTAssertNotEqual(next, baseline, field)
+            XCTAssertNotEqual(try ReplayXIWire.encoder.encode(next), canonical, field)
+            let line = try ReplayXIWire.encodeLine(.init(type: "state", state: next))
+            var parser = ReplayXIWireParser()
+            XCTAssertEqual(try parser.append(line).first?.state, next, field)
+        }
+
+        try changed("playhead") { $0.playhead += 0.25 }
+        try changed("mark bytes") { $0.marks[0].encodedMark.append(0x5A) }
+        try changed("key times") { $0.marks[0].keyframes[0] += 0.5 }
+        try changed("arc control") { $0.marks[0].controlPoint!.y += 0.25 }
+        try changed("edit gate") { $0.canEdit.toggle() }
+        try changed("status") { $0.status = "Changed" }
+        try changed("players") { $0.players[0].position.x += 1 }
+        try changed("scenario") { $0.scenarioID = "different" }
+        try changed("scenario list") { $0.scenarios[0].title = "Updated" }
+        try changed("ball") { $0.ball.y += 0.25 }
+    }
+
     func testCanonicalEncodingAndBoundedParser() throws {
         let encoded = try ReplayXIWire.encoder.encode(["z": 1, "a": 2])
         XCTAssertEqual(String(decoding: encoded, as: UTF8.self), "{\"a\":2,\"z\":1}")

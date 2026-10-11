@@ -17,7 +17,7 @@ final class ReplayXILocalCoachService {
     private var peer: ReplayXIWireConnection?
     private var publishTask: Task<Void, Never>?
     private var revision: UInt64 = 0
-    private var lastState: Data?
+    private var lastState: ReplayXIWireState?
     private var encodedMarks: [UUID: (mark: CoachMark, bytes: Data)] = [:]
     private var commandTimes: [ContinuousClock.Instant] = []
     private var failedPairings = 0
@@ -349,8 +349,8 @@ final class ReplayXILocalCoachService {
                 && !store.isDrawing && !store.hasActiveTimelineScrub
                 && !store.hasActiveCoachMarkGeometryPreview && store.triangleLockMode != .place,
             status: store.statusMessage)
-        guard let fingerprint = try? ReplayXIWire.encoder.encode(state), fingerprint != lastState else { return }
-        lastState = fingerprint
+        guard state != lastState else { return }
+        lastState = state
         revision &+= 1
         var updated = state
         updated.revision = revision
