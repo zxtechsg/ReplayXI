@@ -5,6 +5,7 @@ struct CoachWindow: View {
     @State private var deviceID = ""
     @State private var selectedMarkID: UUID?
     @State private var drawKind = "run"
+    @State private var drawingEnabled = false
     @State private var drawStart: ReplayXIWirePoint?
     @State private var dragStart: ReplayXIWirePoint?
     @State private var dragEnd: ReplayXIWirePoint?
@@ -56,7 +57,7 @@ struct CoachWindow: View {
                     VStack(spacing: 10) {
                         playbackBar(state)
                         PitchMap(state: state, selectedMarkID: $selectedMarkID,
-                            drawKind: drawKind, drawStart: $drawStart,
+                            drawKind: drawKind, drawingEnabled: drawingEnabled, drawStart: $drawStart,
                             dragStart: $dragStart, dragEnd: $dragEnd,
                             onPitchClick: pitchClicked, onMove: moveEndpoint,
                             onArcControl: { mark, point in
@@ -85,6 +86,11 @@ struct CoachWindow: View {
         .onChange(of: selectedMarkID) { _, _ in loadInspector() }
         .onChange(of: state?.scenarioID) { _, _ in
             labelPlayerID = state?.players.first?.id ?? ""
+            drawingEnabled = false
+            drawStart = nil
+        }
+        .onChange(of: state?.canEdit) { _, canEdit in
+            if canEdit != true { drawingEnabled = false; drawStart = nil }
         }
         .onChange(of: state?.revision) { _, _ in
             if let id = selectedMarkID, state?.marks.contains(where: { $0.id == id }) != true {
@@ -102,7 +108,9 @@ struct CoachWindow: View {
         HStack(spacing: 12) {
             Text("REPLAY XI / MAC COACH").font(.headline)
             Spacer()
-            Text(link.status).font(.caption).foregroundStyle(link.connected ? .green : .secondary)
+            Text(link.status).font(.caption)
+                .foregroundStyle(link.connected ? .green : .secondary)
+                .lineLimit(1).help(link.status)
             if link.connected {
                 Button("Disconnect") { link.disconnect() }
             } else {
@@ -111,6 +119,7 @@ struct CoachWindow: View {
                     ForEach(link.devices) { device in Text(device.name).tag(device.id) }
                 }
                 .frame(width: 195)
+                Button("Rescan") { link.retryDiscovery() }
                 SecureField("Six digit PIN", text: Bindable(link).pin)
                     .frame(width: 110)
                 Button("Pair") {
@@ -248,9 +257,16 @@ struct CoachWindow: View {
                     Picker("Draw", selection: $drawKind) {
                         ForEach(["run", "pass", "arc", "danger", "space"], id: \.self) { Text($0.capitalized).tag($0) }
                     }
-                    Button(drawStart == nil ? "New: click start" : "Click end") { drawStart = nil }
+                    Button(drawingEnabled ? "Cancel drawing" : "Draw mark") {
+                        drawingEnabled.toggle()
+                        drawStart = nil
+                    }
+                    .disabled(!state.canEdit && !drawingEnabled)
+                    .keyboardShortcut("n", modifiers: .command)
                 }
-                Text("Click two pitch points to add a mark. Drag its handles to edit.")
+                Text(drawingEnabled
+                    ? (drawStart == nil ? "Click the start point on the pitch." : "Click the end point on the pitch.")
+                    : "Select a mark, or choose Draw mark to place two points.")
                     .font(.caption).foregroundStyle(.secondary)
                 if !state.canEdit {
                     Text("Pause playback and finish headset edits to edit annotations here.")
@@ -357,6 +373,7 @@ struct CoachWindow: View {
                         HStack {
                             Text("Selected \(selectedKey.formatted(.number.precision(.fractionLength(2)))) s")
                             Button("Delete key") { link.send(.init(name: "deleteKey", markID: mark.id, keyframeAt: selectedKey)) }
+                                .disabled(mark.authored || !state.canEdit)
                         }
                         HStack {
                             TextField("Move to · s", value: $retimeKey, format: .number)
@@ -371,10 +388,10 @@ struct CoachWindow: View {
                 Divider()
                 HStack {
                     Button("Undo") { link.send(.init(name: "undo")) }
-                        .disabled(!state.canUndo)
+                        .disabled(!state.canUndo || !state.canEdit)
                         .keyboardShortcut("z", modifiers: .command)
                     Button("Redo") { link.send(.init(name: "redo")) }
-                        .disabled(!state.canRedo)
+                        .disabled(!state.canRedo || !state.canEdit)
                         .keyboardShortcut("z", modifiers: [.command, .shift])
                 }
                 Button("Clear coach marks", role: .destructive) {
@@ -391,7 +408,7 @@ struct CoachWindow: View {
                 HStack {
                     TextField("Save name", text: $saveName)
                     Button("Save") { link.send(.init(name: "save", saveName: saveName)) }
-                        .disabled(!state.canSave)
+                        .disabled(!state.canSave || !state.canEdit)
                         .keyboardShortcut("s", modifiers: .command)
                 }
                 Text(state.status).font(.caption).foregroundStyle(.secondary)
@@ -422,7 +439,7 @@ struct CoachWindow: View {
     private func commitInspectorDraft() { loadedDraft = currentDraft }
 
     private func pitchClicked(_ point: ReplayXIWirePoint) {
-        guard state?.canEdit == true else { return }
+        guard state?.canEdit == true, drawingEnabled else { return }
         guard let start = drawStart else { drawStart = point; return }
         let label: String = switch drawKind {
         case "pass": "Pass"
@@ -434,6 +451,7 @@ struct CoachWindow: View {
         link.send(.init(name: "create", kind: drawKind, start: start, end: point,
             startHeight: 0, endHeight: 0, label: label))
         drawStart = nil
+        drawingEnabled = false
     }
 
     private func moveEndpoint(_ mark: ReplayXIWireMark, _ endpoint: String, _ point: ReplayXIWirePoint) {
@@ -456,6 +474,7 @@ private struct PitchMap: View {
     let state: ReplayXIWireState
     @Binding var selectedMarkID: UUID?
     let drawKind: String
+    let drawingEnabled: Bool
     @Binding var drawStart: ReplayXIWirePoint?
     @Binding var dragStart: ReplayXIWirePoint?
     @Binding var dragEnd: ReplayXIWirePoint?
@@ -522,7 +541,7 @@ private struct PitchMap: View {
                     Circle().fill(.orange).frame(width: 13, height: 13)
                         .position(screen(drawStart, rect))
                 }
-                Text("68 × 105 m · \(drawKind.capitalized)")
+                Text("68 × 105 m · \(drawingEnabled ? "Drawing \(drawKind.capitalized)" : "Select / edit")")
                     .font(.caption).foregroundStyle(.white.opacity(0.65))
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                     .padding(12)

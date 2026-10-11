@@ -3,7 +3,7 @@ import Network
 import Observation
 import simd
 
-/// One paired Mac may control this local review. The PIN changes on restart;
+/// One paired Mac may control this local review. The PIN is single-use;
 /// rejected attempts close the socket. No account or external relay exists.
 @MainActor
 @Observable
@@ -18,6 +18,7 @@ final class ReplayXILocalCoachService {
     private var publishTask: Task<Void, Never>?
     private var revision: UInt64 = 0
     private var lastState: Data?
+    private var encodedMarks: [UUID: (mark: CoachMark, bytes: Data)] = [:]
     private var commandTimes: [ContinuousClock.Instant] = []
     private var failedPairings = 0
 
@@ -30,9 +31,9 @@ final class ReplayXILocalCoachService {
             parameters.includePeerToPeer = false
             let listener = try NWListener(using: parameters)
             listener.service = NWListener.Service(name: "Replay XI", type: ReplayXIWire.serviceType)
-            listener.stateUpdateHandler = { [weak self] state in
-                Task { @MainActor [weak self] in
-                    guard let self else { return }
+            listener.stateUpdateHandler = { [weak self, weak listener] state in
+                Task { @MainActor [weak self, weak listener] in
+                    guard let self, let listener, self.listener === listener else { return }
                     switch state {
                     case .ready: self.status = self.isPaired ? "Mac connected" : "Mac link ready · PIN \(self.pin)"
                     case .failed(let error): self.status = "Mac link unavailable: \(error.localizedDescription)"
@@ -40,8 +41,14 @@ final class ReplayXILocalCoachService {
                     }
                 }
             }
-            listener.newConnectionHandler = { [weak self] connection in
-                Task { @MainActor [weak self] in self?.accept(connection) }
+            listener.newConnectionHandler = { [weak self, weak listener] connection in
+                Task { @MainActor [weak self, weak listener] in
+                    guard let self, let listener, self.listener === listener else {
+                        connection.cancel()
+                        return
+                    }
+                    self.accept(connection, from: listener)
+                }
             }
             listener.start(queue: .main)
             self.listener = listener
@@ -61,6 +68,9 @@ final class ReplayXILocalCoachService {
         peer?.close(); peer = nil
         listener?.cancel(); listener = nil
         isPaired = false
+        encodedMarks.removeAll()
+        failedPairings = 0
+        rotatePin()
         status = "Mac link off"
     }
 
@@ -68,21 +78,33 @@ final class ReplayXILocalCoachService {
         peer?.close(); peer = nil
         isPaired = false
         failedPairings = 0
-        pin = String(format: "%06d", Int.random(in: 0...999_999))
+        rotatePin()
         status = "Mac link ready · PIN \(pin)"
     }
 
-    private func accept(_ connection: NWConnection) {
-        guard peer == nil, failedPairings < 5,
-              Self.isLANEndpoint(connection.endpoint) else { connection.cancel(); return }
-        let peer = ReplayXIWireConnection(connection)
+    private func rotatePin() {
+        let previous = pin
+        repeat { pin = String(format: "%06d", Int.random(in: 0...999_999)) }
+        while pin == previous
+    }
+
+    private func accept(_ connection: NWConnection, from listener: NWListener) {
+        guard self.listener === listener, peer == nil, failedPairings < 5,
+              Self.isLANEndpoint(connection.endpoint) else {
+            if failedPairings >= 5 { status = "Pairing locked · choose New PIN" }
+            connection.cancel()
+            return
+        }
+        let peer = ReplayXIWireConnection(connection, receivesStates: false)
         self.peer = peer
         peer.onClose = { [weak self, weak peer] in
             guard let self, self.peer === peer else { return }
             self.peer = nil
             self.isPaired = false
             self.lastState = nil
-            self.status = "Mac disconnected · PIN \(self.pin)"
+            self.status = self.failedPairings >= 5
+                ? "Pairing locked · choose New PIN"
+                : "Mac disconnected · PIN \(self.pin)"
         }
         peer.onMessage = { [weak self] message in self?.receive(message, from: peer) }
         peer.start()
@@ -118,6 +140,8 @@ final class ReplayXILocalCoachService {
                 return
             }
             isPaired = true
+            failedPairings = 0
+            rotatePin() // The code visible during pairing cannot authorize a later session.
             status = "Mac connected"
             peer.send(.init(type: "result", id: message.id, ok: true, detail: "Paired"))
             lastState = nil
@@ -282,7 +306,14 @@ final class ReplayXILocalCoachService {
         }
         let authoredIDs = Set(scenario.coachMarks.map(\.id))
         let marks: [ReplayXIWireMark] = snapshot.marks.compactMap { mark in
-            guard let encoded = try? ReplayXIWire.encoder.encode(mark) else { return nil }
+            let encoded: Data
+            if let cached = encodedMarks[mark.id], cached.mark == mark {
+                encoded = cached.bytes
+            } else {
+                guard let bytes = try? ReplayXIWire.encoder.encode(mark) else { return nil }
+                encodedMarks[mark.id] = (mark, bytes)
+                encoded = bytes
+            }
             let posed = mark.sampled(at: store.playhead)
             let presented = store.presentedCoachMarkGeometry(mark, at: store.playhead)
             let displayedPose = CoachMark(id: posed.id, kind: posed.kind,
@@ -302,6 +333,8 @@ final class ReplayXILocalCoachService {
                     return ReplayXIWirePoint3(x: p.x, y: p.y, z: p.z)
                 }() : nil, encodedMark: encoded)
         }
+        let retainedIDs = Set(snapshot.marks.map(\.id))
+        encodedMarks = encodedMarks.filter { retainedIDs.contains($0.key) }
         let state = ReplayXIWireState(revision: 0, scenarioID: scenario.id,
             playhead: store.playhead, playing: store.isPlaying, rate: store.playbackRate,
             viewMode: store.viewMode.rawValue, perspectiveID: store.activePerspectiveID,

@@ -3,6 +3,17 @@ import XCTest
 
 @MainActor
 final class ReplayXILocalCoachServiceTests: XCTestCase {
+    func testStoppingLinkRotatesPairingPINAndIgnoresQueuedListenerStatus() async {
+        let service = ReplayXILocalCoachService(store: ReplayStore())
+        let first = service.pin
+        service.start()
+        service.stop()
+        try? await Task.sleep(for: .milliseconds(100))
+        XCTAssertNotEqual(service.pin, first)
+        XCTAssertFalse(service.isRunning)
+        XCTAssertEqual(service.status, "Mac link off")
+    }
+
     func testServiceStaysOffUntilStartedAndRejectsStaleOrPlayingEdits() throws {
         let store = ReplayStore()
         store.prepareForLocalExperience()

@@ -1,5 +1,7 @@
 import Foundation
 import Network
+import Compression
+import CryptoKit
 
 // Shared by the visionOS service and the separate macOS app. A line is one
 // bounded JSON message; the full encoded CoachMark is carried without loss.
@@ -7,13 +9,114 @@ enum ReplayXIWire {
     static let serviceType = "_replayxi-coach._tcp"
     static let maximumMessageBytes = 4 * 1024 * 1024
     static let maximumCommandBytes = 8 * 1024
-    static let protocolVersion = 1
+    static let maximumStateBytes = 16 * 1024 * 1024
+    static let compressionThreshold = 128 * 1024
+    static let protocolVersion = 2
     static let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         return encoder
     }()
     static let decoder = JSONDecoder()
+
+    /// State compression is transport-only. The decoded DTO still contains
+    /// every full CoachMark byte and keyframe.
+    static func encodeLine(_ source: ReplayXIWireMessage) throws -> Data {
+        var message = source
+        if message.type == "state", let state = message.state {
+            let raw = try encoder.encode(state)
+            guard raw.count <= maximumStateBytes else { throw ReplayXIWireError.oversized }
+            if raw.count >= compressionThreshold, let packed = try? compress(raw) {
+                var candidate = message
+                candidate.packedState = packed
+                candidate.packedStateLength = packed.count
+                candidate.unpackedStateBytes = raw.count
+                candidate.packedStateDigest = Data(SHA256.hash(data: packed))
+                candidate.state = nil
+                if try encoder.encode(candidate).count < raw.count { message = candidate }
+            }
+        }
+        var line = try encoder.encode(message)
+        guard line.count <= maximumMessageBytes else { throw ReplayXIWireError.oversized }
+        line.append(0x0A)
+        return line
+    }
+
+    private static func compress(_ source: Data) throws -> Data {
+        var destination = Data(count: source.count + 1024)
+        let written = source.withUnsafeBytes { input in
+            destination.withUnsafeMutableBytes { output in
+                compression_encode_buffer(output.bindMemory(to: UInt8.self).baseAddress!,
+                    output.count, input.bindMemory(to: UInt8.self).baseAddress!,
+                    input.count, nil, COMPRESSION_LZFSE)
+            }
+        }
+        guard written > 0 else { throw ReplayXIWireError.oversized }
+        destination.removeSubrange(written..<destination.count)
+        return destination
+    }
+
+    static func unpack(_ message: inout ReplayXIWireMessage) throws {
+        guard let packed = message.packedState else {
+            guard message.unpackedStateBytes == nil, message.packedStateLength == nil,
+                  message.packedStateDigest == nil,
+                  message.type != "state" || message.state != nil else {
+                throw ReplayXIWireError.invalid
+            }
+            return
+        }
+        guard message.type == "state", message.state == nil,
+              let size = message.unpackedStateBytes,
+              (1...maximumStateBytes).contains(size), !packed.isEmpty,
+              message.packedStateLength == packed.count,
+              let digest = message.packedStateDigest, digest.count == 32,
+              Data(SHA256.hash(data: packed)) == digest else {
+            throw ReplayXIWireError.invalid
+        }
+        // One extra output byte distinguishes an honest exact size from a
+        // compressed stream that only filled the caller's declared buffer.
+        var output = Data(count: size + 1)
+        var sentinel: UInt8 = 0
+        let complete = withUnsafeMutablePointer(to: &sentinel) { pointer in
+            var stream = compression_stream(dst_ptr: pointer, dst_size: 0,
+                src_ptr: UnsafePointer(pointer), src_size: 0, state: nil)
+            guard compression_stream_init(&stream, COMPRESSION_STREAM_DECODE,
+                COMPRESSION_LZFSE) == COMPRESSION_STATUS_OK else { return false }
+            defer { compression_stream_destroy(&stream) }
+            return packed.withUnsafeBytes { input in
+                output.withUnsafeMutableBytes { destination in
+                    stream.src_ptr = input.bindMemory(to: UInt8.self).baseAddress!
+                    stream.src_size = input.count
+                    stream.dst_ptr = destination.bindMemory(to: UInt8.self).baseAddress!
+                    stream.dst_size = destination.count
+                    while true {
+                        let previousInput = stream.src_size
+                        let previousOutput = stream.dst_size
+                        let status = compression_stream_process(&stream,
+                            Int32(COMPRESSION_STREAM_FINALIZE.rawValue))
+                        if status == COMPRESSION_STATUS_END {
+                            return stream.src_size == 0 &&
+                                destination.count - stream.dst_size == size
+                        }
+                        guard status == COMPRESSION_STATUS_OK, stream.dst_size > 0,
+                              stream.src_size != previousInput || stream.dst_size != previousOutput else {
+                            return false
+                        }
+                    }
+                }
+            }
+        }
+        guard complete else { throw ReplayXIWireError.invalid }
+        output.removeLast()
+        guard let state = try? decoder.decode(ReplayXIWireState.self, from: output) else {
+            throw ReplayXIWireError.invalid
+        }
+        message.state = state
+        message.packedState = nil
+        message.packedStateLength = nil
+        message.unpackedStateBytes = nil
+        message.packedStateDigest = nil
+    }
 }
 
 struct ReplayXIWirePoint: Codable, Equatable {
@@ -110,6 +213,11 @@ struct ReplayXIWireMessage: Codable {
     var pin: String? = nil
     var command: ReplayXIWireCommand? = nil
     var state: ReplayXIWireState? = nil
+    var packedState: Data? = nil
+    var packedStateLength: Int? = nil
+    var unpackedStateBytes: Int? = nil
+    /// Unkeyed integrity check for truncated/extra bytes, not authentication.
+    var packedStateDigest: Data? = nil
     var ok: Bool? = nil
     var detail: String? = nil
 }
@@ -130,25 +238,38 @@ enum ReplayXIWireError: Error, Equatable {
 
 struct ReplayXIWireParser {
     private var input = Data()
+    private let receivesStates: Bool
+    private let maximumBytes: Int
+
+    init(receivesStates: Bool = true) {
+        self.receivesStates = receivesStates
+        maximumBytes = receivesStates ? ReplayXIWire.maximumMessageBytes : ReplayXIWire.maximumCommandBytes
+    }
 
     mutating func append(_ bytes: Data) throws -> [ReplayXIWireMessage] {
-        guard input.count + bytes.count <= ReplayXIWire.maximumMessageBytes + 1 else {
-            throw ReplayXIWireError.oversized
-        }
-        input.append(bytes)
         var messages: [ReplayXIWireMessage] = []
-        while let newline = input.firstIndex(of: 0x0A) {
-            let line = input.prefix(upTo: newline)
-            input.removeSubrange(...newline)
-            guard line.count <= ReplayXIWire.maximumMessageBytes,
-                  let message = try? ReplayXIWire.decoder.decode(ReplayXIWireMessage.self, from: line) else {
+        var start = bytes.startIndex
+        while let newline = bytes[start...].firstIndex(of: 0x0A) {
+            let fragment = bytes[start..<newline]
+            guard input.count + fragment.count <= maximumBytes else { throw ReplayXIWireError.oversized }
+            input.append(contentsOf: fragment)
+            guard var message = try? ReplayXIWire.decoder.decode(ReplayXIWireMessage.self, from: input) else {
                 throw ReplayXIWireError.invalid
             }
+            input.removeAll(keepingCapacity: true)
             guard message.version == ReplayXIWire.protocolVersion else {
                 throw ReplayXIWireError.version
             }
+            guard receivesStates || message.type != "state" else {
+                throw ReplayXIWireError.invalid
+            }
+            try ReplayXIWire.unpack(&message)
             messages.append(message)
+            start = bytes.index(after: newline)
         }
+        let tail = bytes[start...]
+        guard input.count + tail.count <= maximumBytes else { throw ReplayXIWireError.oversized }
+        input.append(contentsOf: tail)
         return messages
     }
 }
@@ -160,21 +281,28 @@ final class ReplayXIWireConnection {
     var onClose: (() -> Void)?
     var onReady: (() -> Void)?
     var onProtocolError: ((String) -> Void)?
-    private var parser = ReplayXIWireParser()
+    var onTransportError: ((String) -> Void)?
+    private var parser: ReplayXIWireParser
     private var closed = false
     private var closingAfterFlush = false
     private var sending = false
     private var pendingCritical: [Data] = []
     private var pendingState: Data?
 
-    init(_ connection: NWConnection) { self.connection = connection }
+    init(_ connection: NWConnection, receivesStates: Bool = true) {
+        self.connection = connection
+        parser = ReplayXIWireParser(receivesStates: receivesStates)
+    }
 
     func start() {
         connection.stateUpdateHandler = { [weak self] state in
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 if case .ready = state { self.onReady?() }
-                if case .failed = state { self.close() }
+                if case let .failed(error) = state {
+                    self.onTransportError?(error.localizedDescription)
+                    self.close()
+                }
                 if case .cancelled = state { self.close() }
             }
         }
@@ -184,9 +312,7 @@ final class ReplayXIWireConnection {
 
     @discardableResult
     func send(_ message: ReplayXIWireMessage) -> Bool {
-        guard !closed, let bytes = try? ReplayXIWire.encoder.encode(message),
-              bytes.count <= ReplayXIWire.maximumMessageBytes else { return false }
-        var line = bytes; line.append(0x0A)
+        guard !closed, let line = try? ReplayXIWire.encodeLine(message) else { return false }
         if message.type == "state" {
             pendingState = line
         } else {

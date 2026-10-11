@@ -2,6 +2,7 @@ import XCTest
 import Network
 import SwiftUI
 import AppKit
+import CryptoKit
 @testable import ReplayXICoachMac
 
 @MainActor
@@ -85,6 +86,144 @@ final class ReplayXIWireLoopbackTests: XCTestCase {
             count: ReplayXIWire.maximumMessageBytes + 2))) {
             XCTAssertEqual($0 as? ReplayXIWireError, .oversized)
         }
+        let pair = try ReplayXIWire.encodeLine(.init(type: "pair", pin: "123456",
+            detail: String(repeating: "x", count: 5_000)))
+        var serverParser = ReplayXIWireParser(receivesStates: false)
+        XCTAssertEqual(try serverParser.append(pair + pair).count, 2)
+        var commandParser = ReplayXIWireParser(receivesStates: false)
+        XCTAssertThrowsError(try commandParser.append(Data(repeating: 65,
+            count: ReplayXIWire.maximumCommandBytes + 1))) {
+            XCTAssertEqual($0 as? ReplayXIWireError, .oversized)
+        }
+    }
+
+    func testMaximumMarkAndKeyframeCorpusRoundTripsInBoundedState() throws {
+        let keyframes = (0..<64).map { index in
+            "{\"time\":\(index),\"start\":{\"x\":12.345,\"z\":-32.125}," +
+            "\"end\":{\"x\":13.75,\"z\":-29.5},\"startElevation\":0.5," +
+            "\"endElevation\":1.25,\"curve\":{\"bend\":0.3,\"lift\":2.1}}"
+        }.joined(separator: ",")
+        let marks = (0..<128).map { index in
+            ReplayXIWireMark(id: UUID(), kind: "arc", start: .init(x: 1, z: 2),
+                end: .init(x: 3, z: 4), startHeight: 0.5, endHeight: 1.25,
+                label: "Mark \(index)", showAt: 0, hideAt: 64,
+                keyframes: (0..<64).map(Double.init), authored: false,
+                controlPoint: .init(x: 2, y: 2, z: 3),
+                encodedMark: Data("{\"keyframes\":[\(keyframes)]}".utf8))
+        }
+        var state = Self.sampleState
+        state.marks = marks
+        let raw = try ReplayXIWire.encoder.encode(ReplayXIWireMessage(type: "state", state: state))
+        XCTAssertGreaterThan(raw.count, ReplayXIWire.compressionThreshold)
+        let line = try ReplayXIWire.encodeLine(.init(type: "state", state: state))
+        XCTAssertLessThan(line.count, ReplayXIWire.maximumMessageBytes)
+        var parser = ReplayXIWireParser()
+        let restored = try XCTUnwrap(parser.append(line).first?.state)
+        XCTAssertEqual(restored.marks.count, 128)
+        XCTAssertEqual(restored.marks[127].keyframes.count, 64)
+        XCTAssertEqual(restored.marks[127].encodedMark, marks[127].encodedMark)
+        var serverParser = ReplayXIWireParser(receivesStates: false)
+        XCTAssertThrowsError(try serverParser.append(line)) {
+            XCTAssertEqual($0 as? ReplayXIWireError, .oversized)
+        }
+        var smallServerParser = ReplayXIWireParser(receivesStates: false)
+        let smallState = try ReplayXIWire.encodeLine(.init(type: "state", state: Self.sampleState))
+        XCTAssertThrowsError(try smallServerParser.append(smallState)) {
+            XCTAssertEqual($0 as? ReplayXIWireError, .invalid)
+        }
+    }
+
+    func testStateAboveWireLimitCompressesWithoutDroppingMarkBytes() throws {
+        var state = Self.sampleState
+        let original = Data(repeating: 0x41, count: ReplayXIWire.maximumMessageBytes)
+        state.marks = [ReplayXIWireMark(id: UUID(), kind: "run",
+            start: .init(x: 0, z: 0), end: .init(x: 1, z: 1),
+            startHeight: 0, endHeight: 0, label: "Large review", showAt: 0,
+            hideAt: nil, keyframes: [], authored: false, controlPoint: nil,
+            encodedMark: original)]
+        XCTAssertGreaterThan(try ReplayXIWire.encoder.encode(
+            ReplayXIWireMessage(type: "state", state: state)).count,
+            ReplayXIWire.maximumMessageBytes)
+        let line = try ReplayXIWire.encodeLine(.init(type: "state", state: state))
+        var parser = ReplayXIWireParser()
+        XCTAssertEqual(try parser.append(line).first?.state?.marks.first?.encodedMark, original)
+    }
+
+    func testCompressedStateRejectsMalformedAndOversizedOutput() throws {
+        var parser = ReplayXIWireParser()
+        let bogus = ReplayXIWireMessage(type: "state", packedState: Data([1, 2, 3]),
+            unpackedStateBytes: 1024)
+        XCTAssertThrowsError(try parser.append(ReplayXIWire.encoder.encode(bogus) + Data([0x0A]))) {
+            XCTAssertEqual($0 as? ReplayXIWireError, .invalid)
+        }
+        var sizeParser = ReplayXIWireParser()
+        let oversized = ReplayXIWireMessage(type: "state", packedState: Data([1]),
+            unpackedStateBytes: ReplayXIWire.maximumStateBytes + 1)
+        XCTAssertThrowsError(try sizeParser.append(ReplayXIWire.encoder.encode(oversized) + Data([0x0A]))) {
+            XCTAssertEqual($0 as? ReplayXIWireError, .invalid)
+        }
+        var state = Self.sampleState
+        state.status = String(repeating: "A", count: ReplayXIWire.compressionThreshold)
+        let compressedLine = try ReplayXIWire.encodeLine(.init(type: "state", state: state))
+        let original = try ReplayXIWire.decoder.decode(ReplayXIWireMessage.self,
+            from: compressedLine.dropLast())
+        XCTAssertNotNil(original.packedState)
+        var tooSmall = original
+        tooSmall.unpackedStateBytes! -= 1
+        var tooSmallParser = ReplayXIWireParser()
+        XCTAssertThrowsError(try tooSmallParser.append(ReplayXIWire.encoder.encode(tooSmall) + Data([0x0A]))) {
+            XCTAssertEqual($0 as? ReplayXIWireError, .invalid)
+        }
+        var truncated = original
+        truncated.packedState!.removeLast()
+        truncated.packedStateDigest = Data(SHA256.hash(data: truncated.packedState!))
+        var truncatedParser = ReplayXIWireParser()
+        XCTAssertThrowsError(try truncatedParser.append(ReplayXIWire.encoder.encode(truncated) + Data([0x0A]))) {
+            XCTAssertEqual($0 as? ReplayXIWireError, .invalid)
+        }
+        var trailing = original
+        trailing.packedState!.append(0x00)
+        trailing.packedStateDigest = Data(SHA256.hash(data: trailing.packedState!))
+        var trailingParser = ReplayXIWireParser()
+        XCTAssertThrowsError(try trailingParser.append(ReplayXIWire.encoder.encode(trailing) + Data([0x0A]))) {
+            XCTAssertEqual($0 as? ReplayXIWireError, .invalid)
+        }
+    }
+
+    func testRejectedPairingKeepsFailureVisibleAfterClose() async throws {
+        let listener = try NWListener(using: .tcp, on: .any)
+        let ready = expectation(description: "listener ready")
+        listener.stateUpdateHandler = { if case .ready = $0 { ready.fulfill() } }
+        var serverPeer: ReplayXIWireConnection?
+        listener.newConnectionHandler = { connection in
+            Task { @MainActor in
+                let peer = ReplayXIWireConnection(connection)
+                serverPeer = peer
+                peer.onMessage = { message in
+                    guard message.type == "pair" else { return }
+                    peer.send(.init(type: "result", id: message.id, ok: false, detail: "Pairing failed"))
+                    peer.closeAfterFlush()
+                }
+                peer.start()
+            }
+        }
+        listener.start(queue: .main)
+        await fulfillment(of: [ready], timeout: 5)
+        let link = ReplayXIMacLink()
+        link.pin = "123456"
+        link.connect(to: .init(id: "fixture", name: "Fixture",
+            endpoint: .hostPort(host: "127.0.0.1", port: try XCTUnwrap(listener.port))))
+        let rejected = expectation(description: "rejection visible")
+        Task { @MainActor in
+            for _ in 0..<150 {
+                if link.status == "Pairing failed", !link.connected { rejected.fulfill(); return }
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+        }
+        await fulfillment(of: [rejected], timeout: 5)
+        link.disconnect()
+        serverPeer?.close()
+        listener.cancel()
     }
 
     func testPairedCoachWindowRendersAtDesktopAndMinimumSizes() async throws {
