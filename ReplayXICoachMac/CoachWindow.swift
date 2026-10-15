@@ -2,6 +2,7 @@ import SwiftUI
 
 struct CoachWindow: View {
     @Environment(ReplayXIMacLink.self) private var link
+    @AppStorage("ReplayXI.coachConnectionTarget") private var connectionTarget = "simulator"
     @State private var deviceID = ""
     @State private var selectedMarkID: UUID?
     @State private var drawKind = "run"
@@ -21,11 +22,22 @@ struct CoachWindow: View {
     @State private var saveName = "Coach review"
     @State private var selectedKey = 0.0
     @State private var retimeKey = 0.0
-    @State private var labelPlayerID = ""
     @State private var showClearConfirmation = false
     @State private var loadedMarkFingerprint: Data?
     @State private var loadedDraft: InspectorDraft?
     @State private var inspectorConflict = false
+    @State private var library = "marks"
+    @State private var search = ""
+    @State private var activeOnly = false
+    @State private var showSave = false
+    @State private var showShortcuts = false
+    @State private var showShape = false
+    @State private var showKeys = false
+    @FocusState private var timeFieldFocused: Bool
+
+    init(selectedMarkID: UUID? = nil) {
+        _selectedMarkID = State(initialValue: selectedMarkID)
+    }
 
     private struct InspectorDraft: Equatable {
         var label: String
@@ -56,10 +68,12 @@ struct CoachWindow: View {
                 HStack(spacing: 0) {
                     VStack(spacing: 10) {
                         playbackBar(state)
+                        toolBar(state)
                         PitchMap(state: state, selectedMarkID: $selectedMarkID,
                             drawKind: drawKind, drawingEnabled: drawingEnabled, drawStart: $drawStart,
                             dragStart: $dragStart, dragEnd: $dragEnd,
                             onPitchClick: pitchClicked, onMove: moveEndpoint,
+                            onPlayer: { link.send(.init(name: "pov", playerID: $0)) },
                             onArcControl: { mark, point in
                                 guard state.canEdit, !inspectorConflict else { return }
                                 link.send(.init(name: "arcControl", markID: mark.id,
@@ -71,27 +85,46 @@ struct CoachWindow: View {
                     .frame(maxWidth: .infinity)
                     Divider()
                     inspector(state)
-                        .frame(width: 330)
+                        .frame(width: 340)
                 }
+                Divider()
+                workspaceFooter(state)
             } else {
-                ContentUnavailableView("Connect to Replay XI", systemImage: "visionpro",
-                    description: Text("Open Replay XI on Vision Pro, then enter its Mac link PIN."))
+                ContentUnavailableView(connectionTarget == "simulator" ? "Connect to Vision Pro Simulator" : "Connect to Replay XI",
+                    systemImage: connectionTarget == "simulator" ? "desktopcomputer" : "visionpro",
+                    description: Text(connectionTarget == "simulator"
+                        ? "On this Mac, open Replay XI in Vision Pro Simulator. Choose Start Mac link, then enter its PIN above."
+                        : "Open Replay XI on Vision Pro and choose Start Mac link. Use the same local network and enter its PIN above."))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(Color(nsColor: .windowBackgroundColor))
         .onChange(of: state?.playhead, initial: true) { _, value in
-            if !scrubbing, let value { draftTime = value }
+            if !scrubbing, !timeFieldFocused, let value { draftTime = value }
         }
-        .onChange(of: selectedMarkID) { _, _ in loadInspector() }
+        .onChange(of: selectedMarkID, initial: true) { _, _ in loadInspector() }
+        .onChange(of: timeFieldFocused) { _, focused in
+            if !focused { draftTime = state?.playhead ?? 0 }
+        }
         .onChange(of: state?.scenarioID) { _, _ in
-            labelPlayerID = state?.players.first?.id ?? ""
             drawingEnabled = false
             drawStart = nil
+            selectedMarkID = nil
+            search = ""
+        }
+        .onExitCommand {
+            drawingEnabled = false
+            drawStart = nil
+            dragStart = nil
+            dragEnd = nil
         }
         .onChange(of: state?.canEdit) { _, canEdit in
-            if canEdit != true { drawingEnabled = false; drawStart = nil }
+            if canEdit != true {
+                drawingEnabled = false; drawStart = nil; dragStart = nil; dragEnd = nil
+            }
         }
+        .onChange(of: library) { _, _ in search = "" }
         .onChange(of: state?.revision) { _, _ in
             if let id = selectedMarkID, state?.marks.contains(where: { $0.id == id }) != true {
                 selectedMarkID = nil
@@ -106,26 +139,35 @@ struct CoachWindow: View {
 
     private var connectionBar: some View {
         HStack(spacing: 12) {
-            Text("REPLAY XI / MAC COACH").font(.headline)
+            Label("Replay XI Coach", systemImage: "sportscourt").font(.headline)
             Spacer()
-            Text(link.status).font(.caption)
+            Label(link.status, systemImage: link.connected ? "checkmark.circle.fill" : "wifi")
+                .font(.caption)
                 .foregroundStyle(link.connected ? .green : .secondary)
                 .lineLimit(1).help(link.status)
             if link.connected {
                 Button("Disconnect") { link.disconnect() }
             } else {
+                Picker("Connect", selection: $connectionTarget) {
+                    Text("Simulator on this Mac").tag("simulator")
+                    Text("Vision Pro headset").tag("headset")
+                }.labelsHidden().frame(width: 190)
+                if connectionTarget == "headset" {
                 Picker("Headset", selection: $deviceID) {
                     Text("Select headset").tag("")
                     ForEach(link.devices) { device in Text(device.name).tag(device.id) }
                 }
                 .frame(width: 195)
                 Button("Rescan") { link.retryDiscovery() }
+                }
                 SecureField("Six digit PIN", text: Bindable(link).pin)
                     .frame(width: 110)
                 Button("Pair") {
-                    if let currentDevice { link.connect(to: currentDevice) }
+                    if connectionTarget == "simulator" { link.connectToSimulator() }
+                    else if let currentDevice { link.connect(to: currentDevice) }
                 }
-                .disabled(currentDevice == nil || link.pin.count != 6)
+                .disabled((connectionTarget == "headset" && currentDevice == nil) ||
+                    link.pin.count != 6 || !link.pin.allSatisfy(\.isNumber))
             }
         }
         .padding(.horizontal, 18)
@@ -172,14 +214,24 @@ struct CoachWindow: View {
 
     private func transportControls(_ state: ReplayXIWireState) -> some View {
         HStack(spacing: 8) {
-            Button(state.playing ? "Pause" : "Play") {
-                link.send(.init(name: "play", value: !state.playing))
+            Button { link.send(.init(name: "seek", time: max(0, state.playhead - 5))) } label: {
+                Image(systemName: "gobackward.5")
             }
+            .help("Back 5 seconds · ←").accessibilityLabel("Back 5 seconds")
+            .keyboardShortcut(.leftArrow, modifiers: [])
+            Button {
+                link.send(.init(name: "play", value: !state.playing))
+            } label: {
+                Image(systemName: state.playing ? "pause.fill" : "play.fill").frame(width: 20)
+            }
+            .help(state.playing ? "Pause · Space" : "Play · Space")
+            .accessibilityLabel(state.playing ? "Pause" : "Play")
             .keyboardShortcut(.space, modifiers: [])
-            Button("−5s") { link.send(.init(name: "seek", time: max(0, state.playhead - 5))) }
-                .keyboardShortcut(.leftArrow, modifiers: [])
-            Button("+5s") { link.send(.init(name: "seek", time: min(state.duration, state.playhead + 5))) }
-                .keyboardShortcut(.rightArrow, modifiers: [])
+            Button { link.send(.init(name: "seek", time: min(state.duration, state.playhead + 5))) } label: {
+                Image(systemName: "goforward.5")
+            }
+            .help("Forward 5 seconds · →").accessibilityLabel("Forward 5 seconds")
+            .keyboardShortcut(.rightArrow, modifiers: [])
         }
     }
 
@@ -223,87 +275,142 @@ struct CoachWindow: View {
     private func timeline(_ state: ReplayXIWireState) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("TIMELINE").font(.caption).bold()
+                Button { link.send(.init(name: "seek", time: max(0, state.playhead - 1.0 / 30))) } label: {
+                    Image(systemName: "backward.frame")
+                }
+                .help("Back 1/30 second · ⌥←").accessibilityLabel("Back 1/30 second")
+                .keyboardShortcut(.leftArrow, modifiers: .option)
+                Button { link.send(.init(name: "seek", time: min(state.duration, state.playhead + 1.0 / 30))) } label: {
+                    Image(systemName: "forward.frame")
+                }
+                .help("Forward 1/30 second · ⌥→").accessibilityLabel("Forward 1/30 second")
+                .keyboardShortcut(.rightArrow, modifiers: .option)
+                TextField("Seconds", value: $draftTime, format: .number.precision(.fractionLength(2)))
+                    .frame(width: 70).monospacedDigit()
+                    .focused($timeFieldFocused)
+                    .onSubmit {
+                        guard draftTime.isFinite else { draftTime = state.playhead; return }
+                        draftTime = min(max(0, draftTime), state.duration)
+                        link.send(.init(name: "seek", time: draftTime))
+                    }
+                    .help("Enter an exact time in seconds, then press Return.")
                 Spacer()
-                Text("\(draftTime.formatted(.number.precision(.fractionLength(1)))) / \(state.duration.formatted(.number.precision(.fractionLength(1)))) s")
-                    .monospacedDigit().font(.caption)
+                Text("\(CoachWorkspace.clock(draftTime)) / \(CoachWorkspace.clock(state.duration))")
+                    .monospacedDigit().font(.callout)
             }
+            .controlSize(.small)
             Slider(value: $draftTime, in: 0...max(state.duration, 0.01)) { editing in
+                if editing { timeFieldFocused = false }
                 scrubbing = editing
                 if !editing { link.send(.init(name: "seek", time: draftTime)) }
             }
-            GeometryReader { size in
-                ZStack(alignment: .leading) {
-                    Rectangle().fill(.secondary.opacity(0.25)).frame(height: 2)
-                    ForEach(state.marks) { mark in
-                        let x = CGFloat(mark.showAt / max(state.duration, 0.01)) * size.size.width
-                        Circle().fill(mark.authored ? .gray : .orange)
-                            .frame(width: selectedMarkID == mark.id ? 10 : 7, height: 10)
-                            .position(x: x, y: 7)
-                            .help("\(mark.label) · show \(mark.showAt.formatted()) s")
-                            .onTapGesture { selectedMarkID = mark.id }
-                    }
-                }
+            CoachMarkTimeline(state: state, selectedMarkID: selectedMarkID) { mark in
+                selectedMarkID = mark.id
+                link.send(.init(name: "seek", time: mark.showAt))
             }
-            .frame(height: 16)
         }
+    }
+
+    private func toolBar(_ state: ReplayXIWireState) -> some View {
+        HStack(spacing: 7) {
+            Button {
+                drawingEnabled = false; drawStart = nil
+            } label: { Image(systemName: "cursorarrow").frame(width: 22, height: 20) }
+            .tint(!drawingEnabled ? .accentColor : .secondary)
+            .help("Select / move · Esc").accessibilityLabel("Select or move")
+            ForEach(["run", "pass", "arc", "space", "danger"], id: \.self) { kind in
+                Button {
+                    drawKind = kind; drawingEnabled = true; drawStart = nil
+                } label: { Image(systemName: CoachWorkspace.symbol(for: kind)).frame(width: 22, height: 20) }
+                .tint(drawingEnabled && drawKind == kind ? .orange : .secondary)
+                .help("Draw \(CoachWorkspace.title(for: kind).lowercased()) · click two pitch points")
+                .accessibilityLabel("Draw \(CoachWorkspace.title(for: kind))")
+                .disabled(!state.canEdit)
+            }
+            Spacer(minLength: 4)
+            if drawingEnabled {
+                Text(drawStart == nil ? "1 · Click start" : "2 · Click end")
+                    .font(.caption).foregroundStyle(.orange)
+            } else {
+                Text(state.canEdit ? "Click a player for POV" : "Pause to annotate")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Button { link.send(.init(name: "undo")) } label: { Image(systemName: "arrow.uturn.backward") }
+                .disabled(!state.canUndo || !state.canEdit)
+                .keyboardShortcut("z", modifiers: .command)
+                .help("Undo · ⌘Z").accessibilityLabel("Undo")
+            Button { link.send(.init(name: "redo")) } label: { Image(systemName: "arrow.uturn.forward") }
+                .disabled(!state.canRedo || !state.canEdit)
+                .keyboardShortcut("z", modifiers: [.command, .shift])
+                .help("Redo · ⇧⌘Z").accessibilityLabel("Redo")
+        }
+        .controlSize(.regular)
+    }
+
+    private func workspaceFooter(_ state: ReplayXIWireState) -> some View {
+        HStack {
+            Image(systemName: state.canEdit ? "pencil.circle" : "lock.circle")
+                .foregroundStyle(state.canEdit ? Color.secondary : .orange)
+            Text(link.lastAction.isEmpty ? state.status : link.lastAction)
+                .font(.caption).lineLimit(1)
+                .help(link.lastAction.isEmpty ? state.status : link.lastAction)
+            Spacer()
+            Button { showShortcuts.toggle() } label: { Image(systemName: "keyboard") }
+                .help("Keyboard shortcuts").accessibilityLabel("Keyboard shortcuts")
+                .popover(isPresented: $showShortcuts) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Keyboard shortcuts").font(.headline)
+                        Text("Space    Play / pause\n← →    Seek 5 seconds\n⌥← ⌥→    Step 1/30 second\n⌘N    Draw selected tool\nEsc    Cancel drawing\n⌘Z / ⇧⌘Z    Undo / redo\n⌘S    Save review\n⌘⌫    Delete selected mark")
+                            .font(.callout).lineSpacing(5)
+                    }.padding(20)
+                }
+            Menu {
+                Button("Clear coach marks…", role: .destructive) { showClearConfirmation = true }
+                    .disabled(!state.canEdit || !state.marks.contains(where: { !$0.authored }))
+            } label: { Image(systemName: "ellipsis.circle") }
+            .menuStyle(.borderlessButton).frame(width: 25).help("Review actions")
+            Button("Save review…", systemImage: "square.and.arrow.down") { showSave = true }
+                .disabled(!state.canSave || !state.canEdit)
+                .keyboardShortcut("s", modifiers: .command)
+                .popover(isPresented: $showSave) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Save on Vision Pro").font(.headline)
+                        TextField("Review name", text: $saveName).frame(width: 240)
+                        Button("Save review") {
+                            link.send(.init(name: "save", saveName: saveName.trimmingCharacters(in: .whitespacesAndNewlines)))
+                            showSave = false
+                        }
+                        .disabled(saveName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !state.canEdit || !state.canSave)
+                    }.padding(18)
+                }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 10)
+        .confirmationDialog("Clear all coach marks?", isPresented: $showClearConfirmation) {
+            Button("Clear coach marks", role: .destructive) { link.send(.init(name: "clear")) }
+        } message: { Text("Authored overlays remain. You can undo this change.") }
     }
 
     private func inspector(_ state: ReplayXIWireState) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                Text("ANNOTATIONS").font(.headline)
-                HStack {
-                    Picker("Draw", selection: $drawKind) {
-                        ForEach(["run", "pass", "arc", "danger", "space"], id: \.self) { Text($0.capitalized).tag($0) }
-                    }
-                    Button(drawingEnabled ? "Cancel drawing" : "Draw mark") {
-                        drawingEnabled.toggle()
-                        drawStart = nil
-                    }
-                    .disabled(!state.canEdit && !drawingEnabled)
-                    .keyboardShortcut("n", modifiers: .command)
-                }
-                Text(drawingEnabled
-                    ? (drawStart == nil ? "Click the start point on the pitch." : "Click the end point on the pitch.")
-                    : "Select a mark, or choose Draw mark to place two points.")
-                    .font(.caption).foregroundStyle(.secondary)
+                libraryPanel(state)
                 if !state.canEdit {
-                    Text("Pause playback and finish headset edits to edit annotations here.")
+                    Text(state.playing ? "Pause to edit annotations." : "Finish the current headset edit to continue here.")
                         .font(.caption).foregroundStyle(.orange)
-                }
-                HStack {
-                    Picker("Player label", selection: $labelPlayerID) {
-                        Text("Select player").tag("")
-                        ForEach(state.players) { player in
-                            Text("#\(player.number) \(player.name)").tag(player.id)
-                        }
-                    }
-                    Button("Add label") {
-                        link.send(.init(name: "labelPlayer", playerID: labelPlayerID))
-                    }
-                    .disabled(!state.canEdit || labelPlayerID.isEmpty)
-                }
-                ForEach(state.marks) { mark in
-                    Button {
-                        selectedMarkID = mark.id
-                    } label: {
-                        HStack {
-                            Circle().fill(mark.authored ? .gray : .orange).frame(width: 7, height: 7)
-                            Text(mark.label).lineLimit(1)
-                            Spacer()
-                            Text(mark.kind).font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .padding(6)
-                    .background(selectedMarkID == mark.id ? Color.accentColor.opacity(0.2) : .clear)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
                 Divider()
                 if let mark = selectedMark {
-                    Text(mark.authored ? "Authored overlay · view only" : "SELECTED / \(mark.kind.uppercased())")
-                        .font(.caption).bold()
+                    HStack {
+                        Label(CoachWorkspace.title(for: mark.kind), systemImage: CoachWorkspace.symbol(for: mark.kind))
+                            .font(.headline)
+                        Spacer()
+                        Text(mark.authored ? "Read only" : "Coach mark")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    if !CoachWorkspace.isVisible(mark, at: state.playhead) {
+                        Label("Hidden at this time · dashed preview only", systemImage: "eye.slash")
+                            .font(.caption).foregroundStyle(.orange)
+                    }
                     if inspectorConflict {
                         HStack {
                             Text("Headset state changed. Reload this mark before editing.")
@@ -311,12 +418,18 @@ struct CoachWindow: View {
                             Button("Reload") { loadInspector() }
                         }
                     }
-                    TextField("Label", text: $label)
-                    Button("Apply label") {
+                    HStack {
+                        TextField("Label", text: $label).disabled(mark.authored || !state.canEdit || inspectorConflict)
+                        Button("Rename") {
                         commitInspectorDraft()
                         link.send(.init(name: "label", markID: mark.id, label: label))
+                        }
+                        .disabled(mark.authored || !state.canEdit || inspectorConflict || label == mark.label)
                     }
-                        .disabled(mark.authored || !state.canEdit || inspectorConflict)
+                    DisclosureGroup("3D shape", isExpanded: $showShape) {
+                    VStack(alignment: .leading, spacing: 10) {
+                    Text("Drag yellow ends on the pitch. Height is in metres.")
+                        .font(.caption).foregroundStyle(.secondary)
                     HStack {
                         VStack(alignment: .leading) {
                             Text("Start height · m")
@@ -334,6 +447,8 @@ struct CoachWindow: View {
                     Button("Apply 3D pose") { sendPose(mark, start: mark.start, end: mark.end) }
                         .disabled(mark.authored || !state.canEdit || inspectorConflict)
                     if mark.kind == "arc", let control = mark.controlPoint {
+                        Text("Drag the cyan point to bend the arc. Raise it for an overhead curve.")
+                            .font(.caption).foregroundStyle(.secondary)
                         HStack {
                             Text("Arc control height")
                             Slider(value: $controlHeight, in: 0...12)
@@ -346,82 +461,187 @@ struct CoachWindow: View {
                         }
                         .disabled(mark.authored || !state.canEdit || inspectorConflict)
                     }
+                    }
+                    .disabled(mark.authored || !state.canEdit || inspectorConflict)
+                    .padding(.top, 8)
+                    }
                     Divider()
-                    Text("VISIBLE WINDOW").font(.caption).bold()
-                    HStack { Text("Show at"); TextField("s", value: $showAt, format: .number).frame(width: 80) }
-                    Toggle("Hide at", isOn: $hasHide)
-                    if hasHide { TextField("Hide time · s", value: $hideAt, format: .number) }
-                    Button("Apply show / hide") {
+                    Text("Visibility").font(.headline)
+                    HStack {
+                        Text("Show").frame(width: 40, alignment: .leading)
+                        TextField("Seconds", value: $showAt, format: .number.precision(.fractionLength(2)))
+                        Button("Now") { showAt = state.playhead }
+                            .help("Use the current playhead time")
+                    }
+                    Toggle("Hide at a time", isOn: $hasHide)
+                    if hasHide {
+                        HStack {
+                            Text("Hide").frame(width: 40, alignment: .leading)
+                            TextField("Seconds", value: $hideAt, format: .number.precision(.fractionLength(2)))
+                            Button("Now") { hideAt = state.playhead }
+                                .help("Use the current playhead time")
+                        }
+                    }
+                    if !CoachWorkspace.validWindow(show: showAt, hide: hasHide ? hideAt : nil, duration: state.duration) {
+                        Text("Hide must be after Show. Both must be inside this clip.")
+                            .font(.caption).foregroundStyle(.orange)
+                    }
+                    HStack {
+                    Button("Apply timing") {
                         commitInspectorDraft()
                         link.send(.init(name: "window", markID: mark.id,
                             showAt: showAt, hideAt: hasHide ? hideAt : nil))
                     }
-                    .disabled(mark.authored || !state.canEdit || inspectorConflict)
+                    .disabled(mark.authored || !state.canEdit || inspectorConflict ||
+                        !CoachWorkspace.validWindow(show: showAt, hide: hasHide ? hideAt : nil, duration: state.duration))
+                    Button("Go to start") { link.send(.init(name: "seek", time: mark.showAt)) }
+                    }
                     Divider()
-                    Text("KEYFRAMES").font(.caption).bold()
+                    DisclosureGroup("Motion keys · \(mark.keyframes.count)", isExpanded: $showKeys) {
+                    VStack(alignment: .leading, spacing: 8) {
+                    Text("Set a position, capture it, then repeat at another time.")
+                        .font(.caption).foregroundStyle(.secondary)
                     HStack {
                         Button("Capture at playhead") { link.send(.init(name: "captureKey", markID: mark.id)) }
-                        .disabled(mark.authored || !state.canEdit)
+                        .disabled(mark.authored || !state.canEdit || inspectorConflict)
                     }
                     ForEach(mark.keyframes, id: \.self) { time in
-                        Button("\(time.formatted(.number.precision(.fractionLength(2)))) s") {
+                        Button {
                             selectedKey = time; retimeKey = time
                             link.send(.init(name: "seek", time: time))
+                        } label: {
+                            Label(CoachWorkspace.clock(time), systemImage: selectedKey == time ? "diamond.fill" : "diamond")
                         }
                     }
                     if !mark.keyframes.isEmpty {
                         HStack {
                             Text("Selected \(selectedKey.formatted(.number.precision(.fractionLength(2)))) s")
                             Button("Delete key") { link.send(.init(name: "deleteKey", markID: mark.id, keyframeAt: selectedKey)) }
-                                .disabled(mark.authored || !state.canEdit)
+                                .disabled(mark.authored || !state.canEdit || inspectorConflict)
                         }
                         HStack {
                             TextField("Move to · s", value: $retimeKey, format: .number)
                             Button("Move key") { link.send(.init(name: "retimeKey", markID: mark.id, keyframeAt: selectedKey, keyframeTo: retimeKey)) }
+                                .disabled(!retimeKey.isFinite || !(0...state.duration).contains(retimeKey) ||
+                                    mark.keyframes.contains(where: { $0 != selectedKey && abs($0 - retimeKey) < 0.001 }))
                         }
-                        .disabled(mark.authored || !state.canEdit)
+                        .disabled(mark.authored || !state.canEdit || inspectorConflict)
+                    }
+                    }.padding(.top, 8)
                     }
                     Button("Delete mark", role: .destructive) { link.send(.init(name: "delete", markID: mark.id)) }
-                        .disabled(mark.authored || !state.canEdit)
-                        .keyboardShortcut(.delete, modifiers: [])
-                }
-                Divider()
-                HStack {
-                    Button("Undo") { link.send(.init(name: "undo")) }
-                        .disabled(!state.canUndo || !state.canEdit)
-                        .keyboardShortcut("z", modifiers: .command)
-                    Button("Redo") { link.send(.init(name: "redo")) }
-                        .disabled(!state.canRedo || !state.canEdit)
-                        .keyboardShortcut("z", modifiers: [.command, .shift])
-                }
-                Button("Clear coach marks", role: .destructive) {
-                    showClearConfirmation = true
-                }
-                .disabled(!state.canEdit || !state.marks.contains(where: { !$0.authored }))
-                .confirmationDialog("Clear all coach marks?", isPresented: $showClearConfirmation) {
-                    Button("Clear coach marks", role: .destructive) {
-                        link.send(.init(name: "clear"))
-                    }
-                } message: {
-                    Text("This removes coach-added marks in this scenario. Authored overlays remain.")
-                }
-                HStack {
-                    TextField("Save name", text: $saveName)
-                    Button("Save") { link.send(.init(name: "save", saveName: saveName)) }
-                        .disabled(!state.canSave || !state.canEdit)
-                        .keyboardShortcut("s", modifiers: .command)
-                }
-                Text(state.status).font(.caption).foregroundStyle(.secondary)
-                if !link.lastAction.isEmpty {
-                    Text(link.lastAction).font(.caption).foregroundStyle(.orange)
+                        .disabled(mark.authored || !state.canEdit || inspectorConflict)
+                        .keyboardShortcut(.delete, modifiers: .command)
+                } else {
+                    Label("Select a mark to adjust its shape and timing.", systemImage: "cursorarrow.click")
+                        .font(.callout).foregroundStyle(.secondary)
                 }
             }
             .padding(16)
         }
     }
 
+    private func libraryPanel(_ state: ReplayXIWireState) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Review").font(.title3).bold()
+                Spacer()
+                Button {
+                    drawingEnabled = true; drawStart = nil
+                } label: { Image(systemName: "plus") }
+                .help("Draw \(CoachWorkspace.title(for: drawKind).lowercased()) · ⌘N")
+                .accessibilityLabel("Draw selected annotation tool")
+                .disabled(!state.canEdit).keyboardShortcut("n", modifiers: .command)
+            }
+            Picker("Browse", selection: $library) {
+                Text("Marks · \(state.marks.count)").tag("marks")
+                Text("Players · \(state.players.count)").tag("players")
+            }.pickerStyle(.segmented).labelsHidden()
+            HStack {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField(library == "marks" ? "Find a mark or tool…" : "Name, number or team…", text: $search)
+                    .textFieldStyle(.plain)
+                if !search.isEmpty {
+                    Button { search = "" } label: { Image(systemName: "xmark.circle.fill") }
+                        .buttonStyle(.plain).accessibilityLabel("Clear search")
+                }
+            }.padding(8).background(.quaternary, in: RoundedRectangle(cornerRadius: 7))
+            if library == "marks" {
+                Toggle("Visible now", isOn: $activeOnly).toggleStyle(.checkbox).font(.caption)
+                let marks = state.marks.filter {
+                    (!activeOnly || CoachWorkspace.isVisible($0, at: state.playhead)) &&
+                        CoachWorkspace.matches(search, values: [$0.label, CoachWorkspace.title(for: $0.kind)])
+                }
+                ScrollView {
+                    LazyVStack(spacing: 3) {
+                        ForEach(marks) { mark in
+                            Button { selectedMarkID = mark.id } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: CoachWorkspace.symbol(for: mark.kind))
+                                        .foregroundStyle(mark.authored ? Color.secondary : .orange).frame(width: 18)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(mark.label.isEmpty ? CoachWorkspace.title(for: mark.kind) : mark.label)
+                                            .lineLimit(1)
+                                        Text("\(CoachWorkspace.clock(mark.showAt)) – \(mark.hideAt.map(CoachWorkspace.clock) ?? "end")")
+                                            .font(.caption2).monospacedDigit().foregroundStyle(.secondary)
+                                    }
+                                    Spacer(minLength: 2)
+                                    Image(systemName: mark.authored ? "lock" :
+                                        (CoachWorkspace.isVisible(mark, at: state.playhead) ? "eye" : "eye.slash"))
+                                        .foregroundStyle(.secondary).font(.caption)
+                                }
+                                .padding(7).contentShape(Rectangle())
+                                .background(selectedMarkID == mark.id ? Color.accentColor.opacity(0.15) : .clear,
+                                    in: RoundedRectangle(cornerRadius: 6))
+                            }.buttonStyle(.plain)
+                        }
+                        if marks.isEmpty {
+                            Text(state.marks.isEmpty ? "Choose a tool above the pitch to add a mark." : "No matching marks.")
+                                .font(.caption).foregroundStyle(.secondary).padding(.vertical, 14)
+                        }
+                    }
+                }.frame(maxHeight: 170)
+            } else {
+                let players = state.players.filter {
+                    CoachWorkspace.matches(search, values: [$0.name, "#\($0.number)", $0.team])
+                }
+                ScrollView {
+                    LazyVStack(spacing: 4) {
+                        ForEach(players) { player in
+                            HStack(spacing: 8) {
+                                Button { link.send(.init(name: "pov", playerID: player.id)) } label: {
+                                    HStack {
+                                        Text("\(player.number)").font(.system(size: 12, weight: .bold, design: .rounded))
+                                            .frame(width: 26, height: 26).foregroundStyle(.white)
+                                            .background(player.team == "home" ? Color.blue : .red, in: Circle())
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(player.name).lineLimit(1)
+                                            Text(player.team.capitalized).font(.caption2).foregroundStyle(.secondary)
+                                        }
+                                        Spacer(minLength: 0)
+                                        if state.perspectiveID == player.id { Image(systemName: "eye.fill").font(.caption) }
+                                    }
+                                    .contentShape(Rectangle())
+                                }.buttonStyle(.plain).help("Switch to #\(player.number) \(player.name)'s POV")
+                                Button { link.send(.init(name: "labelPlayer", playerID: player.id)) } label: {
+                                    Image(systemName: "tag.badge.plus")
+                                }
+                                .disabled(!state.canEdit).help("Add a 3D player label")
+                                .accessibilityLabel("Label \(player.name)")
+                            }.padding(5)
+                        }
+                        if players.isEmpty { Text("No matching players.").font(.caption).foregroundStyle(.secondary).padding() }
+                    }
+                }.frame(maxHeight: 170)
+            }
+        }
+    }
+
     private func loadInspector() {
-        guard let mark = selectedMark else { return }
+        guard let mark = selectedMark else {
+            loadedMarkFingerprint = nil; loadedDraft = nil; inspectorConflict = false
+            return
+        }
         label = mark.label
         startHeight = Double(mark.startHeight)
         endHeight = Double(mark.endHeight)
@@ -480,38 +700,72 @@ private struct PitchMap: View {
     @Binding var dragEnd: ReplayXIWirePoint?
     let onPitchClick: (ReplayXIWirePoint) -> Void
     let onMove: (ReplayXIWireMark, String, ReplayXIWirePoint) -> Void
+    let onPlayer: (String) -> Void
     let onArcControl: (ReplayXIWireMark, ReplayXIWirePoint) -> Void
 
     var body: some View {
         GeometryReader { geo in
             let rect = pitchRect(in: geo.size)
             ZStack {
-                Color.black.opacity(0.86)
+                Color(red: 0.035, green: 0.10, blue: 0.075)
+                Rectangle().fill(Color.green.opacity(0.08)).frame(width: rect.width, height: rect.height)
+                    .position(x: rect.midX, y: rect.midY)
                 Path { path in
                     path.addRect(rect)
-                    path.move(to: CGPoint(x: rect.midX, y: rect.minY))
-                    path.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
-                    path.addEllipse(in: CGRect(x: rect.midX - 34, y: rect.midY - 34, width: 68, height: 68))
+                    path.move(to: CGPoint(x: rect.minX, y: rect.midY))
+                    path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
+                    let metre = rect.width / 68
+                    path.addEllipse(in: CGRect(x: rect.midX - 9.15 * metre, y: rect.midY - 9.15 * metre,
+                        width: 18.3 * metre, height: 18.3 * metre))
+                    for top in [true, false] {
+                        path.addRect(CGRect(x: rect.midX - 20.16 * metre,
+                            y: top ? rect.minY : rect.maxY - 16.5 * metre,
+                            width: 40.32 * metre, height: 16.5 * metre))
+                        path.addRect(CGRect(x: rect.midX - 9.16 * metre,
+                            y: top ? rect.minY : rect.maxY - 5.5 * metre,
+                            width: 18.32 * metre, height: 5.5 * metre))
+                    }
                 }
                 .stroke(.white.opacity(0.55), lineWidth: 1.5)
-                ForEach(state.marks) { mark in
+                ForEach(state.marks.filter { CoachWorkspace.isVisible($0, at: state.playhead) || $0.id == selectedMarkID }) { mark in
                     let a = screen(dragStart != nil && selectedMarkID == mark.id ? dragStart! : mark.start, rect)
                     let b = screen(dragEnd != nil && selectedMarkID == mark.id ? dragEnd! : mark.end, rect)
+                    let visible = CoachWorkspace.isVisible(mark, at: state.playhead)
                     Path { path in
-                        path.move(to: a)
-                        if let control = mark.controlPoint {
+                        if mark.kind == "space" {
+                            path.addEllipse(in: CGRect(x: min(a.x, b.x), y: min(a.y, b.y),
+                                width: abs(b.x - a.x), height: abs(b.y - a.y)))
+                        } else if let control = mark.controlPoint {
+                            path.move(to: a)
                             path.addQuadCurve(to: b,
                                 control: screen(.init(x: control.x, z: control.z), rect))
-                        } else { path.addLine(to: b) }
+                        } else {
+                            path.move(to: a); path.addLine(to: b)
+                        }
+                        if ["run", "pass", "arc", "danger"].contains(mark.kind) {
+                            let origin = mark.controlPoint.map { screen(.init(x: $0.x, z: $0.z), rect) } ?? a
+                            let angle = atan2(b.y - origin.y, b.x - origin.x)
+                            for turn in [-0.5, 0.5] {
+                                path.move(to: b)
+                                path.addLine(to: CGPoint(x: b.x - 9 * cos(angle + turn), y: b.y - 9 * sin(angle + turn)))
+                            }
+                        }
                     }
                     .stroke(mark.authored ? .gray : .orange,
-                            style: StrokeStyle(lineWidth: selectedMarkID == mark.id ? 3 : 2, dash: mark.authored ? [5, 4] : []))
+                            style: StrokeStyle(lineWidth: selectedMarkID == mark.id ? 3 : 2,
+                                dash: mark.authored || !visible ? [5, 4] : []))
+                    .opacity(visible ? 1 : 0.45)
+                    .allowsHitTesting(false)
                     Circle().fill(mark.authored ? .gray : .orange)
                         .frame(width: 11, height: 11)
-                        .position(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
+                        .position(mark.controlPoint.map { control in
+                            let c = screen(.init(x: control.x, z: control.z), rect)
+                            return CGPoint(x: (a.x + 2 * c.x + b.x) / 4, y: (a.y + 2 * c.y + b.y) / 4)
+                        } ?? CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2))
                         .help("Select \(mark.label)")
                         .onTapGesture { selectedMarkID = mark.id }
-                    if selectedMarkID == mark.id, !mark.authored {
+                        .allowsHitTesting(!drawingEnabled)
+                    if selectedMarkID == mark.id, !mark.authored, state.canEdit, !drawingEnabled {
                         handle(mark, "start", at: a, rect: rect)
                         handle(mark, "end", at: b, rect: rect)
                         if let control = mark.controlPoint {
@@ -521,17 +775,24 @@ private struct PitchMap: View {
                                 .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .named("pitch"))
                                     .onEnded { value in onArcControl(mark, pitch(value.location, rect)) })
                                 .help("Drag arc control point. Height is set in the inspector.")
+                                .zIndex(3)
                         }
                     }
                 }
                 ForEach(state.players) { player in
+                    Button { onPlayer(player.id) } label: {
                     Text("\(player.number)")
                         .font(.system(size: 11, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
                         .frame(width: 23, height: 23)
                         .background(player.team == "home" ? Color.blue : Color.red, in: Circle())
-                        .position(screen(player.position, rect))
-                        .help(player.name)
+                        .overlay(Circle().stroke(state.perspectiveID == player.id ? Color.white : .clear, lineWidth: 2))
+                    }
+                    .buttonStyle(.plain)
+                    .position(screen(player.position, rect))
+                    .help("#\(player.number) \(player.name) · click for POV")
+                    .accessibilityLabel("View #\(player.number) \(player.name)'s POV")
+                    .allowsHitTesting(!drawingEnabled)
                 }
                 Circle().fill(.white).frame(width: 12, height: 12)
                     .overlay(Circle().stroke(.black, lineWidth: 2))
@@ -541,7 +802,7 @@ private struct PitchMap: View {
                     Circle().fill(.orange).frame(width: 13, height: 13)
                         .position(screen(drawStart, rect))
                 }
-                Text("68 × 105 m · \(drawingEnabled ? "Drawing \(drawKind.capitalized)" : "Select / edit")")
+                Text("Top-down · \(drawingEnabled ? "Drawing \(CoachWorkspace.title(for: drawKind))" : "Click player → POV")")
                     .font(.caption).foregroundStyle(.white.opacity(0.65))
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                     .padding(12)
@@ -567,6 +828,7 @@ private struct PitchMap: View {
                     if endpoint == "start" { dragStart = next } else { dragEnd = next }
                 }
                 .onEnded { value in onMove(mark, endpoint, pitch(value.location, rect)) })
+            .zIndex(3)
     }
 
     private func pitchRect(in size: CGSize) -> CGRect {

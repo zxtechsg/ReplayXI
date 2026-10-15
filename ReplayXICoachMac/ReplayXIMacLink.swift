@@ -21,6 +21,24 @@ final class ReplayXIMacLink {
     private var peer: ReplayXIWireConnection?
     private var pairTimeout: Task<Void, Never>?
 
+    /// Vision Pro Simulator shares the host's loopback network. This is the
+    /// same single-use PIN protocol as a headset, not a development bypass.
+    func connectToSimulator(port: UInt16 = ReplayXIWire.simulatorPort) {
+        guard port > 0, let endpointPort = NWEndpoint.Port(rawValue: port) else {
+            status = "Invalid Simulator port"
+            return
+        }
+        connect(to: Device(id: "local-simulator", name: "Simulator on this Mac",
+            endpoint: .hostPort(host: .ipv4(.loopback), port: endpointPort)))
+    }
+
+    func stopDiscovery() {
+        browser?.cancel()
+        browser = nil
+        devices = []
+        if !connected, peer == nil { status = "Start Mac link in Vision Pro Simulator" }
+    }
+
     func startDiscovery() {
         guard browser == nil else { return }
         let parameters = NWParameters.tcp
@@ -50,9 +68,7 @@ final class ReplayXIMacLink {
     }
 
     func retryDiscovery() {
-        browser?.cancel()
-        browser = nil
-        devices = []
+        stopDiscovery()
         status = "Looking for Replay XI on this network…"
         startDiscovery()
     }

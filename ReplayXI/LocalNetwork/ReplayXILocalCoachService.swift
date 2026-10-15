@@ -12,6 +12,7 @@ final class ReplayXILocalCoachService {
     private(set) var status = "Mac link off"
     var isRunning: Bool { listener != nil }
     private(set) var isPaired = false
+    private(set) var listeningPort: UInt16?
     private let store: ReplayStore
     private var listener: NWListener?
     private var peer: ReplayXIWireConnection?
@@ -22,21 +23,76 @@ final class ReplayXILocalCoachService {
     private var commandTimes: [ContinuousClock.Instant] = []
     private var failedPairings = 0
 
+    static var usesSimulatorLoopback: Bool {
+        #if targetEnvironment(simulator)
+        true
+        #else
+        false
+        #endif
+    }
+
+    #if DEBUG
+    /// Zero lets network tests request an isolated ephemeral loopback port.
+    /// There is no launch argument or production override for this value.
+    var simulatorPortOverrideForTesting: UInt16?
+    #endif
+
     init(store: ReplayStore) { self.store = store }
+
+    static func listenerParameters(simulatorOnly: Bool,
+                                   port: UInt16 = ReplayXIWire.simulatorPort) -> NWParameters {
+        let parameters = NWParameters.tcp
+        parameters.includePeerToPeer = false
+        if simulatorOnly {
+            parameters.requiredInterfaceType = .loopback
+            parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback),
+                port: NWEndpoint.Port(rawValue: port)!)
+        }
+        return parameters
+    }
+
+    static func advertisedService(simulatorOnly: Bool) -> NWListener.Service? {
+        simulatorOnly ? nil : NWListener.Service(name: "Replay XI", type: ReplayXIWire.serviceType)
+    }
+
+    static func failureMessage(_ error: NWError, simulatorOnly: Bool) -> String {
+        if simulatorOnly, case .posix(.EADDRINUSE) = error {
+            return "Simulator link busy. Stop Mac link in the other Replay XI Simulator, then retry."
+        }
+        return "Mac link unavailable: \(error.localizedDescription)"
+    }
 
     func start() {
         guard listener == nil else { return }
         do {
-            let parameters = NWParameters.tcp
-            parameters.includePeerToPeer = false
+            var port = ReplayXIWire.simulatorPort
+            #if DEBUG
+            port = simulatorPortOverrideForTesting ?? port
+            #endif
+            let simulatorOnly = Self.usesSimulatorLoopback
+            let parameters = Self.listenerParameters(simulatorOnly: simulatorOnly, port: port)
+            // The fixed port is already in requiredLocalEndpoint. Supplying
+            // it again through `on:` is rejected by Network with EINVAL.
             let listener = try NWListener(using: parameters)
-            listener.service = NWListener.Service(name: "Replay XI", type: ReplayXIWire.serviceType)
+            listener.service = Self.advertisedService(simulatorOnly: simulatorOnly)
             listener.stateUpdateHandler = { [weak self, weak listener] state in
                 Task { @MainActor [weak self, weak listener] in
                     guard let self, let listener, self.listener === listener else { return }
                     switch state {
-                    case .ready: self.status = self.isPaired ? "Mac connected" : "Mac link ready · PIN \(self.pin)"
-                    case .failed(let error): self.status = "Mac link unavailable: \(error.localizedDescription)"
+                    case .ready:
+                        self.listeningPort = listener.port?.rawValue
+                        self.status = self.isPaired ? "Mac connected"
+                            : "\(simulatorOnly ? "Simulator" : "Mac") link ready · PIN \(self.pin)"
+                    case .failed(let error):
+                        self.stop()
+                        self.status = Self.failureMessage(error, simulatorOnly: simulatorOnly)
+                    case .waiting(let error):
+                        if case .posix(.EADDRINUSE) = error {
+                            self.stop()
+                            self.status = Self.failureMessage(error, simulatorOnly: simulatorOnly)
+                        } else {
+                            self.status = "Mac link waiting: \(error.localizedDescription)"
+                        }
                     default: break
                     }
                 }
@@ -59,7 +115,9 @@ final class ReplayXILocalCoachService {
                 }
             }
         } catch {
-            status = "Mac link unavailable: \(error.localizedDescription)"
+            status = (error as? NWError).map {
+                Self.failureMessage($0, simulatorOnly: Self.usesSimulatorLoopback)
+            } ?? "Mac link unavailable: \(error.localizedDescription)"
         }
     }
 
@@ -67,6 +125,7 @@ final class ReplayXILocalCoachService {
         publishTask?.cancel(); publishTask = nil
         peer?.close(); peer = nil
         listener?.cancel(); listener = nil
+        listeningPort = nil
         isPaired = false
         encodedMarks.removeAll()
         failedPairings = 0

@@ -7,6 +7,95 @@ import CryptoKit
 
 @MainActor
 final class ReplayXIWireLoopbackTests: XCTestCase {
+    func testExplicitSimulatorTargetPairsAndExchangesPlaybackAndAnnotationCommands() async throws {
+        // An ephemeral loopback fixture never touches a running demo's port.
+        let listener = try NWListener(using: .tcp, on: .any)
+        let ready = expectation(description: "simulator fixture ready")
+        listener.stateUpdateHandler = { if case .ready = $0 { ready.fulfill() } }
+        var serverPeer: ReplayXIWireConnection?
+        var serverState = Self.previewState
+        var commands: [ReplayXIWireCommand] = []
+        listener.newConnectionHandler = { connection in
+            Task { @MainActor in
+                let peer = ReplayXIWireConnection(connection)
+                serverPeer = peer
+                peer.onMessage = { message in
+                    if message.type == "pair" {
+                        guard message.pin == "123456" else {
+                            peer.send(.init(type: "result", id: message.id, ok: false, detail: "Pairing failed"))
+                            peer.closeAfterFlush()
+                            return
+                        }
+                        peer.send(.init(type: "result", id: message.id, ok: true))
+                        peer.send(.init(type: "state", state: serverState))
+                    } else if let command = message.command {
+                        commands.append(command)
+                        XCTAssertEqual(command.expectedScenarioID, serverState.scenarioID)
+                        XCTAssertEqual(command.expectedRevision, serverState.revision)
+                        switch command.name {
+                        case "seek": serverState.playhead = command.time ?? -1
+                        case "window":
+                            XCTAssertEqual(command.time, serverState.playhead)
+                            XCTAssertEqual(command.markID, serverState.marks[0].id)
+                            serverState.marks[0].showAt = command.showAt ?? -1
+                            serverState.marks[0].hideAt = command.hideAt
+                        case "pov": serverState.perspectiveID = command.playerID ?? ""
+                        case "play": serverState.playing = command.value ?? false
+                        default: XCTFail("Unexpected command")
+                        }
+                        serverState.revision += 1
+                        peer.send(.init(type: "result", id: message.id, ok: true, detail: "Applied"))
+                        peer.send(.init(type: "state", state: serverState))
+                    }
+                }
+                peer.start()
+            }
+        }
+        listener.start(queue: .main)
+        defer { listener.cancel(); serverPeer?.close() }
+        await fulfillment(of: [ready], timeout: 5)
+        let link = ReplayXIMacLink()
+        link.pin = "123456"
+        link.connectToSimulator(port: try XCTUnwrap(listener.port).rawValue)
+        defer { link.disconnect() }
+
+        func awaitRevision(_ revision: UInt64) async {
+            for _ in 0..<150 {
+                if link.state?.revision == revision { return }
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+            XCTFail("Missing Simulator state revision \(revision)")
+        }
+
+        await awaitRevision(1)
+        XCTAssertTrue(link.connected)
+        XCTAssertTrue(link.devices.isEmpty, "Direct Simulator pairing must not depend on Bonjour")
+        link.send(.init(name: "seek", time: 15))
+        await awaitRevision(2)
+        XCTAssertEqual(link.state?.playhead, 15)
+        link.send(.init(name: "window", markID: serverState.marks[0].id, showAt: 15, hideAt: 22))
+        await awaitRevision(3)
+        XCTAssertEqual(link.state?.marks.first?.showAt, 15)
+        XCTAssertEqual(link.state?.marks.first?.hideAt, 22)
+        link.send(.init(name: "pov", playerID: "p9"))
+        await awaitRevision(4)
+        XCTAssertEqual(link.state?.perspectiveID, "p9")
+        link.send(.init(name: "play", value: true))
+        await awaitRevision(5)
+        XCTAssertEqual(link.state?.playing, true)
+        XCTAssertEqual(commands.map(\.name), ["seek", "window", "pov", "play"])
+    }
+
+    func testSimulatorStillRequiresSixDigitPIN() {
+        let link = ReplayXIMacLink()
+        for pin in ["", "12345", "abc123", "1234567"] {
+            link.pin = pin
+            link.connectToSimulator()
+            XCTAssertFalse(link.connected)
+            XCTAssertEqual(link.status, "Enter the six digit PIN shown in Replay XI")
+        }
+    }
+
     func testPairCommandStateAndDisconnectOverTCP() async throws {
         let listener = try NWListener(using: .tcp, on: .any)
         let ready = expectation(description: "listener ready")
@@ -257,6 +346,7 @@ final class ReplayXIWireLoopbackTests: XCTestCase {
     }
 
     func testPairedCoachWindowRendersAtDesktopAndMinimumSizes() async throws {
+        print("Mac window QA: starting fixture")
         let listener = try NWListener(using: .tcp, on: .any)
         let ready = expectation(description: "fixture listener ready")
         listener.stateUpdateHandler = { state in
@@ -291,18 +381,21 @@ final class ReplayXIWireLoopbackTests: XCTestCase {
             }
         }
         await fulfillment(of: [paired], timeout: 5)
+        print("Mac window QA: paired fixture")
         XCTAssertEqual(link.state?.marks.count, 2)
         XCTAssertEqual(link.state?.players.count, 3)
 
         let output = URL(fileURLWithPath: "/private/tmp/replayxi-mac-qa", isDirectory: true)
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         for (width, height) in [(1360, 840), (1060, 700)] {
-            let view = CoachWindow().environment(link)
+            print("Mac window QA: rendering \(width)")
+            let view = CoachWindow(selectedMarkID: Self.previewState.marks.first?.id).environment(link)
                 .frame(width: CGFloat(width), height: CGFloat(height))
             let renderer = ImageRenderer(content: view)
             renderer.scale = 1
             renderer.proposedSize = ProposedViewSize(width: CGFloat(width), height: CGFloat(height))
             let image = try XCTUnwrap(renderer.nsImage)
+            print("Mac window QA: image renderer done")
             let bitmap = try XCTUnwrap(NSBitmapImageRep(data: try XCTUnwrap(image.tiffRepresentation)))
             XCTAssertEqual(bitmap.pixelsWide, width)
             XCTAssertEqual(bitmap.pixelsHigh, height)
@@ -316,8 +409,28 @@ final class ReplayXIWireLoopbackTests: XCTestCase {
             host.displayIfNeeded()
             let hosted = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
             host.cacheDisplay(in: host.bounds, to: hosted)
+            print("Mac window QA: host cache done")
             let hostedPNG = try XCTUnwrap(hosted.representation(using: .png, properties: [:]))
             try hostedPNG.write(to: output.appendingPathComponent("replayxi-coach-host-\(width)x\(height).png"))
+
+            // AppKit controls need a real window for faithful rendering.
+            // Cache only this test view; no screen-recording permission needed.
+            let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: width, height: height),
+                styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            window.title = "Replay XI Coach · QA sample data"
+            window.contentView = host
+            // Do not activate another copy of the app while a demo is open.
+            // A window-backed view can draw without taking keyboard focus.
+            window.orderFront(nil)
+            host.layoutSubtreeIfNeeded()
+            print("Mac window QA: native window ready")
+            host.displayIfNeeded()
+            let windowBitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+            host.cacheDisplay(in: host.bounds, to: windowBitmap)
+            try XCTUnwrap(windowBitmap.representation(using: .png, properties: [:])).write(to:
+                output.appendingPathComponent("replayxi-coach-window-host-\(width)x\(height).png"))
+            window.orderOut(nil)
+            print("Mac window QA: native window done")
         }
         link.disconnect()
         serverPeer?.close()

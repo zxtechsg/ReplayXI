@@ -7,6 +7,9 @@ import CryptoKit
 // bounded JSON message; the full encoded CoachMark is carried without loss.
 enum ReplayXIWire {
     static let serviceType = "_replayxi-coach._tcp"
+    /// Explicit same-Mac Simulator route. The Simulator server binds loopback
+    /// only; the physical headset continues to use Bonjour on its local LAN.
+    nonisolated static let simulatorPort: UInt16 = 49_311
     static let maximumMessageBytes = 4 * 1024 * 1024
     static let maximumCommandBytes = 8 * 1024
     static let maximumStateBytes = 16 * 1024 * 1024
