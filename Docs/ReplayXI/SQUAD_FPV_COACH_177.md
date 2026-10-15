@@ -29,4 +29,4 @@ Simulator tests cannot establish headset frame rate, comfort or physical Mac–V
 2. Open Replay XI Coach on the same Mac. Select **Simulator on this Mac**.
 3. Enter the displayed six-digit PIN and select **Pair**. Pause playback before editing annotations.
 
-The simulator listener binds only `127.0.0.1:49311`. Only one Replay XI simulator link can use that port at a time; stop the other link before retrying. No account, Bonjour permission or physical headset is required for this route. UI automation was unavailable in this session, so the final manual pairing remains for the user.
+The simulator listener binds only `127.0.0.1:49311`. Only one Replay XI simulator link can use that port at a time; stop the other link before retrying. No account, Bonjour permission or physical headset is required for this route. Both updated apps were launched. The simulator is in the immersive review; finish any current annotation edit and return to its main dashboard to pair. Final manual pairing remains unverified.
