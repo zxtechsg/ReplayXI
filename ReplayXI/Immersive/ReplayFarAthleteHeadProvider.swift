@@ -78,7 +78,7 @@ enum ReplayFarAthleteHeadProvider {
         else { throw PreparationError.invalidAsset }
         // Publish only after every admission check. No partially valid head
         // escapes a failed load, and the ellipsoid remains the fallback.
-        mesh = component.mesh
+        mesh = try ReplayAthleteHeadNeckSkirt.make(from: component.mesh)
     }
 
     static func make(appearance: ReplayAthleteAppearance) -> ModelEntity? {

@@ -119,9 +119,10 @@ final class ReplayAthleteHeadTests: XCTestCase {
         let model = try XCTUnwrap(component.mesh.contents.models.first)
         let part = try XCTUnwrap(model.parts.first)
         let vertices = part.positions.elements
-        let minimumY = try XCTUnwrap(vertices.map(\.y).min())
-        let neckline = vertices.filter { $0.y <= minimumY + 0.012 }
-        XCTAssertFalse(neckline.isEmpty)
+        let neckline = vertices.filter {
+            abs($0.y - ReplayAthleteHeadNeckSkirt.seatedBoundaryY) < 0.000_001
+        }
+        XCTAssertGreaterThanOrEqual(neckline.count, 22)
         let spine = rig.joints[.spine]
         for time in [0.0, 5, 12, 13.6, 18, 28] {
             let ball = scenario.ball.pose(at: time)
@@ -130,11 +131,11 @@ final class ReplayAthleteHeadTests: XCTestCase {
                 lookTargetWorldPosition: [ball.position.x, ball.height, ball.position.z]
             )
             let transform = head.transformMatrix(relativeTo: spine)
-            let collarY = try XCTUnwrap(neckline.map { vertex in
-                (transform * SIMD4<Float>(vertex, 1)).y
-            }.min())
-            XCTAssertLessThanOrEqual(collarY, 0.580, "neckline detached at \(time)s")
-            XCTAssertGreaterThan(collarY, 0.48, "head seated too deeply at \(time)s")
+            for vertex in neckline {
+                let collarY = (transform * SIMD4<Float>(vertex, 1)).y
+                XCTAssertLessThan(collarY, 0.557, "neck edge detached at \(time)s")
+                XCTAssertGreaterThan(collarY, 0.40, "neck skirt extends below collar area at \(time)s")
+            }
         }
     }
 

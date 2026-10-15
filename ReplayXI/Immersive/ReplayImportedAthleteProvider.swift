@@ -48,10 +48,11 @@ enum ReplayAthleteHeadProvider {
             material.baseColor = .init(tint: .white, texture: .init(texture))
             prepared.append(material)
         }
+        let seatedHead = try ReplayAthleteHeadNeckSkirt.make(from: component.mesh)
         // Publish together so a failed texture load never exposes a half-ready
         // renderer. The procedural face remains available without a retry loop.
         materials = prepared
-        mesh = component.mesh
+        mesh = seatedHead
     }
 
     static func make(appearance: ReplayAthleteAppearance) -> ModelEntity? {
@@ -91,6 +92,95 @@ enum ReplayAthleteHeadProvider {
         materials = []
     }
     #endif
+}
+
+/// The licensed head ends in a sloped open neck: the rear edge is 59 mm above
+/// the front. Seated rigidly at the existing gaze pivot, that rear edge clears
+/// the shirt. Extend only the open boundary into the hidden collar interior.
+/// Source assets, skull vertices, UVs, indices, joint placement and draws stay
+/// unchanged. This derived mesh is built once per admitted near/far asset.
+@MainActor
+enum ReplayAthleteHeadNeckSkirt {
+    static let seatedBoundaryY: Float = -0.23
+    static let seatedRadiusX: Float = 0.014
+    static let seatedRadiusZ: Float = 0.0112
+
+    private struct PositionKey: Hashable {
+        let x: Int, y: Int, z: Int
+        init(_ point: SIMD3<Float>) {
+            x = Int((point.x * 1_000_000).rounded())
+            y = Int((point.y * 1_000_000).rounded())
+            z = Int((point.z * 1_000_000).rounded())
+        }
+    }
+
+    static func make(from source: MeshResource) throws -> MeshResource {
+        let parts = source.contents.models.flatMap { Array($0.parts) }
+        guard parts.count == 1, let part = parts.first,
+              let sourceNormals = part.normals, let uvs = part.textureCoordinates,
+              let indices = part.triangleIndices,
+              sourceNormals.count == part.positions.count,
+              uvs.count == part.positions.count,
+              indices.count.isMultiple(of: 3)
+        else { throw ReplayImportedAthleteError.invalidBounds }
+        var points = part.positions.elements
+        var normals = sourceNormals.elements
+        var canonical: [PositionKey: Int] = [:]
+        var pointIDs: [Int] = []
+        pointIDs.reserveCapacity(points.count)
+        for point in points {
+            let key = PositionKey(point)
+            let id = canonical[key] ?? canonical.count
+            canonical[key] = id
+            pointIDs.append(id)
+        }
+        var edges: [UInt64: Int] = [:]
+        let triangles = indices.elements
+        for offset in stride(from: 0, to: triangles.count, by: 3) {
+            for side in 0..<3 {
+                let a = pointIDs[Int(triangles[offset + side])]
+                let b = pointIDs[Int(triangles[offset + (side + 1) % 3])]
+                let key = UInt64(min(a, b)) << 32 | UInt64(max(a, b))
+                edges[key, default: 0] += 1
+            }
+        }
+        var boundaryIDs: Set<Int> = []
+        for (edge, count) in edges where count == 1 {
+            boundaryIDs.insert(Int(edge >> 32))
+            boundaryIDs.insert(Int(edge & 0xffff_ffff))
+        }
+        let lowerBoundary = points.indices.filter {
+            points[$0].y < -0.08 && boundaryIDs.contains(pointIDs[$0])
+        }
+        let lowerIDs = Set(lowerBoundary.map { pointIDs[$0] })
+        guard lowerIDs.count == 22 else { throw ReplayImportedAthleteError.invalidBounds }
+        for index in lowerBoundary {
+            let angle = atan2(points[index].z, points[index].x)
+            points[index] = [seatedRadiusX * cos(angle), seatedBoundaryY,
+                             seatedRadiusZ * sin(angle)]
+        }
+        // Recompute only the moved ring's normals. Coincident UV seam vertices
+        // share one physical normal; facial shading retains source normals.
+        var ringNormals: [Int: SIMD3<Float>] = [:]
+        for offset in stride(from: 0, to: triangles.count, by: 3) {
+            let a = Int(triangles[offset]), b = Int(triangles[offset + 1]), c = Int(triangles[offset + 2])
+            let normal = simd_cross(points[b] - points[a], points[c] - points[a])
+            for index in [a, b, c] where lowerIDs.contains(pointIDs[index]) {
+                ringNormals[pointIDs[index], default: .zero] += normal
+            }
+        }
+        for index in lowerBoundary {
+            if let normal = ringNormals[pointIDs[index]], simd_length_squared(normal) > 0.000_000_01 {
+                normals[index] = simd_normalize(normal)
+            }
+        }
+        var descriptor = MeshDescriptor(name: "replayxi-seated-head-neck")
+        descriptor.positions = MeshBuffers.Positions(points)
+        descriptor.normals = MeshBuffers.Normals(normals)
+        descriptor.textureCoordinates = MeshBuffers.TextureCoordinates(uvs.elements)
+        descriptor.primitives = .triangles(triangles)
+        return try MeshResource.generate(from: [descriptor])
+    }
 }
 
 /// Runtime admission policy for Replay XI's higher-fidelity imported-player

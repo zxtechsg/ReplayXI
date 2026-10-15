@@ -168,8 +168,10 @@ final class ReplayFarAthleteHeadTests: XCTestCase {
             let rig = try ReplayAthleteFactory.make(for: player, lod: .far)
             let head = try XCTUnwrap(rig.root.findEntity(named: "head") as? ModelEntity)
             let part = try XCTUnwrap(head.model?.mesh.contents.models.first?.parts.first)
-            let minimum = try XCTUnwrap(part.positions.elements.map(\.y).min())
-            let neckline = part.positions.elements.filter { $0.y <= minimum + 0.012 }
+            let neckline = part.positions.elements.filter {
+                abs($0.y - ReplayAthleteHeadNeckSkirt.seatedBoundaryY) < 0.000_001
+            }
+            XCTAssertGreaterThanOrEqual(neckline.count, 22)
             var poses: [Double: simd_float4x4] = [:]
             for time in times + times.reversed() {
                 let ball = scenario.ball.pose(at: time)
@@ -184,13 +186,96 @@ final class ReplayFarAthleteHeadTests: XCTestCase {
                 if let first = poses[time] { XCTAssertEqual(transform, first) }
                 poses[time] = transform
                 let collar = head.transformMatrix(relativeTo: rig.joints[.spine])
-                let lowest = try XCTUnwrap(neckline.map { (collar * SIMD4<Float>($0, 1)).y }.min())
-                XCTAssertLessThanOrEqual(lowest, 0.580, player.id)
-                XCTAssertGreaterThan(lowest, 0.48, player.id)
+                for point in neckline {
+                    assertNeckEndInsideCollar((collar * SIMD4<Float>(point, 1)), context: player.id)
+                }
             }
             if player.id == "navy-rw" { XCTAssertNotEqual(poses[0], poses[18]) }
         }
         XCTAssertEqual(ReplayFarAthleteHeadProvider.meshLoadCount, 1)
+    }
+
+    func testWholeOpenNeckBoundarySeatsBelowCollarWithoutChangingSkullOrBudget() throws {
+        try prepare()
+        let (scenario, player) = try fixture()
+        for lod in [ReplayAthleteLOD.near, .far] {
+            let resource = lod == .near ? ReplayAthleteHeadProvider.resourceName
+                : ReplayFarAthleteHeadProvider.resourceName
+            let url = try XCTUnwrap(Bundle.main.url(forResource: resource, withExtension: "usdz",
+                subdirectory: "Resources/Players") ?? Bundle.main.url(forResource: resource, withExtension: "usdz"))
+            let source = try XCTUnwrap(ReplayStaticFarHeadFixture.models(Entity.load(contentsOf: url)).first)
+            let raw = try XCTUnwrap(source.model?.mesh.contents.models.first?.parts.first)
+            let rig = try ReplayAthleteFactory.make(for: player, lod: lod)
+            let head = try XCTUnwrap(rig.root.findEntity(named: "head") as? ModelEntity)
+            let seated = try XCTUnwrap(head.model?.mesh.contents.models.first?.parts.first)
+            XCTAssertEqual(raw.positions.count, seated.positions.count)
+            XCTAssertEqual(raw.triangleIndices?.elements, seated.triangleIndices?.elements)
+            XCTAssertEqual(raw.textureCoordinates?.elements, seated.textureCoordinates?.elements)
+            let before = raw.positions.elements, after = seated.positions.elements
+            let changed = before.indices.filter { before[$0] != after[$0] }
+            XCTAssertGreaterThanOrEqual(changed.count, 22)
+            let rest = head.transformMatrix(relativeTo: rig.joints[.spine])
+            let originalRear = try XCTUnwrap(changed.map { (rest * SIMD4<Float>(before[$0], 1)).y }.max())
+            XCTAssertGreaterThan(originalRear, 0.60,
+                "The original open rear edge must reproduce the visible collar gap")
+            for index in before.indices {
+                if before[index].y >= -0.08 {
+                    XCTAssertEqual(after[index], before[index], "Skull/face position \(index)")
+                    XCTAssertEqual(seated.normals?.elements[index], raw.normals?.elements[index])
+                }
+            }
+            for pitch in stride(from: Float(-25), through: 25, by: 5) {
+                for yaw in stride(from: Float(-60), through: 60, by: 10) {
+                    for lean: Float in [0, 0.13] {
+                        rig.joints[.neck].orientation = simd_quatf(
+                            angle: pitch * .pi / 180 * 0.34 + lean * 0.30, axis: [1, 0, 0])
+                            * simd_quatf(angle: yaw * .pi / 180 * 0.42, axis: [0, 1, 0])
+                        rig.joints[.headRoot].orientation = simd_quatf(
+                            angle: pitch * .pi / 180 * 0.66 + lean * 0.54, axis: [1, 0, 0])
+                            * simd_quatf(angle: yaw * .pi / 180 * 0.58, axis: [0, 1, 0])
+                        let matrix = head.transformMatrix(relativeTo: rig.joints[.spine])
+                        for index in changed {
+                            assertNeckEndInsideCollar(matrix * SIMD4<Float>(after[index], 1),
+                                context: "\(lod), pitch \(pitch), yaw \(yaw), lean \(lean)")
+                        }
+                    }
+                }
+            }
+            for track in scenario.players {
+                for time in stride(from: 0.0, through: scenario.duration, by: 2) {
+                    let ball = scenario.ball.pose(at: time)
+                    ReplayAthleteMotion.update(rig, from: track, at: time,
+                        lookTargetWorldPosition: [ball.position.x, ball.height, ball.position.z],
+                        ballTrack: scenario.ball)
+                    let matrix = head.transformMatrix(relativeTo: rig.joints[.spine])
+                    for index in changed {
+                        assertNeckEndInsideCollar(matrix * SIMD4<Float>(after[index], 1),
+                            context: "\(lod), \(track.id), \(time)")
+                    }
+                }
+            }
+        }
+    }
+
+    private func assertNeckEndInsideCollar(_ point: SIMD4<Float>, context: String,
+                                          file: StaticString = #filePath, line: UInt = #line) {
+        // Independent cross-section of the narrower shipped far torso. Near
+        // torso has more room, so satisfying this envelope covers both LODs.
+        let sections: [SIMD4<Float>] = [
+            [0.435, 0.229, 0.141, -0.002], [0.485, 0.218, 0.132, -0.004],
+            [0.525, 0.160, 0.099, -0.006], [0.554, 0.082, 0.065, 0.003],
+            [0.572, 0.080, 0.064, 0.005]
+        ]
+        XCTAssertLessThan(point.y, 0.557, context, file: file, line: line)
+        var section = sections[0]
+        for index in 1..<sections.count where point.y >= sections[index - 1].x {
+            let a = sections[index - 1], b = sections[index]
+            let weight = min(max((point.y - a.x) / (b.x - a.x), 0), 1)
+            section = a + (b - a) * weight
+            if point.y <= b.x { break }
+        }
+        let x = point.x / section.y, z = (point.z - section.w) / section.z
+        XCTAssertLessThan(x * x + z * z, 1, context, file: file, line: line)
     }
 
     func testNativeFullFarBodyAndCollarWithCalibratedPixels() async throws {
