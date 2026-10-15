@@ -23,6 +23,7 @@
 - `replayxi176-headverified07.xcresult`: 9 passed after that test correction, including source-asset admission, near-head checks and before/after renders.
 - `replayxi176-labelverified08.xcresult`: 58 passed after the authored-label fix. Covers actual opaque jersey ink on both bodies/LODs, label clearance and picking, selection, tethers, keyframed annotations, paused write counts, cache lifecycle and native `1`/`11` renders.
 - Latest Player POV demo launched in the dedicated simulator. Its screenshot shows tags close above the players and the lowered shirt `7` (`/private/tmp/replayxi176-final-demo.png`).
+- Unsigned visionOS device Release build passed (`.codex-derived/ReplayXI-Device`). This is a compile check, not an installed or device-tested build.
 
 Initial checks also caught micrometre-level transform recomposition differences in exact seek assertions. Seek comparisons now use a 10 µm tolerance; paused write-count checks remain strict.
 
