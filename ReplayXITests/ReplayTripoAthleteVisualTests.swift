@@ -14,6 +14,59 @@ private final class ReplayTripoCaptureCompletion: @unchecked Sendable {
 
 @MainActor
 final class ReplayTripoAthleteVisualTests: XCTestCase {
+    func testFirstPersonLookDownAndSquad177() async throws {
+        ReplayTripoAthleteProvider.resetForTesting()
+        defer { ReplayTripoAthleteProvider.resetForTesting() }
+        try ReplayTripoAthleteProvider.prewarm()
+        let calibration = try await calibrate()
+        let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay))
+        let player = try XCTUnwrap(scenario.player(id: "navy-lb"))
+        var retained: [ReplaySkinnedAthleteInstance] = []
+        for diverse in [false, true] {
+            let skin = try diverse
+                ? ReplayTripoAthleteProvider.makeDiverse(for: player, detail: .near)
+                : ReplayTripoAthleteProvider.make(for: player, detail: .near)
+            retained.append(skin)
+            XCTAssertTrue(skin.setFirstPersonBodyPresentation(true))
+            for running in [false, true] {
+                XCTAssertTrue(update(skin, player: player, time: 1.25,
+                    speed: running ? 4 : 0, stationary: !running))
+                let camera = PerspectiveCamera()
+                camera.camera = .init(near: 0.025, far: 20, fieldOfViewInDegrees: 80)
+                let eye = ReplayPOVReference.safeEyeHeight(
+                    crownHeight: skin.headMaximumYInPlayerLocalSpace(),
+                    nominalHeight: skin.motion.geometry.nominalHeight,
+                    heightScale: skin.root.scale.y)
+                camera.look(at: [0, 0, 0.40],
+                    from: [0, eye, ReplayPOVReference.eyeForwardOffsetMetres], relativeTo: nil)
+                let light = DirectionalLight()
+                light.light.intensity = 2_500
+                light.look(at: [0, 0, 0], from: [2, 5, 3], relativeTo: nil)
+                let frame = try await render(entities: [skin.root, camera, light], camera: camera, size: 512)
+                var visible = 0
+                for y in 0..<frame.height {
+                    for x in 0..<frame.width {
+                        let rgba = frame.rgba(x: x, y: y, topFirst: calibration.rawRowsAreTopFirst)
+                        if rgba[0] > 8 || rgba[1] > 8 || rgba[2] > 8 { visible += 1 }
+                    }
+                }
+                XCTAssertGreaterThan(visible, 4_000, "Look down must show an actual animated body")
+                XCTAssertLessThan(visible, frame.width * frame.height * 3 / 4,
+                    "A head/chest surface must not cover the eye camera")
+                let attachment = XCTAttachment(data: try ReplayRealityRendererAudit.png(frame, calibration: calibration),
+                    uniformTypeIdentifier: "public.png")
+                attachment.name = "FPV177-\(diverse ? "A" : "B")-\(running ? "running" : "standing").png"
+                attachment.lifetime = .keepAlways
+                add(attachment)
+            }
+            XCTAssertTrue(skin.setFirstPersonBodyPresentation(false))
+            XCTAssertTrue(update(skin, player: player, time: 1.25, speed: 0, stationary: true))
+            try await capture(skin.root, label: "squad177-\(diverse ? "A" : "B")-restored",
+                player: player, view: .front, calibration: calibration)
+        }
+        withExtendedLifetime(retained) {}
+    }
+
     func testProceduralNeckAttachment176BeforeAfter() async throws {
         ReplayAthleteHeadProvider.resetForTesting()
         ReplayFarAthleteHeadProvider.resetForTesting()

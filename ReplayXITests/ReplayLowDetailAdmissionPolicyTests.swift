@@ -18,12 +18,13 @@ final class ReplayLowDetailAdmissionPolicyTests: XCTestCase {
         scenarioID: String = "match",
         ready: Bool = true,
         cap: Int = 4,
-        allowsFirstPerson: Bool = false
+        allowsFirstPerson: Bool = false,
+        allowsShapeReplay: Bool = false
     ) -> Policy.State {
         Policy.resolve(previous: previous, scenarioID: scenarioID, scenarioKind: kind,
                        viewMode: view, perspectiveID: selected, posesByPlayerID: poses(distances),
                        nearPlayerIDs: near, maximumTotal: cap, lowDetailIsReady: ready,
-                       allowsFirstPerson: allowsFirstPerson)
+                       allowsFirstPerson: allowsFirstPerson, allowsShapeReplay: allowsShapeReplay)
     }
 
     func testFillsOnlySpareSlotsAndExcludesNearImpactSubjects() {
@@ -127,5 +128,58 @@ final class ReplayLowDetailAdmissionPolicyTests: XCTestCase {
         XCTAssertTrue(resolve(distances: squad, near: near, view: .firstPerson,
                               selected: "p0", ready: false, cap: 22,
                               allowsFirstPerson: true).playerIDs.isEmpty)
+    }
+
+    func testShippingDefaultCoversBothTeamsAcrossReplayViewsAndPOVChanges() {
+        let squad = Dictionary(uniqueKeysWithValues: ["home", "away"].flatMap { team in
+            (1...11).map { ("\(team)-\($0)", Float($0) * (team == "home" ? 1 : -1)) }
+        })
+        let detail = ReplayPlayerDetail.defaultSelection
+        XCTAssertEqual(detail, .fullSquad)
+        var state = Policy.State()
+        for selected in ["home-1", "away-11", "home-1"] {
+            for view in [ReplayViewMode.tacticalTable, .touchline, .firstPerson] {
+                let near: Set<String> = view == .firstPerson
+                    ? Set(squad.keys.filter { $0 != selected }.sorted().prefix(2)) : [selected]
+                // The selected first-person body uses a separate admission
+                // slot, never one of the visible neighbour slots.
+                let ownerSlots = view == .firstPerson ? 1 : 0
+                state = resolve(state, distances: squad, near: near, view: view,
+                    selected: selected, cap: detail.maximumSkinnedPlayers - ownerSlots,
+                    allowsFirstPerson: detail.allowsFirstPersonLowSkins)
+                let admitted = Set(state.playerIDs).union(near)
+                XCTAssertEqual(admitted.count + ownerSlots, 22)
+                XCTAssertEqual(admitted.union([selected]), Set(squad.keys))
+                XCTAssertTrue(Set(state.playerIDs).isDisjoint(with: near))
+                XCTAssertEqual(state.playerIDs, state.playerIDs.sorted())
+                if view == .firstPerson { XCTAssertFalse(admitted.contains(selected)) }
+                XCTAssertEqual(state, resolve(state, distances: squad, near: near, view: view,
+                    selected: selected, cap: detail.maximumSkinnedPlayers - ownerSlots,
+                    allowsFirstPerson: detail.allowsFirstPersonLowSkins))
+            }
+        }
+    }
+
+    func testFullSquadFastPathNeverAdmitsInvalidTracksOrExceedsHardCap() {
+        var squad = Dictionary(uniqueKeysWithValues: (0..<30).map { ("p\($0)", Float($0)) })
+        let oversized = resolve(distances: squad, near: ["p0"], selected: "p0", cap: 1_000)
+        XCTAssertEqual(oversized.playerIDs.count, 21)
+        XCTAssertEqual(Set(oversized.playerIDs).count, 21)
+        squad = ["p0": 0, "p1": 1, "p2": .infinity, "p3": .nan]
+        XCTAssertEqual(resolve(distances: squad, near: ["p0"], selected: "p0", cap: 22).playerIDs, ["p1"])
+    }
+
+    func testShapeReplayUsesExplicitSquadOptInWithoutAllocatingHiddenPositioningPlayers() {
+        for view in [ReplayViewMode.tacticalTable, .touchline, .firstPerson] {
+            let admitted = resolve(kind: .shapeLab, view: view, cap: 22,
+                allowsFirstPerson: true, allowsShapeReplay: true)
+            XCTAssertEqual(Set(admitted.playerIDs), ["a", "b", "c", "d"])
+            XCTAssertTrue(resolve(kind: .shapeLab, view: view, cap: 22,
+                allowsFirstPerson: true).playerIDs.isEmpty)
+        }
+        XCTAssertTrue(resolve(kind: .shapeLab, view: .positional, cap: 22,
+            allowsFirstPerson: true, allowsShapeReplay: true).playerIDs.isEmpty)
+        XCTAssertTrue(resolve(kind: .shapeLab, ready: false, cap: 22,
+            allowsShapeReplay: true).playerIDs.isEmpty)
     }
 }

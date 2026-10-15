@@ -18,7 +18,7 @@ final class PlaybackPlayerDetailControl148Tests: XCTestCase {
 
     func testActualChoicePausesWithoutChangingReplayOrAnnotationHistory() throws {
         let store = try makeStore()
-        let preference = Preference()
+        let preference = Preference(ReplayPlayerDetail.balanced.rawValue)
         store.beginDrawing(.arc)
         XCTAssertNil(store.registerPitchTap(.init(x: -20, z: -20)))
         XCTAssertNotNil(store.registerPitchTap(.init(x: -16, z: -14)))
@@ -58,7 +58,7 @@ final class PlaybackPlayerDetailControl148Tests: XCTestCase {
     func testDrawingScrubAndGeometryOwnersRejectAStaleEnabledAction() throws {
         for owner in ["drawing", "timeline", "geometry", "joystick", "curve"] {
             let store = try makeStore()
-            let preference = Preference()
+            let preference = Preference(ReplayPlayerDetail.balanced.rawValue)
             if owner == "drawing" {
                 store.beginDrawing(.arc)
                 _ = store.registerPitchTap(.init(x: -20, z: -20))
@@ -101,7 +101,7 @@ final class PlaybackPlayerDetailControl148Tests: XCTestCase {
         let store = ReplayStore(scenarios: [scenario])
         store.prepareForLocalExperience()
         store.setPlaying(true, broadcast: false)
-        let preference = Preference()
+        let preference = Preference(ReplayPlayerDetail.balanced.rawValue)
         let before = store.makeSavedReviewState()
         let playing = store.isPlaying
         XCTAssertFalse(PlaybackPlayerDetailControl.select(.fullSquad, rawValue: preference.binding, store: store))

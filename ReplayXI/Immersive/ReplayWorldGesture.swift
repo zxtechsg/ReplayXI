@@ -76,6 +76,16 @@ final class ReplayWorldGestureTracking {
         return atan2(-forward.x, -forward.y)
     }
 
+    /// Sampled only when entering a player's POV, never used as a live camera
+    /// follow signal. A seated viewer needs the same avatar eye height.
+    func deviceHeight() -> Float? {
+        guard tracksWorld,
+              let anchor = world.queryDeviceAnchor(atTimestamp: CACurrentMediaTime()),
+              anchor.isTracked else { return nil }
+        let height = anchor.originFromAnchorTransform.columns.3.y
+        return height.isFinite ? height : nil
+    }
+
     func pinchMidpoints() -> (SIMD3<Float>, SIMD3<Float>)? {
         guard tracksHands else { return nil }
         let anchors = hands.handAnchors(at: CACurrentMediaTime())
@@ -101,9 +111,53 @@ final class ReplayWorldGestureTracking {
 }
 
 struct ReplayPOVReference: Equatable {
+    /// Eyes are in front of the athlete's pelvis/neck axis. A centreline
+    /// camera looks down through the shirt instead of towards the legs.
+    static let eyeForwardOffsetMetres: Float = 0.15
     let scenarioID: String
     let playerID: String
     let rootYaw: Float
+    let rootHeight: Float
+
+    init(scenarioID: String, playerID: String, rootYaw: Float, rootHeight: Float = 0) {
+        self.scenarioID = scenarioID
+        self.playerID = playerID
+        self.rootYaw = rootYaw
+        self.rootHeight = rootHeight
+    }
+
+    /// Translation follows replayed body facing, not the live headset or
+    /// animated head. The captured rootYaw remains fixed for free look.
+    static func playerEyePoint(_ pose: PlayerPose) -> SIMD3<Float> {
+        guard pose.position.x.isFinite, pose.position.z.isFinite,
+              pose.facingDegrees.isFinite else { return .zero }
+        let yaw = pose.facingDegrees.truncatingRemainder(dividingBy: 360) * .pi / 180
+        return SIMD3<Float>(pose.position.x + sin(yaw) * eyeForwardOffsetMetres, 0,
+                            pose.position.z + cos(yaw) * eyeForwardOffsetMetres)
+    }
+
+    /// A crouch/header at entry must not lock the viewer below the torso when
+    /// the athlete stands later. Preserve the standing eye level as a floor;
+    /// yaw still uses the actual posed head direction at the chosen timestamp.
+    static func safeEyeHeight(crownHeight: Float?, nominalHeight: Float, heightScale: Float) -> Float {
+        guard nominalHeight.isFinite, heightScale.isFinite,
+              nominalHeight > 0.11, heightScale > 0 else { return 1.68 }
+        let standing = (nominalHeight - 0.11) * heightScale
+        guard standing.isFinite else { return 1.68 }
+        guard let crownHeight, crownHeight.isFinite else { return standing }
+        return max(standing, crownHeight - 0.11 * heightScale)
+    }
+
+    /// Shift the pitch once so the safe avatar eye level meets the tracked
+    /// eye. The result is immutable during this entry: no gait bob or forced
+    /// vertical movement follows later poses. No tracking means no shift.
+    static func rootHeight(deviceHeight: Float?, renderedEyeHeight: Float?) -> Float {
+        guard let deviceHeight, deviceHeight.isFinite else { return 0 }
+        let tracked = min(max(deviceHeight, 0.35), 2.4)
+        let eye = renderedEyeHeight.flatMap { $0.isFinite ? $0 : nil } ?? 1.68
+        let boundedEye = min(max(eye, 0.8), 2.3)
+        return min(max(tracked - boundedEye, -1.7), 1.2)
+    }
 
     static func rootYaw(deviceYaw: Float, playerFacingDegrees: Float,
                         lookYawRadians: Float) -> Float? {

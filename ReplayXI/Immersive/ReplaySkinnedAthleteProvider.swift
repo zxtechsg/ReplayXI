@@ -543,6 +543,9 @@ final class ReplaySkinnedAthleteInstance {
     let front: ModelEntity
     let back: ModelEntity
     let neckBridge: ModelEntity?
+    private let completeBodyMesh: MeshResource?
+    private let firstPersonBodyMesh: MeshResource?
+    private(set) var isFirstPersonBodyPresentation = false
     private let skinRoot: Entity
     let motion: ReplaySkinnedAthleteMotion
     let contactSurface: ReplaySkinnedAthleteContactSurface
@@ -576,7 +579,8 @@ final class ReplaySkinnedAthleteInstance {
          bootMarkers: ReplaySkinnedAthleteBootMarkers? = nil,
          numberSurface: ReplaySkinnedNumberSurface? = nil,
          numbersUseShirtSkin: Bool = false,
-         neckBridge: ModelEntity? = nil) {
+         neckBridge: ModelEntity? = nil,
+         firstPersonBodyMesh: MeshResource? = nil) {
         self.detail = detail
         self.root = root
         self.skinRoot = skinRoot
@@ -598,6 +602,8 @@ final class ReplaySkinnedAthleteInstance {
         numberFrontProbes = frontFootprint.flatMap { numberSurface?.probes(forFront: true, footprint: $0) } ?? []
         numberBackProbes = backFootprint.flatMap { numberSurface?.probes(forFront: false, footprint: $0) } ?? []
         self.neckBridge = neckBridge
+        completeBodyMesh = model.model?.mesh
+        self.firstPersonBodyMesh = firstPersonBodyMesh
         pose = motion.makePoseBuffer()
         footballPose = ReplaySkinnedAthleteFootballPose(motion: motion, bootMarkers: bootMarkers)
         impactPose = ReplaySkinnedAthleteImpactPose(motion: motion, contactSurface: contactSurface)
@@ -641,6 +647,31 @@ final class ReplaySkinnedAthleteInstance {
     func headMaximumYInPlayerLocalSpace() -> Float? {
         contactSurface.headMaximumY(in: pose, head: pose.modelSpaceTransforms[headIndex],
             relativeTo: model.transformMatrix(relativeTo: root.parent))
+    }
+
+    /// Safe to call every scene update; only a mode transition writes the
+    /// model component. Unsupported bodies return false without showing a
+    /// full head around the viewer. The caller keeps that wearer hidden.
+    @discardableResult
+    func setFirstPersonBodyPresentation(_ enabled: Bool) -> Bool {
+        guard !enabled || firstPersonBodyMesh != nil else { return false }
+        guard enabled != isFirstPersonBodyPresentation else { return true }
+        guard let replacement = enabled ? firstPersonBodyMesh : completeBodyMesh,
+              var component = model.model else { return false }
+        component.mesh = replacement
+        model.model = component
+        // Both resources use the exact same skeleton. Reapply the last pose
+        // immediately as RealityKit may initialize a replaced mesh at rest.
+        model.jointTransforms = transforms
+        front.isEnabled = !enabled
+        back.isEnabled = !enabled
+        neckBridge?.isEnabled = !enabled
+        if !enabled, numbersUseShirtSkin {
+            front.jointTransforms = transforms
+            back.jointTransforms = transforms
+        }
+        isFirstPersonBodyPresentation = enabled
+        return true
     }
 
     /// Supplied locomotion is authoritative by default, including deliberate
@@ -892,7 +923,7 @@ final class ReplaySkinnedAthleteInstance {
                                           translation: pose.translations[index])
         }
         model.jointTransforms = transforms
-        if numbersUseShirtSkin {
+        if numbersUseShirtSkin, !isFirstPersonBodyPresentation {
             front.jointTransforms = transforms
             back.jointTransforms = transforms
         }

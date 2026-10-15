@@ -25,23 +25,35 @@ enum ReplayLowDetailAdmissionPolicy {
         nearPlayerIDs: Set<String>,
         maximumTotal: Int,
         lowDetailIsReady: Bool,
-        allowsFirstPerson: Bool = false
+        allowsFirstPerson: Bool = false,
+        allowsShapeReplay: Bool = false
     ) -> State {
+        let maximum = min(maximumTotal, ReplayPlayerDetail.maximumSquadSize)
         guard lowDetailIsReady,
-              scenarioKind != .shapeLab,
+              scenarioKind != .shapeLab || allowsShapeReplay,
               viewMode == .tacticalTable || viewMode == .touchline
                 || (allowsFirstPerson && viewMode == .firstPerson),
-              maximumTotal > nearPlayerIDs.count,
+              maximum > nearPlayerIDs.count,
               let origin = posesByPlayerID[perspectiveID]?.position,
               origin.x.isFinite, origin.z.isFinite
         else { return State() }
 
         let context = Context(scenarioID: scenarioID, perspectiveID: perspectiveID)
-        let limit = maximumTotal - nearPlayerIDs.count
+        let limit = maximum - nearPlayerIDs.count
+        let eligibleIDs = posesByPlayerID.compactMap { id, pose in
+            id != perspectiveID && !nearPlayerIDs.contains(id)
+                && pose.position.x.isFinite && pose.position.z.isFinite ? id : nil
+        }
+        // The usual full-squad case needs no distance calculations or rank
+        // churn: every valid non-near player fits. A stable ID order keeps
+        // view changes and scrubbing independent of dictionary iteration.
+        if eligibleIDs.count <= limit {
+            return State(context: context, playerIDs: eligibleIDs.sorted())
+        }
         var distances: [String: Float] = [:]
-        distances.reserveCapacity(posesByPlayerID.count)
-        for (id, pose) in posesByPlayerID
-            where id != perspectiveID && !nearPlayerIDs.contains(id) {
+        distances.reserveCapacity(eligibleIDs.count)
+        for id in eligibleIDs {
+            guard let pose = posesByPlayerID[id] else { continue }
             let distance = ReplayGeometry.distance(origin, pose.position)
             if distance.isFinite { distances[id] = distance }
         }

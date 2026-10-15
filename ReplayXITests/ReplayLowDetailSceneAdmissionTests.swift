@@ -8,6 +8,7 @@ final class ReplayLowDetailSceneAdmissionTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
+        ReplayTripoAthleteProvider.resetForTesting()
         ReplaySkinnedAthleteProvider.resetForTesting()
         ReplayImportedAthleteProvider.resetPrewarmForTesting()
     }
@@ -17,6 +18,7 @@ final class ReplayLowDetailSceneAdmissionTests: XCTestCase {
             for child in Array(root.children) { child.removeFromParent() }
         }
         roots.removeAll()
+        ReplayTripoAthleteProvider.resetForTesting()
         ReplaySkinnedAthleteProvider.resetForTesting()
         ReplayAthleteHeadProvider.resetForTesting()
         super.tearDown()

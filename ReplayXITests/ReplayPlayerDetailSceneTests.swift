@@ -5,18 +5,21 @@ import XCTest
 
 final class ReplayPlayerDetailTests: XCTestCase {
     func testRawPreferenceDefaultsAndCapacities() {
-        XCTAssertEqual(ReplayPlayerDetail.defaultSelection, .balanced)
-        XCTAssertEqual(ReplayPlayerDetail.storageKey, "ReplayXI.PlayerDetail")
+        XCTAssertEqual(ReplayPlayerDetail.defaultSelection, .fullSquad)
+        XCTAssertEqual(ReplayPlayerDetail.storageKey, "ReplayXI.PlayerDetail.v2")
         for value in ReplayPlayerDetail.allCases {
             XCTAssertEqual(ReplayPlayerDetail.resolved(value.rawValue), value)
         }
         for raw in ["", "future", "FULLSQUAD", "full-squad"] {
-            XCTAssertEqual(ReplayPlayerDetail.resolved(raw), .balanced)
+            XCTAssertEqual(ReplayPlayerDetail.resolved(raw), .fullSquad)
         }
         XCTAssertEqual(ReplayPlayerDetail.balanced.maximumSkinnedPlayers, 4)
         XCTAssertFalse(ReplayPlayerDetail.balanced.allowsFirstPersonLowSkins)
+        XCTAssertFalse(ReplayPlayerDetail.balanced.allowsShapeReplayLowSkins)
         XCTAssertEqual(ReplayPlayerDetail.fullSquad.maximumSkinnedPlayers, 22)
         XCTAssertTrue(ReplayPlayerDetail.fullSquad.allowsFirstPersonLowSkins)
+        XCTAssertTrue(ReplayPlayerDetail.fullSquad.allowsShapeReplayLowSkins)
+        XCTAssertEqual(ReplayPlayerDetail.maximumSquadSize, 22)
     }
 
     func testSameChoiceAndBlockedPlaybackViewCannotChangePreference() {
@@ -282,6 +285,7 @@ final class ReplayPlayerDetailSceneTests: XCTestCase {
     }
 
     private func resetProviders() {
+        ReplayTripoAthleteProvider.resetForTesting()
         ReplayArticulatedFarKitProvider.resetForTesting()
         ReplayArticulatedFarProvider.resetForTesting()
         ReplayFarAthleteHeadProvider.resetForTesting()

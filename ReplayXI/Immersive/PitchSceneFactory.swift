@@ -24,13 +24,14 @@ enum PitchSceneFactory {
 
     private static func skinAdmissionConfiguration(
         for detail: ReplayPlayerDetail
-    ) -> (maximum: Int, allowsPOVLow: Bool) {
+    ) -> (maximum: Int, allowsPOVLow: Bool, allowsShapeReplay: Bool) {
         #if DEBUG
         let resolvedDetail: ReplayPlayerDetail = fullSquadSkinsForTesting ? .fullSquad : detail
         #else
         let resolvedDetail = detail
         #endif
-        return (resolvedDetail.maximumSkinnedPlayers, resolvedDetail.allowsFirstPersonLowSkins)
+        return (resolvedDetail.maximumSkinnedPlayers, resolvedDetail.allowsFirstPersonLowSkins,
+                resolvedDetail.allowsShapeReplayLowSkins)
     }
 
     /// A root represents one immutable authored match. Keep its rolling table
@@ -1118,6 +1119,13 @@ enum PitchSceneFactory {
                 nearSkinIDs.insert(resolvedRagdollCue.playerID)
             }
             let skinAdmission = skinAdmissionConfiguration(for: playerDetail)
+            // Reuse one admitted near skin for the wearer's legs. It counts
+            // against the same squad budget, not as a second hidden avatar.
+            let admitsFirstPersonBody = viewMode == .firstPerson
+                && scenario.player(id: perspectiveID).map {
+                    ReplayTripoAthleteProvider.firstPersonBodyIsReady(for: $0)
+                } == true
+                && !importedPlayerPilotIsEnabled
             let lowDetailAdmission = ReplayLowDetailAdmissionPolicy.resolve(
                 previous: sceneState?.lowDetailAdmission ?? .init(),
                 scenarioID: scenario.id,
@@ -1126,15 +1134,17 @@ enum PitchSceneFactory {
                 perspectiveID: perspectiveID,
                 posesByPlayerID: playerPosesByID,
                 nearPlayerIDs: nearSkinIDs,
-                maximumTotal: skinAdmission.maximum,
+                maximumTotal: skinAdmission.maximum - (admitsFirstPersonBody ? 1 : 0),
                 lowDetailIsReady: ReplayTripoAthleteProvider.preferredLowIsReady
                     && !importedPlayerPilotIsEnabled,
-                allowsFirstPerson: skinAdmission.allowsPOVLow
+                allowsFirstPerson: skinAdmission.allowsPOVLow,
+                allowsShapeReplay: skinAdmission.allowsShapeReplay
             )
             var admittedSkinDetails = Dictionary(
                 uniqueKeysWithValues: nearSkinIDs.lazy.map { ($0, ReplaySkinnedAthleteProvider.Detail.near) }
             )
             for id in lowDetailAdmission.playerIDs { admittedSkinDetails[id] = .lowDetail }
+            if admitsFirstPersonBody { admittedSkinDetails[perspectiveID] = .near }
             // Release departed or promoted variants before roster iteration.
             // Selection order must not delay a near/impact subject by a frame.
             if let sceneState {
@@ -1198,9 +1208,8 @@ enum PitchSceneFactory {
                 let isShapeVisualise = scenario.kind == .shapeLab
                     && viewMode == .positional
                     && effectiveTriangleMode == .visualise
-                // A head-mounted camera must not render the selected player's
-                // own head around the wearer. Keep the track/entity alive as
-                // the positional anchor, but suppress its visual children.
+                // Suppress the full avatar around the camera. Its cached,
+                // headless near skin below is the only visible wearer body.
                 let hidesHeadMountedAvatar = viewMode == .firstPerson && isSelected
                 if let interactionTarget = directChild(named: "interaction-target", of: entity) {
                     interactionTarget.isEnabled = entity.isEnabled
@@ -1228,9 +1237,10 @@ enum PitchSceneFactory {
                             || activeRagdollCue != nil
                     )
                 let admittedSkinDetail = admittedSkinDetails[player.id]
-                let canUseAdmittedSkin = entity.isEnabled && !hidesHeadMountedAvatar
+                let canUseAdmittedSkin = entity.isEnabled
                     && admittedSkinDetail != nil
-                    && (needsDetailedRig || admittedSkinDetail == .lowDetail)
+                    && (needsDetailedRig || admittedSkinDetail == .lowDetail
+                        || (hidesHeadMountedAvatar && admitsFirstPersonBody))
                 // A low visual does not request a detailed procedural/query rig.
                 // Detaching any subject releases its pose buffers and root.
                 if !canUseAdmittedSkin,
@@ -1315,7 +1325,7 @@ enum PitchSceneFactory {
                         locomotion: locomotion)
                 } else { keeperReadiness = nil }
                 let hasBallAction = interaction != nil || (ballAction.map { $0.influence > 0 } ?? false)
-                let impactSample = needsDetailedRig ? activeRagdollCue.flatMap {
+                let impactSample = needsDetailedRig || hidesHeadMountedAvatar ? activeRagdollCue.flatMap {
                     PlayerRagdollPlayback.sample(for: $0, at: time)
                 } : nil
                 // A forward-only legacy clip must not erase a football touch.
@@ -1339,7 +1349,8 @@ enum PitchSceneFactory {
                     }
                 }
                 let usesNewSkin: Bool
-                if canUseAdmittedSkin, let skin = sceneState?.skinnedAthletes[player.id] {
+                if canUseAdmittedSkin, let skin = sceneState?.skinnedAthletes[player.id],
+                   skin.setFirstPersonBodyPresentation(hidesHeadMountedAvatar) {
                     usesNewSkin = skin.update(at: time, track: player, locomotion: locomotion,
                                              lookTarget: playerLookTarget, ballAction: ballAction,
                                              impact: impactSample, stationaryPose: stationaryPose,
@@ -1356,11 +1367,14 @@ enum PitchSceneFactory {
                                                 ? nativeBall?.armCutTimelines[player.id]?.admission(
                                                     at: time, locomotion: locomotion) : nil)
                 } else {
+                    // A missing optional cut must never expose a full head
+                    // around the viewer, including after a failed promotion.
+                    sceneState?.skinnedAthletes[player.id]?.root.isEnabled = false
                     usesNewSkin = false
                 }
                 let usesImportedAthlete = usesLegacySkin || usesNewSkin
-                // Player POV retains only its capped visible-neighbour set;
-                // the wearer's hidden avatar must never be built or cached.
+                // Player POV retains only its capped procedural neighbours;
+                // the wearer uses the single headless imported skin above.
                 // Other views keep the default rig plus the current selection,
                 // preserving the inexpensive A → B → A return path.
                 let retainsDetailedRig = needsDetailedRig
@@ -4629,15 +4643,10 @@ enum PitchSceneFactory {
             // Follow only the selected player's translation. The pitch keeps a
             // constant room-space orientation, so authored yaw/pitch can never
             // steer the headset view: the wearer remains free to look anywhere.
-            // Moving the world by the inverse player offset places the viewer at
-            // the player's head-height body origin throughout the run.
+            // Keep the eye just ahead of the body centre, not inside the neck.
             let pitchRotation = simd_quatf(angle: .pi, axis: [0, 1, 0])
             let playerPose = scenario.player(id: perspectiveID)?.presentationPose(at: time)
-            let playerOffset = SIMD3<Float>(
-                playerPose?.position.x ?? 0,
-                0,
-                playerPose?.position.z ?? 0
-            )
+            let playerOffset = playerPose.map(ReplayPOVReference.playerEyePoint) ?? .zero
             let rotatedPlayerOffset = pitchRotation.act(playerOffset)
             root.scale = SIMD3<Float>(repeating: 1)
             root.orientation = pitchRotation

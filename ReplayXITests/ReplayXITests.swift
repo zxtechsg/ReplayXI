@@ -584,7 +584,7 @@ final class ReplayXITests: XCTestCase {
         let initialPose = player.presentationPose(at: 2)
         let fixedPitchRotation = simd_quatf(angle: .pi, axis: [0, 1, 0])
         let expectedInitialPosition = -fixedPitchRotation.act(
-            SIMD3<Float>(initialPose.position.x, 0, initialPose.position.z)
+            ReplayPOVReference.playerEyePoint(initialPose)
         )
 
         XCTAssertTrue(try XCTUnwrap(root.findEntity(named: "player-navy-rw")).isEnabled)
@@ -614,7 +614,7 @@ final class ReplayXITests: XCTestCase {
 
         let laterPose = player.presentationPose(at: 19)
         let expectedLaterPosition = -fixedPitchRotation.act(
-            SIMD3<Float>(laterPose.position.x, 0, laterPose.position.z)
+            ReplayPOVReference.playerEyePoint(laterPose)
         )
 
         XCTAssertNotEqual(laterPose.facingDegrees, initialPose.facingDegrees)
@@ -642,11 +642,15 @@ final class ReplayXITests: XCTestCase {
         )
         XCTAssertEqual(facing.orientation.vector, recordedFacingOrientation.vector)
 
-        // The cue remains at the head-mounted origin while its authored
-        // direction rotates independently from the viewer's free look.
+        // The cue stays at the body centre, just behind the eye offset. Its
+        // direction still rotates independently from the viewer's free look.
         let facingWorldPosition = root.orientation.act(facing.position) + root.position
-        XCTAssertEqual(facingWorldPosition.x, 0, accuracy: 0.000_1)
-        XCTAssertEqual(facingWorldPosition.z, 0, accuracy: 0.000_1)
+        let centreFromEye = fixedPitchRotation.act(
+            SIMD3<Float>(laterPose.position.x, 0, laterPose.position.z)
+                - ReplayPOVReference.playerEyePoint(laterPose))
+        XCTAssertLessThan(simd_distance(facingWorldPosition, centreFromEye), 0.000_1)
+        XCTAssertEqual(simd_length(facingWorldPosition), ReplayPOVReference.eyeForwardOffsetMetres,
+                       accuracy: 0.000_1)
     }
 
     func testPlayerLensUsesCappedNearestVisibleRigsAndNeverBuildsTheWearer() throws {

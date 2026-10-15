@@ -355,6 +355,69 @@ final class ReplayTripoDiversity172Tests: XCTestCase {
                        "Both teams must reach the production scene with the optional identity")
     }
 
+    func testShippingSquadDefaultKeepsBothTeamsSkinnedThroughViewAndPOVChanges() throws {
+        XCTAssertFalse(PitchSceneFactory.fullSquadSkinsForTesting)
+        XCTAssertEqual(ReplayPlayerDetail.defaultSelection, .fullSquad)
+        try ReplayTripoAthleteProvider.prewarm()
+        XCTAssertTrue(ReplayTripoAthleteProvider.diversityIsPrewarmed)
+        let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay))
+        XCTAssertEqual(scenario.players.count, 22)
+        try ReplayAthleteFactory.prewarm(for: scenario.players, lods: [.near, .far])
+        let root = PitchSceneFactory.makeMatchRoot(for: scenario)
+        defer { for child in Array(root.children) { child.removeFromParent() } }
+        let loadCount = ReplayTripoAthleteProvider.nativeAssetLoadAttemptsForTesting
+        let textureCount = ReplayTripoAthleteProvider.texturePreparationAttemptsForTesting
+        let home = try XCTUnwrap(scenario.players.first { $0.team == .home && !$0.isGoalkeeper })
+        let away = try XCTUnwrap(scenario.players.first { $0.team == .away && !$0.isGoalkeeper })
+
+        for selected in [home.id, away.id, home.id] {
+            for view in [ReplayViewMode.tacticalTable, .firstPerson, .touchline] {
+                for time in [1.25, 2.0, 1.25] {
+                    PitchSceneFactory.update(root: root, scenario: scenario, time: time, viewMode: view,
+                        perspectiveID: selected, marks: [], showsLaneLens: false, isDrawing: false,
+                        positionalOriginTransform: nil, playerDetail: .defaultSelection)
+                    let skins = PitchSceneFactory.skinnedAthletesForTesting(in: root)
+                    XCTAssertEqual(Set(skins.keys), Set(scenario.players.map(\.id)))
+                    XCTAssertEqual(skins.count, ReplayPlayerDetail.maximumSquadSize)
+                    XCTAssertLessThanOrEqual(skins.values.filter { $0.detail == .near }.count,
+                        view == .firstPerson ? 3 : 1)
+                    for player in scenario.players {
+                        let skin = try XCTUnwrap(skins[player.id], player.id)
+                        XCTAssertEqual(skin.motion.rigProfile, .tripo52)
+                        XCTAssertTrue(skin.model.isEnabledInHierarchy, player.id)
+                        XCTAssertEqual(skin.neckBridge != nil,
+                            ReplayTripoAthleteProvider.prefersDiverseGeometry(for: player), player.id)
+                        let body = try XCTUnwrap(root.findEntity(named: "player-\(player.id)"))
+                        XCTAssertTrue(skin.root.parent === body)
+                        XCTAssertFalse(try XCTUnwrap(body.children.first { $0.name == "table-marker" })
+                            .isEnabledInHierarchy, player.id)
+                        let isWearer = view == .firstPerson && player.id == selected
+                        XCTAssertEqual(skin.isFirstPersonBodyPresentation, isWearer, player.id)
+                        XCTAssertEqual(skin.front.isEnabledInHierarchy, !isWearer, player.id)
+                        XCTAssertEqual(skin.back.isEnabledInHierarchy, !isWearer, player.id)
+                        let hitTarget = try XCTUnwrap(body.findEntity(named: "interaction-target"))
+                        XCTAssertEqual(hitTarget.isEnabledInHierarchy, !isWearer, player.id)
+                        if isWearer {
+                            XCTAssertNil(body.children.first { $0.name == "full-rig" })
+                            XCTAssertFalse(skin.neckBridge?.isEnabledInHierarchy ?? false)
+                            let label = try XCTUnwrap(root.findEntity(named: "player-label-\(player.id)"))
+                            XCTAssertFalse(label.isEnabledInHierarchy)
+                            let positions = try XCTUnwrap(skin.model.model?.mesh.contents.models.first?
+                                .parts.first?.positions.elements)
+                            XCTAssertLessThan(try XCTUnwrap(positions.map(\.y).max()), 1.60)
+                            XCTAssertGreaterThan(try XCTUnwrap(positions.map(\.y).max()), 1.47)
+                            XCTAssertLessThan(try XCTUnwrap(positions.map(\.y).min()), 0.05)
+                        }
+                    }
+                }
+            }
+        }
+        XCTAssertEqual(ReplayTripoAthleteProvider.nativeAssetLoadAttemptsForTesting, loadCount,
+                       "Changing POV must reuse prepared geometry")
+        XCTAssertEqual(ReplayTripoAthleteProvider.texturePreparationAttemptsForTesting, textureCount,
+                       "Changing POV must not decode another set of kit atlases")
+    }
+
     func testDiverseNativeAssetMetadataReadback() throws {
         let variants = [
             ("near", ReplayTripoDiversityAssets.near),

@@ -38,6 +38,7 @@ enum ReplayTripoAthleteProvider {
         let boots: ReplaySkinnedAthleteBootMarkers
         let numberSurface: ReplaySkinnedNumberSurface?
         let requiresNeckBridge: Bool
+        let firstPersonBodyMesh: MeshResource?
     }
     private struct GeometryVariant {
         let near: Skin
@@ -66,6 +67,13 @@ enum ReplayTripoAthleteProvider {
             + loadedNumberMaskBaseBytes
     }
     static var isPrewarmed: Bool { near != nil && low != nil && motion != nil && kits.count == 3 }
+    static func firstPersonBodyIsReady(for player: PlayerTrack) -> Bool {
+        guard isPrewarmed else { return false }
+        if prefersDiverseGeometry(for: player), let diversity {
+            return diversity.near.firstPersonBodyMesh != nil
+        }
+        return near?.firstPersonBodyMesh != nil
+    }
 
     #if DEBUG
     private(set) static var nativeAssetLoadAttemptsForTesting = 0
@@ -231,7 +239,8 @@ enum ReplayTripoAthleteProvider {
         else { throw ReplaySkinnedAthleteError.invalidSkeleton }
         return Skin(template: loaded, contacts: contact, boots: boots,
                     numberSurface: ReplaySkinnedNumberSurface(model: model, motion: motion),
-                    requiresNeckBridge: requiresNeckBridge)
+                    requiresNeckBridge: requiresNeckBridge,
+                    firstPersonBodyMesh: try? ReplayFirstPersonBodyMesh.make(from: model, motion: motion))
     }
 
     static func make(for player: PlayerTrack, detail: ReplaySkinnedAthleteProvider.Detail = .near) throws
@@ -329,7 +338,8 @@ enum ReplayTripoAthleteProvider {
         return ReplaySkinnedAthleteInstance(root: root, skinRoot: clone, model: model, front: front, back: back,
             playerID: player.id, motion: motion, contactSurface: skin.contacts, detail: detail,
             bootMarkers: skin.boots, numberSurface: skin.numberSurface,
-            numbersUseShirtSkin: conforming != nil, neckBridge: neckBridge)
+            numbersUseShirtSkin: conforming != nil, neckBridge: neckBridge,
+            firstPersonBodyMesh: skin.firstPersonBodyMesh)
     }
 
     private static func numberMask(for number: Int, digit: MeshResource) throws -> TextureResource {

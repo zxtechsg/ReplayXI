@@ -716,12 +716,14 @@ struct FootballImmersiveView: View {
                   povReference.scenarioID == store.selectedScenarioID,
                   povReference.playerID == store.activePerspectiveID,
                   let player = store.activePerspective {
-            // The captured rotation stays fixed. Only player translation is
-            // sampled on later frames, leaving headset free look untouched.
-            let playerPoint = store.presentedPlayerPose(for: player, at: store.playhead).position
+            // Captured bearing and eye-height offset stay fixed. Only planar
+            // player translation is sampled; free look and leaning stay local.
+            let playerPose = store.presentedPlayerPose(for: player, at: store.playhead)
+            let eyePoint = ReplayPOVReference.playerEyePoint(playerPose)
             let rotation = simd_quatf(angle: povReference.rootYaw, axis: [0, 1, 0])
             root.orientation = rotation
-            root.position = -rotation.act(SIMD3<Float>(playerPoint.x, 0, playerPoint.z))
+            root.position = -rotation.act(eyePoint)
+                + SIMD3<Float>(0, povReference.rootHeight, 0)
         } else if store.viewMode == .tacticalTable || store.viewMode == .touchline {
             root.transform = ReplayWorldPlacement.apply(renderedWorldPlacement, to: root.transform)
         }
@@ -815,6 +817,7 @@ struct FootballImmersiveView: View {
         let now = ProcessInfo.processInfo.systemUptime
         if povEntryStartedAt == nil { povEntryStartedAt = now }
         let trackedYaw = worldTracking.deviceYaw()
+        let trackedHeight = worldTracking.deviceHeight()
         let waitExpired = ReplayPOVEntryPolicy.shouldUseFallback(
             startedAt: povEntryStartedAt ?? now, now: now
         )
@@ -860,7 +863,7 @@ struct FootballImmersiveView: View {
             targetWorldPosition: lookTarget,
             presentationPose: pose
         )
-        let headForward = renderedHeadForwardAtPOVEntry(
+        let renderedEntry = renderedPOVEntrySample(
             for: player, at: time, pose: pose, ballPoint: ballPoint,
             lookTarget: lookTarget, locomotion: locomotion,
             stationaryPose: stationaryPose, recording: recording,
@@ -868,26 +871,29 @@ struct FootballImmersiveView: View {
         )
         guard let yaw = ReplayPOVReference.rootYaw(
             deviceYaw: deviceYaw, playerFacingDegrees: pose.facingDegrees,
-            renderedHeadForward: headForward,
+            renderedHeadForward: renderedEntry?.headForward,
             fallbackLookYawRadians: look.neckYawRadians + look.headYawRadians
         ) else { return }
         povReference = ReplayPOVReference(scenarioID: store.selectedScenarioID,
-                                           playerID: player.id, rootYaw: yaw)
+            playerID: player.id, rootYaw: yaw,
+            rootHeight: ReplayPOVReference.rootHeight(
+                deviceHeight: trackedHeight, renderedEyeHeight: renderedEntry?.eyeHeight))
         povEntryStartedAt = nil
         if trackedYaw == nil || (recording != nil && nativeInputs == nil) {
             store.statusMessage = "POV used an estimated bearing. Switch views and return to realign."
         }
     }
 
-    /// POV hides the wearer's rig, so sample a detached prepared skin exactly
-    /// once when the player changes. Never load/prewarm a model from this path.
-    private func renderedHeadForwardAtPOVEntry(
+    /// Reuse one detached prepared skin for both gaze and eye height exactly
+    /// once on player entry. Never load/prewarm a model from this path, or
+    /// resample it as the viewer leans or the recorded athlete's head moves.
+    private func renderedPOVEntrySample(
         for player: PlayerTrack, at time: TimeInterval, pose: PlayerPose,
         ballPoint: SIMD3<Float>, lookTarget: SIMD3<Float>,
         locomotion: PlayerLocomotionSample, stationaryPose: PlayerPose?,
         recording: ReplayNativeBallPhysics.Recording?,
         nativeInputs: PitchSceneFactory.POVMotionInputs?
-    ) -> SIMD3<Float>? {
+    ) -> (headForward: SIMD3<Float>?, eyeHeight: Float?)? {
         guard ReplayTripoAthleteProvider.preferredIsReady,
               let skin = try? ReplayTripoAthleteProvider.makePreferred(for: player, detail: .near)
         else { return nil }
@@ -915,7 +921,10 @@ struct FootballImmersiveView: View {
             slowRunWeight: nativeInputs?.slowRunWeight ?? 0,
             armCutAdmission: nativeInputs?.armCutAdmission
         ) else { return nil }
-        return skin.headForwardInPlayerLocalSpace()
+        let eyeHeight = ReplayPOVReference.safeEyeHeight(
+            crownHeight: skin.headMaximumYInPlayerLocalSpace(),
+            nominalHeight: skin.motion.geometry.nominalHeight, heightScale: skin.root.scale.y)
+        return (skin.headForwardInPlayerLocalSpace(), eyeHeight)
     }
 
     private func resetWorldPlacement() {

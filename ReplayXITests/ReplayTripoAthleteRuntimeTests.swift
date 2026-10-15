@@ -503,14 +503,20 @@ final class ReplayTripoAthleteRuntimeTests: XCTestCase {
             XCTAssertNotNil(root.findEntity(named: "mark-\(mark.id.uuidString)"))
             XCTAssertTrue(PitchSceneFactory.nativeBallRecordingForTesting(in: root) === recording)
         }
-        // Selected first-person avatar is hidden; the other 21 retain the
-        // same player IDs, so annotations and tap-to-switch keep ownership.
+        // The selected player's clipped legs share the normal squad budget;
+        // the other 21 retain their complete bodies and picking ownership.
         PitchSceneFactory.update(root: root, scenario: scenario, time: 0.3, viewMode: .firstPerson,
             perspectiveID: "arg-23", marks: [mark], showsLaneLens: false, isDrawing: false,
             positionalOriginTransform: nil, playerDetail: .fullSquad)
         let firstPerson = PitchSceneFactory.skinnedAthletesForTesting(in: root)
-        XCTAssertEqual(firstPerson.count, 21)
-        XCTAssertNil(firstPerson["arg-23"])
+        XCTAssertEqual(firstPerson.count, 22)
+        let wearer = try XCTUnwrap(firstPerson["arg-23"])
+        XCTAssertTrue(wearer.isFirstPersonBodyPresentation)
+        XCTAssertTrue(wearer.model.isEnabledInHierarchy)
+        XCTAssertFalse(wearer.front.isEnabled)
+        XCTAssertFalse(wearer.back.isEnabled)
+        XCTAssertTrue(firstPerson.filter { $0.key != "arg-23" }.values
+            .allSatisfy { !$0.isFirstPersonBodyPresentation })
         XCTAssertTrue(firstPerson.values.allSatisfy { $0.motion.rigProfile == .tripo52 })
         let target = try XCTUnwrap(root.findEntity(named: "player-arg-13")?.findEntity(named: "interaction-target"))
         XCTAssertTrue(target.isEnabledInHierarchy)
