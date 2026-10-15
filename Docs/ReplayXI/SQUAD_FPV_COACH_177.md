@@ -20,7 +20,7 @@ Simulator tests cannot establish headset frame rate, comfort or physical Mac–V
 - `replayxi177-check03.xcresult`: 40/40 passed, including native look-down captures, skin/cap/pose/cache checks, both-team admission, free look, localhost PIN authentication, unauthenticated rejection, occupied-port recovery and retry.
 - `replayxi177-check02.xcresult`: older admission/quality-control regression tests passed; its cut-mesh and fixed-port failures were repaired and rerun in check03.
 - `replayxi177-mac11.xcresult`: 16/16 passed. Real TCP tests exercise the Mac client with a fixture server; visionOS tests exercise the real service with a fixture client. These are separate tests, not a completed manual pairing of both app UIs.
-- Mac Release build passed. Native window-backed UI captures checked at 1360×840 and 1060×700.
+- Mac Release and unsigned physical visionOS Release builds passed. Native window-backed Mac UI captures checked at 1360×840 and 1060×700. Device compilation is not a physical-headset test.
 - Check03 also collected an unrelated `backboardd` crash from the other booted visionOS 27 simulator (`1AA6…`); the dedicated 26.5 audit simulator (`E0A4…`) completed all 40 tests. No settings or process changes were made to that other simulator.
 
 ## Pair with visionOS Simulator
