@@ -53,6 +53,7 @@ enum PlaybackSpatialLabels {
     /// selectable through their body targets.
     static let tacticalFocusedPlayerLabelLimit = 5
     static let tacticalContextLabelScale: Float = 2.40
+    static let tacticalSelectedLabelScale: Float = 2.80
     static let firstPersonMaximumLabelDistance: Float = 32
     // At close range the front/back shirt number is already readable. Hiding
     // the floating plate there prevents a tag from covering the athlete's face
@@ -91,9 +92,15 @@ enum PlaybackSpatialLabels {
     )
     private struct AnnotationCardMetrics: Component {
         let boardWidth: Float
+        let bottom: Float
     }
     private struct PlayerLabelIndices: Component {
         let childIndexByName: [String: Int]
+    }
+    private struct PlayerLabelMetrics: Component {
+        let fullBottom: Float
+        let compactBottom: Float
+        let selectedBottom: Float
     }
     /// Fixed player identities benefit from mesh reuse, but arbitrary coach
     /// text must not acquire an unbounded process-wide lifetime.
@@ -139,7 +146,8 @@ enum PlaybackSpatialLabels {
         firstPersonVisiblePlayerIDs: [String]? = nil,
         focusedPlayerIDs: Set<String>? = nil,
         replacedByAnnotationPlayerIDs: Set<String>? = nil,
-        acceptsInput: Bool = true
+        acceptsInput: Bool = true,
+        headTopForPlayer: (String) -> Float? = { _ in nil }
     ) {
         guard let labelsRoot = root.children.first(where: { $0.name == "player-labels-root" }) else {
             return
@@ -168,10 +176,6 @@ enum PlaybackSpatialLabels {
             viewMode: viewMode,
             perspectiveID: perspectiveID
         )
-        // Keep the identity layer above the stable head envelope. Its height
-        // is independent of gait, so tags do not bob during playback.
-        let defaultLabelHeight: Float = 2.16
-
         for player in scenario.players {
             let labelName = "player-label-\(player.id)"
             let indexedLabel: Entity? = if let index = labelIndices?[labelName],
@@ -233,36 +237,32 @@ enum PlaybackSpatialLabels {
                 // Keep the active lens fully named. Number-only context chips
                 // use 40% less linear footprint than the previous treatment,
                 // materially reducing 22-player overlaps at tabletop scale.
-                player.id == perspectiveID ? 4.75 : tacticalContextLabelScale
+                player.id == perspectiveID ? tacticalSelectedLabelScale : tacticalContextLabelScale
             case .touchline:
                 1.70
             case .positional:
                 2.30
             }
-            let minimumReviewHeight = ReplayAthleteReviewLayout.minimumTagHeight(
+            let usesCompactTacticalTag = (viewMode == .tacticalTable || viewMode == .touchline)
+                && player.id != perspectiveID
+            let resolvedHeight = playerLabelHeight(
+                for: label,
                 athleteScale: ReplayAthleteReviewLayout.focusScale(
                     viewMode: viewMode,
                     isSelected: player.id == perspectiveID,
                     isFeatured: scenario.featuredPerspectiveIDs.contains(player.id),
                     isShapeRole: scenario.formationTargets.contains { $0.playerID == player.id }
                 ),
-                labelScale: resolvedScale
+                labelScale: resolvedScale,
+                headTop: headTopForPlayer(player.id),
+                isSelected: player.id == perspectiveID,
+                usesCompactTag: usesCompactTacticalTag
             )
-            let resolvedHeight: Float = switch viewMode {
-            case .firstPerson:
-                firstPersonLabelHeight(forDistance: distance)
-            case .tacticalTable:
-                max(tacticalLabelHeight(team: player.team, shirtNumber: player.shirtNumber), minimumReviewHeight)
-            case .touchline, .positional:
-                max(defaultLabelHeight, minimumReviewHeight)
-            }
             applyLabelTransform(on: label, position: [pose.position.x, resolvedHeight, pose.position.z],
                                 orientation: simd_quatf(angle: atan2(dx, dz), axis: [0, 1, 0]),
                                 scale: SIMD3<Float>(repeating: resolvedScale))
             setStyleEnabled(player.id == perspectiveID,
                             on: label.children.first(where: { $0.name == "selected-outline" }))
-            let usesCompactTacticalTag = (viewMode == .tacticalTable || viewMode == .touchline)
-                && player.id != perspectiveID
             setStyleEnabled(!usesCompactTacticalTag,
                             on: label.children.first(where: { $0.name == "label-glyph" }))
             setStyleEnabled(usesCompactTacticalTag,
@@ -278,6 +278,21 @@ enum PlaybackSpatialLabels {
                 setStyleEnabled(!usesCompactTacticalTag, on: strip)
             }
         }
+    }
+
+    /// Exact visible lower edge, measured only when the tag is built. Updating
+    /// a tag reads scalar metadata and the rig's crown; it never scans a mesh.
+    static func playerLabelHeight(
+        for label: Entity, athleteScale: Float = 1, labelScale: Float,
+        headTop: Float?, isSelected: Bool, usesCompactTag: Bool
+    ) -> Float {
+        let metrics = label.components[PlayerLabelMetrics.self]
+        let bottom = isSelected ? metrics?.selectedBottom ?? -0.19
+            : usesCompactTag ? metrics?.compactBottom ?? -0.09
+            : metrics?.fullBottom ?? -0.15
+        return ReplayAthleteReviewLayout.minimumTagHeight(
+            athleteScale: athleteScale, labelScale: labelScale,
+            headTop: headTop, tagLocalBottom: bottom)
     }
 
     private static func applyLabelTransform(on label: Entity, position: SIMD3<Float>,
@@ -373,8 +388,6 @@ enum PlaybackSpatialLabels {
         glyph.scale = SIMD3<Float>(repeating: textScale)
         glyph.position.x *= textScale
         glyph.position.y *= textScale
-        root.components.set(AnnotationCardMetrics(boardWidth: boardWidth))
-
         let board = ModelEntity(
             mesh: annotationBoardMesh,
             materials: [
@@ -399,6 +412,10 @@ enum PlaybackSpatialLabels {
         glyph.name = "annotation-tag-glyph"
         glyph.position.z = 0.025
         root.addChild(glyph)
+        root.components.set(AnnotationCardMetrics(boardWidth: boardWidth,
+            bottom: min(board.visualBounds(relativeTo: root).min.y,
+                        accent.visualBounds(relativeTo: root).min.y,
+                        glyph.visualBounds(relativeTo: root).min.y)))
         return root
     }
 
@@ -406,6 +423,10 @@ enum PlaybackSpatialLabels {
     static func annotationBoardWidth(in label: Entity, renderedCharacterCount: Int) -> Float {
         label.components[AnnotationCardMetrics.self]?.boardWidth
             ?? estimatedAnnotationBoardWidth(characterCount: renderedCharacterCount)
+    }
+
+    static func annotationLocalBottom(in label: Entity) -> Float {
+        label.components[AnnotationCardMetrics.self]?.bottom ?? -0.16
     }
 
     private static func estimatedAnnotationBoardWidth(characterCount: Int) -> Float {
@@ -497,6 +518,12 @@ enum PlaybackSpatialLabels {
         compactGlyph.position.z = 0.026
         compactGlyph.isEnabled = false
         root.addChild(compactGlyph)
+        let fullBottom = min(board.visualBounds(relativeTo: root).min.y,
+                             glyph.visualBounds(relativeTo: root).min.y,
+                             strip.visualBounds(relativeTo: root).min.y)
+        root.components.set(PlayerLabelMetrics(fullBottom: fullBottom,
+            compactBottom: compactGlyph.visualBounds(relativeTo: root).min.y,
+            selectedBottom: min(fullBottom, selection.visualBounds(relativeTo: root).min.y)))
         return root
     }
 
@@ -606,17 +633,15 @@ enum PlaybackSpatialLabels {
         min(max(0.31 + (max(distance, 0) * 0.009), 0.34), 0.58)
     }
 
-    static func firstPersonLabelHeight(forDistance _: Float) -> Float {
-        // A common band keeps the selected outline 0.15 m above the 2.05 m
-        // head envelope even at its largest POV scale (0.62 × 0.38 m).
-        2.32
+    static func firstPersonLabelHeight(forDistance distance: Float) -> Float {
+        ReplayAthleteReviewLayout.minimumTagHeight(athleteScale: 1,
+            labelScale: firstPersonLabelScale(forDistance: distance), tagLocalBottom: -0.15)
     }
 
-    /// Compact identity chips sit at one stable head band. Selection uses a
-    /// taller card and minimumTagHeight places that card at the same clearance.
+    /// Cold-start approximation used before a live rig or tag is available.
     static func tacticalLabelHeight(team _: FootballTeam, shirtNumber _: Int) -> Float {
         ReplayAthleteReviewLayout.minimumTagHeight(athleteScale: 1,
-            labelScale: tacticalContextLabelScale)
+            labelScale: tacticalContextLabelScale, tagLocalBottom: -0.09)
     }
 
     private static func observerPoint(

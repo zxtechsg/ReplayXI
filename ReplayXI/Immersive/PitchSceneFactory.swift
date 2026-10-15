@@ -347,6 +347,7 @@ enum PitchSceneFactory {
         var importedAthlete: ReplayImportedAthleteInstance?
         var importedAthleteAttemptedPlayerID: String?
         var skinnedAthletes: [String: ReplaySkinnedAthleteInstance] = [:]
+        var visibleHeadHeightsByID: [String: Float] = [:]
         var skinnedAthleteFailedVariants: Set<SkinnedAthleteVariantKey> = []
         var lowDetailAdmission = ReplayLowDetailAdmissionPolicy.State()
         // Match roots are immutable with respect to authored player identity.
@@ -1432,6 +1433,22 @@ enum PitchSceneFactory {
                         goalkeeperReadiness: keeperReadiness
                     )
                 }
+                if entity.isEnabled && !hidesHeadMountedAvatar {
+                    let crown: Float?
+                    if usesNewSkin, let skin = sceneState?.skinnedAthletes[player.id] {
+                        crown = skin.headMaximumYInPlayerLocalSpace()
+                    } else if usesLegacySkin {
+                        crown = nil
+                    } else if let visibleRig = directChild(
+                        named: usesTableMarker ? "table-marker" : "full-rig", of: entity) {
+                        crown = athleteBinding(for: visibleRig, cache: sceneState)?
+                            .headUpperY(relativeTo: entity)
+                    } else {
+                        crown = nil
+                    }
+                    sceneState?.visibleHeadHeightsByID[player.id] = entity.position.y
+                        + (crown ?? ReplayAthleteReviewLayout.headClearanceEnvelope) * entity.scale.y
+                }
             }
         }
 
@@ -1653,7 +1670,8 @@ enum PitchSceneFactory {
             firstPersonVisiblePlayerIDs: firstPersonVisibleIDs,
             focusedPlayerIDs: focusedPlayerIDs,
             replacedByAnnotationPlayerIDs: replacedPlayerIDs.isEmpty ? nil : replacedPlayerIDs,
-            acceptsInput: !suspendsPlayerPickingForAnnotationEdit
+            acceptsInput: !suspendsPlayerPickingForAnnotationEdit,
+            headTopForPlayer: { sceneState?.visibleHeadHeightsByID[$0] }
         )
         let selectedBinding = spatialFocus.selectedMarkID.flatMap {
             annotationCache?.bindingsByID[$0]
@@ -4095,14 +4113,19 @@ enum PitchSceneFactory {
                     anchor = pathAnchor
                 }
             }
-            let playerLabelHeight: Float = switch viewMode {
-            case .firstPerson: 2.30
-            // Board half-heights after view scaling are 0.72, 0.27 and 0.42 m.
-            // Each card clears the 2.05 m head envelope by about 0.2 m.
-            case .tacticalTable: 3.00
-            case .touchline: 2.52
-            case .positional: 2.68
-            }
+            let resolvedScale = viewMode == .firstPerson
+                ? PlaybackSpatialLabels.firstPersonAnnotationScale(
+                    forDistance: ReplayGeometry.distance(observer, anchor))
+                : mark.kind == .playerLabel && viewMode == .tacticalTable
+                    ? PlaybackSpatialLabels.tacticalSelectedLabelScale : scale
+            let cardBottom = mark.kind == .playerLabel
+                ? PlaybackSpatialLabels.annotationLocalBottom(in: label) : 0
+            let clearanceBottom = focus.selectedMarkID == mark.id
+                ? min(cardBottom, AnnotationSceneAffordance.labelOutlineLocalBottom) : cardBottom
+            let playerLabelHeight = mark.kind == .playerLabel ? ReplayAthleteReviewLayout.minimumTagHeight(
+                athleteScale: 1, labelScale: resolvedScale,
+                headTop: mark.playerID.flatMap { cache.visibleHeadHeightsByID[$0] },
+                tagLocalBottom: clearanceBottom) : 0
             let spatialLabelElevation: Float = if mark.kind == .playerLabel {
                 0
             } else if mark.kind == .space {
@@ -4122,11 +4145,6 @@ enum PitchSceneFactory {
                 angle: atan2(observer.x - anchor.x, observer.z - anchor.z),
                 axis: [0, 1, 0]
             )
-            let resolvedScale = viewMode == .firstPerson
-                ? PlaybackSpatialLabels.firstPersonAnnotationScale(
-                    forDistance: ReplayGeometry.distance(observer, anchor)
-                )
-                : scale
             label.scale = SIMD3<Float>(repeating: resolvedScale)
             if mark.kind == .playerLabel {
                 if let attachment = binding.playerAttachment.value {
@@ -4134,7 +4152,8 @@ enum PitchSceneFactory {
                         attachment,
                         anchor: anchor,
                         labelHeight: playerLabelHeight,
-                        viewMode: viewMode
+                        viewMode: viewMode,
+                        labelBottomHeight: playerLabelHeight + cardBottom * resolvedScale
                     )
                 }
                 if let target = binding.bodyTarget.value {

@@ -315,8 +315,8 @@ struct ReplaySkinnedNumberSurface {
     let back: [Probe]
     private let frontTriangles: [Triangle]
     private let backTriangles: [Triangle]
-    private let frontCentre: SIMD3<Float>
-    private let backCentre: SIMD3<Float>
+    private let clothFrontCentre: SIMD3<Float>
+    private let clothBackCentre: SIMD3<Float>
     private let bodyContents: MeshResource.Contents
 
     struct DecalBounds {
@@ -326,13 +326,11 @@ struct ReplaySkinnedNumberSurface {
         init?(digit: MeshResource) {
             guard let positions = digit.contents.models.first?.parts.first?.positions.elements,
                   !positions.isEmpty else { return nil }
-            let xs = positions.map(\.x), ys = positions.map(\.y)
-            guard let minX = xs.min(), let maxX = xs.max(),
-                  let minY = ys.min(), let maxY = ys.max() else { return nil }
-            let padX = Swift.max((maxX - minX) * 0.04, 0.015)
-            let padY = Swift.max((maxY - minY) * 0.04, 0.015)
-            min = [minX - padX, minY - padY]
-            max = [maxX + padX, maxY + padY]
+            // Font masks use a square, centred canvas. Segment bounds vary by
+            // numeral: the old #1 bounds sat right of centre and squeezed its
+            // font into a thin strip. Keep segment geometry only for fallback.
+            min = [-0.54, -0.54]
+            max = [0.54, 0.54]
         }
 
         func uv(_ point: SIMD2<Float>) -> SIMD2<Float> {
@@ -348,12 +346,18 @@ struct ReplaySkinnedNumberSurface {
               let skeleton = contents.skeletons.first,
               let weights = part.jointInfluences?.influences.elements,
               weights.count == part.positions.count * 4,
-              skeleton.joints.count == motion.joints.count else { return nil }
+              skeleton.joints.count == motion.joints.count,
+              let neckIndex = motion.semanticJointIndices["neck"] else { return nil }
         let restChest = motion.restPose.modelSpaceTransforms[motion.numberAnchors.jointIndex]
         let frontCentre = restChest * SIMD4(motion.numberAnchors.front, 1)
         let backCentre = restChest * SIMD4(motion.numberAnchors.back, 1)
-        self.frontCentre = SIMD3(frontCentre.x, frontCentre.y, frontCentre.z)
-        self.backCentre = SIMD3(backCentre.x, backCentre.y, backCentre.z)
+        // The source anchors used 77% of total height for both bodies. Their
+        // collars differ, so that put back ink onto the shorter torso's neck.
+        // Place the font below each rig's collar in model space; leave the
+        // old chest-local anchors and rigid-number surface probes unchanged.
+        let collarY = motion.restPose.modelSpaceTransforms[neckIndex].columns.3.y
+        clothFrontCentre = [frontCentre.x, min(frontCentre.y - 0.05, collarY - 0.16), frontCentre.z]
+        clothBackCentre = [backCentre.x, min(backCentre.y - 0.08, collarY - 0.19), backCentre.z]
         bodyContents = contents
         let positions = part.positions.elements
         func candidates(centre: SIMD4<Float>, side: Float) -> (probes: [Probe], triangles: [Triangle]) {
@@ -421,7 +425,7 @@ struct ReplaySkinnedNumberSurface {
               let skeleton = bodyContents.skeletons.first else { return nil }
         let sourcePositions = sourcePart.positions.elements
         let sourceNormals = sourcePart.normals?.elements
-        let centre = isFront ? frontCentre : backCentre
+        let centre = isFront ? clothFrontCentre : clothBackCentre
         let side: Float = isFront ? 1 : -1
         let minX = centre.x + side * bounds.min.x * scale
         let maxX = centre.x + side * bounds.max.x * scale
@@ -632,6 +636,11 @@ final class ReplaySkinnedAthleteInstance {
         let length = simd_length(planar)
         guard length.isFinite, length > 0.1 else { return nil }
         return planar / length
+    }
+
+    func headMaximumYInPlayerLocalSpace() -> Float? {
+        contactSurface.headMaximumY(in: pose, head: pose.modelSpaceTransforms[headIndex],
+            relativeTo: model.transformMatrix(relativeTo: root.parent))
     }
 
     /// Supplied locomotion is authoritative by default, including deliberate

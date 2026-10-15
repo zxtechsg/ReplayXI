@@ -176,7 +176,6 @@ final class ReplayTripoAthleteRuntimeTests: XCTestCase {
         let weights = try XCTUnwrap(part.jointInfluences).influences.elements
         let indices = try XCTUnwrap(part.triangleIndices).elements
         let inkMesh = try ReplayAthleteMeshLibrary.jerseyNumber(number).mesh
-        let bounds = try XCTUnwrap(ReplaySkinnedNumberSurface.DecalBounds(digit: inkMesh))
         let visibleUVs = try visibleNumberUVs(number, digit: inkMesh)
         XCTAssertEqual(digit.jointTransforms, skin.model.jointTransforms)
         let chestIndex = skin.motion.numberAnchors.jointIndex
@@ -185,39 +184,33 @@ final class ReplayTripoAthleteRuntimeTests: XCTestCase {
         let frontNormal = simd_quatf(chest).act(simd_quatf(rest).inverse.act([0, 0, 1]))
         let outward = isFront ? frontNormal : -frontNormal
         let positions = part.positions.elements
-        let centre4 = skin.motion.restPose.modelSpaceTransforms[chestIndex]
-            * SIMD4(isFront ? skin.motion.numberAnchors.front : skin.motion.numberAnchors.back, 1)
-        let centre = SIMD3<Float>(centre4.x, centre4.y, centre4.z)
+        let textureCoordinates = try XCTUnwrap(part.textureCoordinates).elements
         let side: Float = isFront ? 1 : -1
-        let scale: Float = isFront ? 0.115 : 0.23
         var clearances: [Float] = []
         for uv in visibleUVs {
             // These UVs are opaque in the generated mask; transparent cloth
-            // decal corners are not counted as visible-number evidence.
-            let inkXY = bounds.min + uv * (bounds.max - bounds.min)
-            let target = SIMD2<Float>(centre.x + side * inkXY.x * scale,
-                                      centre.y + inkXY.y * scale)
-            guard let shirt = try rawShirtTriangleWitness(skin, isFront: isFront,
-                restPoint: target) else { continue }
-            var selected: (corners: [Int], barycentric: SIMD3<Float>, depth: Float)?
+            // decal corners are not counted as visible-number evidence. Read
+            // UV placement from the mesh, independently of its anchor formula.
+            var selected: (corners: [Int], barycentric: SIMD3<Float>, point: SIMD3<Float>)?
             for decalBase in stride(from: 0, to: indices.count, by: 3) {
                 let ids = (0..<3).map { Int(indices[decalBase + $0]) }
-                let p = ids.map { positions[$0] }
+                let p = ids.map { textureCoordinates[$0] }
                 let denominator = (p[1].y - p[2].y) * (p[0].x - p[2].x)
                     + (p[2].x - p[1].x) * (p[0].y - p[2].y)
                 guard abs(denominator) > 0.000_000_1 else { continue }
-                let wa = ((p[1].y - p[2].y) * (target.x - p[2].x)
-                    + (p[2].x - p[1].x) * (target.y - p[2].y)) / denominator
-                let wb = ((p[2].y - p[0].y) * (target.x - p[2].x)
-                    + (p[0].x - p[2].x) * (target.y - p[2].y)) / denominator
+                let wa = ((p[1].y - p[2].y) * (uv.x - p[2].x)
+                    + (p[2].x - p[1].x) * (uv.y - p[2].y)) / denominator
+                let wb = ((p[2].y - p[0].y) * (uv.x - p[2].x)
+                    + (p[0].x - p[2].x) * (uv.y - p[2].y)) / denominator
                 let wc = 1 - wa - wb
                 guard min(wa, wb, wc) >= -0.000_1 else { continue }
-                let depth = p[0].z * wa + p[1].z * wb + p[2].z * wc
-                if selected == nil || side * depth > side * selected!.depth {
-                    selected = (ids, [wa, wb, wc], depth)
+                let point = positions[ids[0]] * wa + positions[ids[1]] * wb + positions[ids[2]] * wc
+                if selected == nil || side * point.z > side * selected!.point.z {
+                    selected = (ids, [wa, wb, wc], point)
                 }
             }
-            guard let selected else { continue }
+            guard let selected, let shirt = try rawShirtTriangleWitness(skin, isFront: isFront,
+                restPoint: [selected.point.x, selected.point.y]) else { continue }
             var ink = SIMD3<Float>.zero
             for (corner, index) in selected.corners.enumerated() {
                 var posed = SIMD4<Float>.zero

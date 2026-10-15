@@ -1213,25 +1213,10 @@ final class ReplayXITests: XCTestCase {
                 player.id
             )
             XCTAssertFalse(labelAccessibility.isAccessibilityElement, player.id)
-            XCTAssertEqual(
-                label.position.y,
-                max(
-                    PlaybackSpatialLabels.tacticalLabelHeight(
-                        team: player.team, shirtNumber: player.shirtNumber
-                    ),
-                    ReplayAthleteReviewLayout.minimumTagHeight(
-                        athleteScale: ReplayAthleteReviewLayout.focusScale(
-                            viewMode: .tacticalTable,
-                            isSelected: player.id == scenario.defaultPerspectiveID,
-                            isFeatured: scenario.featuredPerspectiveIDs.contains(player.id),
-                            isShapeRole: false
-                        ),
-                        labelScale: label.scale.y
-                    )
-                ),
-                accuracy: 0.000_1,
-                player.id
-            )
+            // Player identity stays close to the visible body. The earlier
+            // fixed envelope lifted the selected card above 3.1 metres.
+            XCTAssertGreaterThan(label.position.y, 1.5, player.id)
+            XCTAssertLessThan(label.position.y, 2.8, player.id)
 
             let playerRoot = try XCTUnwrap(root.findEntity(named: "player-\(player.id)"))
             let target = try XCTUnwrap(playerRoot.findEntity(named: "interaction-target"))
@@ -1254,7 +1239,7 @@ final class ReplayXITests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(selectedLabel.findEntity(named: "selected-outline")).isEnabled)
         XCTAssertTrue(try XCTUnwrap(selectedLabel.findEntity(named: "label-glyph")).isEnabled)
         XCTAssertFalse(try XCTUnwrap(selectedLabel.findEntity(named: "compact-label-glyph")).isEnabled)
-        XCTAssertEqual(selectedLabel.scale.x, 4.75, accuracy: 0.000_1)
+        XCTAssertEqual(selectedLabel.scale.x, PlaybackSpatialLabels.tacticalSelectedLabelScale, accuracy: 0.000_1)
         let compactLabel = try XCTUnwrap(labelsRoot.findEntity(named: "player-label-navy-rb"))
         XCTAssertFalse(try XCTUnwrap(compactLabel.findEntity(named: "label-glyph")).isEnabled)
         let numberOnlyGlyph = try XCTUnwrap(compactLabel.findEntity(named: "compact-label-glyph"))
@@ -1299,7 +1284,7 @@ final class ReplayXITests: XCTestCase {
         for label in visibleLabels {
             XCTAssertGreaterThanOrEqual(label.scale.x, 0.34, label.name)
             XCTAssertLessThanOrEqual(label.scale.x, 0.62, label.name)
-            XCTAssertGreaterThanOrEqual(label.position.y, 2.20, label.name)
+            XCTAssertGreaterThanOrEqual(label.position.y, 1.65, label.name)
             XCTAssertLessThanOrEqual(label.position.y, 2.60, label.name)
         }
         let wearerPose = try XCTUnwrap(
@@ -1359,7 +1344,7 @@ final class ReplayXITests: XCTestCase {
         XCTAssertEqual(distantScale, 0.62, accuracy: 0.000_1)
         XCTAssertEqual(
             PlaybackSpatialLabels.firstPersonLabelHeight(forDistance: 200),
-            2.32,
+            2.213,
             accuracy: 0.000_1
         )
 
@@ -1399,7 +1384,8 @@ final class ReplayXITests: XCTestCase {
         ).presentationPose(at: 16)
         XCTAssertTrue(markRoot.isEnabled)
         XCTAssertEqual(label.position.x, targetPose.position.x, accuracy: 0.000_1)
-        XCTAssertEqual(label.position.y, 3.00, accuracy: 0.000_1)
+        XCTAssertLessThan(label.position.y, 2.6)
+        XCTAssertEqual(label.scale.y, PlaybackSpatialLabels.tacticalSelectedLabelScale)
         XCTAssertFalse(try XCTUnwrap(root.findEntity(named: "player-label-red-lb")).isEnabled,
                        "A named coach card replaces the ordinary identity chip")
         XCTAssertEqual(label.position.z, targetPose.position.z, accuracy: 0.000_1)

@@ -3,11 +3,10 @@ import Foundation
 /// Actors remain human-sized in pitch coordinates in every review view.
 /// Selection belongs to rings/tags, never a bigger body or collision envelope.
 enum ReplayAthleteReviewLayout {
-    /// Conservative pitch-local head envelope for the bundled grounded rigs,
-    /// including their appearance scales and locomotion. It stays constant as
-    /// heads turn: labels must not bob with animation or query mesh bounds each
-    /// frame. This is a presentation allowance, not a human-height claim.
+    /// Cold-start fallback only. A live rig supplies its posed crown height so
+    /// the visible number remains close to that player, including when bent.
     static let headClearanceEnvelope: Float = 2.05
+    static let tagHeadGap: Float = 0.07
 
     static func focusScale(
         viewMode: ReplayViewMode,
@@ -22,10 +21,14 @@ enum ReplayAthleteReviewLayout {
         1
     }
 
-    static func minimumTagHeight(athleteScale: Float, labelScale: Float) -> Float {
-        // The selected outline is the tallest visible tag piece (0.38 m).
-        // Reserve its lower half even for compact tags; selection then changes
-        // neither tag height nor its minimum clearance.
-        headClearanceEnvelope * athleteScale + 0.19 * labelScale + 0.15
+    static func minimumTagHeight(
+        athleteScale: Float, labelScale: Float,
+        headTop: Float? = nil, tagLocalBottom: Float = -0.19
+    ) -> Float {
+        let crown = headTop.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+            ?? headClearanceEnvelope * athleteScale
+        // Reserve only the part of the visible tag below its origin. Compact
+        // numbers have no card or selected outline, so they need less lift.
+        return crown + tagHeadGap - min(tagLocalBottom, 0) * labelScale
     }
 }

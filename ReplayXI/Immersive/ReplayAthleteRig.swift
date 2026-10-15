@@ -263,6 +263,7 @@ struct ReplayAthleteJointBinding {
     let farFloorSupport: ReplayFarAthleteFloorSupport?
     let articulatedFar: ReplayArticulatedFarBinding?
     private let entities: [ReplayAthleteJoint: Entity]
+    private let headBoundsCorners: [SIMD3<Float>]
 
     init(root: Entity) throws {
         var resolved: [ReplayAthleteJoint: Entity] = [:]
@@ -281,6 +282,13 @@ struct ReplayAthleteJointBinding {
         }
         self.root = root
         self.entities = resolved
+        let head = resolved[.headRoot]!
+        let bounds = head.visualBounds(relativeTo: head)
+        headBoundsCorners = (0..<8).map { corner in
+            SIMD3<Float>(corner & 1 == 0 ? bounds.min.x : bounds.max.x,
+                         corner & 2 == 0 ? bounds.min.y : bounds.max.y,
+                         corner & 4 == 0 ? bounds.min.z : bounds.max.z)
+        }
         let articulated = ReplayArticulatedFarBinding(root: root, joints: resolved)
         self.articulatedFar = articulated
         self.farFloorSupport = articulated == nil ? ReplayFarAthleteFloorSupport(
@@ -292,6 +300,17 @@ struct ReplayAthleteJointBinding {
         // Construction validates all cases, so a missing key here would be a
         // programmer error rather than recoverable replay data.
         entities[joint]!
+    }
+
+    /// One cached head envelope follows the current neck/head pose. This reads
+    /// only the joint transform; no mesh bounds are queried during playback.
+    func headUpperY(relativeTo entity: Entity) -> Float? {
+        let transform = entities[.headRoot]!.transformMatrix(relativeTo: entity)
+        var upper = -Float.greatestFiniteMagnitude
+        for corner in headBoundsCorners {
+            upper = max(upper, (transform * SIMD4<Float>(corner, 1)).y)
+        }
+        return upper.isFinite ? upper : nil
     }
 }
 

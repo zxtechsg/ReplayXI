@@ -333,6 +333,27 @@ struct ReplaySkinnedAthleteContactSurface: Sendable {
         return minimum
     }
 
+    /// Crown height from the same bounded, weighted skull samples used for
+    /// header contact. Includes the current crouch/jump and model/root scale;
+    /// no mesh readback or temporary point array on the presentation path.
+    func headMaximumY(in pose: ReplaySkinnedAthleteMotion.Pose,
+                      head: simd_float4x4, relativeTo transform: simd_float4x4) -> Float? {
+        guard pose.modelSpaceTransforms.count == jointCount, headerProbeCount > 0 else { return nil }
+        var height = -Float.infinity
+        for point in headerPoints {
+            height = max(height, (transform * head * point).y)
+        }
+        for range in weightedHeaderRanges {
+            var point = SIMD4<Float>.zero
+            for index in range {
+                let item = influences[index]
+                point += pose.modelSpaceTransforms[item.joint] * item.localPoint * item.weight
+            }
+            height = max(height, (transform * point).y)
+        }
+        return height.isFinite ? height : nil
+    }
+
     /// A sole point alone misses the outside edge of a banked boot. Correct
     /// the final blended skin instead, including between authored gait poses.
     /// Only raise penetrations: running flight phases must never be pulled down.

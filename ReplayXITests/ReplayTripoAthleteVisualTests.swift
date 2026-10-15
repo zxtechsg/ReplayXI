@@ -14,6 +14,107 @@ private final class ReplayTripoCaptureCompletion: @unchecked Sendable {
 
 @MainActor
 final class ReplayTripoAthleteVisualTests: XCTestCase {
+    func testProceduralNeckAttachment176BeforeAfter() async throws {
+        ReplayAthleteHeadProvider.resetForTesting()
+        ReplayFarAthleteHeadProvider.resetForTesting()
+        defer {
+            ReplayAthleteHeadProvider.resetForTesting()
+            ReplayFarAthleteHeadProvider.resetForTesting()
+        }
+        try ReplayAthleteHeadProvider.prewarm()
+        try ReplayFarAthleteHeadProvider.prewarm()
+        let player = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay)?.player(id: "navy-lb"))
+        let calibration = try await calibrate()
+        func firstModel(_ root: Entity) -> ModelEntity? {
+            if let model = root as? ModelEntity { return model }
+            return root.children.lazy.compactMap { firstModel($0) }.first
+        }
+        var retained: [Entity] = []
+        for lod in [ReplayAthleteLOD.near, .far] {
+            let rig = try ReplayAthleteFactory.make(for: player, lod: lod)
+            retained.append(rig.root)
+            let name = lod == .near ? ReplayAthleteHeadProvider.resourceName : ReplayFarAthleteHeadProvider.resourceName
+            let url = try XCTUnwrap(Bundle.main.url(forResource: name, withExtension: "usdz", subdirectory: "Resources/Players")
+                ?? Bundle.main.url(forResource: name, withExtension: "usdz"))
+            let raw = try await Entity(contentsOf: url)
+            retained.append(raw)
+            let original = try XCTUnwrap(firstModel(raw)?.model?.mesh)
+            let head = try XCTUnwrap(rig.root.findEntity(named: "head") as? ModelEntity)
+            let corrected = try XCTUnwrap(head.model)
+            for turned in [false, true] {
+                let yaw: Float = turned ? .pi / 3 : 0
+                let pitch: Float = turned ? 25 * .pi / 180 : 0
+                rig.joints[.neck].orientation = simd_quatf(angle: yaw * 0.42, axis: [0, 1, 0])
+                    * simd_quatf(angle: pitch * 0.34, axis: [1, 0, 0])
+                rig.joints[.headRoot].orientation = simd_quatf(angle: yaw * 0.58, axis: [0, 1, 0])
+                    * simd_quatf(angle: pitch * 0.66, axis: [1, 0, 0])
+                for control in [true, false] {
+                    var component = corrected
+                    if control { component.mesh = original }
+                    head.model = component
+                    try await capture(rig.root,
+                        label: "neck176-\(lod)-\(turned ? "turned" : "neutral")-\(control ? "source" : "fixed")",
+                        player: player, view: .back, calibration: calibration, closeUp: true)
+                }
+            }
+        }
+        withExtendedLifetime(retained) {}
+    }
+
+    func testHeadAttachmentAndShirtPlacement176() async throws {
+        ReplayTripoAthleteProvider.resetForTesting()
+        defer { ReplayTripoAthleteProvider.resetForTesting() }
+        try ReplayTripoAthleteProvider.prewarm()
+        let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay))
+        let player = try XCTUnwrap(scenario.player(id: "navy-lb"))
+        let calibration = try await calibrate()
+        var instances: [ReplaySkinnedAthleteInstance] = []
+        for diverse in [false, true] {
+            for detail in [ReplaySkinnedAthleteProvider.Detail.near, .lowDetail] {
+                let skin = try diverse
+                    ? ReplayTripoAthleteProvider.makeDiverse(for: player, detail: detail)
+                    : ReplayTripoAthleteProvider.make(for: player, detail: detail)
+                instances.append(skin)
+                let time = 1.25
+                let pose = PlayerPose(position: .zero, facingDegrees: 0)
+                XCTAssertTrue(skin.update(at: time, track: player,
+                    locomotion: player.stationaryLocomotion,
+                    lookTarget: [8, 2, -4], ballAction: nil,
+                    stationaryPose: pose, presentationPose: pose))
+                for view in [View.front, .side, .back] {
+                    try await capture(skin.root,
+                        label: "placement176-\(diverse ? "A" : "B")-\(detail)-\(view)",
+                        player: player, view: view, calibration: calibration, closeUp: true)
+                }
+            }
+        }
+        withExtendedLifetime(instances) {}
+    }
+
+    func testNarrowAndDoubleJerseyNumerals176() async throws {
+        ReplayTripoAthleteProvider.resetForTesting()
+        defer { ReplayTripoAthleteProvider.resetForTesting() }
+        try ReplayTripoAthleteProvider.prewarm()
+        let source = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay)?.player(id: "navy-lb"))
+        let calibration = try await calibrate()
+        var retained: [Entity] = []
+        for number in [1, 11] {
+            let player = PlayerTrack(id: source.id, displayName: source.displayName,
+                role: source.role, shirtNumber: number, team: source.team,
+                isGoalkeeper: false, keyframes: source.keyframes)
+            for diverse in [false, true] {
+                let skin = try diverse
+                    ? ReplayTripoAthleteProvider.makeDiverse(for: player, detail: .near)
+                    : ReplayTripoAthleteProvider.make(for: player, detail: .near)
+                retained.append(skin.root)
+                XCTAssertTrue(update(skin, player: player, time: 1.25, speed: 0, stationary: true))
+                try await capture(skin.root, label: "number176-\(diverse ? "A" : "B")-\(number)",
+                    player: player, view: .back, calibration: calibration, closeUp: true)
+            }
+        }
+        withExtendedLifetime(retained) {}
+    }
+
     func testNumberAlphaMaterialAB() async throws {
         ReplayTripoAthleteProvider.resetForTesting()
         defer { ReplayTripoAthleteProvider.resetForTesting() }

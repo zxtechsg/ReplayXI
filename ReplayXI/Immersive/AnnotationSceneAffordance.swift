@@ -103,8 +103,14 @@ enum AnnotationSceneAffordance {
         size: [1.30, 0.41, 0.018],
         cornerRadius: 0.105
     )
+    static let labelOutlineLocalBottom: Float = {
+        let outline = ModelEntity(mesh: labelOutlineMesh, materials: [])
+        return outline.visualBounds(relativeTo: outline).min.y
+    }()
 
     static func makeSelectionRoot() -> Entity {
+        // Warm the immutable outline extent during scene construction.
+        _ = labelOutlineLocalBottom
         let root = Entity()
         root.name = selectionRootName
         root.isEnabled = false
@@ -268,14 +274,15 @@ enum AnnotationSceneAffordance {
         _ root: Entity,
         anchor: PitchPoint,
         labelHeight: Float,
-        viewMode: ReplayViewMode
+        viewMode: ReplayViewMode,
+        labelBottomHeight: Float? = nil
     ) {
         root.position = [anchor.x, 0, anchor.z]
         let scale = visualScale(for: viewMode)
         root.children.first { $0.name == "annotation-attachment-ring" }?.scale = [scale, 1, scale]
         root.children.first { $0.name == "annotation-attachment-ring-inset" }?.scale = [scale, 1, scale]
         if let stem = root.children.first(where: { $0.name == "annotation-attachment-stem" }) {
-            let height = max(labelHeight - 0.32, 0.25)
+            let height = max(labelBottomHeight ?? labelHeight - 0.32, 0.25)
             stem.position = [0, height / 2, 0]
             stem.scale = [scale, height, scale]
         }
