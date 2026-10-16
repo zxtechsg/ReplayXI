@@ -16,10 +16,18 @@ final class ReplayXIMacLink {
     private(set) var status = "Looking for Replay XI on this network…"
     private(set) var lastAction = ""
     private(set) var connected = false
+    private(set) var isConnecting = false
     var pin = ""
     private var browser: NWBrowser?
     private var peer: ReplayXIWireConnection?
     private var pairTimeout: Task<Void, Never>?
+    private var pairingID: UUID?
+    private var pairingAccepted = false
+    private let pairingTimeout: Duration
+
+    init(pairingTimeout: Duration = .seconds(15)) {
+        self.pairingTimeout = pairingTimeout
+    }
 
     /// Vision Pro Simulator shares the host's loopback network. This is the
     /// same single-use PIN protocol as a headset, not a development bypass.
@@ -41,6 +49,7 @@ final class ReplayXIMacLink {
 
     func startDiscovery() {
         guard browser == nil else { return }
+        if !connected, !isConnecting { status = "Looking for Replay XI on this network…" }
         let parameters = NWParameters.tcp
         parameters.includePeerToPeer = false
         let browser = NWBrowser(for: .bonjour(type: ReplayXIWire.serviceType, domain: nil), using: parameters)
@@ -74,13 +83,18 @@ final class ReplayXIMacLink {
     }
 
     func connect(to device: Device) {
+        guard !isConnecting else { return }
         disconnect()
         guard pin.count == 6, pin.allSatisfy(\.isNumber) else {
             status = "Enter the six digit PIN shown in Replay XI"
             return
         }
         status = "Connecting to \(device.name)…"
+        isConnecting = true
         lastAction = ""
+        let requestedPIN = pin
+        let requestID = UUID()
+        pairingID = requestID
         let connection = NWConnection(to: device.endpoint, using: .tcp)
         let peer = ReplayXIWireConnection(connection)
         self.peer = peer
@@ -89,6 +103,9 @@ final class ReplayXIMacLink {
             self.pairTimeout?.cancel(); self.pairTimeout = nil
             self.peer = nil
             self.connected = false
+            self.isConnecting = false
+            self.pairingAccepted = false
+            self.pairingID = nil
             self.state = nil
             self.status = self.lastAction.isEmpty ? "Disconnected · pair again with the headset's new PIN" : self.lastAction
         }
@@ -108,14 +125,17 @@ final class ReplayXIMacLink {
         }
         peer.onReady = { [weak self, weak peer] in
             guard let self, self.peer === peer else { return }
-            peer?.send(.init(type: "pair", id: UUID(), pin: self.pin))
+            peer?.send(.init(type: "pair", id: requestID, pin: requestedPIN))
         }
         peer.start()
+        let timeout = pairingTimeout
         pairTimeout = Task { [weak self, weak peer] in
-            try? await Task.sleep(for: .seconds(15))
+            try? await Task.sleep(for: timeout)
             guard !Task.isCancelled, let self, let peer,
                   self.peer === peer, !self.connected else { return }
-            self.lastAction = "Pairing timed out. Check the headset link and PIN."
+            self.lastAction = self.pairingAccepted
+                ? "Paired, but no replay arrived. Restart Mac link and try again."
+                : "Pairing timed out. Check Start Mac link and the PIN."
             peer.close()
         }
     }
@@ -126,6 +146,9 @@ final class ReplayXIMacLink {
         peer = nil
         oldPeer?.close()
         connected = false
+        isConnecting = false
+        pairingAccepted = false
+        pairingID = nil
         state = nil
         lastAction = ""
         status = "Disconnected · pair again with the headset's new PIN"
@@ -134,14 +157,15 @@ final class ReplayXIMacLink {
     private func receive(_ message: ReplayXIWireMessage) {
         switch message.type {
         case "result":
-            if !connected {
-                connected = message.ok == true
-                if connected {
-                    pairTimeout?.cancel(); pairTimeout = nil
-                    status = "Connected · local network"
+            if !pairingAccepted {
+                guard isConnecting, message.id == pairingID else { return }
+                pairingAccepted = message.ok == true
+                if pairingAccepted {
+                    status = "Paired · loading replay…"
                 } else {
                     lastAction = message.detail ?? "Pairing failed"
                     status = lastAction
+                    peer?.close()
                 }
             } else {
                 lastAction = message.ok == true ? (message.detail ?? "Applied")
@@ -149,10 +173,12 @@ final class ReplayXIMacLink {
                 status = message.ok == true ? "Connected · local network" : lastAction
             }
         case "state":
-            guard let next = message.state else { return }
+            guard pairingAccepted, let next = message.state else { return }
             if let current = state, next.revision <= current.revision { return }
             state = next
             connected = true
+            isConnecting = false
+            pairTimeout?.cancel(); pairTimeout = nil
             status = "Connected · local network"
         default: break
         }

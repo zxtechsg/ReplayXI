@@ -7,6 +7,88 @@ import CryptoKit
 
 @MainActor
 final class ReplayXIWireLoopbackTests: XCTestCase {
+    func testPairAcknowledgementStillNeedsReplayState() async throws {
+        try await withPairFixture(timeout: .milliseconds(250), response: { peer, message in
+            peer.send(.init(type: "result", id: message.id, ok: true))
+        }) { link in
+            for _ in 0..<100 {
+                if !link.isConnecting { break }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTAssertFalse(link.connected)
+            XCTAssertFalse(link.isConnecting)
+            XCTAssertNil(link.state)
+            XCTAssertTrue(link.status.contains("no replay arrived"))
+        }
+    }
+
+    func testUnpairedReplayStateCannotOpenWorkspace() async throws {
+        var sentState = false
+        try await withPairFixture(timeout: .seconds(2), response: { peer, _ in
+            peer.send(.init(type: "state", state: Self.previewState))
+            sentState = true
+        }) { link in
+            for _ in 0..<100 {
+                if sentState { break }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            try await Task.sleep(for: .milliseconds(30))
+            XCTAssertTrue(sentState)
+            XCTAssertNil(link.state)
+            XCTAssertFalse(link.connected)
+            XCTAssertTrue(link.isConnecting)
+            link.disconnect()
+            XCTAssertFalse(link.isConnecting)
+        }
+    }
+
+    func testPairingUsesPINAtClickAndIgnoresRepeatedPairClicks() async throws {
+        var requestedPIN: String?
+        var requests = 0
+        try await withPairFixture(response: { peer, message in
+            requestedPIN = message.pin
+            requests += 1
+            peer.send(.init(type: "result", id: message.id, ok: true))
+            peer.send(.init(type: "state", state: Self.previewState))
+        }) { link in
+            link.pin = "654321"
+            link.connectToSimulator() // Must not replace the in-flight fixture connection.
+            for _ in 0..<100 {
+                if link.connected { break }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTAssertTrue(link.connected)
+            XCTAssertFalse(link.isConnecting)
+            XCTAssertEqual(requestedPIN, "123456")
+            XCTAssertEqual(requests, 1)
+        }
+    }
+
+    private func withPairFixture(timeout: Duration = .seconds(2),
+        response: @escaping (ReplayXIWireConnection, ReplayXIWireMessage) -> Void,
+        exercise: (ReplayXIMacLink) async throws -> Void) async throws {
+        let listener = try NWListener(using: .tcp, on: .any)
+        let ready = expectation(description: "pairing fixture ready")
+        listener.stateUpdateHandler = { if case .ready = $0 { ready.fulfill() } }
+        var serverPeer: ReplayXIWireConnection?
+        listener.newConnectionHandler = { connection in
+            Task { @MainActor in
+                let peer = ReplayXIWireConnection(connection)
+                serverPeer = peer
+                peer.onMessage = { response(peer, $0) }
+                peer.start()
+            }
+        }
+        listener.start(queue: .main)
+        defer { listener.cancel(); serverPeer?.close() }
+        await fulfillment(of: [ready], timeout: 5)
+        let link = ReplayXIMacLink(pairingTimeout: timeout)
+        link.pin = "123456"
+        link.connectToSimulator(port: try XCTUnwrap(listener.port).rawValue)
+        defer { link.disconnect() }
+        try await exercise(link)
+    }
+
     func testExplicitSimulatorTargetPairsAndExchangesPlaybackAndAnnotationCommands() async throws {
         // An ephemeral loopback fixture never touches a running demo's port.
         let listener = try NWListener(using: .tcp, on: .any)
@@ -413,8 +495,8 @@ final class ReplayXIWireLoopbackTests: XCTestCase {
             let hostedPNG = try XCTUnwrap(hosted.representation(using: .png, properties: [:]))
             try hostedPNG.write(to: output.appendingPathComponent("replayxi-coach-host-\(width)x\(height).png"))
 
-            // AppKit controls need a real window for faithful rendering.
-            // Cache only this test view; no screen-recording permission needed.
+            // Bitmap snapshots verify layout, but system glass/inspector layers
+            // require a compositor screenshot for visual QA.
             let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: width, height: height),
                 styleMask: [.titled, .closable], backing: .buffered, defer: false)
             window.title = "Replay XI Coach · QA sample data"
@@ -424,6 +506,10 @@ final class ReplayXIWireLoopbackTests: XCTestCase {
             window.orderFront(nil)
             host.layoutSubtreeIfNeeded()
             print("Mac window QA: native window ready")
+            if let seconds = Double(ProcessInfo.processInfo.environment["REPLAYXI_QA_HOLD_SECONDS"] ?? ""), seconds > 0 {
+                // Opt-in only: leave the sample window visible for a CUA capture.
+                try? await Task.sleep(for: .seconds(min(seconds, 30)))
+            }
             host.displayIfNeeded()
             let windowBitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
             host.cacheDisplay(in: host.bounds, to: windowBitmap)

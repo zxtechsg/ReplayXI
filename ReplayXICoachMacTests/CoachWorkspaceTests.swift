@@ -40,6 +40,52 @@ final class CoachWorkspaceTests: XCTestCase {
         XCTAssertEqual(CoachWorkspace.clock(-Double.greatestFiniteMagnitude), "00:00.0")
     }
 
+    func testRenameAcknowledgementPreservesUnsavedHeightAndTiming() {
+        let base = CoachInspectorDraft(fixture, duration: 60)
+        var local = base
+        local.label = "Overlap"
+        local.startHeight = 2
+        local.hideAt = 25
+        var remote = base
+        remote.label = "Overlap"
+        let merged = CoachInspectorDraft.merge(base: base, local: local, remote: remote)
+        XCTAssertFalse(merged.conflict)
+        XCTAssertEqual(merged.draft.label, "Overlap")
+        XCTAssertEqual(merged.draft.startHeight, 2)
+        XCTAssertEqual(merged.draft.hideAt, 25)
+    }
+
+    func testInspectorMergeUpdatesCleanFieldsAndDetectsActualConflicts() {
+        let base = CoachInspectorDraft(fixture, duration: 60)
+        var local = base
+        local.label = "My label"
+        var remote = base
+        remote.endHeight = 3
+        let merged = CoachInspectorDraft.merge(base: base, local: local, remote: remote)
+        XCTAssertFalse(merged.conflict)
+        XCTAssertEqual(merged.draft.endHeight, 3)
+        XCTAssertEqual(merged.draft.label, "My label")
+        remote.label = "Other label"
+        let conflict = CoachInspectorDraft.merge(base: base, local: local, remote: remote)
+        XCTAssertTrue(conflict.conflict)
+        XCTAssertEqual(conflict.draft.label, "My label", "Never silently discard local typing")
+    }
+
+    func testHeightAcknowledgementDoesNotConflictOnWireRounding() {
+        let base = CoachInspectorDraft(fixture, duration: 60)
+        var local = base
+        local.startHeight = 0.2
+        local.endHeight = 1.1
+        local.controlHeight = 3.3
+        var remote = local
+        remote.startHeight = Double(Float(local.startHeight))
+        remote.endHeight = Double(Float(local.endHeight))
+        remote.controlHeight = Double(Float(local.controlHeight))
+        XCTAssertFalse(CoachInspectorDraft.merge(base: base, local: local, remote: remote).conflict)
+        remote.controlHeight = 4
+        XCTAssertTrue(CoachInspectorDraft.merge(base: base, local: local, remote: remote).conflict)
+    }
+
     private var fixture: ReplayXIWireMark {
         .init(id: UUID(), kind: "arc", start: .init(x: -20, z: -28), end: .init(x: 8, z: 18),
             startHeight: 0.5, endHeight: 1.2, label: "Curved overlap", showAt: 7, hideAt: 20,
