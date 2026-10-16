@@ -83,7 +83,8 @@ final class ReplayFirstPersonBody177Tests: XCTestCase {
                 let capIndices = try XCTUnwrap(cap.triangleIndices).elements
                 XCTAssertGreaterThanOrEqual(capPositions.count, 4)
                 XCTAssertLessThanOrEqual(capPositions.count, 129)
-                XCTAssertEqual(capIndices.count, (capPositions.count - 1) * 3)
+                let visibleCapIndexCount = (capPositions.count - 1) * 3
+                XCTAssertEqual(capIndices.count, ((visibleCapIndexCount + 11) / 12) * 12)
                 XCTAssertEqual(capWeights.count, capPositions.count * 4)
                 let sourceIndices = try XCTUnwrap(complete.contents.models.first?.parts.first?
                     .triangleIndices?.elements)
@@ -115,7 +116,7 @@ final class ReplayFirstPersonBody177Tests: XCTestCase {
                         }
                     }, "Neck closure edges must follow the exact existing skin weights")
                 }
-                for offset in stride(from: 0, to: capIndices.count, by: 3) {
+                for offset in stride(from: 0, to: visibleCapIndexCount, by: 3) {
                     let a = capPositions[Int(capIndices[offset])]
                     let b = capPositions[Int(capIndices[offset + 1])]
                     let c = capPositions[Int(capIndices[offset + 2])]
@@ -135,6 +136,67 @@ final class ReplayFirstPersonBody177Tests: XCTestCase {
                 XCTAssertTrue(skin.front.isEnabled)
                 XCTAssertTrue(skin.back.isEnabled)
                 XCTAssertTrue(skin.neckBridge?.isEnabled ?? true)
+            }
+        }
+    }
+
+    func testFirstPersonPartsHaveAlignedBoundedIndicesWithoutChangingSkinOrVisibleTriangles() throws {
+        try ReplayTripoAthleteProvider.prewarm()
+        for diverse in [false, true] {
+            for detail in [ReplaySkinnedAthleteProvider.Detail.near, .lowDetail] {
+                let skin = try diverse
+                    ? ReplayTripoAthleteProvider.makeDiverse(for: player(), detail: detail)
+                    : ReplayTripoAthleteProvider.make(for: player(), detail: detail)
+                let complete = try XCTUnwrap(skin.model.model?.mesh)
+                let original = try vertices(complete)
+                let sourceIndices = try XCTUnwrap(complete.contents.models.first?.parts.first?
+                    .triangleIndices?.elements)
+                XCTAssertTrue(skin.setFirstPersonBodyPresentation(true))
+                let cut = try XCTUnwrap(skin.model.model?.mesh)
+                let bodyVertices = try vertices(cut)
+                let bodySet = Set(bodyVertices)
+                XCTAssertTrue(bodySet.isSubset(of: Set(original)),
+                    "Alignment must not alter retained positions, UVs, normals or weights")
+                var expectedBodyTriangles: [Vertex] = []
+                for base in stride(from: 0, to: sourceIndices.count, by: 3) {
+                    let triangle = (0..<3).map { original[Int(sourceIndices[base + $0])] }
+                    if triangle.allSatisfy(bodySet.contains) { expectedBodyTriangles += triangle }
+                }
+                let parts = try XCTUnwrap(cut.contents.models.first).parts
+                XCTAssertEqual(parts.count, 2)
+                for part in parts {
+                    let indices = try XCTUnwrap(part.triangleIndices).elements
+                    XCTAssertTrue(indices.count.isMultiple(of: 3), part.id)
+                    XCTAssertTrue(indices.count.isMultiple(of: 4), part.id)
+                    XCTAssertTrue((indices.count * MemoryLayout<UInt32>.stride).isMultiple(of: 16), part.id)
+                    XCTAssertTrue(indices.allSatisfy { Int($0) < part.positions.count }, part.id)
+                    let weights = try XCTUnwrap(part.jointInfluences).influences.elements
+                    XCTAssertEqual(weights.count, part.positions.count * 4, part.id)
+                    XCTAssertTrue(weights.allSatisfy {
+                        skin.motion.joints.indices.contains($0.jointIndex) && $0.weight.isFinite
+                    }, part.id)
+                    let visibleIndexCount: Int
+                    if part.id == "first-person-body" {
+                        visibleIndexCount = expectedBodyTriangles.count
+                        XCTAssertEqual(indices.prefix(visibleIndexCount).map { bodyVertices[Int($0)] },
+                            expectedBodyTriangles, "Every original retained triangle must remain in order")
+                    } else {
+                        XCTAssertEqual(part.id, "first-person-neck-cap")
+                        let ringCount = part.positions.count - 1
+                        visibleIndexCount = ringCount * 3
+                        let expected = (0..<ringCount).flatMap { index in
+                            [UInt32(ringCount), UInt32((index + 1) % ringCount), UInt32(index)]
+                        }
+                        XCTAssertEqual(Array(indices.prefix(visibleIndexCount)), expected,
+                            "The neck closure fan must remain intact")
+                    }
+                    XCTAssertEqual(indices.count, ((visibleIndexCount + 11) / 12) * 12, part.id)
+                    XCTAssertLessThan(indices.count - visibleIndexCount, 12, part.id)
+                    for offset in stride(from: visibleIndexCount, to: indices.count, by: 3) {
+                        XCTAssertEqual(indices[offset], indices[offset + 1], part.id)
+                        XCTAssertEqual(indices[offset], indices[offset + 2], part.id)
+                    }
+                }
             }
         }
     }

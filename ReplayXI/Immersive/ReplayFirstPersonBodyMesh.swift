@@ -82,7 +82,7 @@ enum ReplayFirstPersonBodyMesh {
         part.positions = MeshBuffers.Positions(bodyPositions)
         part.normals = MeshBuffers.Normals(bodyNormals)
         part.textureCoordinates = MeshBuffers.TextureCoordinates(bodyUVs)
-        part.triangleIndices = MeshBuffers.TriangleIndices(bodyIndices)
+        part.triangleIndices = MeshBuffers.TriangleIndices(alignedTriangleIndices(bodyIndices))
         part.jointInfluences = .init(influences: MeshBuffers.JointInfluences(bodyWeights), influencesPerVertex: 4)
         part.skeletonID = skeleton.id
         // A cut boundary belongs to both a kept and a removed triangle. The
@@ -170,9 +170,20 @@ enum ReplayFirstPersonBodyMesh {
         cap.positions = MeshBuffers.Positions(capPositions)
         cap.normals = MeshBuffers.Normals(Array(repeating: [0, 1, 0], count: capPositions.count))
         cap.textureCoordinates = MeshBuffers.TextureCoordinates(Array(repeating: uvs[colourSample], count: capPositions.count))
-        cap.triangleIndices = MeshBuffers.TriangleIndices(triangles)
+        cap.triangleIndices = MeshBuffers.TriangleIndices(alignedTriangleIndices(triangles))
         cap.jointInfluences = .init(influences: MeshBuffers.JointInfluences(capWeights), influencesPerVertex: 4)
         cap.skeletonID = skeletonID
         return cap
+    }
+
+    /// Keep each generated part's UInt32 index stream 16-byte aligned when
+    /// RealityKit packs adjacent parts. visionOS 27's compositor validates
+    /// these with SIMD loads. Zero-area triangles retain every visible face
+    /// and make both the next part's start and this part's length safe.
+    private static func alignedTriangleIndices(_ source: [UInt32]) -> [UInt32] {
+        guard !source.count.isMultiple(of: 4), let index = source.first else { return source }
+        var result = source
+        while !result.count.isMultiple(of: 4) { result.append(contentsOf: [index, index, index]) }
+        return result
     }
 }
