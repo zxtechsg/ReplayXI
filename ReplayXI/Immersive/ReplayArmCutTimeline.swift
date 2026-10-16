@@ -5,7 +5,7 @@ import Foundation
 /// Knot/midpoint caps are sampled, not a proof of the policy between samples.
 @MainActor
 struct ReplayArmCutTimeline: Sendable {
-    struct Admission: Sendable {
+    struct Admission: Equatable, Sendable {
         let envelopeWeight: Float
         fileprivate let track: PlayerTrack
         fileprivate let sourceCommit: String

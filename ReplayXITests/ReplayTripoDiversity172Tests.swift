@@ -389,6 +389,8 @@ final class ReplayTripoDiversity172Tests: XCTestCase {
                             ReplayTripoAthleteProvider.prefersDiverseGeometry(for: player), player.id)
                         let body = try XCTUnwrap(root.findEntity(named: "player-\(player.id)"))
                         XCTAssertTrue(skin.root.parent === body)
+                        XCTAssertNil(body.children.first { $0.name == "full-rig" },
+                            "An admitted Tripo body must not allocate a second hidden procedural rig")
                         XCTAssertFalse(try XCTUnwrap(body.children.first { $0.name == "table-marker" })
                             .isEnabledInHierarchy, player.id)
                         let isWearer = view == .firstPerson && player.id == selected

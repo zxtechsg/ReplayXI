@@ -121,7 +121,7 @@ enum PlayerRagdollPlayback {
 
     /// One absolute-clock result shared by the skin and its kinematic query rig.
     /// The solver must not run on separate frame clocks for those two bodies.
-    struct Sample: Sendable {
+    struct Sample: Equatable, Sendable {
         let playerID: String
         let time: TimeInterval
         let pose: PlayerRagdollPose

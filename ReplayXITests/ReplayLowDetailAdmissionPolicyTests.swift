@@ -169,6 +169,29 @@ final class ReplayLowDetailAdmissionPolicyTests: XCTestCase {
         XCTAssertEqual(resolve(distances: squad, near: ["p0"], selected: "p0", cap: 22).playerIDs, ["p1"])
     }
 
+    func testUnchangedFullSquadReusesArrayStorageAndRevalidatesEveryMember() {
+        let squad = Dictionary(uniqueKeysWithValues: (0..<22).map { ("p\($0)", Float($0)) })
+        let initial = resolve(distances: squad, near: ["p0"], selected: "p0", cap: 22)
+        func buffer(_ ids: [String]) -> UInt {
+            ids.withUnsafeBufferPointer { UInt(bitPattern: $0.baseAddress!) }
+        }
+        for _ in 0..<32 {
+            let repeated = resolve(initial, distances: squad, near: ["p0"], selected: "p0", cap: 22)
+            XCTAssertEqual(repeated, initial)
+            XCTAssertEqual(buffer(repeated.playerIDs), buffer(initial.playerIDs),
+                           "No new membership Array or sort is needed for an unchanged full squad")
+        }
+        var invalid = squad
+        invalid["p10"] = .nan
+        XCTAssertFalse(resolve(initial, distances: invalid, near: ["p0"], selected: "p0", cap: 22)
+            .playerIDs.contains("p10"))
+        let duplicate = Policy.State(context: initial.context,
+            playerIDs: Array(repeating: "p1", count: initial.playerIDs.count))
+        XCTAssertEqual(resolve(duplicate, distances: squad, near: ["p0"], selected: "p0", cap: 22), initial)
+        let unsorted = Policy.State(context: initial.context, playerIDs: Array(initial.playerIDs.reversed()))
+        XCTAssertEqual(resolve(unsorted, distances: squad, near: ["p0"], selected: "p0", cap: 22), initial)
+    }
+
     func testShapeReplayUsesExplicitSquadOptInWithoutAllocatingHiddenPositioningPlayers() {
         for view in [ReplayViewMode.tacticalTable, .touchline, .firstPerson] {
             let admitted = resolve(kind: .shapeLab, view: view, cap: 22,

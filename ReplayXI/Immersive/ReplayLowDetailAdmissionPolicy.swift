@@ -40,20 +40,37 @@ enum ReplayLowDetailAdmissionPolicy {
 
         let context = Context(scenarioID: scenarioID, perspectiveID: perspectiveID)
         let limit = maximum - nearPlayerIDs.count
-        let eligibleIDs = posesByPlayerID.compactMap { id, pose in
+        func isEligible(_ id: String, _ pose: PlayerPose) -> Bool {
             id != perspectiveID && !nearPlayerIDs.contains(id)
-                && pose.position.x.isFinite && pose.position.z.isFinite ? id : nil
+                && pose.position.x.isFinite && pose.position.z.isFinite
+        }
+        let eligibleCount = posesByPlayerID.reduce(into: 0) { count, entry in
+            if isEligible(entry.key, entry.value) { count += 1 }
         }
         // The usual full-squad case needs no distance calculations or rank
         // churn: every valid non-near player fits. A stable ID order keeps
         // view changes and scrubbing independent of dictionary iteration.
-        if eligibleIDs.count <= limit {
-            return State(context: context, playerIDs: eligibleIDs.sorted())
+        if eligibleCount <= limit {
+            // Repeated full-squad frames keep the same immutable Array buffer.
+            // Validate membership and strict ordering so malformed/stale state
+            // cannot retain duplicates or consume an invalid player's slot.
+            if previous.context == context, previous.playerIDs.count == eligibleCount {
+                var last: String?
+                let unchanged = previous.playerIDs.allSatisfy { id in
+                    guard let pose = posesByPlayerID[id], isEligible(id, pose),
+                          last.map({ $0 < id }) ?? true else { return false }
+                    last = id
+                    return true
+                }
+                if unchanged { return previous }
+            }
+            return State(context: context, playerIDs: posesByPlayerID.compactMap { id, pose in
+                isEligible(id, pose) ? id : nil
+            }.sorted())
         }
         var distances: [String: Float] = [:]
-        distances.reserveCapacity(eligibleIDs.count)
-        for id in eligibleIDs {
-            guard let pose = posesByPlayerID[id] else { continue }
+        distances.reserveCapacity(eligibleCount)
+        for (id, pose) in posesByPlayerID where isEligible(id, pose) {
             let distance = ReplayGeometry.distance(origin, pose.position)
             if distance.isFinite { distances[id] = distance }
         }

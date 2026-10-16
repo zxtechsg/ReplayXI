@@ -524,6 +524,13 @@ final class ReplaySkinnedAthleteInstance {
     var disablesUpperBodyFlowForTesting = false
     /// Matched original-arm control; body, phase, source and contacts are shared.
     var disablesArmCutSmoothingForTesting = false
+    /// Matched pose-publication control; animation evaluation stays identical.
+    var disablesPoseWriteCoalescingForTesting = false
+    var disablesPoseInputMemoizationForTesting = false
+    private(set) var jointPoseWriteCountForTesting = 0
+    private(set) var neckBridgeWriteCountForTesting = 0
+    private(set) var poseEvaluationCountForTesting = 0
+    private(set) var poseInputCacheHitCountForTesting = 0
     enum DiagnosticStage: String, CaseIterable {
         case source, footballRetargetAndContact, offBall, look, impact
         case stationarySupport, headerAim, cervical, finalFloor
@@ -552,6 +559,30 @@ final class ReplaySkinnedAthleteInstance {
     let bootMarkers: ReplaySkinnedAthleteBootMarkers?
     private(set) var pose: ReplaySkinnedAthleteMotion.Pose
     private var transforms: [Transform]
+    private var lastPublishedTime: TimeInterval?
+    /// One exact value checkpoint, not a hash or a time-only cache. Track
+    /// arrays retain their existing COW storage; no pose history accumulates.
+    private struct PoseInput: Equatable {
+        let time: TimeInterval
+        let track: PlayerTrack
+        let locomotion: PlayerLocomotionSample
+        let lookTarget: SIMD3<Float>?
+        let ballAction: ReplayAthleteBallActionPose?
+        let impact: PlayerRagdollPlayback.Sample?
+        let stationaryPose: PlayerPose?
+        let interaction: ReplayAthleteInteractionCue?
+        let presentationPose: PlayerPose?
+        let allowsOffBallPose: Bool
+        let goalkeeperReadiness: ReplayGoalkeeperReadiness.Sample?
+        let allowsTrackLocomotionSampling: Bool
+        let slowRunWeight: Float
+        let armCutAdmission: ReplayArmCutTimeline.Admission?
+        #if DEBUG
+        var diagnosticOptions: UInt16 = 0
+        #endif
+    }
+    private var lastPoseInput: PoseInput?
+    private var lastNeckBridgeTransform: Transform?
     private let frontLocal: simd_float4x4
     private let backLocal: simd_float4x4
     let numberSurface: ReplaySkinnedNumberSurface?
@@ -631,6 +662,9 @@ final class ReplaySkinnedAthleteInstance {
         backLocal = Transform(scale: .init(repeating: 0.23),
                               rotation: restRotation.inverse * simd_quatf(angle: .pi, axis: [0, 1, 0]),
                               translation: motion.numberAnchors.back - numberNormal).matrix
+        // Rest-space grounding is immutable for this admitted asset. Writing
+        // it every frame dirties the whole skin hierarchy without moving it.
+        skinRoot.position.y = -motion.geometry.restMinY
     }
 
     /// Horizontal head direction in the player's unfaced local space. The
@@ -663,14 +697,21 @@ final class ReplaySkinnedAthleteInstance {
         // Both resources use the exact same skeleton. Reapply the last pose
         // immediately as RealityKit may initialize a replaced mesh at rest.
         model.jointTransforms = transforms
+        #if DEBUG
+        jointPoseWriteCountForTesting += 1
+        #endif
         front.isEnabled = !enabled
         back.isEnabled = !enabled
         neckBridge?.isEnabled = !enabled
         if !enabled, numbersUseShirtSkin {
             front.jointTransforms = transforms
             back.jointTransforms = transforms
+            #if DEBUG
+            jointPoseWriteCountForTesting += 2
+            #endif
         }
         isFirstPersonBodyPresentation = enabled
+        if !enabled { updateNeckBridge() }
         return true
     }
 
@@ -689,19 +730,59 @@ final class ReplaySkinnedAthleteInstance {
                 allowsTrackLocomotionSampling: Bool = false,
                 slowRunWeight suppliedSlowRunWeight: Float = 0,
                 armCutAdmission: ReplayArmCutTimeline.Admission? = nil) -> Bool {
-        #if DEBUG
-        slowRunWeightForTesting = 0
-        armCutWeightForTesting = 0
-        armCutSuppressionForTesting = 0
-        #endif
         let locomotion = stationaryPose == nil ? suppliedLocomotion : track.stationaryLocomotion
         // Never apply a stale or different player's collision sample. Unsupported
         // assets still fail soft to the procedural body rather than disappear.
         let validImpact = impact.map { $0.playerID == track.id && $0.time == time && impactPose != nil } ?? true
         let supported = validImpact && time.isFinite && locomotion.speedMetresPerSecond.isFinite
             && locomotion.turnRateDegreesPerSecond.isFinite && locomotion.accelerationMetresPerSecondSquared.isFinite
-        root.isEnabled = supported
-        guard supported else { return false }
+        if root.isEnabled != supported { root.isEnabled = supported }
+        guard supported else {
+            lastPoseInput = nil
+            #if DEBUG
+            slowRunWeightForTesting = 0
+            armCutWeightForTesting = 0
+            armCutSuppressionForTesting = 0
+            #endif
+            return false
+        }
+        var input = PoseInput(time: time, track: track, locomotion: suppliedLocomotion,
+            lookTarget: lookTarget, ballAction: ballAction, impact: impact,
+            stationaryPose: stationaryPose, interaction: interaction, presentationPose: presentationPose,
+            allowsOffBallPose: allowsOffBallPose, goalkeeperReadiness: goalkeeperReadiness,
+            allowsTrackLocomotionSampling: allowsTrackLocomotionSampling,
+            slowRunWeight: suppliedSlowRunWeight, armCutAdmission: armCutAdmission)
+        let mayReusePose: Bool
+        #if DEBUG
+        if disablesCutPhaseAlignmentForTesting { input.diagnosticOptions |= 1 }
+        if disablesCutWeightSmoothingForTesting { input.diagnosticOptions |= 2 }
+        if disablesHeaderHandoffForTesting { input.diagnosticOptions |= 4 }
+        if disablesOffBallReadyArmsForTesting { input.diagnosticOptions |= 8 }
+        if disablesCervicalAimForTesting { input.diagnosticOptions |= 16 }
+        if disablesUpperBodyFlowForTesting { input.diagnosticOptions |= 32 }
+        if disablesArmCutSmoothingForTesting { input.diagnosticOptions |= 64 }
+        if disablesPoseWriteCoalescingForTesting { input.diagnosticOptions |= 128 }
+        if disablesPoseInputMemoizationForTesting { input.diagnosticOptions |= 256 }
+        mayReusePose = !disablesPoseInputMemoizationForTesting && !disablesPoseWriteCoalescingForTesting
+            && poseStageObserverForTesting == nil && authoredPoseObserverForTesting == nil
+        #else
+        mayReusePose = true
+        #endif
+        if mayReusePose, lastPoseInput == input {
+            #if DEBUG
+            poseInputCacheHitCountForTesting += 1
+            #endif
+            return true
+        }
+        // Invalid/observed evaluations cannot leave an older successful key
+        // pointing at a different pose. Publish a checkpoint only on success.
+        lastPoseInput = nil
+        #if DEBUG
+        poseEvaluationCountForTesting += 1
+        slowRunWeightForTesting = 0
+        armCutWeightForTesting = 0
+        armCutSuppressionForTesting = 0
+        #endif
         let gaitPhase = stationaryPose == nil
             ? track.gaitPhase(at: time)
             : locomotion.motion.locomotionPhase
@@ -918,28 +999,37 @@ final class ReplaySkinnedAthleteInstance {
         #if DEBUG
         poseStageObserverForTesting?(.finalFloor, pose)
         #endif
+        // At advancing/reversing replay times the normal publication path is
+        // unchanged. Paused annotation/HUD updates can evaluate the same pose
+        // again; compare its exact result before copying/writing three native
+        // joint arrays. Same-time gaze, action and posture edits still publish.
+        var publishesPose = lastPublishedTime != time
+        #if DEBUG
+        publishesPose = publishesPose || disablesPoseWriteCoalescingForTesting
+        #endif
         for index in transforms.indices {
-            transforms[index] = Transform(scale: pose.scales[index], rotation: pose.rotations[index],
-                                          translation: pose.translations[index])
-        }
-        model.jointTransforms = transforms
-        if numbersUseShirtSkin, !isFirstPersonBodyPresentation {
-            front.jointTransforms = transforms
-            back.jointTransforms = transforms
-        }
-        if let neckBridge {
-            let neck4 = pose.modelSpaceTransforms[neckIndex].columns.3
-            let head4 = pose.modelSpaceTransforms[headIndex].columns.3
-            let neck = SIMD3(neck4.x, neck4.y, neck4.z)
-            let head = SIMD3(head4.x, head4.y, head4.z)
-            let axis = head - neck
-            let length = simd_length(axis)
-            if length.isFinite && length > 0.05 && length < 0.25 {
-                neckBridge.position = (neck + head) * 0.5
-                neckBridge.orientation = simd_quatf(from: [0, 1, 0], to: axis / length)
-                neckBridge.scale = [1, length + 0.09, 1]
+            let next = Transform(scale: pose.scales[index], rotation: pose.rotations[index],
+                                 translation: pose.translations[index])
+            if publishesPose || transforms[index] != next {
+                transforms[index] = next
+                publishesPose = true
             }
         }
+        if publishesPose {
+            model.jointTransforms = transforms
+            #if DEBUG
+            jointPoseWriteCountForTesting += 1
+            #endif
+            if numbersUseShirtSkin, !isFirstPersonBodyPresentation {
+                front.jointTransforms = transforms
+                back.jointTransforms = transforms
+                #if DEBUG
+                jointPoseWriteCountForTesting += 2
+                #endif
+            }
+        }
+        lastPublishedTime = time
+        if !isFirstPersonBodyPresentation { updateNeckBridge() }
         let chest = pose.modelSpaceTransforms[motion.numberAnchors.jointIndex]
         var resolvedFront = frontLocal, resolvedBack = backLocal
         if !numbersUseShirtSkin, let numberSurface {
@@ -960,8 +1050,27 @@ final class ReplaySkinnedAthleteInstance {
             front.transform = Transform(matrix: chest * resolvedFront)
             back.transform = Transform(matrix: chest * resolvedBack)
         }
-        skinRoot.position.y = -motion.geometry.restMinY
+        if mayReusePose { lastPoseInput = input }
         return true
+    }
+
+    private func updateNeckBridge() {
+        guard let neckBridge else { return }
+        let neck4 = pose.modelSpaceTransforms[neckIndex].columns.3
+        let head4 = pose.modelSpaceTransforms[headIndex].columns.3
+        let neck = SIMD3(neck4.x, neck4.y, neck4.z)
+        let head = SIMD3(head4.x, head4.y, head4.z)
+        let axis = head - neck
+        let length = simd_length(axis)
+        guard length.isFinite && length > 0.05 && length < 0.25 else { return }
+        let desired = Transform(scale: [1, length + 0.09, 1],
+            rotation: simd_quatf(from: [0, 1, 0], to: axis / length), translation: (neck + head) * 0.5)
+        guard desired != lastNeckBridgeTransform else { return }
+        neckBridge.transform = desired
+        lastNeckBridgeTransform = desired
+        #if DEBUG
+        neckBridgeWriteCountForTesting += 1
+        #endif
     }
 
     private func applyOffBall(_ sample: ReplayAthleteOffBallPose.Sample) {
