@@ -26,7 +26,7 @@ struct ReplayReferenceVideoWindow: View {
             }
         }
         .frame(minWidth: 1_120, minHeight: 680)
-        .background(.black.opacity(0.76))
+        .background(ReplayTheme.pitch.opacity(0.04))
         .preferredColorScheme(.dark)
         .onAppear { reconcileRoomClock() }
         .onChange(of: roomIsPresenting) { _, _ in reconcileRoomClock() }
@@ -89,7 +89,25 @@ struct ReplayReferenceVideoWindow: View {
                         Label("Authored 3D replay", systemImage: "cube.transparent")
                             .font(.headline)
                     }
-                    if roomIsPresenting {
+                    if store.isOpeningImmersive {
+                        VStack(spacing: 16) {
+                            ProgressView().controlSize(.large)
+                            Text(store.statusMessage)
+                                .font(.headline)
+                                .multilineTextAlignment(.center)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Button("Cancel") { ReplayRoomLauncher.cancelPendingOpen(for: store) }
+                                .buttonStyle(.bordered)
+                                .disabled(!ReplayRoomLauncher.canCancelPendingOpen(for: store))
+                                .accessibilityLabel("Cancel room preparation")
+                        }
+                        .padding(24)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .accessibilityIdentifier("comparison-room-preparation")
+                    } else if store.isClosingImmersive {
+                        ProgressView("Closing 3D room…")
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if roomIsPresenting {
                         VStack(spacing: 16) {
                             Image(systemName: "vision.pro").font(.system(size: 42))
                             Text(store.selectedScenarioID == capture.scenario.id

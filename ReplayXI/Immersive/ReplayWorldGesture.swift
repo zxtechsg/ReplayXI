@@ -86,6 +86,13 @@ final class ReplayWorldGestureTracking {
         return height.isFinite ? height : nil
     }
 
+    func deviceTransform() -> simd_float4x4? {
+        guard tracksWorld,
+              let anchor = world.queryDeviceAnchor(atTimestamp: CACurrentMediaTime()),
+              anchor.isTracked else { return nil }
+        return anchor.originFromAnchorTransform
+    }
+
     func pinchMidpoints() -> (SIMD3<Float>, SIMD3<Float>)? {
         guard tracksHands else { return nil }
         let anchors = hands.handAnchors(at: CACurrentMediaTime())
@@ -118,12 +125,28 @@ struct ReplayPOVReference: Equatable {
     let playerID: String
     let rootYaw: Float
     let rootHeight: Float
+    let roomXZ: SIMD2<Float>
 
-    init(scenarioID: String, playerID: String, rootYaw: Float, rootHeight: Float = 0) {
+    init(scenarioID: String, playerID: String, rootYaw: Float, rootHeight: Float = 0,
+         roomXZ: SIMD2<Float> = .zero) {
         self.scenarioID = scenarioID
         self.playerID = playerID
         self.rootYaw = rootYaw
         self.rootHeight = rootHeight
+        self.roomXZ = roomXZ.x.isFinite && roomXZ.y.isFinite ? roomXZ : .zero
+    }
+
+    /// Sample the room position only on POV entry. Later leaning/walking is
+    /// free headset motion, not a signal that drags the replay world along.
+    static func roomXZ(from transform: simd_float4x4?) -> SIMD2<Float>? {
+        guard let transform else { return nil }
+        let position = SIMD2<Float>(transform.columns.3.x, transform.columns.3.z)
+        return position.x.isFinite && position.y.isFinite ? position : nil
+    }
+
+    func rootPosition(for pose: PlayerPose) -> SIMD3<Float> {
+        let rotation = simd_quatf(angle: rootYaw, axis: [0, 1, 0])
+        return SIMD3<Float>(roomXZ.x, rootHeight, roomXZ.y) - rotation.act(Self.playerEyePoint(pose))
     }
 
     /// Translation follows replayed body facing, not the live headset or

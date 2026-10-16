@@ -36,6 +36,8 @@ struct FootballImmersiveView: View {
     @State private var povEntryStartedAt: TimeInterval?
     @State private var currentMatchRoot: Entity?
     @State private var worldPlacement = ReplayWorldPlacement()
+    @State private var reviewViewerTransform: simd_float4x4?
+    @State private var reviewControlsAnchor: AnchorEntity?
     @State private var pitchTrackingOwner = UUID()
     @State private var nativeAdmission = NativeReplaySceneAdmission()
     @State private var nativePreparationRetry = 0
@@ -103,6 +105,7 @@ struct FootballImmersiveView: View {
                 revision: controlPlacementRevision
             )
             content.add(controlsAnchor)
+            reviewControlsAnchor = controlsAnchor
             if accessibilityActivationSubscription == nil {
                 accessibilityActivationSubscription = content.subscribe(
                     to: AccessibilityEvents.Activate.self
@@ -162,6 +165,7 @@ struct FootballImmersiveView: View {
                 // Restoring a different exercise can create new conditional panels.
                 // Mount them without replacing the captured workspace origin.
                 addAttachments(to: content, attachments: attachments, controlsAnchor: workspace)
+                if reviewControlsAnchor !== workspace { reviewControlsAnchor = workspace }
             }
         } attachments: {
             if store.selectedScenario.kind == .shapeLab {
@@ -209,7 +213,8 @@ struct FootballImmersiveView: View {
                         emphasizesBall: $emphasizesBall,
                         recenterControls: recenterControls,
                         resetWorldPlacement: resetWorldPlacement,
-                        surfaceControls: pitchSurfaceControls
+                        surfaceControls: pitchSurfaceControls,
+                        canPlacePitch: canAdjustWorldPlacement && !worldPlacement.isActive
                     )
                     .frame(width: viewHUDLayout.attachmentWidth)
                     .disabled(workspaceMove.isActive)
@@ -278,7 +283,7 @@ struct FootballImmersiveView: View {
             guard !Task.isCancelled, store.roomPresentation.owns(roomPresentationID),
                   !store.isClosingImmersive else { return }
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("--replayxi-pinch-draft") {
+            if ReplayLaunchConfiguration.current.automationArguments.contains("--replayxi-pinch-draft") {
                 let start = PitchPoint(x: 11, z: 7)
                 let end = PitchPoint(x: 23, z: 22)
                 store.beginDrawing(.run)
@@ -313,6 +318,7 @@ struct FootballImmersiveView: View {
             while !Task.isCancelled {
                 if store.roomPresentation.owns(roomPresentationID), !store.isClosingImmersive {
                     capturePOVReferenceIfNeeded()
+                    captureReviewPlacementIfNeeded()
                     let canAdjust = canAdjustWorldPlacement
                     let pinches = canAdjust ? tracking.pinchMidpoints() : nil
                     let mayStartPlacement = canAdjust && pinches != nil
@@ -356,6 +362,7 @@ struct FootballImmersiveView: View {
             povReference = nil
             povEntryStartedAt = nil
             currentMatchRoot = nil
+            reviewControlsAnchor = nil
             accessibilityActivationSubscription?.cancel()
             accessibilityActivationSubscription = nil
             // An old view must not pause, close or edit a newly opened room.
@@ -409,6 +416,7 @@ struct FootballImmersiveView: View {
         }
         .onChange(of: store.viewMode) { _, _ in
             povReference = nil
+            reviewViewerTransform = worldTracking.deviceTransform().flatMap(ReplayReviewPlacement.horizontalViewer)
             povEntryStartedAt = nil
             reconcileWorldPlacementForCurrentView()
             capturePOVReferenceIfNeeded()
@@ -503,6 +511,12 @@ struct FootballImmersiveView: View {
         let request = nativeAdmission.begin(scenarioID: scenario.id, roomID: roomPresentationID)
         guard FootballReferenceScenarios.contains(scenario) else { return }
         do {
+            // A study selected inside the room may introduce new shirt digits.
+            // Warm its shared assets during admission, before scene creation.
+            try await ReplayRoomLauncher.prepareVisuals(for: [scenario], shouldContinue: {
+                store.selectedScenarioID == scenario.id
+                    && store.roomPresentation.owns(roomPresentationID) && !store.isClosingImmersive
+            })
             let recording = try await ReplayNativeBallPhysics.prewarm(track: scenario.ball,
                 players: scenario.players, plannedTouches: FootballReferenceScenarios.touches(for: scenario))
             guard !Task.isCancelled else { return }
@@ -543,6 +557,9 @@ struct FootballImmersiveView: View {
             lighting = made
         }
         if sky?.isEnabled != visible { sky?.isEnabled = visible }
+        if let sky, let matchRoot {
+            ReplayStadiumEnvironment.placeBackdropBelowPitch(in: sky, pitchHeight: matchRoot.position.y)
+        }
         if stadium?.isEnabled != visible { stadium?.isEnabled = visible }
         if lighting?.isEnabled != visible { lighting?.isEnabled = visible }
         guard enabled, let stadium else { return }
@@ -716,15 +733,17 @@ struct FootballImmersiveView: View {
                   povReference.scenarioID == store.selectedScenarioID,
                   povReference.playerID == store.activePerspectiveID,
                   let player = store.activePerspective {
-            // Captured bearing and eye-height offset stay fixed. Only planar
-            // player translation is sampled; free look and leaning stay local.
+            // Captured room X/Z, bearing and eye-height offset stay fixed.
+            // Only player translation is sampled; free look and leaning stay local.
             let playerPose = store.presentedPlayerPose(for: player, at: store.playhead)
-            let eyePoint = ReplayPOVReference.playerEyePoint(playerPose)
             let rotation = simd_quatf(angle: povReference.rootYaw, axis: [0, 1, 0])
             root.orientation = rotation
-            root.position = -rotation.act(eyePoint)
-                + SIMD3<Float>(0, povReference.rootHeight, 0)
+            root.position = povReference.rootPosition(for: playerPose)
         } else if store.viewMode == .tacticalTable || store.viewMode == .touchline {
+            if let reviewViewerTransform {
+                root.transform = ReplayReviewPlacement.apply(to: root.transform,
+                    viewMode: store.viewMode, viewer: reviewViewerTransform)
+            }
             root.transform = ReplayWorldPlacement.apply(renderedWorldPlacement, to: root.transform)
         }
         // Factory's temporary default POV bearing must never be visible.
@@ -874,10 +893,17 @@ struct FootballImmersiveView: View {
             renderedHeadForward: renderedEntry?.headForward,
             fallbackLookYawRadians: look.neckYawRadians + look.headYawRadians
         ) else { return }
+        let trackedTransform = worldTracking.deviceTransform()
+        let fallbackTransform = reviewControlsAnchor.flatMap { anchor in
+            anchor.isAnchored ? anchor.transformMatrix(relativeTo: nil) : nil
+        }
+        let roomXZ = ReplayPOVReference.roomXZ(from: trackedTransform)
+            ?? ReplayPOVReference.roomXZ(from: fallbackTransform) ?? .zero
         povReference = ReplayPOVReference(scenarioID: store.selectedScenarioID,
             playerID: player.id, rootYaw: yaw,
             rootHeight: ReplayPOVReference.rootHeight(
-                deviceHeight: trackedHeight, renderedEyeHeight: renderedEntry?.eyeHeight))
+                deviceHeight: trackedHeight, renderedEyeHeight: renderedEntry?.eyeHeight),
+            roomXZ: roomXZ)
         povEntryStartedAt = nil
         if trackedYaw == nil || (recording != nil && nativeInputs == nil) {
             store.statusMessage = "POV used an estimated bearing. Switch views and return to realign."
@@ -928,9 +954,24 @@ struct FootballImmersiveView: View {
     }
 
     private func resetWorldPlacement() {
-        guard acceptsMatchInteraction, !worldPlacement.isActive else { return }
+        guard canAdjustWorldPlacement, !worldPlacement.isActive else { return }
         worldPlacement.reset()
-        store.statusMessage = "Pitch and stadium reset to their default placement"
+        reviewViewerTransform = worldTracking.deviceTransform().flatMap(ReplayReviewPlacement.horizontalViewer)
+        reviewControlsAnchor = nil
+        controlPlacementRevision &+= 1
+        store.statusMessage = "Pitch placed in front of you"
+    }
+
+    private func captureReviewPlacementIfNeeded() {
+        guard reviewViewerTransform == nil, acceptsMatchInteraction,
+              store.viewMode == .tacticalTable || store.viewMode == .touchline else { return }
+        if let pose = worldTracking.deviceTransform().flatMap(ReplayReviewPlacement.horizontalViewer) {
+            reviewViewerTransform = pose
+        } else if let anchor = reviewControlsAnchor, anchor.isAnchored {
+            // Simulator world tracking can be unavailable. The same one-shot
+            // head anchor that places the controls still supplies a viewer pose.
+            reviewViewerTransform = ReplayReviewPlacement.horizontalViewer(anchor.transformMatrix(relativeTo: nil))
+        }
     }
 
     private func findPitchSurface() {
@@ -2387,15 +2428,10 @@ private struct ImmersiveControlDeck: View {
         .padding(4)
         .frame(width: deckWidth)
         .controlSize(.extraLarge)
-        .background(ReplayTheme.navy.opacity(0.46), in: RoundedRectangle(cornerRadius: 26))
-        .overlay {
-            RoundedRectangle(cornerRadius: 26)
-                .stroke(.white.opacity(0.13), lineWidth: 1)
-        }
         .glassBackgroundEffect(in: .rect(cornerRadius: 26))
         .task {
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("--replayxi-saved-reviews") {
+            if ReplayLaunchConfiguration.current.automationArguments.contains("--replayxi-saved-reviews") {
                 inlinePanel = .savedReviews
             }
             #endif
@@ -2534,7 +2570,7 @@ private struct ImmersiveControlDeck: View {
             PlaybackEventRailLayout.prepareTimelineTickClusters(&timelineTickClusters)
             rebuildReviewIndex()
             #if DEBUG
-            let arguments = ProcessInfo.processInfo.arguments
+            let arguments = ReplayLaunchConfiguration.current.automationArguments
             if arguments.contains("--replayxi-large-controls") {
                 controlDeckPresetRawValue = PlaybackControlDeckPreset.large.rawValue
             }
@@ -5655,11 +5691,6 @@ private struct ImmersiveControlDeck: View {
         .padding(18)
         .frame(width: deckWidth)
         .controlSize(.extraLarge)
-        .background(ReplayTheme.navy.opacity(0.46), in: RoundedRectangle(cornerRadius: 26))
-        .overlay {
-            RoundedRectangle(cornerRadius: 26)
-                .stroke(ReplayTheme.orange.opacity(0.22), lineWidth: 1)
-        }
         .glassBackgroundEffect(in: .rect(cornerRadius: 26))
     }
 

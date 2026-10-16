@@ -13,6 +13,7 @@ struct PlaybackViewOverlayHUD: View {
     let recenterControls: () -> Void
     let resetWorldPlacement: () -> Void
     var surfaceControls: ReplaySurfacePlacementControls? = nil
+    let canPlacePitch: Bool
     private let usesSpatialGlass: Bool
     @State private var isExpanded = false
     @State private var section: PlaybackViewShelf = .camera
@@ -20,6 +21,7 @@ struct PlaybackViewOverlayHUD: View {
     init(showsPlaybackAnnotations: Binding<Bool>, emphasizesBall: Binding<Bool>,
          recenterControls: @escaping () -> Void, resetWorldPlacement: @escaping () -> Void = {},
          surfaceControls: ReplaySurfacePlacementControls? = nil,
+         canPlacePitch: Bool = true,
          initialSection: PlaybackViewShelf = .camera, initiallyExpanded: Bool = false,
          usesSpatialGlass: Bool = true) {
         self._showsPlaybackAnnotations = showsPlaybackAnnotations
@@ -27,6 +29,7 @@ struct PlaybackViewOverlayHUD: View {
         self.recenterControls = recenterControls
         self.resetWorldPlacement = resetWorldPlacement
         self.surfaceControls = surfaceControls
+        self.canPlacePitch = canPlacePitch
         self.usesSpatialGlass = usesSpatialGlass
         self._section = State(initialValue: initialSection)
         self._isExpanded = State(initialValue: initiallyExpanded)
@@ -110,6 +113,15 @@ struct PlaybackViewOverlayHUD: View {
                             }
                         }
                     }
+                    if store.viewMode == .tacticalTable || store.viewMode == .touchline {
+                        Button(action: resetWorldPlacement) {
+                            Label("Bring pitch here", systemImage: "viewfinder")
+                                .frame(maxWidth: .infinity, minHeight: 56)
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(!canPlacePitch || surfaceControls?.hasPlacement == true)
+                        .help("Places the pitch in front of you and keeps it fixed in the room")
+                    }
                 }
 
                 if section == .space {
@@ -137,13 +149,13 @@ struct PlaybackViewOverlayHUD: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         Button(action: resetWorldPlacement) {
-                            Label("Reset pitch & stadium", systemImage: "arrow.counterclockwise")
+                            Label("Bring pitch here", systemImage: "viewfinder")
                                 .font(.subheadline.weight(.semibold))
                                 .frame(maxWidth: .infinity, minHeight: 60)
                         }
                         .buttonStyle(.bordered)
-                        .disabled(surfaceControls?.hasPlacement == true)
-                        .accessibilityHint("Restores the default pitch and stadium placement")
+                        .disabled(!canPlacePitch || surfaceControls?.hasPlacement == true)
+                        .accessibilityHint("Places a level pitch in front of you and keeps it fixed in the room")
                     }
                     environmentChoices
                     if store.viewMode == .tacticalTable,
@@ -164,14 +176,9 @@ struct PlaybackViewOverlayHUD: View {
         }
         .padding(11)
         .controlSize(.large)
-        .background(ReplayTheme.navy.opacity(0.50), in: RoundedRectangle(cornerRadius: 20))
-        .overlay {
-            RoundedRectangle(cornerRadius: 20)
-                .stroke(.white.opacity(0.14), lineWidth: 1)
-        }
         .task {
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("--replayxi-view-hud-expanded") {
+            if ReplayLaunchConfiguration.current.automationArguments.contains("--replayxi-view-hud-expanded") {
                 isExpanded = true
             }
             #endif

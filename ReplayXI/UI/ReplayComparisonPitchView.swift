@@ -56,7 +56,7 @@ struct ReplayComparisonPitchView: View {
         preparationError = nil
         playFocus = ReplayComparisonPitchFocus(scenario: capture.scenario)
         do {
-            try ReplayRoomLauncher.prepareVisuals(for: [capture.scenario])
+            try await ReplayRoomLauncher.prepareVisuals(for: [capture.scenario])
             try Task.checkCancellation()
             if FootballReferenceScenarios.contains(capture.scenario) {
                 let prepared = try await ReplayNativeBallPhysics.prewarm(

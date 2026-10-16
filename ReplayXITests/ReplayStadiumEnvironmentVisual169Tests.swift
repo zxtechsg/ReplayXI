@@ -17,6 +17,67 @@ private final class ReplayStadiumCaptureCompletion169: @unchecked Sendable {
 /// do not validate SwiftUI, immersion transitions, passthrough or headset cost.
 @MainActor
 final class ReplayStadiumEnvironmentVisual169Tests: XCTestCase {
+    func testTacticalPitchHasVisibleGreenTurfAfterViewChanges178() async throws {
+        try ReplayStrategyPitchProvider.prewarm()
+        let calibration = try await calibrate()
+        let scenario = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay))
+        let root = PitchSceneFactory.makeMatchRoot(for: scenario)
+        let camera = PerspectiveCamera()
+        camera.camera = .init(near: 0.01, far: 200, fieldOfViewInDegrees: 60)
+        for mode in [ReplayViewMode.tacticalTable, .firstPerson, .touchline, .tacticalTable] {
+            PitchSceneFactory.update(root: root, scenario: scenario, time: 2, viewMode: mode,
+                perspectiveID: scenario.defaultPerspectiveID, marks: [], showsLaneLens: false,
+                isDrawing: false, positionalOriginTransform: nil)
+            if mode == .firstPerson { continue }
+            camera.look(at: root.position, from: [0, 1.65, 0], relativeTo: nil)
+            let frame = try await render(entities: [root, camera], camera: camera, size: 512)
+            var turfPixels = 0
+            for y in 0..<frame.height {
+                for x in 0..<frame.width {
+                    let p = frame.rgba(x: x, y: y, topFirst: calibration.rawRowsAreTopFirst)
+                    if p[1] > 20, Float(p[1]) > Float(p[0]) * 1.25,
+                       Float(p[1]) > Float(p[2]) * 1.15 { turfPixels += 1 }
+                }
+            }
+            try attachPNG(frame, calibration: calibration,
+                name: "ReplayXI-Tactical178-turf-\(mode.rawValue)-\(turfPixels).png")
+            XCTAssertGreaterThan(turfPixels, frame.width * frame.height / 100,
+                "A tactical pitch must render grass, not just an enabled invisible plane")
+        }
+        withExtendedLifetime([root, camera]) {}
+    }
+
+    func testSeatedReplayFloorCannotCoverThePitch178() async throws {
+        try ReplayStrategyPitchProvider.prewarm()
+        ReplayStadiumEnvironment.prewarm()
+        let pitch = try XCTUnwrap(ReplayStrategyPitchProvider.makeInstance())
+        pitch.position.y = -0.8
+        let sky = ReplayStadiumEnvironment.makeSkyRoot()
+        let camera = PerspectiveCamera()
+        camera.camera = .init(near: 0.02, far: 400, fieldOfViewInDegrees: 70)
+        camera.look(at: [0, -0.8, -15], from: [0, 0.9, 0], relativeTo: nil)
+        let calibration = try await calibrate()
+        let covered = try await render(entities: [pitch, sky, camera], camera: camera, size: 512)
+        ReplayStadiumEnvironment.placeBackdropBelowPitch(in: sky, pitchHeight: pitch.position.y)
+        let visible = try await render(entities: [pitch, sky, camera], camera: camera, size: 512)
+        func grassPixels(_ frame: ReplayRealityRendererAudit.Frame) -> Int {
+            var count = 0
+            for y in 0..<frame.height {
+                for x in 0..<frame.width {
+                    let p = frame.rgba(x: x, y: y, topFirst: calibration.rawRowsAreTopFirst)
+                    if p[1] > 20, Float(p[1]) > Float(p[0]) * 1.25,
+                       Float(p[1]) > Float(p[2]) * 1.15 { count += 1 }
+                }
+            }
+            return count
+        }
+        XCTAssertGreaterThan(grassPixels(visible), grassPixels(covered) + 10_000,
+            "The backdrop floor must not hide the lowered pitch")
+        try attachPNG(covered, calibration: calibration, name: "ReplayXI-Pitch178-seated-before.png")
+        try attachPNG(visible, calibration: calibration, name: "ReplayXI-Pitch178-seated-fixed.png")
+        withExtendedLifetime([pitch, sky, camera]) {}
+    }
+
     func testCapturesLocalStadiumFromHeadHeightInsideBowl169() async throws {
         ReplayStadiumEnvironment.prewarm()
         XCTAssertTrue(ReplayStadiumEnvironment.preparationSucceeded)

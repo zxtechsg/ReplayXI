@@ -17,9 +17,8 @@ struct Eyebrow: View {
     var color: Color = ReplayTheme.signal
 
     var body: some View {
-        Text(text.uppercased())
-            .font(.caption2.monospaced().weight(.black))
-            .tracking(1.4)
+        Text(text)
+            .font(.caption.weight(.semibold))
             .foregroundStyle(color)
     }
 }
@@ -30,8 +29,8 @@ struct StatusPill: View {
     var color: Color = ReplayTheme.signal
 
     var body: some View {
-        Label(text.uppercased(), systemImage: systemImage)
-            .font(.caption2.monospaced().weight(.bold))
+        Label(text, systemImage: systemImage)
+            .font(.caption.weight(.semibold))
             .foregroundStyle(color)
             .padding(.horizontal, 10)
             .padding(.vertical, 7)

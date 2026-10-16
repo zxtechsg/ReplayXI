@@ -102,6 +102,15 @@ enum ReplayStadiumEnvironment {
     /// floor is a plain backdrop below Y=0, not turf or a physical play surface.
     static func makeSkyRoot() -> Entity { templates.sky.clone(recursive: true) }
 
+    /// Seated POV can put the virtual pitch below the room origin. The sky
+    /// remains room-fixed, but its opaque floor must stay below that pitch.
+    static func placeBackdropBelowPitch(in sky: Entity, pitchHeight: Float) {
+        guard pitchHeight.isFinite,
+              let floor = sky.children.first(where: { $0.name == "local-backdrop-floor" }) else { return }
+        let offset = min(0, pitchHeight)
+        if floor.position.y != offset { floor.position.y = offset }
+    }
+
     /// Metres, Y-up, centred on the existing 68 × 105m pitch. No field, goals,
     /// collision, input or physics components. Clone visibility is independent.
     /// Keep full-sized around the wearer for tabletop; align with the match

@@ -5,6 +5,7 @@ struct ReplayDashboardView: View {
     @Environment(LocalPitchAnchorCoordinator.self) private var sharedSpace
     @Environment(ReplayConversionPreviewSession.self) private var comparisonSession
     @Environment(ReplayAnnotationEntrySession.self) private var annotationEntry: ReplayAnnotationEntrySession?
+    @Environment(ReplayLaunchSession.self) private var launchSession: ReplayLaunchSession?
     @Environment(\.openImmersiveSpace) private var openImmersiveSpace
     @Environment(\.dismissWindow) private var dismissWindow
     @Environment(\.openWindow) private var openWindow
@@ -30,18 +31,7 @@ struct ReplayDashboardView: View {
             RoomRail(openRoom: openRoom)
                 .frame(width: 278)
         }
-        .background {
-            ZStack {
-                Color.black.opacity(0.72)
-                RadialGradient(
-                    colors: [ReplayTheme.pitch.opacity(0.48), .clear],
-                    center: .topTrailing,
-                    startRadius: 20,
-                    endRadius: 760
-                )
-            }
-            .ignoresSafeArea()
-        }
+        .background(ReplayTheme.pitch.opacity(0.04))
         .preferredColorScheme(.dark)
         // Keep a second gesture from starting while presentation is in flight.
         // An already-open room remains interactive if this window is reopened.
@@ -64,7 +54,7 @@ struct ReplayDashboardView: View {
         }
         .task {
             #if DEBUG
-            let arguments = ProcessInfo.processInfo.arguments
+            guard let arguments = launchSession?.consumeArguments(for: "dashboard") else { return }
             let scenarioArguments = [
                 "--replayxi-eleven-eyes": "eleven-eyes",
                 "--replayxi-coach-focus": "everyone-with-seven",
@@ -123,10 +113,10 @@ struct ReplayDashboardView: View {
                 openComparison()
             }
             if arguments.contains("--replayxi-annotate-autostart") {
-                try? await Task.sleep(for: .milliseconds(750))
+                do { try await Task.sleep(for: .milliseconds(750)) } catch { return }
                 openAnnotations()
             } else if arguments.contains("--replayxi-autostart") {
-                try? await Task.sleep(for: .milliseconds(750))
+                do { try await Task.sleep(for: .milliseconds(750)) } catch { return }
                 openRoom()
             }
             #endif
@@ -158,6 +148,7 @@ struct ReplayDashboardView: View {
 
 private struct ScenarioRail: View {
     @Environment(ReplayStore.self) private var store
+    @Environment(ReplayLaunchSession.self) private var launchSession: ReplayLaunchSession?
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var showsSavedReviews = false
     @State private var showsExercises = true
@@ -273,7 +264,7 @@ private struct ScenarioRail: View {
         }
         .task {
             #if DEBUG
-            let arguments = ProcessInfo.processInfo.arguments
+            guard let arguments = launchSession?.consumeArguments(for: "saved-review-sheet") else { return }
             if arguments.contains("--replayxi-saved-reviews") {
                 if store.savedReviews.isEmpty { store.saveReview(named: "Right-wing return") }
                 showsSavedReviews = !arguments.contains("--replayxi-autostart")
@@ -391,8 +382,7 @@ private struct ScenarioWorkspace: View {
                             ? "RECONSTRUCTION  /  \(scenario.matchContext)"
                             : "DEMO \(scenario.kind.number)  /  \(scenario.matchContext)")
                         Text(scenario.title)
-                            .font(.system(size: 38, weight: .black, design: .rounded))
-                            .tracking(-1.0)
+                            .font(.largeTitle.weight(.semibold))
                         if let reference = ReplayReferenceLibrary.reference(for: scenario.id) {
                             ReplayVideoReferenceButton(reference: reference)
                         }

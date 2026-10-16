@@ -141,8 +141,7 @@ final class PlaybackViewHUDTextMetricsTests: XCTestCase {
         let caption = font(.caption1, weight: .black)
         let camera = font(.subheadline, weight: .bold)
         let modeTitle = font(.subheadline, weight: .black)
-        let eyebrow = UIFont.monospacedSystemFont(ofSize: UIFont.preferredFont(
-            forTextStyle: .caption2, compatibleWith: traits).pointSize, weight: .black)
+        let eyebrow = font(.caption1, weight: .semibold)
         let layout = PlaybackViewHUDLayout.resolve(preset: .standard,
             usesAccessibilityText: category.isAccessibilityCategory)
         let symbolLayout = PlaybackViewHUDSymbolLayout.resolve(
@@ -177,7 +176,7 @@ final class PlaybackViewHUDTextMetricsTests: XCTestCase {
             category: category.rawValue, innerWidth: Double(layout.attachmentWidth) - 22,
             headerSymbols: modes + chevrons, badgeSymbols: badges,
             maximumModeTitleWidth: viewModes.map { textWidth($0.title, font: modeTitle) }.max() ?? 0,
-            eyebrowUnwrappedWidth: textWidth("VIEW & OVERLAYS", font: eyebrow, tracking: 1.4),
+            eyebrowUnwrappedWidth: textWidth("View & Overlays", font: eyebrow, tracking: 0),
             cameraMinimumTextRowWidth: ["POV", "Tactical", "Touchline"].reduce(12.0) {
                 $0 + textWidth($1, font: camera) * 0.72
             },

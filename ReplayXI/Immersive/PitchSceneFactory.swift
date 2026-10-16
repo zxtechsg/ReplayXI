@@ -1031,6 +1031,10 @@ enum PitchSceneFactory {
             firstPersonDetailedIDList.append(resolvedRagdollCue.playerID)
         }
         let firstPersonDetailedIDs = Set(firstPersonDetailedIDList)
+        let crownPlayerIDs: Set<String>? = viewMode == .firstPerson
+            ? Set(firstPersonVisibleIDs).union(marks.compactMap {
+                $0.kind == .playerLabel ? $0.playerID : nil
+            }) : nil
         let preferredImportedAthleteID: String? = if viewMode == .firstPerson {
             // The selected track is the wearer's translated camera origin and
             // must stay visually hidden. Spend the one imported-rig budget on
@@ -1250,7 +1254,7 @@ enum PitchSceneFactory {
                         SkinnedAthleteVariantKey(playerID: player.id, detail: previous.detail)
                     )
                 }
-                if needsDetailedRig,
+                if needsDetailedRig, !ReplayTripoAthleteProvider.isPrewarmed,
                    directChild(named: "full-rig", of: entity) == nil,
                    let athlete = makeDetailedRig(for: player) {
                     athlete.root.name = "full-rig"
@@ -1373,6 +1377,16 @@ enum PitchSceneFactory {
                     usesNewSkin = false
                 }
                 let usesImportedAthlete = usesLegacySkin || usesNewSkin
+                // A successful Tripo skin supplies its own posed geometry.
+                // Build the procedural fallback only if it is actually needed
+                // for a failed skin or an active impact's query body.
+                if needsDetailedRig, (!usesImportedAthlete || impactSample != nil),
+                   directChild(named: "full-rig", of: entity) == nil,
+                   let athlete = makeDetailedRig(for: player) {
+                    athlete.root.name = "full-rig"
+                    entity.addChild(athlete.root)
+                    sceneState?.retainAthleteBinding(athlete.joints)
+                }
                 // Player POV retains only its capped procedural neighbours;
                 // the wearer uses the single headless imported skin above.
                 // Other views keep the default rig plus the current selection,
@@ -1447,7 +1461,8 @@ enum PitchSceneFactory {
                         goalkeeperReadiness: keeperReadiness
                     )
                 }
-                if entity.isEnabled && !hidesHeadMountedAvatar {
+                if entity.isEnabled && !hidesHeadMountedAvatar,
+                   crownPlayerIDs?.contains(player.id) ?? true {
                     let crown: Float?
                     if usesNewSkin, let skin = sceneState?.skinnedAthletes[player.id] {
                         crown = skin.headMaximumYInPlayerLocalSpace()
@@ -1746,7 +1761,7 @@ enum PitchSceneFactory {
             showsIdeal: showsIdealShape,
             sceneState: sceneState
         )
-        let showsFullField = viewMode == .tacticalTable || viewMode == .firstPerson
+        let showsFullField = viewMode != .positional
         if let pitch = directChild(named: "pitch", of: root) {
             pitch.isEnabled = viewMode != .positional
             directChild(named: "tactical-board-rim", of: pitch)?.isEnabled =

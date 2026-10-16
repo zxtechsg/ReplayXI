@@ -2,8 +2,7 @@ import RealityKit
 import XCTest
 @testable import ReplayXI
 
-/// Visibility policy, not a pixel/rendering test: touchline intentionally keeps
-/// field markings without the turf surface used by tactical and Player POV.
+/// Every match review view keeps turf. Physical positioning uses local markers.
 @MainActor
 final class ReplayPitchVisibility154Tests: XCTestCase {
     func testPreparedPitchVisibilityAcrossAllModesPreservesSubtree154() throws {
@@ -45,7 +44,7 @@ final class ReplayPitchVisibility154Tests: XCTestCase {
                 perspectiveID: scenario.defaultPerspectiveID, marks: scenario.coachMarks,
                 showsLaneLens: false, isDrawing: false, positionalOriginTransform: nil)
             let context = "Prepared pitch / \(mode.rawValue)"
-            let hasTurf = mode == .tacticalTable || mode == .firstPerson
+            let hasTurf = mode != .positional
             let hasPitch = mode != .positional
             XCTAssertTrue(root.isEnabled, context)
             XCTAssertEqual(pitch.isEnabled, hasPitch, context)

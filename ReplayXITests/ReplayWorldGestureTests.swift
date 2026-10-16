@@ -33,6 +33,52 @@ final class ReplayWorldGestureTests: XCTestCase {
             PlayerPose(position: .zero, facingDegrees: .nan)), .zero)
     }
 
+    func testPOVEntryMapsThePlayerEyeToTheTranslatedViewerInsteadOfRoomOrigin() {
+        let captured = SIMD2<Float>(2.3, -1.7)
+        let reference = ReplayPOVReference(scenarioID: "replay", playerID: "winger",
+            rootYaw: 0.6, rootHeight: -0.7, roomXZ: captured)
+        let rotation = simd_quatf(angle: reference.rootYaw, axis: [0, 1, 0])
+        for (position, facing): (PitchPoint, Float) in [
+            (.init(x: 3, z: 4), 0), (.init(x: -7, z: 12), 90), (.init(x: 5, z: -2), 180)
+        ] {
+            let pose = PlayerPose(position: position, facingDegrees: facing)
+            let worldEye = rotation.act(ReplayPOVReference.playerEyePoint(pose)) + reference.rootPosition(for: pose)
+            XCTAssertLessThan(simd_distance(worldEye, [captured.x, -0.7, captured.y]), 0.000_01)
+        }
+        // Moving after entry must leave this checkpoint alone. A new player
+        // entry can independently capture the viewer's new room position.
+        let pose = PlayerPose(position: .zero, facingDegrees: 25)
+        let originalPosition = reference.rootPosition(for: pose)
+        let movedViewer = Transform(translation: [4.3, 1.1, -0.7]).matrix
+        let next = ReplayPOVReference(scenarioID: "replay", playerID: "teammate",
+            rootYaw: reference.rootYaw, rootHeight: reference.rootHeight,
+            roomXZ: ReplayPOVReference.roomXZ(from: movedViewer)!)
+        XCTAssertEqual(reference.rootPosition(for: pose), originalPosition)
+        XCTAssertLessThan(simd_distance(next.rootPosition(for: pose) - originalPosition, [2, 0, 1]), 0.000_01)
+    }
+
+    func testPOVRoomPositionRejectsInvalidSamplesAndKeepsLegacyOriginDefault() {
+        XCTAssertNil(ReplayPOVReference.roomXZ(from: nil))
+        for value: Float in [.nan, .infinity, -.infinity] {
+            var transform = matrix_identity_float4x4
+            transform.columns.3.x = value
+            XCTAssertNil(ReplayPOVReference.roomXZ(from: transform))
+            transform = matrix_identity_float4x4
+            transform.columns.3.z = value
+            XCTAssertNil(ReplayPOVReference.roomXZ(from: transform))
+            XCTAssertEqual(ReplayPOVReference(scenarioID: "replay", playerID: "winger",
+                rootYaw: 0, roomXZ: [value, 0]).roomXZ, .zero)
+        }
+        let fallback = Transform(translation: [-2, 1.5, 3]).matrix
+        let captured = ReplayPOVReference.roomXZ(from: nil) ?? ReplayPOVReference.roomXZ(from: fallback)
+        XCTAssertEqual(captured, SIMD2<Float>(-2, 3))
+        let legacy = ReplayPOVReference(scenarioID: "replay", playerID: "winger", rootYaw: 0.3)
+        let pose = PlayerPose(position: .init(x: 2, z: 5), facingDegrees: 40)
+        XCTAssertEqual(legacy.roomXZ, .zero)
+        XCTAssertLessThan(simd_distance(legacy.rootPosition(for: pose),
+            -simd_quatf(angle: 0.3, axis: [0, 1, 0]).act(ReplayPOVReference.playerEyePoint(pose))), 0.000_01)
+    }
+
     func testPOVReferenceFacesCurrentPresentedGaze() {
         let yaw = ReplayPOVReference.rootYaw(
             deviceYaw: 0.4, playerFacingDegrees: 90,
@@ -152,7 +198,9 @@ final class ReplayWorldGestureTests: XCTestCase {
             "ReplayXI/Immersive/FootballImmersiveView.swift"), encoding: .utf8)
         XCTAssertEqual(view.components(separatedBy: "worldTracking.deviceHeight()").count - 1, 1)
         XCTAssertTrue(view.contains("povReference?.playerID == player.id { return }"))
-        XCTAssertTrue(view.contains("+ SIMD3<Float>(0, povReference.rootHeight, 0)"))
+        XCTAssertTrue(view.contains("root.position = povReference.rootPosition(for: playerPose)"))
+        XCTAssertEqual(view.components(separatedBy: "let trackedTransform = worldTracking.deviceTransform()").count - 1, 1)
+        XCTAssertTrue(view.contains("?? ReplayPOVReference.roomXZ(from: fallbackTransform) ?? .zero"))
         XCTAssertTrue(view.contains("renderedEyeHeight: renderedEntry?.eyeHeight"))
         XCTAssertTrue(view.contains("skin.headMaximumYInPlayerLocalSpace()"))
         XCTAssertTrue(view.contains("ReplayPOVReference.safeEyeHeight("))

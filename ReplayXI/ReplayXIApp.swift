@@ -8,6 +8,7 @@ struct ReplayXIApp: App {
     @State private var comparisonSession = ReplayConversionPreviewSession()
     @State private var annotationEntry = ReplayAnnotationEntrySession()
     @State private var macCoachService: ReplayXILocalCoachService
+    @State private var launchSession: ReplayLaunchSession
     @AppStorage(ReplayEnvironmentMode.storageKey) private var environmentModeRawValue =
         ReplayEnvironmentMode.defaultSelection.rawValue
 
@@ -29,16 +30,13 @@ struct ReplayXIApp: App {
     init() {
         // Test hosts and scripted demos never touch production saves. A normal
         // launch restores the user's local session and enables durable saves.
-        let isTestHost = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
-            || ProcessInfo.processInfo.environment["XCTestBundlePath"] != nil
-            || NSClassFromString("XCTestCase") != nil
-        let hasDemoRoute = ProcessInfo.processInfo.arguments.contains { $0.hasPrefix("--replayxi-") }
+        let launch = ReplayLaunchConfiguration.current
         let scenarios = DemoScenarios.catalogue
-        let library = isTestHost || hasDemoRoute
+        let library = launch.usesTransientReviews
             ? ReplayReviewLibrary(scenarios: scenarios)
             : ReplayReviewLibrary.persistent(scenarios: scenarios)
         let store = ReplayStore(scenarios: scenarios, reviewLibrary: library)
-        if !isTestHost && !hasDemoRoute { store.restoreAutosavedReview() }
+        if !launch.usesTransientReviews { store.restoreAutosavedReview() }
         store.prepareForLocalExperience()
         let sharedSpace = LocalPitchAnchorCoordinator()
         sharedSpace.onSelectedAnchorRemoved = { [weak store] anchorID in
@@ -50,6 +48,7 @@ struct ReplayXIApp: App {
         _store = State(initialValue: store)
         _sharedSpace = State(initialValue: sharedSpace)
         _macCoachService = State(initialValue: ReplayXILocalCoachService(store: store))
+        _launchSession = State(initialValue: ReplayLaunchSession(configuration: launch))
     }
 
     var body: some Scene {
@@ -62,10 +61,32 @@ struct ReplayXIApp: App {
             .environment(sharedSpace)
             .environment(comparisonSession)
             .environment(annotationEntry)
+            .environment(launchSession)
+            // Outside the dashboard's transition lock, so Cancel remains
+            // reachable while resource preparation disables navigation.
+            .overlay {
+                if store.isOpeningImmersive {
+                    VStack(spacing: 16) {
+                        ProgressView().controlSize(.large)
+                        Text(store.statusMessage)
+                            .font(.headline)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button("Cancel") { ReplayRoomLauncher.cancelPendingOpen(for: store) }
+                            .buttonStyle(.bordered)
+                            .disabled(!ReplayRoomLauncher.canCancelPendingOpen(for: store))
+                            .accessibilityLabel("Cancel room preparation")
+                    }
+                    .padding(28)
+                    .frame(width: 360)
+                    .glassBackgroundEffect(in: RoundedRectangle(cornerRadius: 24))
+                }
+            }
         }
         .defaultSize(width: 1_380, height: 820)
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { store.flushReviewAutosave() }
+            if phase == .background { ReplayRoomLauncher.cancelPendingOpen(for: store) }
         }
 
         WindowGroup(id: "ReplayVideoComparison", for: String.self) { _ in

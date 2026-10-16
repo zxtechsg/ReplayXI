@@ -4,135 +4,182 @@ import SwiftUI
 /// One entry path keeps cancellation, physics validation and save handling equal.
 @MainActor
 enum ReplayRoomLauncher {
-    static func prepareVisuals(for scenarios: [ReplayScenario]) throws {
-        ReplayStadiumEnvironment.prewarm()
-        // The supplied bowl is optional; missing or changed scenery keeps the
-        // low-cost local fallback without blocking replay or annotations.
-        _ = try? ReplayStadiumAssetProvider.prewarm()
-        // Meshes and geometric shirt digits are finite and shared.
-        // Warm them before RealityView starts its frame loop so the
-        // first close player or impact cue cannot hitch playback.
-        try ReplayAthleteFactory.prewarm(
-            for: scenarios.flatMap(\.players),
-            lods: [.near, .far]
-        )
-        // An explicit developer opt-in may admit one hash-locked CC0
-        // skinned athlete for profiling. The pilot is fail-soft and
-        // never blocks the room. It remains separate from the licensed
-        // Rocketbox body and the procedural football-action fallback.
-        _ = try? ReplayImportedAthleteProvider.prewarm()
-        // Admit the new FBX-derived players only as a complete, hash-checked
-        // near/low set. Missing or incompatible assets retain the old renderer.
-        do {
-            try ReplayTripoAthleteProvider.prewarm()
-        } catch {
-            #if DEBUG
-            print("Replay XI Tripo players unavailable; using existing players: \(error)")
-            #endif
-        }
-        if !ReplayTripoAthleteProvider.isPrewarmed {
-            do {
-                try ReplaySkinnedAthleteProvider.prewarm()
-                try ReplaySkinnedAthleteProvider.prewarmLowDetail()
-            } catch {
-                #if DEBUG
-                print("Replay XI skinned-player preparation failed; using standard rig: \(error)")
-                #endif
+    enum OpenResult: Equatable { case opened, cancelled, failed }
+    private enum PreparationFailure: Error { case players, ball }
+    private struct PendingOpen {
+        let requestID: UUID
+        let task: Task<Void, Never>
+        var isPreparing = true
+    }
+    private static var pendingOpens: [ObjectIdentifier: PendingOpen] = [:]
+    static func prepareVisuals(
+        for scenarios: [ReplayScenario],
+        shouldContinue: () -> Bool = { true },
+        progress: (String) -> Void = { _ in }
+    ) async throws {
+        try await ReplayVisualPreparation.run(shouldContinue: shouldContinue, progress: progress) { step in
+            switch step {
+            case .environment: ReplayStadiumEnvironment.prewarm()
+            case .stadium: prepareOptional("stadium") { try ReplayStadiumAssetProvider.prewarm() }
+            case .athleteMeshes:
+                // Keep fallback/impact meshes ready, but only this scenario's
+                // shirt numbers and palettes. No per-player rigs are built.
+                try ReplayAthleteFactory.prewarm(
+                    for: scenarios.flatMap(\.players),
+                    lods: [.near, .far]
+                )
+            case .importedPilot: prepareOptional("imported pilot") { _ = try ReplayImportedAthleteProvider.prewarm() }
+            case .tripoPlayers:
+                prepareOptional("Tripo players") { try ReplayTripoAthleteProvider.prewarm() }
+            case .fallbackPlayers:
+                if !ReplayTripoAthleteProvider.isPrewarmed {
+                    prepareOptional("fallback players") {
+                        try ReplaySkinnedAthleteProvider.prewarm()
+                        try ReplaySkinnedAthleteProvider.prewarmLowDetail()
+                    }
+                }
+            case .farHeads: prepareOptional("distant heads") { try ReplayFarAthleteHeadProvider.prewarm() }
+            case .articulatedBodies:
+                prepareOptional("articulated bodies") { try ReplayArticulatedFarProvider.prewarm() }
+            case .farKits: prepareOptional("distant kits") { try ReplayArticulatedFarKitProvider.prewarm() }
+            case .ball: prepareOptional("ball") { try ReplayStrategyBallProvider.prewarm() }
+            case .pitch: prepareOptional("pitch") { try ReplayStrategyPitchProvider.prewarm() }
             }
         }
-        // Distant players share one static face and the existing skin
-        // palettes. No extra skeleton or per-frame resource load.
-        do {
-            try ReplayFarAthleteHeadProvider.prewarm()
-        } catch {
+    }
+
+    private static func prepareOptional(_ name: String, _ prepare: () throws -> Void) {
+        do { try prepare() } catch {
             #if DEBUG
-            print("Replay XI distant-player faces unavailable; keeping standard heads: \(error)")
-            #endif
-        }
-        // Original Blender anatomy bends at knees/elbows while
-        // retaining the far family's seven-model budget. Preparation
-        // is explicit; a failed asset keeps the established fallback.
-        do {
-            try ReplayArticulatedFarProvider.prewarm()
-        } catch {
-            #if DEBUG
-            print("Replay XI articulated players unavailable; keeping standard bodies: \(error)")
-            #endif
-        }
-        // Optional original kit maps share six tiny textures across
-        // the whole squad. Missing maps retain the solid team colours.
-        _ = try? ReplayArticulatedFarKitProvider.prewarm()
-        // Optional visual admission; a missing/corrupt asset retains the
-        // procedural ball without blocking playback or loading per frame.
-        do {
-            try ReplayStrategyBallProvider.prewarm()
-        } catch {
-            #if DEBUG
-            print("Replay XI Blender ball unavailable; using standard ball: \(error)")
-            #endif
-        }
-        do {
-            try ReplayStrategyPitchProvider.prewarm()
-        } catch {
-            #if DEBUG
-            print("Replay XI Blender pitch unavailable; using standard pitch: \(error)")
+            print("Replay XI \(name) unavailable; keeping fallback: \(error)")
             #endif
         }
     }
 
-    static func open(store: ReplayStore, openImmersiveSpace: OpenImmersiveSpaceAction,
-                     dismissWindow: DismissWindowAction,
-                     annotationEntry: ReplayAnnotationEntrySession? = nil) {
+    static func open(
+        store: ReplayStore, openImmersiveSpace: OpenImmersiveSpaceAction,
+        dismissWindow: DismissWindowAction,
+        annotationEntry: ReplayAnnotationEntrySession? = nil
+    ) {
+        let scenario = store.selectedScenario
+        begin(
+            store: store, annotationEntry: annotationEntry,
+            prepare: { requestID in
+                do {
+                    try await prepareVisuals(
+                        for: [scenario],
+                        shouldContinue: {
+                            store.roomPresentation.isOpeningRequest(requestID)
+                                && store.selectedScenarioID == scenario.id
+                        }, progress: { store.statusMessage = $0 })
+                } catch is CancellationError { throw CancellationError() } catch { throw PreparationFailure.players }
+                try Task.checkCancellation()
+                if FootballReferenceScenarios.contains(scenario) {
+                    store.statusMessage = "Preparing ball physics…"
+                    do {
+                        let recording = try await ReplayNativeBallPhysics.prewarm(
+                            track: scenario.ball,
+                            players: scenario.players, plannedTouches: FootballReferenceScenarios.touches(for: scenario)
+                        )
+                        guard NativeReplaySceneAdmission.isUsable(recording) else {
+                            throw PreparationFailure.ball
+                        }
+                    } catch is CancellationError { throw CancellationError() } catch { throw PreparationFailure.ball }
+                }
+            },
+            openRoom: { requestID in
+                switch await openImmersiveSpace(id: "ReplayRoom", value: requestID) {
+                case .opened: .opened
+                case .userCancelled: .cancelled
+                case .error: .failed
+                @unknown default: .failed
+                }
+            }, didOpen: { dismissWindow(id: "ReplayDashboard") })
+    }
+
+    /// Only pending preparation is cancellable here. Once the system is
+    /// presenting its room, its result/appearance callbacks retain ownership.
+    static func canCancelPendingOpen(for store: ReplayStore) -> Bool {
+        guard let pending = pendingOpens[ObjectIdentifier(store)] else { return false }
+        return pending.isPreparing && store.roomPresentation.isOpeningRequest(pending.requestID)
+    }
+
+    @discardableResult
+    static func cancelPendingOpen(for store: ReplayStore) -> Bool {
+        let key = ObjectIdentifier(store)
+        guard canCancelPendingOpen(for: store), let pending = pendingOpens[key]
+        else { return false }
+        pending.task.cancel()
+        guard store.completeImmersiveOpen(pending.requestID, opened: false) else { return false }
+        store.statusMessage = "Opening cancelled"
+        return true
+    }
+
+    /// Closure-based system boundary also lets lifecycle tests prove stale
+    /// completions cannot reopen a room or dismiss a newer dashboard.
+    @discardableResult
+    static func begin(
+        store: ReplayStore, annotationEntry: ReplayAnnotationEntrySession? = nil,
+        prepare: @escaping @MainActor (UUID) async throws -> Void,
+        openRoom: @escaping @MainActor (UUID) async -> OpenResult,
+        didOpen didOpenCallback: @escaping @MainActor () -> Void
+    ) -> Task<Void, Never>? {
         if annotationEntry != nil, let reason = ReplayAnnotationEntryPolicy.blockReason(in: store) {
             store.statusMessage = reason
-            return
+            return nil
         }
-        guard let requestID = store.beginImmersiveOpen() else { return }
-        annotationEntry?.request(roomID: requestID, scenarioID: store.selectedScenarioID)
-        Task {
+        guard let requestID = store.beginImmersiveOpen() else { return nil }
+        let key = ObjectIdentifier(store)
+        let scenarioID = store.selectedScenarioID
+        annotationEntry?.request(roomID: requestID, scenarioID: scenarioID)
+        let task = Task { @MainActor in
             var didOpen = false
             defer {
                 if !didOpen { annotationEntry?.cancel(roomID: requestID) }
+                if pendingOpens[key]?.requestID == requestID { pendingOpens[key] = nil }
             }
             do {
-                try prepareVisuals(for: store.scenarios)
-            } catch {
-                guard store.completeImmersiveOpen(requestID, opened: false) else { return }
-                store.statusMessage = "Player renderer could not prepare. Try opening the room again."
-                return
-            }
-            await Task.yield()
-            guard store.roomPresentation.isOpeningRequest(requestID) else { return }
-            // Prepare only the selected study. The room has its own cancellable
-            // admission gate for later switches and restored reviews. Older
-            // demonstrations retain their original authored paths.
-            store.statusMessage = "Preparing ball physics…"
-            let toPrepare = FootballReferenceScenarios.contains(store.selectedScenario)
-                ? [store.selectedScenario] : []
-            do {
-                for scenario in toPrepare {
-                    guard store.roomPresentation.isOpeningRequest(requestID) else { return }
-                    let recording = try await ReplayNativeBallPhysics.prewarm(track: scenario.ball, players: scenario.players,
-                        plannedTouches: FootballReferenceScenarios.touches(for: scenario))
-                    guard recording.missedTouchCount == 0 else {
-                        throw ReplayNativeBallPhysics.Failure.invalidInput
-                    }
+                try Task.checkCancellation()
+                try await prepare(requestID)
+                try Task.checkCancellation()
+            } catch is CancellationError {
+                if store.completeImmersiveOpen(requestID, opened: false) {
+                    store.statusMessage = "Opening cancelled"
                 }
+                return
             } catch {
                 guard store.completeImmersiveOpen(requestID, opened: false) else { return }
-                store.statusMessage = "Ball physics could not prepare. Please try again."
+                switch error {
+                case PreparationFailure.players:
+                    store.statusMessage = "Player renderer could not prepare. Try opening the room again."
+                case PreparationFailure.ball:
+                    store.statusMessage = "Ball physics could not prepare. Please try again."
+                default:
+                    store.statusMessage = "Replay could not prepare. Please try again."
+                }
                 return
             }
             guard store.roomPresentation.isOpeningRequest(requestID) else { return }
+            guard store.selectedScenarioID == scenarioID else {
+                _ = store.completeImmersiveOpen(requestID, opened: false)
+                store.statusMessage = "Replay changed. Open the room again."
+                return
+            }
+            pendingOpens[key]?.isPreparing = false
             store.statusMessage = "Opening spatial replay…"
-            let result = await openImmersiveSpace(id: "ReplayRoom", value: requestID)
+            let result = await openRoom(requestID)
             guard store.completeImmersiveOpen(requestID, opened: result == .opened) else { return }
             if result == .opened {
                 didOpen = true
-                dismissWindow(id: "ReplayDashboard")
+                didOpenCallback()
             } else {
-                store.statusMessage = "The immersive room did not open. Try again."
+                store.statusMessage =
+                    result == .cancelled
+                    ? "Opening cancelled"
+                    : "The immersive room did not open. Try again."
             }
         }
+        pendingOpens[key] = PendingOpen(requestID: requestID, task: task)
+        return task
     }
 }

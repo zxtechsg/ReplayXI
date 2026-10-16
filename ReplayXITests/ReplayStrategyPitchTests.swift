@@ -24,6 +24,10 @@ final class ReplayStrategyPitchTests: XCTestCase {
             let stable = try XCTUnwrap(material as? UnlitMaterial)
             XCTAssertNotNil(stable.color.texture, "Both original turf tiles must survive USDZ packaging")
         }
+        let markings = try XCTUnwrap(pitch.findEntity(named: "pitch-markings-and-goals") as? ModelEntity)
+        XCTAssertTrue(markings.model?.materials.first is UnlitMaterial,
+            "Cold tactical entry must not depend on an environment light to show white lines")
+        XCTAssertTrue(markings.model?.materials.last is PhysicallyBasedMaterial)
     }
 
     func testClonesKeepIndependentVisibilityAndFactoryUsesPreparedAsset() throws {

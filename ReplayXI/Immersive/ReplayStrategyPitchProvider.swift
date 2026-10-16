@@ -57,8 +57,16 @@ enum ReplayStrategyPitchProvider {
                     }
                     var stable = UnlitMaterial(color: .white, applyPostProcessToneMap: false)
                     stable.color = .init(tint: .white, texture: texture)
+                    stable.faceCulling = .none
                     return stable
                 }
+                model.model = component
+            } else if model.name == "pitch-markings-and-goals", var component = model.model {
+                // Initial tactical entry never changes contrast mode. Give it
+                // legible lines immediately, even without stadium lighting.
+                component.materials[0] = UnlitMaterial(
+                    color: UIColor(red: 0.94, green: 0.93, blue: 0.82, alpha: 1),
+                    applyPostProcessToneMap: false)
                 model.model = component
             }
             root.addChild(model)
