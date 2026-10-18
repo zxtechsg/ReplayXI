@@ -590,6 +590,7 @@ struct FootballImmersiveView: View {
         for id in PlaybackAttachmentPlacement.attachmentIDs {
             if let entity = attachments.entity(for: id) {
                 entity.name = id
+                PlaybackAttachmentPlacement.faceViewer(entity)
                 if entity.parent !== workspace {
                     workspace.addChild(entity)
                 }
@@ -3101,7 +3102,7 @@ private struct ImmersiveControlDeck: View {
                 HStack(spacing: 16) {
                     VStack(alignment: .leading, spacing: 3) {
                         Eyebrow(text: "Workspace", color: ReplayTheme.orange)
-                        Text("Fixed in the room")
+                        Text("Stays in place · faces you")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     HStack(spacing: 6) {

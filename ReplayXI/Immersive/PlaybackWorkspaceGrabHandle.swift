@@ -22,6 +22,7 @@ enum PlaybackWorkspaceGrabHandle {
         handle.components.set(CollisionComponent(shapes: [.generateBox(size: size)]))
         handle.components.set(InputTargetComponent())
         handle.components.set(HoverEffectComponent())
+        PlaybackAttachmentPlacement.faceViewer(handle)
 
         let text = ModelEntity(
             mesh: .generateText("Move", extrusionDepth: 0.0002,
@@ -72,7 +73,7 @@ enum PlaybackWorkspaceGrabHandle {
         accessibility.isAccessibilityElement = true
         accessibility.label = "Move controls"
         accessibility.value = isAvailable
-            ? "Pinch and drag. Controls stay fixed in the room after release."
+            ? "Pinch and drag towards you or away. Cards stay in place after release and turn to face you."
             : "Finish or cancel the current gesture first."
         handle.components.set(accessibility)
     }
