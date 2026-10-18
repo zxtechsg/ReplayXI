@@ -12,7 +12,7 @@ enum CoachMarkEndpoint: Equatable, Sendable {
 /// The vertical part of a selected spatial instruction that should move.
 /// `both` lifts the complete stroke atomically, avoiding two SharePlay packets
 /// and preserving a level run/pass when the coach wants a raised layer.
-enum CoachMarkElevationTarget: Equatable, Sendable {
+enum CoachMarkElevationTarget: Hashable, Sendable {
     case start
     case end
     case both
@@ -1120,7 +1120,7 @@ final class ReplayStore {
     @discardableResult
     func setMacCoachMarkPose(id: UUID, start: PitchPoint, end: PitchPoint,
                             startElevation: Float, endElevation: Float,
-                            controlPoint: SIMD3<Float>? = nil) -> Bool {
+                            controlPoint: SIMD3<Float>? = nil, recordMotion: Bool = false) -> Bool {
         guard allowsAnnotationAuthoring(), allowsMutationOutsideEndpointPreview(),
               pendingAnnotationTimingEditID == nil, !hasActiveTimelineScrub, !isDrawing, localRole == .coach,
               !selectedScenarioAuthoredCoachMarkIDs.contains(id),
@@ -1128,11 +1128,16 @@ final class ReplayStore {
               marks[index].kind.requiresTwoPitchPoints else { return false }
         let mark = marks[index]
         guard allowsCoachMarkPoseRecording(mark) else { return false }
-        var replacement = markReplacingGeometry(mark, start: start, end: end,
+        // One command, one Undo step. Seed the original pose before recording
+        // the first move so enabling motion never moves an earlier timestamp.
+        let records = recordMotion && !mark.followsPlayerTracks
+        let baseline = records && !mark.hasKeyframes
+            ? mark.recordingPose(at: mark.revealTime) : mark
+        var replacement = markReplacingGeometry(baseline, start: start, end: end,
             startElevation: startElevation, endElevation: endElevation, resolvingTrackOffsetsAt: playhead)
         if let controlPoint {
             guard mark.kind == .arc, Self.isValidArcControlPoint(controlPoint) else { return false }
-            replacement = markReplacingGeometry(mark, start: start, end: end,
+            replacement = markReplacingGeometry(baseline, start: start, end: end,
                 curve: replacement.resolvedCurve.settingControlPoint(controlPoint, for: replacement),
                 startElevation: startElevation, endElevation: endElevation, resolvingTrackOffsetsAt: playhead)
         }
@@ -1156,6 +1161,49 @@ final class ReplayStore {
         return setMacCoachMarkPose(id: id, start: geometry.start, end: geometry.end,
             startElevation: pose.resolvedStartElevation, endElevation: pose.resolvedEndElevation,
             controlPoint: point)
+    }
+
+    /// Attach just one handle. Keep its current offset (no jump), and leave
+    /// the other handle's player/pitch link untouched. Keys are never erased.
+    @discardableResult
+    func setCoachMarkEndpointTracking(id: UUID, endpoint: CoachMarkElevationTarget,
+                                     playerID: String?) -> Bool {
+        guard endpoint != .both, allowsAnnotationAuthoring(), allowsMutationOutsideEndpointPreview(),
+              canChangePlaybackView, !isDrawing, localRole == .coach,
+              pendingCoachMarkGeometryBaselines.isEmpty,
+              !selectedScenarioAuthoredCoachMarkIDs.contains(id),
+              let index = marks.firstIndex(where: { $0.id == id }),
+              marks[index].kind.requiresTwoPitchPoints else { return false }
+        let mark = marks[index]
+        guard !mark.hasKeyframes else {
+            statusMessage = "Keep saved poses, or freeze motion before linking a player"
+            return false
+        }
+        let player = playerID.flatMap { selectedScenario.player(id: $0) }
+        guard playerID == nil || player != nil else { return false }
+        let geometry = presentedCoachMarkGeometry(mark, at: playhead)
+        let point = endpoint == .start ? geometry.start : geometry.end
+        let anchor = player.map {
+            CoachMarkTrackAnchor(playerID: $0.id,
+                offset: Self.authoredTrackOffset(from: presentedPlayerPose(for: $0, at: playhead).position,
+                                                to: point))
+        }
+        // Freeze both fallbacks at the displayed instant, preserving the
+        // existing curve's control frame and the other endpoint's offset.
+        let replacement = CoachMark(id: mark.id, kind: mark.kind,
+            start: geometry.start, end: geometry.end,
+            startElevation: mark.startElevation, endElevation: mark.endElevation,
+            curve: mark.curve, label: mark.label, revealTime: mark.revealTime,
+            hideTime: mark.hideTime, author: mark.author,
+            startTrackAnchor: endpoint == .start ? anchor : mark.startTrackAnchor,
+            endTrackAnchor: endpoint == .end ? anchor : mark.endTrackAnchor)
+        guard replacement != mark, isValidSharedMark(replacement, for: selectedScenario) else { return false }
+        marks[index] = replacement
+        isPlaying = false
+        statusMessage = player.map { "\(endpoint == .start ? "Origin" : "End") follows #\($0.shirtNumber)" }
+            ?? "\(endpoint == .start ? "Origin" : "End") fixed to pitch"
+        emitSnapshot()
+        return true
     }
 
     private static func isValidArcControlPoint(_ point: SIMD3<Float>) -> Bool {

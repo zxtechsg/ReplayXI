@@ -2215,6 +2215,7 @@ private struct ImmersiveControlDeck: View {
     @State private var annotationActionsFeedback: AnnotationActionsFeedback?
     @State private var showsAnnotationTools = false
     @State private var showsToolsShelf = false
+    @State private var annotationTrackingEndpoint: CoachMarkElevationTarget = .start
     @Binding var selectedAnnotationID: UUID?
     @Binding var showsDecisionStrip: Bool
     @Binding var showsPlaybackAnnotations: Bool
@@ -3746,14 +3747,16 @@ private struct ImmersiveControlDeck: View {
     /// current replay instant, so choosing a player never makes the mark jump.
     private func annotationTrackingShelf(_ mark: CoachMark) -> some View {
         let color = annotationColor(for: mark.kind)
-        let isFixedToPitch = !mark.hasKeyframes && !mark.followsPlayerTracks
+        let isFixedToPitch = !mark.hasKeyframes && (annotationTrackingEndpoint == .start
+            ? mark.startTrackAnchor == nil : annotationTrackingEndpoint == .end
+            ? mark.endTrackAnchor == nil : !mark.followsPlayerTracks)
 
         return inlineShelf(color: color) {
             VStack(spacing: 8) {
                 HStack(spacing: 12) {
                     inlinePanelHeader(
                         title: "Follow player",
-                        detail: "START + END",
+                        detail: annotationTrackingEndpoint == .start ? "ORIGIN" : annotationTrackingEndpoint == .end ? "END" : "BOTH",
                         systemImage: "link",
                         color: color
                     )
@@ -3761,7 +3764,11 @@ private struct ImmersiveControlDeck: View {
                     inlineChoiceDivider
 
                     if !mark.hasKeyframes {
-                        Text("Keeps both points at their current offset from the chosen player.")
+                        Picker("Link point", selection: $annotationTrackingEndpoint) {
+                            Text("Origin").tag(CoachMarkElevationTarget.start)
+                            Text("End").tag(CoachMarkElevationTarget.end)
+                            Text("Both").tag(CoachMarkElevationTarget.both)
+                        }.pickerStyle(.segmented).frame(maxWidth: 250)
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.white.opacity(0.68))
                             .lineLimit(2)
@@ -3794,7 +3801,7 @@ private struct ImmersiveControlDeck: View {
                         .disabled(isFixedToPitch || !annotationTrackingIsEnabled(mark))
                         .accessibilityLabel("Fix annotation to pitch")
                         .accessibilityHint(store.canChangePlaybackView
-                            ? "Stops both annotation points following a player"
+                            ? "Stops the selected point or points following a player"
                             : "Finish or cancel the current gesture first")
                         .accessibilityAddTraits(isFixedToPitch ? .isSelected : [])
                     }
@@ -3886,12 +3893,16 @@ private struct ImmersiveControlDeck: View {
         .accessibilityLabel(
             "Follow \(FootballReferenceScenarios.teamTitle(player.team, in: store.selectedScenario)) number \(player.shirtNumber), \(player.role)"
         )
-        .accessibilityHint(AnnotationTrackingPolicy.playerHint(mark,
-            canChangePlaybackView: store.canChangePlaybackView))
+        .accessibilityHint(mark.hasKeyframes
+            ? AnnotationTrackingPolicy.keyframeHint : !store.canChangePlaybackView
+            ? "Finish or cancel the current gesture first"
+            : "Keeps the selected point or points at their current offset from this player")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     private func annotationTrackingPlayerID(_ mark: CoachMark) -> String? {
+        if annotationTrackingEndpoint == .start { return mark.startTrackAnchor?.playerID }
+        if annotationTrackingEndpoint == .end { return mark.endTrackAnchor?.playerID }
         guard let startID = mark.startTrackAnchor?.playerID,
               let endID = mark.endTrackAnchor?.playerID,
               startID == endID else { return nil }
@@ -3900,6 +3911,7 @@ private struct ImmersiveControlDeck: View {
 
     private func annotationTrackingSummary(_ mark: CoachMark) -> String {
         if let status = AnnotationTrackingPolicy.keyframeStatus(mark) { return status }
+        if annotationTrackingEndpoint != .both, annotationTrackingPlayerID(mark) == nil { return "PITCH FIXED" }
         guard mark.followsPlayerTracks else { return "PITCH FIXED" }
         if let playerID = annotationTrackingPlayerID(mark),
            let player = store.selectedScenario.player(id: playerID) {
@@ -3910,7 +3922,10 @@ private struct ImmersiveControlDeck: View {
 
     private func setAnnotationTracking(_ mark: CoachMark, playerID: String?) {
         guard annotationTrackingIsEnabled(mark) else { return }
-        guard store.setCoachMarkTracking(id: mark.id, playerID: playerID) else { return }
+        let applied = annotationTrackingEndpoint == .both
+            ? store.setCoachMarkTracking(id: mark.id, playerID: playerID)
+            : store.setCoachMarkEndpointTracking(id: mark.id, endpoint: annotationTrackingEndpoint, playerID: playerID)
+        guard applied else { return }
         if let playerID,
            let player = store.selectedScenario.player(id: playerID) {
             annotationConfirmation = "FOLLOWS #\(player.shirtNumber) · \(formatTime(store.playhead))"
@@ -5251,7 +5266,8 @@ private struct ImmersiveControlDeck: View {
         guard mark.followsPlayerTracks else { return "Fixed to pitch" }
         if let playerID = annotationTrackingPlayerID(mark),
            let player = store.selectedScenario.player(id: playerID) {
-            return "Both points follow \(FootballReferenceScenarios.teamTitle(player.team, in: store.selectedScenario)) number \(player.shirtNumber)"
+            let target = annotationTrackingEndpoint == .start ? "Origin" : annotationTrackingEndpoint == .end ? "End" : "Both points"
+            return "\(target) follow \(FootballReferenceScenarios.teamTitle(player.team, in: store.selectedScenario)) number \(player.shirtNumber)"
         }
         return "Annotation points currently use different player tracks"
     }

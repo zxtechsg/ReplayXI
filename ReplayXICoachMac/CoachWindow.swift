@@ -23,6 +23,7 @@ struct CoachWindow: View {
     @State private var selectedKey = 0.0
     @State private var retimeKey = 0.0
     @State private var showClearConfirmation = false
+    @State private var pendingFreezeID: UUID?
     @State private var loadedMark: ReplayXIWireMark?
     @State private var loadedDraft: CoachInspectorDraft?
     @State private var inspectorConflict = false
@@ -34,6 +35,9 @@ struct CoachWindow: View {
     @State private var showShape = false
     @State private var showKeys = false
     @State private var showInspector = true
+    @AppStorage("ReplayXI.coach3DPreview") private var shows3D = true
+    @AppStorage("ReplayXI.coachRecordMotion") private var recordMotion = true
+    @State private var previewReset = 0
     @State private var pendingDrawKind: String?
     @State private var marksBeforeCreate: Set<UUID>?
     @FocusState private var timeFieldFocused: Bool
@@ -61,6 +65,21 @@ struct CoachWindow: View {
                     VStack(spacing: 10) {
                         playbackBar(state)
                         toolBar(state)
+                        if shows3D {
+                            CoachScenePreview(state: state, selectedMarkID: selectedMarkID,
+                                drawingEnabled: drawingEnabled, drawStart: drawStart,
+                                resetRevision: previewReset,
+                                select: { selectedMarkID = $0 }, onPlayer: { link.send(.init(name: "pov", playerID: $0)) },
+                                onPitchClick: pitchClicked,
+                                onPose: { mark, start, end, control in
+                                    guard state.canEdit, !inspectorConflict else { return }
+                                    link.send(.init(name: "geometry", markID: mark.id,
+                                        start: .init(x: start.x, z: start.z), end: .init(x: end.x, z: end.z),
+                                        startHeight: start.y, endHeight: end.y, controlPoint: control,
+                                        recordMotion: recordMotion))
+                                })
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                        } else {
                         PitchMap(state: state, selectedMarkID: $selectedMarkID,
                             drawKind: drawKind, drawingEnabled: drawingEnabled, drawStart: $drawStart,
                             dragStart: $dragStart, dragEnd: $dragEnd,
@@ -68,9 +87,12 @@ struct CoachWindow: View {
                             onPlayer: { link.send(.init(name: "pov", playerID: $0)) },
                             onArcControl: { mark, point in
                                 guard state.canEdit, !inspectorConflict else { return }
-                                link.send(.init(name: "arcControl", markID: mark.id,
-                                    controlPoint: .init(x: point.x, y: Float(controlHeight), z: point.z)))
+                                link.send(.init(name: "geometry", markID: mark.id, start: mark.start, end: mark.end,
+                                    startHeight: mark.startHeight, endHeight: mark.endHeight,
+                                    controlPoint: .init(x: point.x, y: Float(controlHeight), z: point.z),
+                                    recordMotion: recordMotion))
                             })
+                        }
                         timeline(state)
                     }
                     .padding(14)
@@ -104,8 +126,18 @@ struct CoachWindow: View {
             }
         }
         .toolbarRole(.editor)
+        .confirmationDialog("Freeze motion here?", isPresented: Binding(
+            get: { pendingFreezeID != nil }, set: { if !$0 { pendingFreezeID = nil } })) {
+            Button("Freeze at playhead") {
+                if let id = pendingFreezeID { link.send(.init(name: "freezeKeys", markID: id)) }
+                pendingFreezeID = nil; recordMotion = false
+            }
+        } message: { Text("Keeps the current shape and removes its saved poses. You can undo this.") }
         .onChange(of: state?.playhead, initial: true) { _, value in
             if !scrubbing, !timeFieldFocused, let value { draftTime = value }
+        }
+        .onChange(of: draftTime) { _, time in
+            if scrubbing { link.seek(to: time, final: false) }
         }
         .onChange(of: selectedMarkID, initial: true) { _, _ in loadInspector() }
         .onChange(of: timeFieldFocused) { _, focused in
@@ -329,6 +361,15 @@ struct CoachWindow: View {
                     }
                     .help("Enter an exact time in seconds, then press Return.")
                 Spacer()
+                if let mark = selectedMark {
+                    Button { jumpKey(mark, forward: false) } label: { Image(systemName: "backward.end") }
+                        .help("Previous saved pose").accessibilityLabel("Previous saved pose")
+                        .disabled(CoachWorkspace.adjacentKey(in: mark.keyframes, at: state.playhead, forward: false) == nil)
+                    Text("\(mark.keyframes.count) poses").font(.caption).foregroundStyle(.secondary)
+                    Button { jumpKey(mark, forward: true) } label: { Image(systemName: "forward.end") }
+                        .help("Next saved pose").accessibilityLabel("Next saved pose")
+                        .disabled(CoachWorkspace.adjacentKey(in: mark.keyframes, at: state.playhead, forward: true) == nil)
+                }
                 Text("\(CoachWorkspace.clock(draftTime)) / \(CoachWorkspace.clock(state.duration))")
                     .monospacedDigit().font(.callout)
             }
@@ -336,17 +377,41 @@ struct CoachWindow: View {
             Slider(value: $draftTime, in: 0...max(state.duration, 0.01)) { editing in
                 if editing { timeFieldFocused = false }
                 scrubbing = editing
-                if !editing { link.send(.init(name: "seek", time: draftTime)) }
+                if !editing { link.seek(to: draftTime, final: true) }
             }
-            CoachMarkTimeline(state: state, selectedMarkID: selectedMarkID) { mark in
-                selectedMarkID = mark.id
-                link.send(.init(name: "seek", time: mark.showAt))
-            }
+            CoachMarkTimeline(state: state, selectedMarkID: selectedMarkID, playhead: draftTime,
+                select: { selectedMarkID = $0.id }, seek: { time, final in
+                    timeFieldFocused = false; scrubbing = !final; draftTime = time
+                    if selectedMark?.keyframes.contains(where: { abs($0 - time) < 0.001 }) == true {
+                        selectedKey = time; retimeKey = time
+                    }
+                    // Preview is coalesced by onChange(draftTime). Release
+                    // flushes here even if the last pointer sample was equal.
+                    if final { link.seek(to: time, final: true) }
+                }, trim: { mark, start, end in
+                    guard !inspectorConflict, CoachWorkspace.validWindow(show: start, hide: end, duration: state.duration) else { return }
+                    link.send(.init(name: "window", markID: mark.id, showAt: start, hideAt: end))
+                })
         }
     }
 
     private func toolBar(_ state: ReplayXIWireState) -> some View {
         HStack(spacing: 7) {
+            Picker("Preview", selection: $shows3D) {
+                Text("3D").tag(true)
+                Text("2D").tag(false)
+            }.pickerStyle(.segmented).frame(width: 85)
+            if shows3D {
+                Button { previewReset += 1 } label: { Image(systemName: "viewfinder") }
+                    .help("Reset 3D camera").accessibilityLabel("Reset 3D camera")
+            }
+            if let mark = selectedMark, !mark.authored, mark.kind != "playerLabel" {
+                Toggle(isOn: $recordMotion) { Image(systemName: "diamond.fill") }
+                    .toggleStyle(.button)
+                    .help(mark.keyframes.isEmpty ? "Record moves: seek, then drag a point to save its pose" : "Motion active. Freeze here in Motion poses to return to static editing.")
+                    .accessibilityLabel("Record moves at playhead")
+                    .disabled(!mark.keyframes.isEmpty || mark.startPlayerID != nil || mark.endPlayerID != nil)
+            }
             Button {
                 drawingEnabled = false; drawStart = nil; pendingDrawKind = nil
             } label: { Image(systemName: "cursorarrow").frame(width: 22, height: 20) }
@@ -462,6 +527,14 @@ struct CoachWindow: View {
                         }
                         .disabled(mark.authored || !state.canEdit || inspectorConflict || label == mark.label)
                     }
+                    if mark.kind != "playerLabel" {
+                        endpointLink(mark, endpoint: "start", title: "Origin", state: state)
+                        endpointLink(mark, endpoint: "end", title: "End", state: state)
+                        if mark.startPlayerID != nil || mark.endPlayerID != nil {
+                            Text("Linked points follow the player. Unlink both for saved-pose motion.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
                     DisclosureGroup("3D shape", isExpanded: $showShape) {
                     VStack(alignment: .leading, spacing: 10) {
                     Text("Drag yellow ends on the pitch. Height is in metres.")
@@ -491,8 +564,10 @@ struct CoachWindow: View {
                             Text(controlHeight.formatted(.number.precision(.fractionLength(2))))
                         }
                         Button("Apply arc control") {
-                            link.send(.init(name: "arcControl", markID: mark.id,
-                                controlPoint: .init(x: control.x, y: Float(controlHeight), z: control.z)))
+                                link.send(.init(name: "geometry", markID: mark.id, start: mark.start, end: mark.end,
+                                    startHeight: mark.startHeight, endHeight: mark.endHeight,
+                                    controlPoint: .init(x: control.x, y: Float(controlHeight), z: control.z),
+                                    recordMotion: recordMotion))
                         }
                         .disabled(mark.authored || !state.canEdit || inspectorConflict)
                     }
@@ -518,7 +593,7 @@ struct CoachWindow: View {
                         }
                     }
                     if !CoachWorkspace.validWindow(show: showAt, hide: hasHide ? hideAt : nil, duration: state.duration) {
-                        Text("Hide must be after Show. Both must be inside this clip.")
+                        Text("Choose 0.5–30 seconds inside this clip, or leave Out unset.")
                             .font(.caption).foregroundStyle(.orange)
                     }
                     HStack {
@@ -531,13 +606,15 @@ struct CoachWindow: View {
                     Button("Go to start") { link.send(.init(name: "seek", time: mark.showAt)) }
                     }
                     Divider()
-                    DisclosureGroup("Motion keys · \(mark.keyframes.count)", isExpanded: $showKeys) {
+                    DisclosureGroup("Motion poses · \(mark.keyframes.count)", isExpanded: $showKeys) {
                     VStack(alignment: .leading, spacing: 8) {
-                    Text("Set a position, capture it, then repeat at another time.")
+                    Toggle("Record moves at playhead", isOn: $recordMotion)
+                        .disabled(!mark.keyframes.isEmpty || mark.startPlayerID != nil || mark.endPlayerID != nil || mark.authored)
+                    Text("Seek, then drag a point. Its pose is saved at that time. Click a diamond to return.")
                         .font(.caption).foregroundStyle(.secondary)
                     HStack {
                         Button("Capture at playhead") { link.send(.init(name: "captureKey", markID: mark.id)) }
-                        .disabled(mark.authored || !state.canEdit || inspectorConflict)
+                        .disabled(mark.authored || !state.canEdit || inspectorConflict || mark.startPlayerID != nil || mark.endPlayerID != nil)
                     }
                     ForEach(mark.keyframes, id: \.self) { time in
                         Button {
@@ -548,6 +625,8 @@ struct CoachWindow: View {
                         }
                     }
                     if !mark.keyframes.isEmpty {
+                        Button("Freeze here…") { pendingFreezeID = mark.id }
+                            .disabled(mark.authored || !state.canEdit || inspectorConflict)
                         HStack {
                             Text("Selected \(selectedKey.formatted(.number.precision(.fractionLength(2)))) s")
                             Button("Delete key") { link.send(.init(name: "deleteKey", markID: mark.id, keyframeAt: selectedKey)) }
@@ -743,7 +822,30 @@ struct CoachWindow: View {
     private func sendPose(_ mark: ReplayXIWireMark, start: ReplayXIWirePoint, end: ReplayXIWirePoint) {
         guard !inspectorConflict else { return }
         link.send(.init(name: "geometry", markID: mark.id, start: start, end: end,
-            startHeight: Float(startHeight), endHeight: Float(endHeight)))
+            startHeight: Float(startHeight), endHeight: Float(endHeight), recordMotion: recordMotion))
+    }
+
+    private func jumpKey(_ mark: ReplayXIWireMark, forward: Bool) {
+        guard let time = CoachWorkspace.adjacentKey(in: mark.keyframes, at: state?.playhead ?? 0, forward: forward) else { return }
+        selectedKey = time; retimeKey = time
+        link.seek(to: time, final: true)
+    }
+
+    private func endpointLink(_ mark: ReplayXIWireMark, endpoint: String, title: String,
+                              state: ReplayXIWireState) -> some View {
+        Picker(title, selection: Binding(get: {
+            (endpoint == "start" ? mark.startPlayerID : mark.endPlayerID) ?? ""
+        }, set: { id in
+            link.send(.init(name: "trackEndpoint", playerID: id.isEmpty ? nil : id,
+                            markID: mark.id, endpoint: endpoint))
+        })) {
+            Text("Pitch fixed").tag("")
+            ForEach(state.players) { player in
+                Text("\(player.team.capitalized) · #\(player.number) \(player.name)").tag(player.id)
+            }
+        }
+        .disabled(mark.authored || !state.canEdit || inspectorConflict || !mark.keyframes.isEmpty)
+        .help(mark.keyframes.isEmpty ? "Keep this point's current offset from a player" : "Saved poses are kept. Freeze motion before linking a player.")
     }
 }
 

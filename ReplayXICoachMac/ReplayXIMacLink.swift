@@ -24,6 +24,8 @@ final class ReplayXIMacLink {
     private var pairingID: UUID?
     private var pairingAccepted = false
     private let pairingTimeout: Duration
+    private var seekTask: Task<Void, Never>?
+    private var pendingSeek: (scenarioID: String, time: Double)?
 
     init(pairingTimeout: Duration = .seconds(15)) {
         self.pairingTimeout = pairingTimeout
@@ -141,6 +143,7 @@ final class ReplayXIMacLink {
     }
 
     func disconnect() {
+        seekTask?.cancel(); seekTask = nil; pendingSeek = nil
         pairTimeout?.cancel(); pairTimeout = nil
         let oldPeer = peer
         peer = nil
@@ -185,6 +188,13 @@ final class ReplayXIMacLink {
     }
 
     func send(_ command: ReplayXIWireCommand) {
+        if command.name == "seek" || command.name == "scenario" || command.name == "play" {
+            seekTask?.cancel(); seekTask = nil; pendingSeek = nil
+        }
+        transmit(command)
+    }
+
+    private func transmit(_ command: ReplayXIWireCommand) {
         guard connected, let state else { return }
         var command = command
         command.expectedRevision = state.revision
@@ -192,6 +202,33 @@ final class ReplayXIMacLink {
         if command.time == nil { command.time = state.playhead }
         if peer?.send(.init(type: "command", id: UUID(), command: command)) != true {
             lastAction = "Command exceeds transfer limit"
+        }
+    }
+
+    /// Eight previews/second, latest wins. Release sends the exact end time;
+    /// no queued seek can arrive later and pull the playhead backwards.
+    func seek(to time: Double, final: Bool) {
+        guard let state, connected, time.isFinite else { return }
+        let time = min(max(0, time), state.duration)
+        if final {
+            seekTask?.cancel(); seekTask = nil; pendingSeek = nil
+            transmit(.init(name: "seek", time: time))
+            return
+        }
+        pendingSeek = (state.scenarioID, time)
+        guard seekTask == nil else { return }
+        transmit(.init(name: "seek", time: time))
+        pendingSeek = nil
+        seekTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(125))
+                guard !Task.isCancelled, let self else { return }
+                guard let next = self.pendingSeek else { self.seekTask = nil; return }
+                self.pendingSeek = nil
+                if self.state?.scenarioID == next.scenarioID {
+                    self.transmit(.init(name: "seek", time: next.time))
+                }
+            }
         }
     }
 }

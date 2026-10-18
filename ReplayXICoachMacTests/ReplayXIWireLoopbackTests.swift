@@ -7,6 +7,29 @@ import CryptoKit
 
 @MainActor
 final class ReplayXIWireLoopbackTests: XCTestCase {
+    func testScrubCoalescesAndReleaseCancelsOlderQueuedTimes() async throws {
+        var times: [Double] = []
+        try await withPairFixture(response: { peer, message in
+            if message.type == "pair" {
+                peer.send(.init(type: "result", id: message.id, ok: true))
+                peer.send(.init(type: "state", state: Self.previewState))
+            } else if let command = message.command, command.name == "seek", let time = command.time {
+                times.append(time)
+            }
+        }) { link in
+            for _ in 0..<100 {
+                if link.connected { break }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTAssertTrue(link.connected)
+            for index in 0..<100 { link.seek(to: Double(index) / 10, final: false) }
+            link.seek(to: 8.4, final: true)
+            try await Task.sleep(for: .milliseconds(350))
+            XCTAssertEqual(times.count, 2, "A drag burst sends leading preview and final time only")
+            XCTAssertEqual(times.last, 8.4, "A delayed preview must never replace the release time")
+        }
+    }
+
     func testPairAcknowledgementStillNeedsReplayState() async throws {
         try await withPairFixture(timeout: .milliseconds(250), response: { peer, message in
             peer.send(.init(type: "result", id: message.id, ok: true))

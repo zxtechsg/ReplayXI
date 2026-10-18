@@ -2,6 +2,22 @@ import XCTest
 @testable import ReplayXICoachMac
 
 final class CoachWorkspaceTests: XCTestCase {
+    func testTimelineKeysJumpStrictlyInEitherDirectionWithoutWrapping() {
+        XCTAssertEqual(CoachWorkspace.adjacentKey(in: [6, 2, 4], at: 4, forward: true), 6)
+        XCTAssertEqual(CoachWorkspace.adjacentKey(in: [6, 2, 4], at: 4, forward: false), 2)
+        XCTAssertNil(CoachWorkspace.adjacentKey(in: [2, 4, 6], at: 6, forward: true))
+        XCTAssertNil(CoachWorkspace.adjacentKey(in: [2, 4, 6], at: 2, forward: false))
+        XCTAssertEqual(CoachWorkspace.adjacentKey(in: [.nan, 4], at: 3, forward: true), 4)
+    }
+
+    func testTimelineScrubClampsToClipAndRejectsInvalidSizes() {
+        XCTAssertEqual(CoachWorkspace.timelineTime(x: 50, width: 100, duration: 60), 30)
+        XCTAssertEqual(CoachWorkspace.timelineTime(x: -5, width: 100, duration: 60), 0)
+        XCTAssertEqual(CoachWorkspace.timelineTime(x: 200, width: 100, duration: 60), 60)
+        XCTAssertEqual(CoachWorkspace.timelineTime(x: 50, width: 0, duration: 60), 0)
+        XCTAssertEqual(CoachWorkspace.timelineTime(x: .infinity, width: 100, duration: 60), 0)
+    }
+
     func testVisibilityMatchesInclusiveStartExclusiveEnd() {
         var mark = fixture
         XCTAssertFalse(CoachWorkspace.isVisible(mark, at: 6.999))
@@ -21,7 +37,9 @@ final class CoachWorkspaceTests: XCTestCase {
     }
 
     func testVisibilityWindowRejectsInvalidOrInvertedTimes() {
-        XCTAssertTrue(CoachWorkspace.validWindow(show: 0, hide: 60, duration: 60))
+        XCTAssertTrue(CoachWorkspace.validWindow(show: 0, hide: 30, duration: 60))
+        XCTAssertFalse(CoachWorkspace.validWindow(show: 0, hide: 60, duration: 60))
+        XCTAssertFalse(CoachWorkspace.validWindow(show: 7, hide: 7.4, duration: 60))
         XCTAssertTrue(CoachWorkspace.validWindow(show: 7, hide: nil, duration: 60))
         for (show, hide, duration) in [(7.0, 7.0, 60.0), (7, 6, 60), (-1, 7, 60),
             (7, 61, 60), (61, 62, 60), (0, 1, -1), (Double.nan, 8, 60),

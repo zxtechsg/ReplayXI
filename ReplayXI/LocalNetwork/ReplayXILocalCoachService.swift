@@ -239,7 +239,7 @@ final class ReplayXILocalCoachService {
             return false
         }
         let editCommands: Set<String> = ["create", "labelPlayer", "geometry", "height", "arcControl", "window",
-            "captureKey", "deleteKey", "retimeKey", "label", "delete", "clear", "undo", "redo", "save"]
+            "captureKey", "deleteKey", "retimeKey", "freezeKeys", "trackEndpoint", "label", "delete", "clear", "undo", "redo", "save"]
         if editCommands.contains(command.name) {
             guard !store.isPlaying,
                   let editTime = command.time,
@@ -291,7 +291,13 @@ final class ReplayXILocalCoachService {
                   startHeight.isFinite, endHeight.isFinite else { return false }
             let control = command.controlPoint.map { SIMD3($0.x, $0.y, $0.z) }
             return store.setMacCoachMarkPose(id: id, start: start, end: end,
-                startElevation: startHeight, endElevation: endHeight, controlPoint: control)
+                startElevation: startHeight, endElevation: endHeight, controlPoint: control,
+                recordMotion: command.recordMotion == true)
+        case "trackEndpoint":
+            guard let id = command.markID, let raw = command.endpoint,
+                  raw == "start" || raw == "end" else { return false }
+            return store.setCoachMarkEndpointTracking(id: id, endpoint: raw == "start" ? .start : .end,
+                playerID: command.playerID)
         case "height":
             guard let id = command.markID, let target = command.kind,
                   let delta = command.startHeight, delta.isFinite else { return false }
@@ -314,6 +320,9 @@ final class ReplayXILocalCoachService {
         case "captureKey":
             guard let id = command.markID else { return false }
             return store.captureCoachMarkKeyframe(id: id)
+        case "freezeKeys":
+            guard let id = command.markID else { return false }
+            return store.freezeCoachMarkKeyframes(id: id)
         case "deleteKey":
             guard let id = command.markID, let time = command.keyframeAt, time.isFinite else { return false }
             return store.removeCoachMarkKeyframe(id: id, at: time)
@@ -346,10 +355,11 @@ final class ReplayXILocalCoachService {
         let snapshot = store.makeSnapshot()
         let scenario = store.selectedScenario
         let players = scenario.players.map { player in
-            let p = store.presentedPlayerPose(for: player, at: store.playhead).position
+            let pose = store.presentedPlayerPose(for: player, at: store.playhead)
+            let p = pose.position
             return ReplayXIWirePlayer(id: player.id, name: player.displayName,
                 number: player.shirtNumber, team: player.team.rawValue,
-                position: .init(x: p.x, z: p.z))
+                position: .init(x: p.x, z: p.z), facingDegrees: pose.facingDegrees)
         }
         let authoredBall = scenario.ball.pose(at: store.playhead)
         let ballPosition: SIMD3<Float>
@@ -390,7 +400,9 @@ final class ReplayXILocalCoachService {
                 controlPoint: mark.kind == .arc ? {
                     let p = displayedPose.resolvedCurve.controlPoint(for: displayedPose)
                     return ReplayXIWirePoint3(x: p.x, y: p.y, z: p.z)
-                }() : nil, encodedMark: encoded)
+                }() : nil, encodedMark: encoded,
+                startPlayerID: mark.startTrackAnchor?.playerID,
+                endPlayerID: mark.endTrackAnchor?.playerID)
         }
         let retainedIDs = Set(snapshot.marks.map(\.id))
         encodedMarks = encodedMarks.filter { retainedIDs.contains($0.key) }

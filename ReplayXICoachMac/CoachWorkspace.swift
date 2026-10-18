@@ -13,10 +13,23 @@ enum CoachWorkspace {
         return words.allSatisfy { haystack.localizedStandardContains(String($0)) }
     }
 
+    static func adjacentKey(in keys: [Double], at time: Double, forward: Bool) -> Double? {
+        let sorted = keys.filter(\.isFinite).sorted()
+        return forward ? sorted.first { $0 > time + 0.001 } : sorted.last { $0 < time - 0.001 }
+    }
+
+    static func timelineTime(x: Double, width: Double, duration: Double) -> Double {
+        guard x.isFinite, width.isFinite, width > 0, duration.isFinite, duration > 0 else { return 0 }
+        return min(max(x / width, 0), 1) * duration
+    }
+
     static func validWindow(show: Double, hide: Double?, duration: Double) -> Bool {
         guard show.isFinite, duration.isFinite, duration >= 0,
               (0...duration).contains(show) else { return false }
-        return hide.map { $0.isFinite && $0 > show && $0 <= duration } ?? true
+        return hide.map {
+            let span = $0 - show
+            return $0.isFinite && span >= 0.5 - 0.000_001 && span <= 30 + 0.000_001 && $0 <= duration
+        } ?? true
     }
 
     static func clock(_ time: Double) -> String {

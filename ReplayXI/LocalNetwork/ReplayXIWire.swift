@@ -139,6 +139,7 @@ struct ReplayXIWirePlayer: Codable, Equatable, Identifiable {
     var number: Int
     var team: String
     var position: ReplayXIWirePoint
+    var facingDegrees: Float? = nil
 }
 
 struct ReplayXIWireScenario: Codable, Equatable, Identifiable {
@@ -162,6 +163,8 @@ struct ReplayXIWireMark: Codable, Equatable, Identifiable {
     var controlPoint: ReplayXIWirePoint3?
     /// Exact CoachMark Codable bytes, including anchors, curves and keyframes.
     var encodedMark: Data
+    var startPlayerID: String? = nil
+    var endPlayerID: String? = nil
 }
 
 struct ReplayXIWireState: Codable, Equatable {
@@ -207,6 +210,8 @@ struct ReplayXIWireCommand: Codable {
     var keyframeAt: Double? = nil
     var keyframeTo: Double? = nil
     var saveName: String? = nil
+    var endpoint: String? = nil
+    var recordMotion: Bool? = nil
 }
 
 struct ReplayXIWireMessage: Codable {
