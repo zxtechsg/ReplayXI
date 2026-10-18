@@ -34,8 +34,9 @@
   inspected: pitch, both teams, numbers, curved mark and control handles visible.
 - Mac layout fixture images are not proof of compositor/glass rendering:
   `ImageRenderer` cannot capture AppKit/SceneKit/inspector layers correctly.
-- Final expanded runs were blocked while the Mac was locked. Do not report
-  these as passed until their result bundles complete. Headset hand gestures
+- Final expanded runs were interrupted after they stalled while the Mac was
+  locked. They are not passing results. Rerun after unlocking, including the
+  latest palm-side change and projection-coordinate test. Headset hand gestures
   and physical comfort still need device testing.
 - The official Argentina–France source was rechecked at video 36:56. It supports
   strike-balance/running posture, but fingers are too small for exact pose recovery.
