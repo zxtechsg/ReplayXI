@@ -68,6 +68,46 @@ SPZ → PLY conversion used [Niantic's official browser tool](https://nianticlab
 which runs locally in WebAssembly. No second service upload was needed. PLY
 conversion preserves points; it does not repair holes or create a mesh.
 
+## Blender inspection and optimisation
+
+`Scripts/blender/inspect_chisel_splat179.py` makes a hash-checked, bounded
+**inspection copy**, not a replacement stadium. The full SPZ/PLY stay intact.
+It filters opacity below 0.05, averages occupied voxels and uses native Cycles
+points, with no sphere instancing or surface reconstruction.
+
+- 857,250 source points → 760,993 after opacity filtering → **52,867** preview
+  points. The saved inspection blend is about 1.1 MB.
+- Zero mesh faces, zero edges, zero instances. Eight CPU threads, eight samples,
+  two 1280 × 800 diagnostic renders.
+- Infinite opacity logits are valid alpha endpoints, not corrupt geometry.
+  The importer preserves alpha=1 and handles alpha=0 before filtering.
+- SH DC colours are retained. The preview does **not** reproduce anisotropic
+  covariance, rotation or Gaussian alpha compositing. Mean opacity is saved
+  as a separate attribute, not used as a false claim of faithful rendering.
+- Display-only `(X,Z,-Y)` rotation assumes source Y-down. Source units and
+  pitch registration remain unverified. No metric calibration is inferred
+  from the generated bounds.
+
+The result below is deliberately labelled a point proxy. The missing coverage
+was also visible in Studio's original splat viewer before this downsampling.
+
+![Blender inspection only; not a mesh](Evidence179/chisel-point-proxy.png)
+
+The full measured report is
+[`Evidence179/chisel-point-inspection.json`](Evidence179/chisel-point-inspection.json).
+Timing fields are local import/render observations, **not app performance**.
+
+To reproduce into a new staging directory:
+
+```sh
+/Applications/Blender.app/Contents/MacOS/Blender \
+  --factory-startup --background --python-exit-code 1 \
+  --python Scripts/blender/inspect_chisel_splat179.py -- \
+  --input .replayxi-world-staging/Chisel179/Studio/Preview02/stadium.ply \
+  --expected-input-sha256 01e5b509aef637665f3c3ce16f25bc34dcd37be3ab611cf5dc9f166687f10279 \
+  --output-dir .replayxi-world-staging/Chisel179/Inspection04
+```
+
 ## Reproduce the original seed
 
 Use Blender **5.2.1 LTS**, in a new background process. The script refuses live

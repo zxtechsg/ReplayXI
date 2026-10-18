@@ -1,0 +1,139 @@
+{
+  "inspectionOnly": true,
+  "candidateAcceptedForApp": false,
+  "priorBrowserAssessment": "Rejected: huge gaps and missing roof; no reconstruction attempted",
+  "source": "/Users/zx/Documents/ChatGPT/SPATIAL PLATFORM/.replayxi-world-staging/Chisel179/Studio/Preview02/stadium.ply",
+  "sourceSHA256": "01e5b509aef637665f3c3ce16f25bc34dcd37be3ab611cf5dc9f166687f10279",
+  "sourceBytes": 58293416,
+  "sourceHeader": [
+    "ply",
+    "format binary_little_endian 1.0",
+    "element vertex 857250",
+    "property float x",
+    "property float y",
+    "property float z",
+    "property float nx",
+    "property float ny",
+    "property float nz",
+    "property float f_dc_0",
+    "property float f_dc_1",
+    "property float f_dc_2",
+    "property float opacity",
+    "property float scale_0",
+    "property float scale_1",
+    "property float scale_2",
+    "property float rot_0",
+    "property float rot_1",
+    "property float rot_2",
+    "property float rot_3",
+    "end_header"
+  ],
+  "sourcePoints": 857250,
+  "finiteXYZPoints": 857250,
+  "sourceBoundsXYZ": {
+    "min": [
+      -168.838623046875,
+      -73.341552734375,
+      -203.735595703125
+    ],
+    "max": [
+      148.768310546875,
+      0.0654296875,
+      195.8779296875
+    ]
+  },
+  "validRequiredFieldsPoints": 857250,
+  "invalidPointsRemoved": 0,
+  "minimumOpacity": 0.05,
+  "positiveInfinityOpacityLogits": 653222,
+  "negativeInfinityOpacityLogits": 58902,
+  "opacityTreatment": "Sigmoid(logit); +Infinity treated as alpha1, -Infinity as alpha0. Alpha filters/weights voxel averaging but is not Gaussian-composited in previews.",
+  "opacityPointsRemoved": 96257,
+  "pointsBeforeVoxels": 760993,
+  "retainedBoundsXYZBeforeVoxels": {
+    "min": [
+      -135.303955078125,
+      -67.787353515625,
+      -203.703857421875
+    ],
+    "max": [
+      146.43359375,
+      0.0654296875,
+      194.579833984375
+    ]
+  },
+  "inspectionPoints": 52867,
+  "voxelMergedPoints": 708126,
+  "totalPointsRemovedOrMerged": 804383,
+  "voxelWidthSourceUnits": 0.777897834777832,
+  "voxelAttempts": [
+    {
+      "voxelWidthSourceUnits": 0.777897834777832,
+      "occupiedVoxels": 52867
+    }
+  ],
+  "inspectionSourceBoundsXYZ": {
+    "min": [
+      -135.303955078125,
+      -67.7191162109375,
+      -203.703857421875
+    ],
+    "max": [
+      146.43359375,
+      0.0228271484375,
+      194.579833984375
+    ]
+  },
+  "previewBoundsBlenderXYZ": {
+    "min": [
+      -135.303955078125,
+      -203.703857421875,
+      -0.0228271484375
+    ],
+    "max": [
+      146.43359375,
+      194.579833984375,
+      67.7191162109375
+    ]
+  },
+  "previewCoordinateTransform": "Blender (X,Y,Z) = source (X,Z,-Y); rotation only; no scale/translation",
+  "coordinateLimits": "Y-down is an explicit visual assumption; source units, handedness and pitch alignment remain uncalibrated. No metre/native registration claim.",
+  "colorMethod": "RGB=clamp(0.5+SH_C0*f_dc); opacity-weighted voxel means; display RGB converted to linear for unlit emission",
+  "colorClippedSourcePoints": 0,
+  "representationLimits": "Opaque isotropic point proxy at fixed radius 0.45*voxel width; NOT a faithful Gaussian renderer or reconstructed mesh. Source anisotropic covariance/scales, rotations and Gaussian opacity compositing are NOT reproduced. Only SH DC exists in this PLY; no higher-order SH. Mean opacity retained as an attribute only.",
+  "sourceGaussianFieldsNotRendered": [
+    "nx",
+    "ny",
+    "nz",
+    "opacity",
+    "scale_0",
+    "scale_1",
+    "scale_2",
+    "rot_0",
+    "rot_1",
+    "rot_2",
+    "rot_3"
+  ],
+  "meshFaces": 0,
+  "meshEdges": 0,
+  "sphereInstances": 0,
+  "pointRadiusSourceUnits": 0.3500540256500244,
+  "localPLYReadSeconds": 0.004879249958321452,
+  "filterAndVoxelSeconds": 0.13287454203236848,
+  "localImportAndBlendSaveSecondsExcludingStartupAndHash": 0.16825854196213186,
+  "previewCPUThreads": 8,
+  "previewSamples": 8,
+  "previewResolution": [
+    1280,
+    800
+  ],
+  "blend": "/Users/zx/Documents/ChatGPT/SPATIAL PLATFORM/.replayxi-world-staging/Chisel179/Inspection03/Chisel179Inspection.blend",
+  "previews": [
+    "wide-overview.png",
+    "interior-relative.png"
+  ],
+  "sourceUnchanged": true,
+  "generationSpend": 0,
+  "appOrSeedFilesChanged": false,
+  "previewRenderSeconds": 0.36832354200305417
+}
