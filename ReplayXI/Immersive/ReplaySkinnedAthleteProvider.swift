@@ -599,6 +599,7 @@ final class ReplaySkinnedAthleteInstance {
     private let offBallLeftArm: ReplayAthleteOffBallPose.NativeArmBinding?
     private let offBallRightArm: ReplayAthleteOffBallPose.NativeArmBinding?
     private let upperBodyFlow: ReplayAthleteUpperBodyFlow.NativeBinding?
+    private let handPose: ReplayAthleteHandPose?
     private var footballPose: ReplaySkinnedAthleteFootballPose?
     private var impactPose: ReplaySkinnedAthleteImpactPose?
     private let turnInPlace: ReplaySkinnedAthleteTurnInPlace?
@@ -642,6 +643,7 @@ final class ReplaySkinnedAthleteInstance {
         offBallLeftArm = .init(side: "left", motion: motion)
         offBallRightArm = .init(side: "right", motion: motion)
         upperBodyFlow = .init(motion: motion)
+        handPose = ReplayAthleteHandPose(motion: motion)
         transforms = model.jointTransforms
         neckIndex = motion.semanticJointIndices["neck"]!
         headIndex = motion.semanticJointIndices["head"]!
@@ -945,6 +947,7 @@ final class ReplaySkinnedAthleteInstance {
         #if DEBUG
         poseStageObserverForTesting?(.impact, pose)
         #endif
+        handPose?.apply(to: &pose, preserveWrist: interactionSample?.kind == .save)
         motion.rebuildModelSpaceTransforms(in: &pose)
         if let turn = ReplaySkinnedAthleteTurnInPlace.sample(track: track, at: time,
             presentationPose: presentationPose, locomotion: locomotion, interaction: interaction,

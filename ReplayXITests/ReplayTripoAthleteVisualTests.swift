@@ -14,6 +14,72 @@ private final class ReplayTripoCaptureCompletion: @unchecked Sendable {
 
 @MainActor
 final class ReplayTripoAthleteVisualTests: XCTestCase {
+    func testCapturesTripoHandSourceAndRelaxedCloseups() async throws {
+        ReplayTripoAthleteProvider.resetForTesting()
+        defer { ReplayTripoAthleteProvider.resetForTesting() }
+        try ReplayTripoAthleteProvider.prewarm()
+        let calibration = try await calibrate()
+        let player = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay)?.player(id: "navy-lb"))
+        var retained: [ReplaySkinnedAthleteInstance] = []
+        for diverse in [false, true] {
+            let skin = try diverse
+                ? ReplayTripoAthleteProvider.makeDiverse(for: player, detail: .near)
+                : ReplayTripoAthleteProvider.make(for: player, detail: .near)
+            retained.append(skin)
+            for running in [false, true] {
+                var source: ReplaySkinnedAthleteMotion.Pose?
+                skin.poseStageObserverForTesting = { stage, pose in
+                    if stage == .impact { source = pose }
+                }
+                XCTAssertTrue(update(skin, player: player, time: 1.25,
+                    speed: running ? 4 : 0, stationary: !running))
+                skin.poseStageObserverForTesting = nil
+                let original = try XCTUnwrap(source)
+                let fixed = skin.pose
+                for (label, pose) in [("source", original), ("relaxed", fixed)] {
+                    skin.model.jointTransforms = pose.rotations.indices.map {
+                        Transform(scale: pose.scales[$0], rotation: pose.rotations[$0],
+                                  translation: pose.translations[$0])
+                    }
+                    try await captureHand(skin, pose: fixed,
+                        label: "hand-\(diverse ? "A" : "B")-\(running ? "run" : "idle")-\(label)",
+                        player: player, calibration: calibration)
+                }
+            }
+        }
+        withExtendedLifetime(retained) {}
+    }
+
+    private func captureHand(_ skin: ReplaySkinnedAthleteInstance,
+                             pose: ReplaySkinnedAthleteMotion.Pose, label: String,
+                             player: PlayerTrack,
+                             calibration: ReplayRealityRendererAudit.Calibration) async throws {
+        let wristIndex = try XCTUnwrap(skin.motion.joints.firstIndex {
+            $0.sourceName == "mixamorig:LeftHand"
+        })
+        let indexBase = try XCTUnwrap(skin.motion.joints.firstIndex {
+            $0.sourceName == "mixamorig:LeftHandIndex1"
+        })
+        let matrix = skin.model.transformMatrix(relativeTo: nil)
+        let wrist = matrix * pose.modelSpaceTransforms[wristIndex].columns.3
+        let finger = matrix * pose.modelSpaceTransforms[indexBase].columns.3
+        let target = SIMD3<Float>((wrist.x + finger.x) * 0.5,
+                                  (wrist.y + finger.y) * 0.5,
+                                  (wrist.z + finger.z) * 0.5)
+        let camera = PerspectiveCamera()
+        camera.camera = .init(near: 0.025, far: 5, fieldOfViewInDegrees: 33)
+        camera.look(at: target, from: target + SIMD3<Float>(0.16, 0.09, 0.48), relativeTo: nil)
+        let light = DirectionalLight()
+        light.light.intensity = 2_500
+        light.look(at: target, from: target + SIMD3<Float>(1, 2, 2), relativeTo: nil)
+        let frame = try await render(entities: [skin.root, camera, light], camera: camera, size: 512)
+        let attachment = XCTAttachment(data: try ReplayRealityRendererAudit.png(frame,
+            calibration: calibration), uniformTypeIdentifier: "public.png")
+        attachment.name = "ReplayXI-Tripo-\(player.team.rawValue)-\(label).png"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     func testFirstPersonLookDownAndSquad177() async throws {
         ReplayTripoAthleteProvider.resetForTesting()
         defer { ReplayTripoAthleteProvider.resetForTesting() }
