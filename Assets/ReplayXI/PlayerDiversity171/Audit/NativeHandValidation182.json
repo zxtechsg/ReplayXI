@@ -1,0 +1,36 @@
+{
+  "date": "2026-10-22",
+  "scope": "Player A hand-weight repair and Tripo runtime wrist/finger pose",
+  "rigSHA256": "3aa5db75d7652be9944b2c2fef6e3f0f13e140512e75af8d57d355b8a7a95e0b",
+  "resourcesSHA256": {
+    "nearUSDZ": "81a424ee1638fef40a1379d00e95259c04eeb5204d96224d2ce17a694967eeb7",
+    "lowUSDZ": "06175656f9e7ea79592b31a511c17fa53bcc84ccf597ed09c462cb3282cacdc0",
+    "nearContact": "3a9549fb890f44e0ce1e9b165073c336fcf9ee770dc35e4fdb462e4306e4fc73",
+    "lowContact": "24ace84f76343654b8dca79cd9e72a047ec47dd2f2739a8dda6a28cbd6a47d8e"
+  },
+  "unchanged": ["motion JSON", "three kit textures", "Player B geometry", "Rocketbox geometry"],
+  "simulator": "Apple Vision Pro, visionOS 26.5, arm64",
+  "targetedTests": {
+    "handPoseAndThreePhaseCaptures": {
+      "result": "Passed",
+      "passed": 5,
+      "failed": 0,
+      "evidence": ".codex-derived/Hands182Agent/candidate182-curl.xcresult"
+    },
+    "diversityAdmission": {
+      "result": "Passed",
+      "passed": 10,
+      "failed": 0,
+      "evidence": ".codex-derived/Hands182Agent/diversity182.xcresult"
+    },
+    "tripoABIdleAndRunCloseups": {
+      "result": "Passed",
+      "passed": 5,
+      "failed": 0,
+      "evidence": ".codex-derived/Hands182Agent/tripo-thumb182.xcresult"
+    }
+  },
+  "visualQA": "Six RealityKit closeups: both hands at running times 1.12, 1.25 and 1.38 s. The right hand no longer points horizontally across the waist. No gross finger crossing was visible from these views. Curl is modest, not a clenched fist; left fingers are nearly straight at 1.38 s. Source mesh seams remain visible.",
+  "captureEvidence": ".codex-derived/Hands182Agent/Candidate182CurlCaptures",
+  "limits": "Simulator only; no physical headset, full-match animation sweep, FPS or memory measurement. Closeups do not prove absence of hidden self-intersections. Base Tripo thumb still extends visibly, though less than the source pose."
+}

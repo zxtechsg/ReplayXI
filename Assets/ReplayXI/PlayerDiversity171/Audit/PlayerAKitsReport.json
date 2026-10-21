@@ -19,7 +19,7 @@
     ],
     "sourceChromaProtected": true
   },
-  "nearGLBSHA256": "abc6fbd26d4144d29b83a36e5756483c5c5b9ba509ebeba994824ca416bfea00",
+  "nearGLBSHA256": "1fe74ec1fcc3b06a6db4d23b7a45b6fdc7e6ad4728ccededcf576842741d6558",
   "sameGeometryForBothTeams": true,
   "sourceSHA256": "2b25690666877f3e090d5ce4e5d8e30702d6d02f497e5511de4ba9d3df1dcfc3",
   "textures": [
@@ -51,5 +51,5 @@
       "texture": "ReplayXITripoPlayerAKeeper.png"
     }
   ],
-  "visualQA": "passed: matched original/home/away/keeper front and side renders; UV pixel audit in PlayerASkinPixelsAudit.json"
+  "visualQA": "Original kit PNG hashes unchanged; Player A hand closeups checked in visionOS simulator at three running phases. Full kit view not rechecked for this hand repair."
 }

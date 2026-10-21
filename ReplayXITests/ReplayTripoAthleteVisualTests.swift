@@ -14,6 +14,24 @@ private final class ReplayTripoCaptureCompletion: @unchecked Sendable {
 
 @MainActor
 final class ReplayTripoAthleteVisualTests: XCTestCase {
+    func testCapturesPlayerAHandsAcrossThreeRunningGaitPhases182() async throws {
+        ReplayTripoAthleteProvider.resetForTesting()
+        defer { ReplayTripoAthleteProvider.resetForTesting() }
+        try ReplayTripoAthleteProvider.prewarm()
+        let calibration = try await calibrate()
+        let player = try XCTUnwrap(DemoScenarios.scenario(for: .squadReplay)?.player(id: "navy-lb"))
+        let skin = try ReplayTripoAthleteProvider.makeDiverse(for: player, detail: .near)
+        for (index, time) in [1.12, 1.25, 1.38].enumerated() {
+            XCTAssertTrue(update(skin, player: player, time: time, speed: 4, stationary: false))
+            for side in ["Left", "Right"] {
+                try await captureHand(skin, pose: skin.pose,
+                    label: "hand-A-run182-phase\(index)-\(side.lowercased())",
+                    player: player, calibration: calibration, side: side)
+            }
+        }
+        withExtendedLifetime(skin) {}
+    }
+
     func testCapturesTripoHandSourceAndRelaxedCloseups() async throws {
         ReplayTripoAthleteProvider.resetForTesting()
         defer { ReplayTripoAthleteProvider.resetForTesting() }
@@ -53,12 +71,13 @@ final class ReplayTripoAthleteVisualTests: XCTestCase {
     private func captureHand(_ skin: ReplaySkinnedAthleteInstance,
                              pose: ReplaySkinnedAthleteMotion.Pose, label: String,
                              player: PlayerTrack,
-                             calibration: ReplayRealityRendererAudit.Calibration) async throws {
+                             calibration: ReplayRealityRendererAudit.Calibration,
+                             side: String = "Left") async throws {
         let wristIndex = try XCTUnwrap(skin.motion.joints.firstIndex {
-            $0.sourceName == "mixamorig:LeftHand"
+            $0.sourceName == "mixamorig:\(side)Hand"
         })
         let indexBase = try XCTUnwrap(skin.motion.joints.firstIndex {
-            $0.sourceName == "mixamorig:LeftHandIndex1"
+            $0.sourceName == "mixamorig:\(side)HandIndex1"
         })
         let matrix = skin.model.transformMatrix(relativeTo: nil)
         let wrist = matrix * pose.modelSpaceTransforms[wristIndex].columns.3
@@ -68,7 +87,7 @@ final class ReplayTripoAthleteVisualTests: XCTestCase {
                                   (wrist.z + finger.z) * 0.5)
         let camera = PerspectiveCamera()
         camera.camera = .init(near: 0.025, far: 5, fieldOfViewInDegrees: 33)
-        camera.look(at: target, from: target + SIMD3<Float>(0.16, 0.09, 0.48), relativeTo: nil)
+        camera.look(at: target, from: target + SIMD3<Float>(side == "Left" ? 0.16 : -0.16, 0.09, 0.48), relativeTo: nil)
         let light = DirectionalLight()
         light.light.intensity = 2_500
         light.look(at: target, from: target + SIMD3<Float>(1, 2, 2), relativeTo: nil)

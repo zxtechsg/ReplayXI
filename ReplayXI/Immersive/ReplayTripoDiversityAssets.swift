@@ -20,12 +20,12 @@ enum ReplayTripoDiversityAssets {
     static let decodedTextureBytes = 3 * textureSize * textureSize * 4
     static let motion = Resource(name: "ReplayXITripoPlayerAMotion", sha256: "0ec69ffd45a2964c2ac174dcf7f82c8789476a7a6d72b4b8891bcd210836461d")
     static let near = Skin(
-        asset: .init(name: "ReplayXITripoPlayerA", sha256: "688434ce9398f7fdcda6480b09f6a80c281f754a3bad8591d83084699ecbab26"),
-        contacts: .init(name: "ReplayXITripoPlayerAContactSurface", sha256: "20cd8157804c9bf63f0f227c3bc48ea0e33758dc5f66f41ab77d3759c9ff5c28"),
+        asset: .init(name: "ReplayXITripoPlayerA", sha256: "81a424ee1638fef40a1379d00e95259c04eeb5204d96224d2ce17a694967eeb7"),
+        contacts: .init(name: "ReplayXITripoPlayerAContactSurface", sha256: "3a9549fb890f44e0ce1e9b165073c336fcf9ee770dc35e4fdb462e4306e4fc73"),
         sourceVertices: 7_999, importedVertices: 7_999, triangles: 10_289)
     static let low = Skin(
-        asset: .init(name: "ReplayXITripoPlayerALow", sha256: "a35f7e7cdca279cbc3e8978dbced568b494f932d88f6925d704707609756879e"),
-        contacts: .init(name: "ReplayXITripoPlayerALowContactSurface", sha256: "0199ce5faed7df86281cddb4599c77c3dfcb6f6c34cb7e5052887d77eddb7576"),
+        asset: .init(name: "ReplayXITripoPlayerALow", sha256: "06175656f9e7ea79592b31a511c17fa53bcc84ccf597ed09c462cb3282cacdc0"),
+        contacts: .init(name: "ReplayXITripoPlayerALowContactSurface", sha256: "24ace84f76343654b8dca79cd9e72a047ec47dd2f2739a8dda6a28cbd6a47d8e"),
         sourceVertices: 2_590, importedVertices: 2_590, triangles: 2_744)
     /// Home, away, keeper order. Hashes cover decoded RGBA pixels.
     static let atlases: [Resource] = [

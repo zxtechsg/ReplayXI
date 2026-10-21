@@ -4,7 +4,7 @@
       "authoredUSDPointCount": 2590,
       "drawCalls": 1,
       "jointCount": 52,
-      "sha256": "a35f7e7cdca279cbc3e8978dbced568b494f932d88f6925d704707609756879e",
+      "sha256": "06175656f9e7ea79592b31a511c17fa53bcc84ccf597ed09c462cb3282cacdc0",
       "sourceVertices": 2590,
       "triangles": 2744,
       "vertices": 2590
@@ -13,7 +13,7 @@
       "authoredUSDPointCount": 7999,
       "drawCalls": 1,
       "jointCount": 52,
-      "sha256": "688434ce9398f7fdcda6480b09f6a80c281f754a3bad8591d83084699ecbab26",
+      "sha256": "81a424ee1638fef40a1379d00e95259c04eeb5204d96224d2ce17a694967eeb7",
       "sourceVertices": 7999,
       "triangles": 10289,
       "vertices": 7999
@@ -127,24 +127,20 @@
   },
   "files": {
     "PlayerAKitsReport.json": {
-      "bytes": 1352,
-      "sha256": "0a046f49037ab222846ee76be00cd573cec6c89edb6fea898f40b85c619b9033"
-    },
-    "PlayerASkinPixelsAudit.json": {
-      "bytes": 2547,
-      "sha256": "c90175b777d108e6d2146709f26f75d7da86a37376e81ba47822080529db0a68"
+      "bytes": 1248,
+      "sha256": "2a8657c3a98c3dc30da8fbaebc8b1df8d87aa08b36bce37700d338cdee85044b"
     },
     "ReplayXITripoPlayerA.usdz": {
-      "bytes": 610698,
-      "sha256": "688434ce9398f7fdcda6480b09f6a80c281f754a3bad8591d83084699ecbab26"
+      "bytes": 611418,
+      "sha256": "81a424ee1638fef40a1379d00e95259c04eeb5204d96224d2ce17a694967eeb7"
     },
     "ReplayXITripoPlayerAAway.png": {
       "bytes": 1312693,
       "sha256": "c8e7f97ce1b247c095a054f7cf52fe781eb0bb6d0e620af7da1299a24bfefd09"
     },
     "ReplayXITripoPlayerAContactSurface.json": {
-      "bytes": 64027,
-      "sha256": "20cd8157804c9bf63f0f227c3bc48ea0e33758dc5f66f41ab77d3759c9ff5c28"
+      "bytes": 64642,
+      "sha256": "3a9549fb890f44e0ce1e9b165073c336fcf9ee770dc35e4fdb462e4306e4fc73"
     },
     "ReplayXITripoPlayerAHome.png": {
       "bytes": 1365947,
@@ -155,12 +151,12 @@
       "sha256": "1ecb16154e4084dce7f34331f435144e2c31e14e9ad04c53a6dc18656651c90c"
     },
     "ReplayXITripoPlayerALow.usdz": {
-      "bytes": 311911,
-      "sha256": "a35f7e7cdca279cbc3e8978dbced568b494f932d88f6925d704707609756879e"
+      "bytes": 312270,
+      "sha256": "06175656f9e7ea79592b31a511c17fa53bcc84ccf597ed09c462cb3282cacdc0"
     },
     "ReplayXITripoPlayerALowContactSurface.json": {
-      "bytes": 64562,
-      "sha256": "0199ce5faed7df86281cddb4599c77c3dfcb6f6c34cb7e5052887d77eddb7576"
+      "bytes": 65333,
+      "sha256": "24ace84f76343654b8dca79cd9e72a047ec47dd2f2739a8dda6a28cbd6a47d8e"
     },
     "ReplayXITripoPlayerAMotion.json": {
       "bytes": 553591,
@@ -872,12 +868,12 @@
     },
     {
       "boundsMax": [
-        0.3267268,
+        0.3287732,
         1.6670422,
         0.40415
       ],
       "boundsMin": [
-        -0.2826685,
+        -0.2832177,
         0.0171149,
         -0.327917
       ],
@@ -886,12 +882,12 @@
     },
     {
       "boundsMax": [
-        0.252934,
+        0.2540367,
         1.6766442,
         0.3834429
       ],
       "boundsMin": [
-        -0.3431867,
+        -0.3439581,
         0.0223528,
         -0.2984846
       ],
@@ -900,12 +896,12 @@
     },
     {
       "boundsMax": [
-        0.3267268,
+        0.3287733,
         1.6670423,
         0.4041582
       ],
       "boundsMin": [
-        -0.2826683,
+        -0.2832175,
         0.0171149,
         -0.3279171
       ],
@@ -914,7 +910,7 @@
     }
   ],
   "provenance": {
-    "kitVisualQA": "passed: matched original/home/away/keeper front and side renders; UV pixel audit in PlayerASkinPixelsAudit.json",
+    "kitVisualQA": "pending",
     "kits": {
       "away": {
         "file": "ReplayXITripoPlayerAAway.png",
@@ -944,13 +940,13 @@
         ]
       }
     },
-    "kitsReportSHA256": "0a046f49037ab222846ee76be00cd573cec6c89edb6fea898f40b85c619b9033",
+    "kitsReportSHA256": "2a8657c3a98c3dc30da8fbaebc8b1df8d87aa08b36bce37700d338cdee85044b",
     "rigBasecolorSHA256": {
       "low": "ebe28e4cabbd108c000bbbb25a5827a1ac1306bc7aa8a541938edb5b06489777",
       "motion": "ebe28e4cabbd108c000bbbb25a5827a1ac1306bc7aa8a541938edb5b06489777",
       "near": "ebe28e4cabbd108c000bbbb25a5827a1ac1306bc7aa8a541938edb5b06489777"
     },
-    "skinPixelAuditSHA256": "c90175b777d108e6d2146709f26f75d7da86a37376e81ba47822080529db0a68",
+    "skinPixelAuditSHA256": null,
     "sourceBasecolorSHA256": "ebe28e4cabbd108c000bbbb25a5827a1ac1306bc7aa8a541938edb5b06489777",
     "sourceGLBSHA256": "2b25690666877f3e090d5ce4e5d8e30702d6d02f497e5511de4ba9d3df1dcfc3",
     "sourceImages": {
@@ -1003,9 +999,9 @@
     },
     "low": {
       "contactResource": "ReplayXITripoPlayerALowContactSurface.json",
-      "contactSHA256": "0199ce5faed7df86281cddb4599c77c3dfcb6f6c34cb7e5052887d77eddb7576",
+      "contactSHA256": "24ace84f76343654b8dca79cd9e72a047ec47dd2f2739a8dda6a28cbd6a47d8e",
       "resource": "ReplayXITripoPlayerALow.usdz",
-      "sha256": "a35f7e7cdca279cbc3e8978dbced568b494f932d88f6925d704707609756879e",
+      "sha256": "06175656f9e7ea79592b31a511c17fa53bcc84ccf597ed09c462cb3282cacdc0",
       "sourceVertices": 2590,
       "triangles": 2744
     },
@@ -1015,19 +1011,19 @@
     },
     "near": {
       "contactResource": "ReplayXITripoPlayerAContactSurface.json",
-      "contactSHA256": "20cd8157804c9bf63f0f227c3bc48ea0e33758dc5f66f41ab77d3759c9ff5c28",
+      "contactSHA256": "3a9549fb890f44e0ce1e9b165073c336fcf9ee770dc35e4fdb462e4306e4fc73",
       "resource": "ReplayXITripoPlayerA.usdz",
-      "sha256": "688434ce9398f7fdcda6480b09f6a80c281f754a3bad8591d83084699ecbab26",
+      "sha256": "81a424ee1638fef40a1379d00e95259c04eeb5204d96224d2ce17a694967eeb7",
       "sourceVertices": 7999,
       "triangles": 10289
     }
   },
   "sourceCommit": "player-a-glb-2b25690666877f3e090d5ce4e5d8e307",
   "sourceHashes": {
-    "kitsReport": "0a046f49037ab222846ee76be00cd573cec6c89edb6fea898f40b85c619b9033",
-    "lowGLB": "ef0b41c06c34c2f97a2df9031750346a023662bf40a5093c8fbb54a74c0503a1",
-    "motionGLB": "d5a5f29647099ecbd4b2f8176e269a9a105d93ccb29793c0ce6ae749cfdeaeb2",
-    "nearGLB": "abc6fbd26d4144d29b83a36e5756483c5c5b9ba509ebeba994824ca416bfea00",
+    "kitsReport": "2a8657c3a98c3dc30da8fbaebc8b1df8d87aa08b36bce37700d338cdee85044b",
+    "lowGLB": "2e4ca4f8ccbef94a5dce2820f7dd0e89f160f0a79c9fdf56e769cdc9dc37f7ee",
+    "motionGLB": "36910eecdad65a760c7b5677f9dda9a97a833e6fe2e211858f1e1a81c40a3442",
+    "nearGLB": "1fe74ec1fcc3b06a6db4d23b7a45b6fdc7e6ad4728ccededcf576842741d6558",
     "sourceGLB": "2b25690666877f3e090d5ce4e5d8e30702d6d02f497e5511de4ba9d3df1dcfc3"
   },
   "usdTopologyMode": "source-vertex"

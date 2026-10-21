@@ -1,5 +1,5 @@
 {
-  "candidateOnly": true,
+  "candidateOnly": false,
   "sourceHashes": {
     "source": "2b25690666877f3e090d5ce4e5d8e30702d6d02f497e5511de4ba9d3df1dcfc3",
     "motionBlend": "3b3aa3c6541510e477f767f2f232b81b53c9919cdfb1cca877108adf2809ff2f"
@@ -19,8 +19,12 @@
     },
     "handStabilization": {
       "vertices": 645,
+      "articulatedFingerVertices": 371,
       "startXMetres": 0.36,
-      "fullXMetres": 0.42
+      "fullXMetres": 0.42,
+      "fingerTransferThreshold": 0.45,
+      "fingerInfluenceScale": 0.35,
+      "maximumFingerPalmBlend": 0.12
     },
     "weights": {
       "maxInfluences": 4,
@@ -30,7 +34,7 @@
     },
     "restBounds": [
       [
-        -0.4923523962497711,
+        -0.49235236644744873,
         0.49133700132369995
       ],
       [
@@ -42,8 +46,8 @@
         0.9777411222457886
       ]
     ],
-    "glb": "/Users/zx/Documents/ChatGPT/SPATIAL PLATFORM/.codex-derived/replayxi-diversity172/rig-trest-v4/PlayerA-Near.glb",
-    "sha256": "abc6fbd26d4144d29b83a36e5756483c5c5b9ba509ebeba994824ca416bfea00"
+    "glb": "/Users/zx/Documents/ChatGPT/SPATIAL PLATFORM/.codex-derived/replayxi-hands182-rig-candidate2/PlayerA-Near.glb",
+    "sha256": "1fe74ec1fcc3b06a6db4d23b7a45b6fdc7e6ad4728ccededcf576842741d6558"
   },
   "low": {
     "decimation": {
@@ -60,7 +64,7 @@
     },
     "restBounds": [
       [
-        -0.4900377690792084,
+        -0.490037739276886,
         0.49133700132369995
       ],
       [
@@ -72,19 +76,19 @@
         0.9767961502075195
       ]
     ],
-    "glb": "/Users/zx/Documents/ChatGPT/SPATIAL PLATFORM/.codex-derived/replayxi-diversity172/rig-trest-v4/PlayerA-Low.glb",
-    "sha256": "ef0b41c06c34c2f97a2df9031750346a023662bf40a5093c8fbb54a74c0503a1"
+    "glb": "/Users/zx/Documents/ChatGPT/SPATIAL PLATFORM/.codex-derived/replayxi-hands182-rig-candidate2/PlayerA-Low.glb",
+    "sha256": "2e4ca4f8ccbef94a5dce2820f7dd0e89f160f0a79c9fdf56e769cdc9dc37f7ee"
   },
   "motion": {
-    "glb": "/Users/zx/Documents/ChatGPT/SPATIAL PLATFORM/.codex-derived/replayxi-diversity172/rig-trest-v4/PlayerA-Motion.glb",
-    "sha256": "d5a5f29647099ecbd4b2f8176e269a9a105d93ccb29793c0ce6ae749cfdeaeb2",
+    "glb": "/Users/zx/Documents/ChatGPT/SPATIAL PLATFORM/.codex-derived/replayxi-hands182-rig-candidate2/PlayerA-Motion.glb",
+    "sha256": "36910eecdad65a760c7b5677f9dda9a97a833e6fe2e211858f1e1a81c40a3442",
     "clips": {
       "idle": 83,
       "run": 19
     }
   },
-  "blend": "/Users/zx/Documents/ChatGPT/SPATIAL PLATFORM/.codex-derived/replayxi-diversity172/rig-trest-v4/PlayerA-Rig.blend",
-  "blendSHA256": "2fbaf656e2e80d093ec6824f6e9d9b9e26186594431ae4a5fcf50f8a3a80f42e",
+  "blend": "Assets/ReplayXI/PlayerDiversity171/Blender/PlayerA-Rig.blend",
+  "blendSHA256": "3aa5db75d7652be9944b2c2fef6e3f0f13e140512e75af8d57d355b8a7a95e0b",
   "jointCount": 65,
   "restBones": {
     "mixamorig:Hips": {
@@ -1973,5 +1977,5 @@
       ]
     }
   },
-  "limit": "Same-family surface weight transfer; visual pose QA required."
+  "limit": "Same-family surface weight transfer. Runtime closeups at three running phases show no gross finger crossing, but curl remains modest and seams are visible. Not a full-fist or headset validation."
 }

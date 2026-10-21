@@ -15,6 +15,47 @@ final class ReplayAthleteHandPoseTests: XCTestCase {
         2 * acos(min(abs(simd_dot(a.vector, b.vector)), 1))
     }
 
+    private func position(_ pose: ReplaySkinnedAthleteMotion.Pose, _ index: Int) -> SIMD3<Float> {
+        let column = pose.modelSpaceTransforms[index].columns.3
+        return [column.x, column.y, column.z]
+    }
+
+    private func assertPalmsFaceInward(_ pose: ReplaySkinnedAthleteMotion.Pose,
+                                       motion: ReplaySkinnedAthleteMotion,
+                                       file: StaticString = #filePath, line: UInt = #line) throws {
+        let rest = motion.restPose
+        let chest = try XCTUnwrap(motion.semanticJointIndices["chest"])
+        let left = try XCTUnwrap(motion.joints.firstIndex { $0.sourceName == "mixamorig:LeftHand" })
+        let right = try XCTUnwrap(motion.joints.firstIndex { $0.sourceName == "mixamorig:RightHand" })
+        let restRight = simd_normalize(position(rest, right) - position(rest, left))
+        let bodyRightLocal = simd_quatf(rest.modelSpaceTransforms[chest]).inverse.act(restRight)
+        let bodyRight = simd_quatf(pose.modelSpaceTransforms[chest]).act(bodyRightLocal)
+        for (side, sign) in [("Left", Float(1)), ("Right", Float(-1))] {
+            func joint(_ suffix: String) throws -> Int {
+                try XCTUnwrap(motion.joints.firstIndex {
+                    $0.sourceName == "mixamorig:\(side)Hand\(suffix)"
+                })
+            }
+            let wrist = try joint("")
+            let index = try joint("Index1")
+            let middle = try joint("Middle1")
+            let pinky = try joint("Pinky1")
+            let thumb = try joint("Thumb1")
+            func normal(_ sample: ReplaySkinnedAthleteMotion.Pose) -> SIMD3<Float> {
+                simd_normalize(simd_cross(position(sample, index) - position(sample, pinky),
+                                          position(sample, middle) - position(sample, wrist)))
+            }
+            let restNormal = normal(rest)
+            let palmSign: Float = simd_dot(restNormal, position(rest, thumb) - position(rest, wrist)) < 0
+                ? -1 : 1
+            let reach = simd_normalize(position(pose, middle) - position(pose, wrist))
+            let medial = bodyRight * sign
+            let target = simd_normalize(medial - reach * simd_dot(medial, reach))
+            let alignment = simd_dot(normal(pose) * palmSign, target)
+            XCTAssertGreaterThan(alignment, 0.90, "\(side) palm faces away from torso", file: file, line: line)
+        }
+    }
+
     func testTripoHandsAreRelaxedWithoutChangingBodyOrBoneLengths() throws {
         for resource in ["ReplayXITripoMotion", "ReplayXITripoPlayerAMotion"] {
             let motion = try motion(resource, profile: .tripo52)
@@ -28,6 +69,18 @@ final class ReplayAthleteHandPoseTests: XCTestCase {
                     var posed = source
                     hand.apply(to: &posed)
                     motion.rebuildModelSpaceTransforms(in: &posed)
+                    if effort == 1 && frame == 5 {
+                        for side in ["Left", "Right"] {
+                            let ids = (1...3).map { ordinal in motion.joints.firstIndex {
+                                $0.sourceName == "mixamorig:\(side)HandIndex\(ordinal)"
+                            }! }
+                            let wrist = motion.joints.firstIndex { $0.sourceName == "mixamorig:\(side)Hand" }!
+                            XCTAssertLessThan(simd_distance(position(posed, wrist), position(posed, ids[2])),
+                                simd_distance(position(source, wrist), position(source, ids[2])) - 0.003,
+                                "\(resource) \(side) index must curl toward the hand")
+                        }
+                    }
+                    try assertPalmsFaceInward(posed, motion: motion)
                     XCTAssertEqual(source.translations, posed.translations)
                     XCTAssertEqual(source.scales, posed.scales)
                     for index in motion.joints.indices {
@@ -37,14 +90,6 @@ final class ReplayAthleteHandPoseTests: XCTestCase {
                             XCTAssertTrue(posed.rotations[index].vector.y.isFinite)
                             XCTAssertTrue(posed.rotations[index].vector.z.isFinite)
                             XCTAssertTrue(posed.rotations[index].vector.w.isFinite)
-                            if name.hasSuffix("Hand") {
-                                XCTAssertLessThanOrEqual(angle(motion.restPose.rotations[index],
-                                    posed.rotations[index]), 50 * .pi / 180 + 0.001)
-                            } else {
-                                XCTAssertLessThanOrEqual(angle(motion.restPose.rotations[index],
-                                    posed.rotations[index]), angle(motion.restPose.rotations[index],
-                                        source.rotations[index]) + 0.001)
-                            }
                         } else {
                             XCTAssertEqual(source.rotations[index].vector, posed.rotations[index].vector,
                                 "Unexpected change: \(name)")
@@ -60,6 +105,47 @@ final class ReplayAthleteHandPoseTests: XCTestCase {
                             XCTAssertEqual(original, result, accuracy: 0.0001, name)
                         }
                     }
+                }
+            }
+        }
+    }
+
+    func testUpturnedWristIsPronatedWithBoundedFingerDirection() throws {
+        for resource in ["ReplayXITripoMotion", "ReplayXITripoPlayerAMotion"] {
+            let motion = try motion(resource, profile: .tripo52)
+            let hand = try XCTUnwrap(ReplayAthleteHandPose(motion: motion))
+            for effort: Float in [0, 1] {
+                var pose = motion.makePoseBuffer()
+                motion.sample(time: 0.42, locomotionEffort: effort, gaitPhase: 1.7, into: &pose)
+                for side in ["Left", "Right"] {
+                    let wrist = try XCTUnwrap(motion.joints.firstIndex {
+                        $0.sourceName == "mixamorig:\(side)Hand"
+                    })
+                    let middle = try XCTUnwrap(motion.joints.firstIndex {
+                        $0.sourceName == "mixamorig:\(side)HandMiddle1"
+                    })
+                    let restReach = simd_normalize(position(motion.restPose, middle)
+                        - position(motion.restPose, wrist))
+                    let localReach = simd_quatf(motion.restPose.modelSpaceTransforms[wrist])
+                        .inverse.act(restReach)
+                    pose.rotations[wrist] = simd_normalize(pose.rotations[wrist]
+                        * simd_quatf(angle: .pi / 2, axis: localReach))
+                }
+                motion.rebuildModelSpaceTransforms(in: &pose)
+                let before = pose
+                hand.apply(to: &pose)
+                motion.rebuildModelSpaceTransforms(in: &pose)
+                try assertPalmsFaceInward(pose, motion: motion)
+                for side in ["Left", "Right"] {
+                    let wrist = try XCTUnwrap(motion.joints.firstIndex {
+                        $0.sourceName == "mixamorig:\(side)Hand"
+                    })
+                    let middle = try XCTUnwrap(motion.joints.firstIndex {
+                        $0.sourceName == "mixamorig:\(side)HandMiddle1"
+                    })
+                    let originalReach = simd_normalize(position(before, middle) - position(before, wrist))
+                    let correctedReach = simd_normalize(position(pose, middle) - position(pose, wrist))
+                    XCTAssertGreaterThan(simd_dot(originalReach, correctedReach), cos(0.60) - 0.002)
                 }
             }
         }
@@ -89,16 +175,17 @@ final class ReplayAthleteHandPoseTests: XCTestCase {
         motion.sample(time: 0, locomotionEffort: 0, gaitPhase: 0, into: &source)
         var posed = source
         hand.apply(to: &posed, preserveWrist: true)
+        motion.rebuildModelSpaceTransforms(in: &posed)
         for side in ["Left", "Right"] {
             let wrist = try XCTUnwrap(motion.joints.firstIndex {
                 $0.sourceName == "mixamorig:\(side)Hand"
             })
             XCTAssertEqual(posed.rotations[wrist].vector, source.rotations[wrist].vector)
-            let indexBase = try XCTUnwrap(motion.joints.firstIndex {
-                $0.sourceName == "mixamorig:\(side)HandIndex1"
+            let indexTip = try XCTUnwrap(motion.joints.firstIndex {
+                $0.sourceName == "mixamorig:\(side)HandIndex3"
             })
-            XCTAssertLessThan(angle(motion.restPose.rotations[indexBase], posed.rotations[indexBase]),
-                angle(motion.restPose.rotations[indexBase], source.rotations[indexBase]))
+            XCTAssertLessThan(simd_distance(position(posed, wrist), position(posed, indexTip)),
+                simd_distance(position(source, wrist), position(source, indexTip)))
         }
     }
 }

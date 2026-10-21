@@ -122,8 +122,11 @@ def bake_actions(rig, samples):
 
 
 def stabilize_hands(mesh):
-    """Limit transferred finger weights past the wrist; retain a soft wrist blend."""
+    """Keep confident finger weights; bind ambiguous hand transfers to the palm."""
     affected = 0
+    articulated = 0
+    chains = ("Index", "Middle", "Ring", "Pinky", "Thumb")
+    groups = {group.index: group.name for group in mesh.vertex_groups}
     for vertex in mesh.data.vertices:
         x, _, z = vertex.co
         if abs(x) <= .36 or z <= .68:
@@ -133,15 +136,32 @@ def stabilize_hands(mesh):
         t = max(0.0, min(1.0, (abs(x) - .36) / .06))
         blend = t * t * (3 - 2 * t)
         existing = {item.group: item.weight for item in vertex.groups if item.weight > 0}
-        mixed = {group: weight * (1 - blend) for group, weight in existing.items()}
-        mixed[hand] = mixed.get(hand, 0) + blend
+        finger_groups = {chain: {group: weight for group, weight in existing.items()
+                                 if groups[group].startswith(f"mixamorig:{side}Hand{chain}")}
+                         for chain in chains}
+        dominant = max(chains, key=lambda chain: sum(finger_groups[chain].values()))
+        if sum(finger_groups[dominant].values()) >= .45:
+            # The transfer's clear finger chain should still bend at its real
+            # phalanges. Discard competing chains that made fingers intersect.
+            # The transfer is coarse near these narrow fingers. Limit its
+            # influence so authored bends cannot fold the mesh through itself.
+            mixed = {group: weight * (1 - min(blend, .12)) * .35
+                     for group, weight in finger_groups[dominant].items()}
+            mixed[hand] = 1 - sum(mixed.values())
+            articulated += 1
+        else:
+            mixed = {group: weight * (1 - blend) for group, weight in existing.items()}
+            mixed[hand] = mixed.get(hand, 0) + blend
         for group in existing:
             mesh.vertex_groups[group].remove([vertex.index])
         for group, weight in mixed.items():
             if weight > 0:
                 mesh.vertex_groups[group].add([vertex.index], weight, "REPLACE")
         affected += 1
-    return {"vertices": affected, "startXMetres": .36, "fullXMetres": .42}
+    return {"vertices": affected, "articulatedFingerVertices": articulated,
+            "startXMetres": .36, "fullXMetres": .42,
+            "fingerTransferThreshold": .45, "fingerInfluenceScale": .35,
+            "maximumFingerPalmBlend": .12}
 
 
 def main():
