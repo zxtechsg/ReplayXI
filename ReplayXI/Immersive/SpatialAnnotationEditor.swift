@@ -44,7 +44,7 @@ struct SpatialAnnotationEditor: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            action("timeline.selection", "All annotation tracks", onTimeline)
+            action("list.bullet.rectangle", "All annotation tracks", onTimeline)
             Label(mark.label, systemImage: mark.kind.systemImage)
                 .font(.subheadline.weight(.semibold)).lineLimit(1)
             Spacer(minLength: 0)
@@ -53,7 +53,7 @@ struct SpatialAnnotationEditor: View {
                     _ = store.captureCoachMarkKeyframe(id: mark.id)
                 }
                 .disabled(mark.followsPlayerTracks || !mark.canRecordPose(at: store.playhead))
-                action("diamond.slash", "Delete position at this time") {
+                action("minus.circle", "Delete position at this time") {
                     if let key = currentKey { _ = store.removeCoachMarkKeyframe(id: mark.id, at: key.time) }
                 }
                 .disabled(currentKey == nil)
@@ -83,7 +83,8 @@ struct SpatialAnnotationEditor: View {
             .frame(minWidth: 44, minHeight: 44)
         }
         .buttonStyle(.bordered)
-        .tint(anchor == nil ? .white : ReplayTheme.cyan)
+        .tint(anchor == nil ? .white.opacity(0.10) : ReplayTheme.cyan)
+        .foregroundStyle(anchor == nil ? Color.white : Color.black)
         .help("\(start ? "Origin" : "End") · \(player.map { "#\($0.shirtNumber)" } ?? "fixed to pitch")")
         .accessibilityLabel("Link \(start ? "origin" : "end") to a player")
         .accessibilityValue(player.map { "#\($0.shirtNumber) \($0.displayName)" } ?? "Pitch fixed")

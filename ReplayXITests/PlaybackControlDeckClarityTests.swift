@@ -254,52 +254,41 @@ final class PlaybackControlDeckClarityTests: XCTestCase {
         XCTAssertTrue(movePolicy.contains("CoachMarkTimingPolicy.windowFits"))
     }
 
-    func testSelectedCoachMarkExposesClearRetractableTwentyTwoPlayerTracking() throws {
+    func testSelectedCoachMarkExposesRetractableEndpointLinksWithFreezeGate() throws {
         let source = try immersiveSource()
         let inspector = try sourceSlice(
             source,
             after: "private func selectedAnnotationInspector(_ mark: CoachMark) -> some View",
             before: "private func annotationGeometryButton(_ mark: CoachMark) -> some View"
         )
-        XCTAssertTrue(inspector.contains("annotationTrackingButton(mark)"))
+        XCTAssertTrue(inspector.contains("SpatialAnnotationEditor(mark: mark"))
 
-        let trackingButton = try sourceSlice(
-            source,
-            after: "private func annotationTrackingButton(_ mark: CoachMark) -> some View",
-            before: "private func annotationTrackingButtonTitle(_ mark: CoachMark) -> String"
-        )
-        XCTAssertTrue(trackingButton.contains("toggleInlinePanel(.annotationTracking(mark.id))"))
-        XCTAssertTrue(trackingButton.contains("Annotation player tracking"))
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let editor = try String(contentsOf: root.appendingPathComponent(
+            "ReplayXI/Immersive/SpatialAnnotationEditor.swift"), encoding: .utf8)
+        let header = try sourceSlice(editor, after: "private var header: some View",
+            before: "private func endpointButton(")
+        XCTAssertTrue(header.contains("endpointButton(.start)"))
+        XCTAssertTrue(header.contains("endpointButton(.end)"))
+        XCTAssertTrue(header.contains("if editable, mark.kind.requiresTwoPitchPoints"))
 
-        let trackingShelf = try sourceSlice(
-            source,
-            after: "private func annotationTrackingShelf(_ mark: CoachMark) -> some View",
-            before: "private func annotationTrackingTeamRow("
-        )
-        XCTAssertTrue(trackingShelf.contains("title: \"Follow player\""))
-        XCTAssertTrue(trackingShelf.contains("detail: \"START + END\""))
-        XCTAssertTrue(trackingShelf.contains("Label(\"Pitch\""))
-        XCTAssertTrue(trackingShelf.contains("store.selectedScenario.homePlayers"))
-        XCTAssertTrue(trackingShelf.contains("store.selectedScenario.awayPlayers"))
+        let endpoint = try sourceSlice(editor, after: "private func endpointButton(",
+            before: "private func playerLinks(")
+        XCTAssertTrue(endpoint.contains("linking = linking == endpoint ? nil : endpoint"))
+        XCTAssertTrue(endpoint.contains(".accessibilityLabel(\"Link "))
+        XCTAssertTrue(endpoint.contains(".frame(minWidth: 44, minHeight: 44)"))
 
-        let trackingRow = try sourceSlice(
-            source,
-            after: "private func annotationTrackingTeamRow(\n",
-            before: "private func annotationTrackingPlayerButton("
-        )
-        XCTAssertTrue(trackingRow.contains("ForEach(players.prefix(11))"))
-
-        let trackingMutation = try sourceSlice(
-            source,
-            after: "private func setAnnotationTracking(_ mark: CoachMark, playerID: String?)",
-            before: "private func annotationLabelShelf(_ mark: CoachMark) -> some View"
-        )
-        XCTAssertTrue(
-            trackingMutation.contains(
-                "store.setCoachMarkTracking(id: mark.id, playerID: playerID)"
-            )
-        )
-        XCTAssertTrue(trackingMutation.contains("inlinePanel = nil"))
+        let links = try sourceSlice(editor, after: "private func playerLinks(",
+            before: "private func action(")
+        XCTAssertTrue(links.contains("if mark.hasKeyframes"))
+        XCTAssertTrue(links.contains("Button(\"Freeze here\")"))
+        XCTAssertTrue(links.contains("store.freezeCoachMarkKeyframes(id: mark.id)"))
+        XCTAssertTrue(links.contains("Freeze the current pose before linking"))
+        XCTAssertTrue(links.contains("ForEach(store.selectedScenario.players) { player in"))
+        XCTAssertTrue(links.contains("store.setCoachMarkEndpointTracking(id: mark.id, endpoint: endpoint,"))
+        XCTAssertTrue(links.contains("playerID: player.id"))
+        XCTAssertTrue(links.contains("playerID: nil"), "Pitch-fixed must remain available.")
+        XCTAssertTrue(links.contains("linking = nil"), "Choosing a player or pitch must retract the picker.")
     }
 
     private func immersiveSource() throws -> String {

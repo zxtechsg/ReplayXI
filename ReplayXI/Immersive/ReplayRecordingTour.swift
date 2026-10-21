@@ -6,13 +6,22 @@ import Foundation
 @MainActor
 enum ReplayRecordingTour {
     static func run(store: ReplayStore, roomID: UUID,
-                    ready: () -> Bool, selectMark: (UUID?) -> Void) async {
+                    ready: () -> Bool, povReady: () -> Bool,
+                    selectMark: (UUID?) -> Void) async {
         func valid() -> Bool {
             !Task.isCancelled && store.roomPresentation.acceptsInteraction(for: roomID)
         }
         func wait(_ seconds: Double) async -> Bool {
             do { try await Task.sleep(for: .seconds(seconds)) } catch { return false }
             return valid()
+        }
+        func awaitPOV() async -> Bool {
+            for _ in 0..<40 {
+                if povReady() { return await wait(0.35) }
+                guard await wait(0.2) else { return false }
+            }
+            NSLog("ReplayXI capture: POV entry did not become ready for %@", store.selectedScenarioID)
+            return false
         }
         guard await wait(3) else { return }
         let ids = ["final-36-counter-v2", "final-81-volley-v2", "final-108-rebound-v2",
@@ -39,11 +48,13 @@ enum ReplayRecordingTour {
             store.openLocalPlayerPOV(store.selectedScenario.defaultPerspectiveID)
             guard await wait(0.3) else { return }
             faceBall(store)
+            guard await awaitPOV() else { return }
             store.setPlaying(true, broadcast: false)
             guard await wait(3) else { return }
             if let other = store.selectedScenario.awayPlayers.first(where: { !$0.isGoalkeeper }) {
                 store.openLocalPlayerPOV(other.id)
                 faceBall(store)
+                guard await awaitPOV() else { return }
                 store.setPlaying(true, broadcast: false)
                 guard await wait(2) else { return }
             }

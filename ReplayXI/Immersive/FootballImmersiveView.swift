@@ -256,7 +256,8 @@ struct FootballImmersiveView: View {
                   ReplayLaunchConfiguration.current.automationArguments.contains("--replayxi-record-tour") else { return }
             didRunRecordingTour = true
             await ReplayRecordingTour.run(store: store, roomID: roomPresentationID,
-                ready: { isMatchSceneReady }, selectMark: { selectedAnnotationID = $0 })
+                ready: { isMatchSceneReady }, povReady: { hasCurrentPOVReference },
+                selectMark: { selectedAnnotationID = $0 })
             #endif
         }
         .onAppear {

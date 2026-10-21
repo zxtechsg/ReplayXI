@@ -37,11 +37,13 @@ struct PlaybackViewOverlayHUD: View {
 
     var body: some View {
         if usesSpatialGlass {
-            controls.glassBackgroundEffect(in: .rect(cornerRadius: 20))
+            controls
+                .fixedSize(horizontal: !isExpanded, vertical: false)
+                .glassBackgroundEffect(in: .rect(cornerRadius: 20))
         } else {
             // UIHostingController cannot snapshot spatial glass composites.
             // Window-layout audits render the identical controls without glass.
-            controls
+            controls.fixedSize(horizontal: !isExpanded, vertical: false)
         }
     }
 

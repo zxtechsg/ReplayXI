@@ -94,6 +94,9 @@ final class PlaybackViewHUDTextMetricsTests: XCTestCase {
         XCTAssertTrue(header.contains("Text(\"POV\")"))
         XCTAssertFalse(header.contains("Eyebrow(text: \"View & Overlays\""))
         XCTAssertFalse(header.contains("Text(store.viewMode.title)"))
+        XCTAssertEqual(hud.components(separatedBy:
+            ".fixedSize(horizontal: !isExpanded, vertical: false)").count - 1, 2,
+            "Both glass and screenshot paths must hug collapsed icon controls.")
         let badge = try slice(hud, after: "private func compactOverlayBadge(",
             before: "private func compactOverlayBadgeColor(")
         XCTAssertTrue(badge.contains(".font(.caption.weight(.black))"))
@@ -112,7 +115,9 @@ final class PlaybackViewHUDTextMetricsTests: XCTestCase {
         let overlay = try slice(hud, after: "private func overlayChoice(", before: "\n}")
         XCTAssertTrue(overlay.contains("Image(systemName: systemImage)"))
         XCTAssertTrue(overlay.contains(".font(.title3.weight(.bold))"))
-        XCTAssertFalse(overlay.contains("Label("))
+        let overlayButtonLabel = try slice(overlay, after: "return Button(action: action) {",
+            before: ".buttonStyle(.borderedProminent)")
+        XCTAssertFalse(overlayButtonLabel.contains("Label("))
         XCTAssertFalse(overlay.contains("minimumScaleFactor"))
         XCTAssertTrue(overlay.contains("minHeight: PlaybackControlDeckPresentation.minimumSpatialHitTarget"))
         XCTAssertTrue(hud.contains("Stadium: hides passthrough. Stay seated or planted"))
