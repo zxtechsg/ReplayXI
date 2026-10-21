@@ -3,8 +3,8 @@ import SceneKit
 import simd
 
 enum CoachSceneGeometry {
-    static let overviewPosition = SIMD3<Float>(72, 75, 88)
-    static let overviewTarget = SIMD3<Float>(0, 0, 3)
+    static let overviewPosition = SIMD3<Float>(55, 88, 82)
+    static let overviewTarget = SIMD3<Float>(0, 0, 0)
     static let overviewFieldOfView: CGFloat = 60
 
     static func pitchRing(radius: CGFloat, pipeRadius: CGFloat) -> SCNNode {
@@ -28,6 +28,26 @@ enum CoachSceneGeometry {
         let point = a + ray * t
         guard point.x.isFinite, point.y.isFinite, point.z.isFinite else { return nil }
         return point
+    }
+
+    /// SceneKit's unprojectPoint needs a rendered viewport. Derive the pick
+    /// ray from the live camera instead, so the first drag works too.
+    static func pitchPoint(screen: CGPoint, size: CGSize, camera: SCNNode,
+                           fieldOfView: CGFloat, height: Float) -> SIMD3<Float>? {
+        guard size.width > 0, size.height > 0, fieldOfView.isFinite,
+              (1..<179).contains(fieldOfView) else { return nil }
+        let tangent = Float(tan(fieldOfView * .pi / 360))
+        let aspect = Float(size.width / size.height)
+        let local = SIMD3<Float>(
+            (Float(screen.x / size.width) * 2 - 1) * aspect * tangent,
+            (Float(screen.y / size.height) * 2 - 1) * tangent, -1)
+        let transform = camera.simdWorldTransform
+        let rotation = simd_float3x3(columns: (
+            SIMD3<Float>(transform.columns.0.x, transform.columns.0.y, transform.columns.0.z),
+            SIMD3<Float>(transform.columns.1.x, transform.columns.1.y, transform.columns.1.z),
+            SIMD3<Float>(transform.columns.2.x, transform.columns.2.y, transform.columns.2.z)))
+        let origin = camera.simdWorldPosition
+        return planeIntersection(near: origin, far: origin + rotation * local, height: height)
     }
 
     static func canCommit(dragRevision: UInt64, dragScenarioID: String, markID: UUID,
@@ -56,7 +76,8 @@ struct CoachScenePreview: View {
         CoachSceneSurface(state: state, selectedMarkID: selectedMarkID,
             drawingEnabled: drawingEnabled, drawStart: drawStart,
             resetRevision: resetRevision, playerView: playerView, focusRevision: focusRevision,
-            select: select, onPlayer: onPlayer, onPitchClick: onPitchClick, onPose: onPose)
+            select: select, onPlayer: { id in playerView = true; onPlayer(id) },
+            onPitchClick: onPitchClick, onPose: onPose)
             .overlay(alignment: .topLeading) {
                 HStack(spacing: 8) {
                 Picker("Camera", selection: $playerView) {
@@ -226,7 +247,8 @@ final class CoachSceneView: SCNView {
             cameraNode.simdPosition = [player.position.x, 1.72, player.position.z]
             let target = CoachSceneGeometry.headingTarget(position: player.position,
                                                           facingDegrees: player.facingDegrees ?? 0)
-            cameraNode.look(at: .init(target.x, target.y, target.z))
+            cameraNode.look(at: .init(target.x, target.y, target.z),
+                            up: .init(0, 1, 0), localFront: .init(0, 0, -1))
             pointOfView = cameraNode
             for (id, node) in players { node.isHidden = id == player.id }
         } else { for node in players.values { node.isHidden = false } }
@@ -237,7 +259,8 @@ final class CoachSceneView: SCNView {
     private func overview() {
         cameraNode.simdPosition = CoachSceneGeometry.overviewPosition
         let target = CoachSceneGeometry.overviewTarget
-        cameraNode.look(at: .init(target.x, target.y, target.z))
+        cameraNode.look(at: .init(target.x, target.y, target.z),
+                        up: .init(0, 1, 0), localFront: .init(0, 0, -1))
         pointOfView = cameraNode
         defaultCameraController.target = .init(target.x, target.y, target.z)
         defaultCameraController.clearRoll()
@@ -251,7 +274,8 @@ final class CoachSceneView: SCNView {
         let centre = (minimum + maximum) / 2
         let radius = max(5, simd_distance(minimum, maximum) / 2)
         cameraNode.simdPosition = centre + simd_normalize(SIMD3<Float>(0.55, 0.95, 1)) * radius * 2.5
-        cameraNode.look(at: .init(centre.x, centre.y, centre.z))
+        cameraNode.look(at: .init(centre.x, centre.y, centre.z),
+                        up: .init(0, 1, 0), localFront: .init(0, 0, -1))
         pointOfView = cameraNode
         defaultCameraController.target = .init(centre.x, centre.y, centre.z)
         defaultCameraController.clearRoll()
@@ -348,11 +372,9 @@ final class CoachSceneView: SCNView {
     }
 
     private func planePoint(_ location: CGPoint, height: Float) -> SIMD3<Float>? {
-        let near = unprojectPoint(.init(location.x, location.y, 0))
-        let far = unprojectPoint(.init(location.x, location.y, 1))
-        let a = SIMD3<Float>(Float(near.x), Float(near.y), Float(near.z))
-        let b = SIMD3<Float>(Float(far.x), Float(far.y), Float(far.z))
-        return CoachSceneGeometry.planeIntersection(near: a, far: b, height: height)
+        CoachSceneGeometry.pitchPoint(screen: location, size: bounds.size,
+            camera: cameraNode, fieldOfView: cameraNode.camera?.fieldOfView ?? 60,
+            height: height)
     }
 
     private func edited(_ drag: Drag) -> (start: ReplayXIWirePoint3, end: ReplayXIWirePoint3, control: ReplayXIWirePoint3?) {

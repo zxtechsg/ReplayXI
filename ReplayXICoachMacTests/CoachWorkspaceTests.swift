@@ -18,6 +18,16 @@ final class CoachWorkspaceTests: XCTestCase {
         XCTAssertEqual(CoachWorkspace.timelineTime(x: .infinity, width: 100, duration: 60), 0)
     }
 
+    func testKeyDragRejectsOccupiedOrInvalidTimesAtDomainTolerance() {
+        let keys = [2.0, 4.0, 6.0]
+        XCTAssertTrue(CoachWorkspace.validKeyMove(from: 4, to: 4.5, keys: keys, duration: 10))
+        XCTAssertTrue(CoachWorkspace.validKeyMove(from: 4, to: 6.000_01, keys: keys, duration: 10))
+        XCTAssertFalse(CoachWorkspace.validKeyMove(from: 4, to: 6.000_000_5, keys: keys, duration: 10))
+        XCTAssertFalse(CoachWorkspace.validKeyMove(from: 5, to: 5.5, keys: keys, duration: 10))
+        XCTAssertFalse(CoachWorkspace.validKeyMove(from: 4, to: -1, keys: keys, duration: 10))
+        XCTAssertFalse(CoachWorkspace.validKeyMove(from: 4, to: .nan, keys: keys, duration: 10))
+    }
+
     func testVisibilityMatchesInclusiveStartExclusiveEnd() {
         var mark = fixture
         XCTAssertFalse(CoachWorkspace.isVisible(mark, at: 6.999))

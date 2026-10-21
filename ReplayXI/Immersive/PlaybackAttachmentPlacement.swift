@@ -40,8 +40,8 @@ enum PlaybackAttachmentPlacement {
         surface.components.set(BillboardComponent())
     }
 
-    /// Only an explicit user request changes the workspace origin. No frame loop,
-    /// player selection, save restore or view switch is allowed to recapture it.
+    /// A user recenter or teleport changes the revision once. Ordinary head
+    /// motion and replay ticks never recapture this room-fixed anchor.
     static func needsRecenter(_ anchor: AnchorEntity, revision: Int) -> Bool {
         anchor.components[Revision.self]?.value != revision
     }

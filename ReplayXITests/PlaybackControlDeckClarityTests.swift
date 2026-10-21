@@ -192,7 +192,14 @@ final class PlaybackControlDeckClarityTests: XCTestCase {
         XCTAssertFalse(source.contains("Text(\"EVENTS\")"))
         XCTAssertFalse(source.contains("Text(\"MARK\")"))
         XCTAssertFalse(source.contains("Text(\"MORE\")"))
-        XCTAssertTrue(source.contains("Eyebrow(text: \"View & Overlays\""))
+        let hud = try sourceSlice(source,
+            after: "private var controls: some View",
+            before: "private var environmentChoices: some View")
+        XCTAssertTrue(hud.contains("Image(systemName: store.viewMode.systemImage)"))
+        XCTAssertTrue(hud.contains("Text(\"POV\")"))
+        XCTAssertFalse(hud.contains("Eyebrow(text: \"View & Overlays\""))
+        XCTAssertTrue(hud.contains(".help("))
+        XCTAssertTrue(hud.contains(".accessibilityLabel(\"View and overlays\")"))
     }
 
     func testSpeedShelfRetractsAndRemainsIndependentOfSelectedAnnotation() {

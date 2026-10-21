@@ -3,6 +3,7 @@ import Foundation
 /// Shared by the map, timeline and inspector. Keep Mac timing semantics in
 /// step with CoachMark: the show boundary is inclusive; hide is exclusive.
 enum CoachWorkspace {
+    static let keyTimeTolerance = 0.000_001
     static func isVisible(_ mark: ReplayXIWireMark, at time: Double) -> Bool {
         mark.showAt <= time && (mark.hideAt.map { time < $0 } ?? true)
     }
@@ -21,6 +22,15 @@ enum CoachWorkspace {
     static func timelineTime(x: Double, width: Double, duration: Double) -> Double {
         guard x.isFinite, width.isFinite, width > 0, duration.isFinite, duration > 0 else { return 0 }
         return min(max(x / width, 0), 1) * duration
+    }
+
+    static func validKeyMove(from original: Double, to proposed: Double,
+                             keys: [Double], duration: Double) -> Bool {
+        original.isFinite && proposed.isFinite && duration.isFinite &&
+            (0...duration).contains(proposed) &&
+            keys.contains(where: { abs($0 - original) <= keyTimeTolerance }) &&
+            !keys.contains(where: { abs($0 - original) > keyTimeTolerance &&
+                abs($0 - proposed) <= keyTimeTolerance })
     }
 
     static func validWindow(show: Double, hide: Double?, duration: Double) -> Bool {

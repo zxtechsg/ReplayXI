@@ -4,8 +4,7 @@ import XCTest
 @testable import ReplayXI
 
 /// UIFont and configured SF-symbol size budgets, not a SwiftUI render. The
-/// expanded rows use minimum heights, so larger line heights are not failures.
-/// Row width probes exclude native button padding and Label's implicit gap.
+/// icon rows use minimum heights; width probes exclude native button padding.
 @MainActor
 final class PlaybackViewHUDTextMetricsTests: XCTestCase {
     private let categories: [UIContentSizeCategory] = [
@@ -14,7 +13,7 @@ final class PlaybackViewHUDTextMetricsTests: XCTestCase {
         .accessibilityExtraExtraLarge, .accessibilityExtraExtraExtraLarge
     ]
 
-    func testEveryTextSizeHasNativeHeaderAndOverlayMeasurements() throws {
+    func testEveryTextSizeHasNativeHeaderAndToolIconMeasurements() throws {
         let records = try categories.map(metrics)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -26,8 +25,10 @@ final class PlaybackViewHUDTextMetricsTests: XCTestCase {
         for record in records {
             XCTAssertEqual(record.headerSymbols.count, 5)
             XCTAssertEqual(record.badgeSymbols.count, 3)
+            XCTAssertEqual(record.expandedSymbols.count, 13)
             XCTAssertTrue(record.headerSymbols.allSatisfy { $0.width > 0 && $0.height > 0 })
             XCTAssertTrue(record.badgeSymbols.allSatisfy { $0.width > 0 && $0.height > 0 })
+            XCTAssertTrue(record.expandedSymbols.allSatisfy { $0.width > 0 && $0.height > 0 })
         }
     }
 
@@ -51,24 +52,25 @@ final class PlaybackViewHUDTextMetricsTests: XCTestCase {
         }
     }
 
-    func testExpandedRowsDoNotExceedEvenTheirUnpaddedWidthBudget() throws {
+    func testExpandedToolIconsFitTheirThreeColumnCellsAndHitTargetHeight() throws {
         for record in try categories.map(metrics) {
-            XCTAssertLessThanOrEqual(record.cameraMinimumTextRowWidth,
-                record.innerWidth, record.category)
-            XCTAssertLessThanOrEqual(record.overlayMinimumContentRowWidth,
-                record.innerWidth, record.category)
+            for symbol in record.expandedSymbols {
+                let context = "\(record.category): \(symbol.name)"
+                XCTAssertLessThanOrEqual(symbol.width, symbol.widthLimit, context)
+                XCTAssertLessThanOrEqual(symbol.height, symbol.heightLimit, context)
+            }
         }
     }
 
     func testFullCollapsedHeaderFitsWithAllThreeBadgesAtEveryTextSize() throws {
         for category in categories {
             let record = try metrics(for: category)
-            // Exact plain-header frames, four 10 pt gaps, two 5 pt badge
-            // gaps and the existing 4 pt minimum spacer. No styled buttons.
+            // Five header children in POV: view icon, POV text, badge row,
+            // zero-minimum spacer, chevron. Other views omit the short text.
             let width = record.headerSymbols[0].widthLimit
-                + max(record.maximumModeTitleWidth, record.eyebrowUnwrappedWidth)
+                + record.povLabelWidth
                 + 3 * record.badgeSymbols[0].widthLimit + 2 * 5
-                + record.headerSymbols[3].widthLimit + 4 * 10 + 4
+                + record.headerSymbols[3].widthLimit + 4 * 8
             for preset in PlaybackControlDeckPreset.allCases {
                 let layout = PlaybackViewHUDLayout.resolve(preset: preset,
                     usesAccessibilityText: category.isAccessibilityCategory)
@@ -89,6 +91,9 @@ final class PlaybackViewHUDTextMetricsTests: XCTestCase {
         XCTAssertTrue(header.contains(".frame(width: symbolLayout.disclosureIconWidth,"))
         XCTAssertEqual(header.components(separatedBy:
             "height: PlaybackControlDeckPresentation.minimumSpatialHitTarget)").count - 1, 2)
+        XCTAssertTrue(header.contains("Text(\"POV\")"))
+        XCTAssertFalse(header.contains("Eyebrow(text: \"View & Overlays\""))
+        XCTAssertFalse(header.contains("Text(store.viewMode.title)"))
         let badge = try slice(hud, after: "private func compactOverlayBadge(",
             before: "private func compactOverlayBadgeColor(")
         XCTAssertTrue(badge.contains(".font(.caption.weight(.black))"))
@@ -100,14 +105,24 @@ final class PlaybackViewHUDTextMetricsTests: XCTestCase {
             "PlaybackViewHUDSymbolLayout.resolve(usesAccessibilityText: dynamicTypeSize.isAccessibilitySize)"))
         let camera = try slice(hud, after: "private func viewChoice(", before: "private func overlayChoice(")
         XCTAssertTrue(hud.contains("[.firstPerson, .tacticalTable, .touchline]"))
-        XCTAssertTrue(camera.contains(".font(.subheadline.weight(.bold))"))
-        XCTAssertTrue(camera.contains(".minimumScaleFactor(0.72)"))
+        XCTAssertTrue(camera.contains("Image(systemName: mode.systemImage)"))
+        XCTAssertTrue(camera.contains(".font(.title3.weight(.bold))"))
+        XCTAssertFalse(camera.contains("Text("))
         XCTAssertTrue(camera.contains("minHeight: PlaybackControlDeckPresentation.minimumSpatialHitTarget"))
-        let overlay = try slice(hud, after: "private func overlayChoice(", before: "private func shortViewTitle(")
-        XCTAssertTrue(overlay.contains(".font(.caption.weight(.black))"))
-        XCTAssertTrue(overlay.contains(".lineLimit(1)"))
+        let overlay = try slice(hud, after: "private func overlayChoice(", before: "\n}")
+        XCTAssertTrue(overlay.contains("Image(systemName: systemImage)"))
+        XCTAssertTrue(overlay.contains(".font(.title3.weight(.bold))"))
+        XCTAssertFalse(overlay.contains("Label("))
         XCTAssertFalse(overlay.contains("minimumScaleFactor"))
         XCTAssertTrue(overlay.contains("minHeight: PlaybackControlDeckPresentation.minimumSpatialHitTarget"))
+        XCTAssertTrue(hud.contains("Stadium: hides passthrough. Stay seated or planted"))
+        XCTAssertTrue(hud.contains("Surface pitch fixed. Reset its surface placement"))
+        let shelf = try String(contentsOf: root.appendingPathComponent(
+            "ReplayXI/Immersive/PlaybackViewShelf.swift"), encoding: .utf8)
+        XCTAssertTrue(shelf.contains("Image(systemName: section.systemImage)"))
+        XCTAssertTrue(shelf.contains(".frame(maxWidth: .infinity, minHeight: 60)"))
+        XCTAssertFalse(shelf.contains("Text(section.title)"))
+        XCTAssertTrue(shelf.contains(".accessibilityLabel(\"\\(section.title) controls\")"))
         XCTAssertTrue(hud.contains(".padding(11)"))
     }
 
@@ -116,11 +131,8 @@ final class PlaybackViewHUDTextMetricsTests: XCTestCase {
         let innerWidth: Double
         let headerSymbols: [SymbolBudget]
         let badgeSymbols: [SymbolBudget]
-        let maximumModeTitleWidth: Double
-        let eyebrowUnwrappedWidth: Double
-        let cameraMinimumTextRowWidth: Double
-        let overlayMinimumContentRowWidth: Double
-        let overlayCaptionLineHeight: Double
+        let expandedSymbols: [SymbolBudget]
+        let povLabelWidth: Double
     }
 
     private struct SymbolBudget: Encodable {
@@ -139,9 +151,9 @@ final class PlaybackViewHUDTextMetricsTests: XCTestCase {
         }
         let headline = font(.headline, weight: .black)
         let caption = font(.caption1, weight: .black)
-        let camera = font(.subheadline, weight: .bold)
-        let modeTitle = font(.subheadline, weight: .black)
-        let eyebrow = font(.caption1, weight: .semibold)
+        let pov = font(.caption1, weight: .bold)
+        let tool = font(.title3, weight: .bold)
+        let shelf = font(.title3, weight: .semibold)
         let layout = PlaybackViewHUDLayout.resolve(preset: .standard,
             usesAccessibilityText: category.isAccessibilityCategory)
         let symbolLayout = PlaybackViewHUDSymbolLayout.resolve(
@@ -166,28 +178,24 @@ final class PlaybackViewHUDTextMetricsTests: XCTestCase {
             try symbol($0.systemImage, font: caption, width: Double(symbolLayout.overlayBadgeDiameter),
                 height: Double(symbolLayout.overlayBadgeDiameter))
         }
-        let offSymbol = try symbol("eye.slash", font: caption,
-            width: Double(symbolLayout.overlayBadgeDiameter), height: Double(symbolLayout.overlayBadgeDiameter))
-        let overlayTitles = ["Marks", "Ball", "Lanes"]
-        let overlayWidth = zip(overlayTitles, badges).reduce(12.0) { sum, item in
-            sum + textWidth(item.0, font: caption) + max(item.1.width, offSymbol.width)
-        }
+        let cellWidth = (Double(layout.attachmentWidth) - 22 - 2 * 6) / 3
+        let targetHeight = Double(PlaybackControlDeckPresentation.minimumSpatialHitTarget)
+        let toolSymbols = try (viewModes.map(\.systemImage) + PlaybackOverlayBadge.allCases.map(\.systemImage))
+            .map { try symbol($0, font: tool, width: cellWidth, height: targetHeight) }
+        let shelfSymbols = try (PlaybackViewShelf.allCases.map(\.systemImage)
+            + ReplayEnvironmentMode.allCases.map(\.systemImage) + ["sportscourt", "viewfinder"])
+            .map { try symbol($0, font: shelf, width: cellWidth, height: targetHeight) }
         return Metrics(
             category: category.rawValue, innerWidth: Double(layout.attachmentWidth) - 22,
             headerSymbols: modes + chevrons, badgeSymbols: badges,
-            maximumModeTitleWidth: viewModes.map { textWidth($0.title, font: modeTitle) }.max() ?? 0,
-            eyebrowUnwrappedWidth: textWidth("View & Overlays", font: eyebrow, tracking: 0),
-            cameraMinimumTextRowWidth: ["POV", "Tactical", "Touchline"].reduce(12.0) {
-                $0 + textWidth($1, font: camera) * 0.72
-            },
-            overlayMinimumContentRowWidth: overlayWidth,
-            overlayCaptionLineHeight: Double(caption.lineHeight)
+            expandedSymbols: toolSymbols + shelfSymbols,
+            povLabelWidth: textWidth("POV", font: pov)
         )
     }
 
-    private func textWidth(_ text: String, font: UIFont, tracking: Double = 0) -> Double {
+    private func textWidth(_ text: String, font: UIFont) -> Double {
         let line = CTLineCreateWithAttributedString(NSAttributedString(string: text,
-            attributes: [.font: font, .kern: tracking]) as CFAttributedString)
+            attributes: [.font: font]) as CFAttributedString)
         return CTLineGetTypographicBounds(line, nil, nil, nil)
     }
 

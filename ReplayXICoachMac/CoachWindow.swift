@@ -62,9 +62,9 @@ struct CoachWindow: View {
                 .fixedSize(horizontal: false, vertical: true)
             Divider()
             if let state {
-                    VStack(spacing: 10) {
+                    VStack(spacing: 8) {
                         playbackBar(state)
-                        toolBar(state)
+                        toolBar(state).disabled(link.playbackContextPending)
                         if shows3D {
                             CoachScenePreview(state: state, selectedMarkID: selectedMarkID,
                                 drawingEnabled: drawingEnabled, drawStart: drawStart,
@@ -79,6 +79,8 @@ struct CoachWindow: View {
                                         recordMotion: recordMotion))
                                 })
                                 .clipShape(RoundedRectangle(cornerRadius: 10))
+                                .allowsHitTesting(!link.playbackContextPending)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
                         } else {
                         PitchMap(state: state, selectedMarkID: $selectedMarkID,
                             drawKind: drawKind, drawingEnabled: drawingEnabled, drawStart: $drawStart,
@@ -92,13 +94,15 @@ struct CoachWindow: View {
                                     controlPoint: .init(x: point.x, y: Float(controlHeight), z: point.z),
                                     recordMotion: recordMotion))
                             })
+                            .allowsHitTesting(!link.playbackContextPending)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
                         }
                         timeline(state)
                     }
-                    .padding(14)
-                    .frame(maxWidth: .infinity)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 Divider()
-                workspaceFooter(state)
+                workspaceFooter(state).disabled(link.playbackContextPending)
             } else {
                 ContentUnavailableView(connectionTarget == "simulator" ? "Connect to Vision Pro Simulator" : "Connect to Replay XI",
                     systemImage: connectionTarget == "simulator" ? "desktopcomputer" : "visionpro",
@@ -112,7 +116,8 @@ struct CoachWindow: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .inspector(isPresented: Binding(get: { state != nil && showInspector }, set: { showInspector = $0 })) {
             if let state {
-                inspector(state).inspectorColumnWidth(min: 300, ideal: 340, max: 420)
+                inspector(state).disabled(link.playbackContextPending)
+                    .inspectorColumnWidth(min: 340, ideal: 390, max: 480)
             }
         }
         .toolbar {
@@ -201,7 +206,9 @@ struct CoachWindow: View {
 
     private var connectionBar: some View {
         HStack(spacing: 12) {
-            Label("Replay XI Coach", systemImage: "sportscourt").font(.headline)
+            Image(systemName: "sportscourt")
+                .help("Replay XI Coach connection")
+                .accessibilityLabel("Replay XI Coach connection")
             Spacer()
             Label(link.status, systemImage: link.connected ? "checkmark.circle.fill" : "wifi")
                 .font(.caption)
@@ -236,8 +243,8 @@ struct CoachWindow: View {
                 }
             }
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
     }
 
     private func playbackBar(_ state: ReplayXIWireState) -> some View {
@@ -266,6 +273,9 @@ struct CoachWindow: View {
             }
         }
         .controlSize(.small)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .modifier(CoachGlassSurface())
     }
 
     private func scenarioPicker(_ state: ReplayXIWireState) -> some View {
@@ -275,7 +285,9 @@ struct CoachWindow: View {
             )) {
                 ForEach(state.scenarios) { scenario in Text(scenario.title).tag(scenario.id) }
             }
+            .labelsHidden()
             .frame(maxWidth: 320)
+            .help("Choose scenario")
     }
 
     private func transportControls(_ state: ReplayXIWireState) -> some View {
@@ -311,7 +323,9 @@ struct CoachWindow: View {
                 Text("Positioning").tag("positional")
                 Text("Player POV").tag("firstPerson")
             }
+            .labelsHidden()
             .frame(width: 180)
+            .help("Headset view")
     }
 
     private func povPicker(_ state: ReplayXIWireState) -> some View {
@@ -323,7 +337,9 @@ struct CoachWindow: View {
                     Text("#\(player.number) \(player.name)").tag(player.id)
                 }
             }
+            .labelsHidden()
             .frame(width: 165)
+            .help("Headset player POV")
     }
 
     private func speedPicker(_ state: ReplayXIWireState) -> some View {
@@ -335,7 +351,9 @@ struct CoachWindow: View {
                     Text("\(rate.formatted())×").tag(rate)
                 }
             }
+            .labelsHidden()
             .frame(width: 105)
+            .help("Playback speed")
     }
 
     private func timeline(_ state: ReplayXIWireState) -> some View {
@@ -382,15 +400,23 @@ struct CoachWindow: View {
             CoachMarkTimeline(state: state, selectedMarkID: selectedMarkID, playhead: draftTime,
                 select: { selectedMarkID = $0.id }, seek: { time, final in
                     timeFieldFocused = false; scrubbing = !final; draftTime = time
-                    if selectedMark?.keyframes.contains(where: { abs($0 - time) < 0.001 }) == true {
+                    if selectedMark?.keyframes.contains(where: { abs($0 - time) <= CoachWorkspace.keyTimeTolerance }) == true {
                         selectedKey = time; retimeKey = time
                     }
                     // Preview is coalesced by onChange(draftTime). Release
                     // flushes here even if the last pointer sample was equal.
                     if final { link.seek(to: time, final: true) }
                 }, trim: { mark, start, end in
-                    guard !inspectorConflict, CoachWorkspace.validWindow(show: start, hide: end, duration: state.duration) else { return }
+                    guard !link.playbackContextPending, !inspectorConflict,
+                          CoachWorkspace.validWindow(show: start, hide: end, duration: state.duration) else { return }
                     link.send(.init(name: "window", markID: mark.id, showAt: start, hideAt: end))
+                }, retime: { mark, old, new in
+                    guard !link.playbackContextPending, !inspectorConflict, state.canEdit, !mark.authored,
+                        CoachWorkspace.validKeyMove(from: old, to: new,
+                            keys: mark.keyframes, duration: state.duration) else { return }
+                    selectedMarkID = mark.id; selectedKey = new; retimeKey = new
+                    link.send(.init(name: "retimeKey", markID: mark.id,
+                        keyframeAt: old, keyframeTo: new))
                 })
         }
     }
@@ -405,6 +431,32 @@ struct CoachWindow: View {
                 Button { previewReset += 1 } label: { Image(systemName: "viewfinder") }
                     .help("Reset 3D camera").accessibilityLabel("Reset 3D camera")
             }
+            Menu {
+                Button("Look at ball", systemImage: "soccerball") {
+                    link.send(.init(name: "lookAt", lookTarget: "ball"))
+                }
+                if !state.perspectiveID.isEmpty {
+                    Button("Look at POV player", systemImage: "person.crop.circle") {
+                        link.send(.init(name: "lookAt", playerID: state.perspectiveID,
+                            lookTarget: "player"))
+                    }
+                }
+                if let mark = selectedMark {
+                    Divider()
+                    Button("Look at mark origin", systemImage: "scope") {
+                        link.send(.init(name: "lookAt", markID: mark.id,
+                            lookTarget: "markStart"))
+                    }
+                    Button("Look at mark end", systemImage: "scope") {
+                        link.send(.init(name: "lookAt", markID: mark.id,
+                            lookTarget: "markEnd"))
+                    }
+                }
+            } label: { Image(systemName: "eye") }
+            .menuStyle(.borderlessButton)
+            .frame(width: 28)
+            .help("Aim headset view once at ball, player or mark")
+            .accessibilityLabel("Aim headset view")
             if let mark = selectedMark, !mark.authored, mark.kind != "playerLabel" {
                 Toggle(isOn: $recordMotion) { Image(systemName: "diamond.fill") }
                     .toggleStyle(.button)
@@ -429,14 +481,12 @@ struct CoachWindow: View {
                     .stroke(drawingEnabled && drawKind == kind ? Color.orange : .clear, lineWidth: 2))
             }
             Spacer(minLength: 4)
-            if pendingDrawKind != nil {
-                Text("Pausing…").font(.caption).foregroundStyle(.secondary)
-            } else if drawingEnabled {
-                Text("\(CoachWorkspace.title(for: drawKind)) · \(drawStart == nil ? "click start" : "click end")")
-                    .font(.caption).foregroundStyle(.orange)
-            } else {
-                Text(state.canEdit ? "Click a player for POV" : state.playing ? "Pause to annotate" : "Finish the headset edit")
-                    .font(.caption).foregroundStyle(.secondary)
+            if pendingDrawKind != nil || drawingEnabled {
+                Image(systemName: pendingDrawKind != nil ? "pause.circle" : "pencil.tip.crop.circle")
+                    .foregroundStyle(.orange)
+                    .help(pendingDrawKind != nil ? "Pausing playback" :
+                        "Draw \(CoachWorkspace.title(for: drawKind)): \(drawStart == nil ? "click origin" : "click end")")
+                    .accessibilityLabel(pendingDrawKind != nil ? "Pausing playback" : "Drawing annotation")
             }
             Button { link.send(.init(name: "undo")) } label: { Image(systemName: "arrow.uturn.backward") }
                 .disabled(!state.canUndo || !state.canEdit)
@@ -448,7 +498,8 @@ struct CoachWindow: View {
                 .help("Redo · ⇧⌘Z").accessibilityLabel("Redo")
         }
         .controlSize(.regular)
-        .padding(8)
+        .frame(height: 42)
+        .padding(.horizontal, 10)
         .modifier(CoachGlassSurface())
     }
 
@@ -635,8 +686,8 @@ struct CoachWindow: View {
                         HStack {
                             TextField("Move to · s", value: $retimeKey, format: .number)
                             Button("Move key") { link.send(.init(name: "retimeKey", markID: mark.id, keyframeAt: selectedKey, keyframeTo: retimeKey)) }
-                                .disabled(!retimeKey.isFinite || !(0...state.duration).contains(retimeKey) ||
-                                    mark.keyframes.contains(where: { $0 != selectedKey && abs($0 - retimeKey) < 0.001 }))
+                                .disabled(!CoachWorkspace.validKeyMove(from: selectedKey,
+                                    to: retimeKey, keys: mark.keyframes, duration: state.duration))
                         }
                         .disabled(mark.authored || !state.canEdit || inspectorConflict)
                     }
@@ -833,15 +884,32 @@ struct CoachWindow: View {
 
     private func endpointLink(_ mark: ReplayXIWireMark, endpoint: String, title: String,
                               state: ReplayXIWireState) -> some View {
-        Picker(title, selection: Binding(get: {
-            (endpoint == "start" ? mark.startPlayerID : mark.endPlayerID) ?? ""
-        }, set: { id in
-            link.send(.init(name: "trackEndpoint", playerID: id.isEmpty ? nil : id,
-                            markID: mark.id, endpoint: endpoint))
-        })) {
-            Text("Pitch fixed").tag("")
-            ForEach(state.players) { player in
-                Text("\(player.team.capitalized) · #\(player.number) \(player.name)").tag(player.id)
+        let point = endpoint == "start" ? mark.start : mark.end
+        let linkedID = endpoint == "start" ? mark.startPlayerID : mark.endPlayerID
+        let closest = state.players.min { a, b in
+            let ax = a.position.x - point.x, az = a.position.z - point.z
+            let bx = b.position.x - point.x, bz = b.position.z - point.z
+            return ax * ax + az * az < bx * bx + bz * bz
+        }
+        return VStack(alignment: .leading, spacing: 3) {
+            Picker(title, selection: Binding(get: { linkedID ?? "" }, set: { id in
+                link.send(.init(name: "trackEndpoint", playerID: id.isEmpty ? nil : id,
+                                markID: mark.id, endpoint: endpoint))
+            })) {
+                Text("Pitch fixed").tag("")
+                ForEach(state.players) { player in
+                    Text("\(player.team.capitalized) · #\(player.number) \(player.name)").tag(player.id)
+                }
+            }
+            if let closest, closest.id != linkedID {
+                Button("Link to nearest · #\(closest.number) \(closest.name)") {
+                    link.send(.init(name: "trackEndpoint", playerID: closest.id,
+                        markID: mark.id, endpoint: endpoint))
+                }
+                .buttonStyle(.link)
+                .font(.caption)
+                .help("Keep the point's current offset from #\(closest.number) \(closest.name)")
+                .accessibilityLabel("Link \(title.lowercased()) to #\(closest.number) \(closest.name)")
             }
         }
         .disabled(mark.authored || !state.canEdit || inspectorConflict || !mark.keyframes.isEmpty)
@@ -962,10 +1030,15 @@ private struct PitchMap: View {
                     .accessibilityLabel("View #\(player.number) \(player.name)'s POV")
                     .allowsHitTesting(!drawingEnabled)
                 }
-                Circle().fill(.white).frame(width: 12, height: 12)
-                    .overlay(Circle().stroke(.black, lineWidth: 2))
+                Circle().fill(.orange.opacity(0.3)).frame(width: 34, height: 34)
+                    .overlay(Circle().stroke(.orange.opacity(0.85), lineWidth: 2))
+                    .overlay(Circle().fill(.white).frame(width: 18, height: 18)
+                        .overlay(Circle().stroke(.black, lineWidth: 2)))
                     .position(screen(.init(x: state.ball.x, z: state.ball.z), rect))
                     .help("Ball · \(state.ball.y.formatted(.number.precision(.fractionLength(2)))) m high")
+                    .accessibilityLabel("Ball")
+                    .allowsHitTesting(false)
+                    .zIndex(4)
                 if let drawStart {
                     Circle().fill(.orange).frame(width: 13, height: 13)
                         .position(screen(drawStart, rect))

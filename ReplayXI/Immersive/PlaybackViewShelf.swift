@@ -20,20 +20,23 @@ struct PlaybackViewShelfPicker: View {
         HStack(spacing: 6) {
             ForEach(PlaybackViewShelf.allCases) { section in
                 Button { selection = section } label: {
-                    VStack(spacing: 3) {
-                        Image(systemName: section.systemImage).font(.headline)
-                        Text(section.title).font(.caption.weight(.semibold))
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .frame(maxWidth: .infinity, minHeight: 60)
-                    .contentShape(RoundedRectangle(cornerRadius: 12))
+                    Image(systemName: section.systemImage)
+                        .font(.title3.weight(.semibold))
+                        .frame(maxWidth: .infinity, minHeight: 60)
+                        .contentShape(RoundedRectangle(cornerRadius: 12))
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(selection == section ? Color.black : Color.white)
                 .background(selection == section ? ReplayTheme.signal : .white.opacity(0.08),
                             in: RoundedRectangle(cornerRadius: 12))
                 .hoverEffect(.highlight)
+                .help(section == .space
+                    ? "Room controls. Pinch both hands: move together to place the pitch; spread or close to resize."
+                    : "\(section.title) controls")
                 .accessibilityLabel("\(section.title) controls")
+                .accessibilityHint(section == .space
+                    ? "Pinch both hands to place or resize the pitch. The workspace stays fixed after recentering."
+                    : "Shows \(section.title.lowercased()) controls")
                 .accessibilityAddTraits(selection == section ? .isSelected : [])
             }
         }

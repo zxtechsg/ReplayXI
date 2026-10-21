@@ -9,12 +9,18 @@ import CryptoKit
 final class ReplayXIWireLoopbackTests: XCTestCase {
     func testScrubCoalescesAndReleaseCancelsOlderQueuedTimes() async throws {
         var times: [Double] = []
+        var serverState = Self.previewState
         try await withPairFixture(response: { peer, message in
             if message.type == "pair" {
                 peer.send(.init(type: "result", id: message.id, ok: true))
-                peer.send(.init(type: "state", state: Self.previewState))
+                peer.send(.init(type: "state", state: serverState))
             } else if let command = message.command, command.name == "seek", let time = command.time {
                 times.append(time)
+                serverState.playhead = time
+                serverState.revision += 1
+                peer.send(.init(type: "state", state: serverState))
+                peer.send(.init(type: "result", id: message.id, ok: true,
+                    stateRevision: serverState.revision))
             }
         }) { link in
             for _ in 0..<100 {
@@ -27,6 +33,140 @@ final class ReplayXIWireLoopbackTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(350))
             XCTAssertEqual(times.count, 2, "A drag burst sends leading preview and final time only")
             XCTAssertEqual(times.last, 8.4, "A delayed preview must never replace the release time")
+        }
+    }
+
+    func testQueuedEditsWaitForStateAfterResultFirstDelivery() async throws {
+        var serverState = Self.previewState
+        var received: [ReplayXIWireCommand] = []
+        try await withPairFixture(response: { peer, message in
+            if message.type == "pair" {
+                peer.send(.init(type: "result", id: message.id, ok: true))
+                peer.send(.init(type: "state", state: serverState))
+            } else if let command = message.command {
+                received.append(command)
+                serverState.revision += 1
+                let next = serverState
+                peer.send(.init(type: "result", id: message.id, ok: true,
+                    stateRevision: next.revision))
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(40))
+                    peer.send(.init(type: "state", state: next))
+                }
+            }
+        }) { link in
+            for _ in 0..<100 where !link.connected {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTAssertTrue(link.connected)
+            link.send(.init(name: "label", markID: serverState.marks[0].id, label: "First"))
+            link.send(.init(name: "label", markID: serverState.marks[0].id, label: "Second"))
+            try await Task.sleep(for: .milliseconds(20))
+            XCTAssertEqual(received.count, 1)
+            for _ in 0..<100 where received.count < 2 {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTAssertEqual(received.map(\.expectedRevision), [1, 2])
+        }
+    }
+
+    func testSeekBlocksEditsUntilAcknowledgedPlayheadArrives() async throws {
+        var serverState = Self.previewState
+        var received: [ReplayXIWireCommand] = []
+        var heldSeek: (ReplayXIWireConnection, UUID)?
+        try await withPairFixture(response: { peer, message in
+            if message.type == "pair" {
+                peer.send(.init(type: "result", id: message.id, ok: true))
+                peer.send(.init(type: "state", state: serverState))
+            } else if let command = message.command {
+                received.append(command)
+                if command.name == "seek" {
+                    guard let id = message.id else { XCTFail("Seek command ID missing"); return }
+                    serverState.playhead = command.time ?? -1
+                    serverState.revision += 1
+                    heldSeek = (peer, id)
+                } else {
+                    XCTAssertEqual(command.time, serverState.playhead)
+                    serverState.revision += 1
+                    peer.send(.init(type: "state", state: serverState))
+                    peer.send(.init(type: "result", id: message.id, ok: true,
+                        stateRevision: serverState.revision))
+                }
+            }
+        }) { link in
+            for _ in 0..<100 where !link.connected {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTAssertFalse(link.playbackContextPending)
+            link.seek(to: 12, final: true)
+            XCTAssertTrue(link.playbackContextPending)
+            link.send(.init(name: "label", markID: serverState.marks[0].id, label: "Too soon"))
+            for _ in 0..<100 where heldSeek == nil {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTAssertEqual(received.map(\.name), ["seek"])
+            let (peer, seekID) = try XCTUnwrap(heldSeek)
+            peer.send(.init(type: "result", id: seekID, ok: true,
+                stateRevision: serverState.revision))
+            try await Task.sleep(for: .milliseconds(30))
+            XCTAssertTrue(link.playbackContextPending, "Result alone must not reopen editing")
+            link.send(.init(name: "label", markID: serverState.marks[0].id, label: "Still waiting"))
+            XCTAssertEqual(received.map(\.name), ["seek"])
+            peer.send(.init(type: "state", state: serverState))
+            for _ in 0..<100 where link.playbackContextPending {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTAssertFalse(link.playbackContextPending)
+            XCTAssertEqual(link.state?.playhead, 12)
+            link.send(.init(name: "label", markID: serverState.marks[0].id, label: "After seek"))
+            for _ in 0..<100 where received.count < 2 {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTAssertEqual(received.map(\.name), ["seek", "label"])
+            XCTAssertEqual(received.last?.time, 12)
+        }
+    }
+
+    func testPlayBlocksEditsUntilAcknowledgedStateArrives() async throws {
+        var serverState = Self.previewState
+        var commands: [String] = []
+        var heldPlay: (ReplayXIWireConnection, UUID)?
+        try await withPairFixture(response: { peer, message in
+            if message.type == "pair" {
+                peer.send(.init(type: "result", id: message.id, ok: true))
+                peer.send(.init(type: "state", state: serverState))
+            } else if let command = message.command {
+                commands.append(command.name)
+                if command.name == "play" {
+                    guard let id = message.id else { XCTFail("Play command ID missing"); return }
+                    serverState.playing = true
+                    serverState.revision += 1
+                    heldPlay = (peer, id)
+                }
+            }
+        }) { link in
+            for _ in 0..<100 where !link.connected {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            link.send(.init(name: "play", value: true))
+            XCTAssertTrue(link.playbackContextPending)
+            link.send(.init(name: "label", markID: serverState.marks[0].id, label: "Too soon"))
+            for _ in 0..<100 where heldPlay == nil {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTAssertEqual(commands, ["play"])
+            let (peer, playID) = try XCTUnwrap(heldPlay)
+            peer.send(.init(type: "result", id: playID, ok: true,
+                stateRevision: serverState.revision))
+            try await Task.sleep(for: .milliseconds(30))
+            XCTAssertTrue(link.playbackContextPending)
+            peer.send(.init(type: "state", state: serverState))
+            for _ in 0..<100 where link.playbackContextPending {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTAssertFalse(link.playbackContextPending)
+            XCTAssertTrue(link.state?.playing == true)
+            XCTAssertEqual(commands, ["play"])
         }
     }
 
@@ -149,8 +289,9 @@ final class ReplayXIWireLoopbackTests: XCTestCase {
                         default: XCTFail("Unexpected command")
                         }
                         serverState.revision += 1
-                        peer.send(.init(type: "result", id: message.id, ok: true, detail: "Applied"))
                         peer.send(.init(type: "state", state: serverState))
+                        peer.send(.init(type: "result", id: message.id, ok: true, detail: "Applied",
+                            stateRevision: serverState.revision))
                     }
                 }
                 peer.start()

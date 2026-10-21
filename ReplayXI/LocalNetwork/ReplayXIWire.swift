@@ -212,6 +212,8 @@ struct ReplayXIWireCommand: Codable {
     var saveName: String? = nil
     var endpoint: String? = nil
     var recordMotion: Bool? = nil
+    /// One-shot virtual view direction. Never reads or locks physical eye gaze.
+    var lookTarget: String? = nil
 }
 
 struct ReplayXIWireMessage: Codable {
@@ -228,6 +230,9 @@ struct ReplayXIWireMessage: Codable {
     var packedStateDigest: Data? = nil
     var ok: Bool? = nil
     var detail: String? = nil
+    /// The authoritative state produced by this command. Results can overtake
+    /// coalesced state packets; clients wait for this revision before editing.
+    var stateRevision: UInt64? = nil
 }
 
 enum ReplayXIWireError: Error, Equatable {

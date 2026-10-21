@@ -26,6 +26,31 @@ final class ReplayXIMacLink {
     private let pairingTimeout: Duration
     private var seekTask: Task<Void, Never>?
     private var pendingSeek: (scenarioID: String, time: Double)?
+    private struct QueuedCommand {
+        let command: ReplayXIWireCommand
+        let scenarioID: String
+        let playhead: Double
+        let previewSeek: Bool
+    }
+    private var commandQueue: [QueuedCommand] = []
+    private var inFlightCommandID: UUID?
+    private var inFlightCommandName: String?
+    private var awaitingStateRevision: UInt64?
+    private var awaitingContextStateRevision: UInt64?
+    private var revisionWaitTask: Task<Void, Never>?
+    private var protocolSyncLost = false
+    private static let editCommands: Set<String> = ["create", "labelPlayer", "geometry", "height",
+        "arcControl", "window", "captureKey", "deleteKey", "retimeKey", "freezeKeys",
+        "trackEndpoint", "label", "delete", "clear", "undo", "redo", "save"]
+
+    private static let contextCommands: Set<String> = ["seek", "scenario", "play"]
+
+    var playbackContextPending: Bool {
+        inFlightCommandName.map { Self.contextCommands.contains($0) } == true
+            || awaitingContextStateRevision != nil
+            || commandQueue.contains(where: { Self.contextCommands.contains($0.command.name) })
+            || pendingSeek != nil || seekTask != nil
+    }
 
     init(pairingTimeout: Duration = .seconds(15)) {
         self.pairingTimeout = pairingTimeout
@@ -109,6 +134,14 @@ final class ReplayXIMacLink {
             self.pairingAccepted = false
             self.pairingID = nil
             self.state = nil
+            self.commandQueue.removeAll()
+            self.inFlightCommandID = nil
+            self.inFlightCommandName = nil
+            self.awaitingStateRevision = nil
+            self.awaitingContextStateRevision = nil
+            self.revisionWaitTask?.cancel(); self.revisionWaitTask = nil
+            self.seekTask?.cancel(); self.seekTask = nil; self.pendingSeek = nil
+            self.protocolSyncLost = false
             self.status = self.lastAction.isEmpty ? "Disconnected · pair again with the headset's new PIN" : self.lastAction
         }
         peer.onMessage = { [weak self, weak peer] message in
@@ -153,6 +186,13 @@ final class ReplayXIMacLink {
         pairingAccepted = false
         pairingID = nil
         state = nil
+        commandQueue.removeAll()
+        inFlightCommandID = nil
+        inFlightCommandName = nil
+        awaitingStateRevision = nil
+        awaitingContextStateRevision = nil
+        revisionWaitTask?.cancel(); revisionWaitTask = nil
+        protocolSyncLost = false
         lastAction = ""
         status = "Disconnected · pair again with the headset's new PIN"
     }
@@ -171,18 +211,55 @@ final class ReplayXIMacLink {
                     peer?.close()
                 }
             } else {
+                guard message.id == inFlightCommandID else { return }
+                let wasContextChange = inFlightCommandName.map { Self.contextCommands.contains($0) } == true
+                inFlightCommandID = nil
+                inFlightCommandName = nil
                 lastAction = message.ok == true ? (message.detail ?? "Applied")
                     : "Rejected: \(message.detail ?? "invalid edit")"
                 status = message.ok == true ? "Connected · local network" : lastAction
+                guard let revision = message.stateRevision else {
+                    // Older peers cannot prove which state an ack refers to.
+                    commandQueue.removeAll()
+                    protocolSyncLost = true
+                    lastAction = "Replay XI update needed before more edits"
+                    status = lastAction
+                    return
+                }
+                if (state?.revision ?? 0) < revision {
+                    awaitingStateRevision = revision
+                    if wasContextChange { awaitingContextStateRevision = revision }
+                    revisionWaitTask?.cancel()
+                    revisionWaitTask = Task { [weak self] in
+                        try? await Task.sleep(for: .seconds(3))
+                        guard !Task.isCancelled, let self,
+                              self.awaitingStateRevision == revision else { return }
+                        self.commandQueue.removeAll()
+                        self.awaitingStateRevision = nil
+                        self.awaitingContextStateRevision = nil
+                        self.protocolSyncLost = true
+                        self.lastAction = "Replay state did not arrive. Reconnect to edit."
+                        self.status = self.lastAction
+                    }
+                } else {
+                    if wasContextChange { awaitingContextStateRevision = nil }
+                    transmitNext()
+                }
             }
         case "state":
             guard pairingAccepted, let next = message.state else { return }
             if let current = state, next.revision <= current.revision { return }
             state = next
+            if let waiting = awaitingStateRevision, next.revision >= waiting {
+                awaitingStateRevision = nil
+                awaitingContextStateRevision = nil
+                revisionWaitTask?.cancel(); revisionWaitTask = nil
+                transmitNext()
+            }
             connected = true
             isConnecting = false
             pairTimeout?.cancel(); pairTimeout = nil
-            status = "Connected · local network"
+            status = lastAction.hasPrefix("Rejected:") ? lastAction : "Connected · local network"
         default: break
         }
     }
@@ -191,16 +268,48 @@ final class ReplayXIMacLink {
         if command.name == "seek" || command.name == "scenario" || command.name == "play" {
             seekTask?.cancel(); seekTask = nil; pendingSeek = nil
         }
-        transmit(command)
+        enqueue(command)
     }
 
-    private func transmit(_ command: ReplayXIWireCommand) {
+    private func enqueue(_ command: ReplayXIWireCommand, previewSeek: Bool = false) {
         guard connected, let state else { return }
-        var command = command
-        command.expectedRevision = state.revision
-        command.expectedScenarioID = state.scenarioID
-        if command.time == nil { command.time = state.playhead }
-        if peer?.send(.init(type: "command", id: UUID(), command: command)) != true {
+        guard !protocolSyncLost else {
+            lastAction = "Replay XI update needed before more edits"
+            status = lastAction
+            return
+        }
+        guard !Self.editCommands.contains(command.name) || !playbackContextPending else {
+            lastAction = "Wait for replay state to update before editing"
+            status = lastAction
+            return
+        }
+        if ["seek", "scenario", "play"].contains(command.name) {
+            // The playhead/scenario may change before queued edits are sent.
+            commandQueue.removeAll()
+        } else if previewSeek {
+            commandQueue.removeAll { $0.previewSeek }
+        }
+        commandQueue.append(.init(command: command, scenarioID: state.scenarioID,
+                                  playhead: state.playhead, previewSeek: previewSeek))
+        transmitNext()
+    }
+
+    private func transmitNext() {
+        guard connected, !protocolSyncLost, inFlightCommandID == nil,
+              awaitingStateRevision == nil, let state else { return }
+        while !commandQueue.isEmpty {
+            let queued = commandQueue.removeFirst()
+            guard queued.scenarioID == state.scenarioID else { continue }
+            var command = queued.command
+            command.expectedRevision = state.revision
+            command.expectedScenarioID = state.scenarioID
+            if command.time == nil { command.time = queued.playhead }
+            let id = UUID()
+            if peer?.send(.init(type: "command", id: id, command: command)) == true {
+                inFlightCommandID = id
+                inFlightCommandName = command.name
+                return
+            }
             lastAction = "Command exceeds transfer limit"
         }
     }
@@ -212,12 +321,12 @@ final class ReplayXIMacLink {
         let time = min(max(0, time), state.duration)
         if final {
             seekTask?.cancel(); seekTask = nil; pendingSeek = nil
-            transmit(.init(name: "seek", time: time))
+            enqueue(.init(name: "seek", time: time))
             return
         }
         pendingSeek = (state.scenarioID, time)
         guard seekTask == nil else { return }
-        transmit(.init(name: "seek", time: time))
+        enqueue(.init(name: "seek", time: time), previewSeek: true)
         pendingSeek = nil
         seekTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -226,7 +335,7 @@ final class ReplayXIMacLink {
                 guard let next = self.pendingSeek else { self.seekTask = nil; return }
                 self.pendingSeek = nil
                 if self.state?.scenarioID == next.scenarioID {
-                    self.transmit(.init(name: "seek", time: next.time))
+                    self.enqueue(.init(name: "seek", time: next.time), previewSeek: true)
                 }
             }
         }

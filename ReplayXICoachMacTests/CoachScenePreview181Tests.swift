@@ -115,23 +115,40 @@ final class CoachScenePreview181Tests: XCTestCase {
     }
 
     @MainActor
-    func testSceneViewProjectionRoundTripsPitchPointInViewCoordinates() {
-        let view = CoachSceneView(frame: NSRect(x: 0, y: 0, width: 1000, height: 700))
-        let world = SCNVector3(12, 0, 20)
-        let screen = view.projectPoint(world)
-        XCTAssertTrue(screen.x.isFinite && screen.y.isFinite && screen.z.isFinite)
-        XCTAssertGreaterThan(screen.x, 0)
-        XCTAssertLessThan(screen.x, view.bounds.width)
-        XCTAssertGreaterThan(screen.y, 0)
-        XCTAssertLessThan(screen.y, view.bounds.height)
-        let near = view.unprojectPoint(.init(screen.x, screen.y, 0))
-        let far = view.unprojectPoint(.init(screen.x, screen.y, 1))
-        let hit = CoachSceneGeometry.planeIntersection(
-            near: .init(Float(near.x), Float(near.y), Float(near.z)),
-            far: .init(Float(far.x), Float(far.y), Float(far.z)), height: 0)
+    func testSceneKitReferenceProjectionHitsPitchPoint() {
+        // SCNView.projectPoint([12, 0, 20]) from this camera and viewport
+        // gives (493.7999, 268.2071). This sample also covers macOS's
+        // bottom-left view coordinate convention without a rendered NSView.
+        let camera = makeCamera(position: CoachSceneGeometry.overviewPosition,
+            target: CoachSceneGeometry.overviewTarget)
+        let hit = CoachSceneGeometry.pitchPoint(
+            screen: .init(x: 493.7999, y: 268.2071), size: .init(width: 1000, height: 700),
+            camera: camera, fieldOfView: CoachSceneGeometry.overviewFieldOfView,
+            height: 0)
         XCTAssertNotNil(hit)
         XCTAssertEqual(hit?.x ?? .nan, 12, accuracy: 0.1)
         XCTAssertEqual(hit?.z ?? .nan, 20, accuracy: 0.1)
+    }
+
+    @MainActor
+    func testPitchPickUsesLiveCameraOrientationAfterOrbit() {
+        let camera = makeCamera(position: [25, 40, 70], target: .zero)
+        let hit = CoachSceneGeometry.pitchPoint(screen: .init(x: 480, y: 360),
+            size: .init(width: 960, height: 720), camera: camera,
+            fieldOfView: CoachSceneGeometry.overviewFieldOfView, height: 0)
+        XCTAssertEqual(hit?.x ?? .nan, 0, accuracy: 0.1)
+        XCTAssertEqual(hit?.z ?? .nan, 0, accuracy: 0.1)
+    }
+
+    @MainActor
+    private func makeCamera(position: SIMD3<Float>, target: SIMD3<Float>) -> SCNNode {
+        let camera = SCNNode()
+        camera.camera = SCNCamera()
+        camera.camera?.fieldOfView = CoachSceneGeometry.overviewFieldOfView
+        camera.simdPosition = position
+        camera.look(at: .init(target.x, target.y, target.z),
+            up: .init(0, 1, 0), localFront: .init(0, 0, -1))
+        return camera
     }
 
     private func fixtureState(revision: UInt64) -> ReplayXIWireState {

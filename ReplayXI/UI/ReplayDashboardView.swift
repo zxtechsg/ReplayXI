@@ -172,25 +172,17 @@ private struct ScenarioRail: View {
                             .font(.headline.monospaced().weight(.black))
                             .foregroundStyle(.black)
                     }
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("REPLAY XI")
-                            .font(.headline.monospaced().weight(.black))
-                        Text("SPATIAL FILM ROOM")
-                            .font(.caption2.monospaced().weight(.bold))
-                            .foregroundStyle(.secondary)
-                    }
+                    Text("REPLAY XI")
+                        .font(.headline.monospaced().weight(.black))
                 }
-
-                Text("See the play they saw.")
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.88))
             }
-            .padding(22)
+            .padding(18)
 
             Rectangle().fill(ReplayTheme.hairline).frame(height: 1)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
+                    Eyebrow(text: "Mode")
                     ForEach(ReplayAppMode.allCases) { mode in
                         modeButton(mode)
                     }
@@ -289,17 +281,12 @@ private struct ScenarioRail: View {
                     .font(.title3.weight(.semibold))
                     .frame(width: 30)
                     .foregroundStyle(isSelected ? ReplayTheme.signal : .secondary)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(mode.title)
-                        .font(.headline).foregroundStyle(.white)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text(mode.subtitle)
-                        .font(.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                Text(mode.title)
+                    .font(.headline).foregroundStyle(.white)
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
             }
-            .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
             .padding(12)
             .background(isSelected ? ReplayTheme.signal.opacity(0.09) : .white.opacity(0.025),
                         in: RoundedRectangle(cornerRadius: 15))
@@ -311,7 +298,7 @@ private struct ScenarioRail: View {
         }
         .buttonStyle(.plain)
         .disabled(navigationIsDisabled)
-        .accessibilityLabel("\(mode.title), \(mode.subtitle)")
+        .accessibilityLabel(mode.title)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
@@ -366,12 +353,24 @@ private struct ScenarioRailRow: View {
 
 private struct ScenarioWorkspace: View {
     @Environment(ReplayStore.self) private var store
+    @State private var showsReplayInfo = false
 
     let openRoom: () -> Void
     let openComparison: () -> Void
     let openAnnotations: (() -> Void)?
 
     var scenario: ReplayScenario { store.selectedScenario }
+
+    private var coachNote: String? {
+        switch scenario.id {
+        case "final-36-counter-v2": "Third-man run after drawing the press."
+        case "final-81-volley-v2": "One-two before the first-time finish."
+        case "final-108-rebound-v2": "Good reaction to the second ball."
+        case "city-45-overlap-header": "Overlap creates room for the cross."
+        case "city-57-underlap-cutback": "Underlap opens the cutback."
+        default: nil
+        }
+    }
 
     var body: some View {
         ScrollView {
@@ -383,37 +382,76 @@ private struct ScenarioWorkspace: View {
                             : "DEMO \(scenario.kind.number)  /  \(scenario.matchContext)")
                         Text(scenario.title)
                             .font(.largeTitle.weight(.semibold))
-                        if let reference = ReplayReferenceLibrary.reference(for: scenario.id) {
-                            ReplayVideoReferenceButton(reference: reference)
+                        HStack(spacing: 8) {
+                            if let reference = ReplayReferenceLibrary.reference(for: scenario.id) {
+                                ReplayVideoReferenceButton(reference: reference)
+                            } else if scenario.kind == .realWorldReplay {
+                                Label("Demo match · no video loaded", systemImage: "cube.transparent")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            if scenario.kind == .realWorldReplay {
+                                Button { showsReplayInfo = true } label: {
+                                    Image(systemName: "info.circle")
+                                        .frame(minWidth: 44, minHeight: 44)
+                                }
+                                .buttonStyle(.plain)
+                                .help("About this replay")
+                                .accessibilityLabel("About this replay")
+                                .popover(isPresented: $showsReplayInfo) {
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Text("About this replay").font(.headline)
+                                        if ReplayReferenceLibrary.reference(for: scenario.id) != nil {
+                                            Text("This 3D replay is an authored reconstruction. Player paths are not measured from the source video.")
+                                            Text("Video comparison places the source beside the replay. It does not convert video automatically.")
+                                        } else {
+                                            Text("This is a synthetic demo with authored player paths. No source video is loaded.")
+                                        }
+                                    }
+                                    .font(.subheadline)
+                                    .padding(18)
+                                    .frame(width: 300, alignment: .leading)
+                                }
+                            }
                         }
-                        Text(scenario.objective)
-                            .font(.headline)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                        if let coachNote {
+                            Eyebrow(text: "Coach notes")
+                            Text(coachNote)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     Spacer(minLength: 20)
                     StatusPill(text: store.viewMode.title, systemImage: store.viewMode.systemImage)
                 }
 
-                if FootballReferenceScenarios.contains(scenario) {
-                    Button(action: openComparison) {
-                        HStack(spacing: 12) {
+                HStack(spacing: 8) {
+                    if FootballReferenceScenarios.contains(scenario) {
+                        Button(action: openComparison) {
                             Image(systemName: "rectangle.split.2x1")
-                                .font(.title2)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("Video → Replay").font(.headline)
-                                Text("Concept demo · compare video with 3D")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                            Spacer(minLength: 8)
-                            Image(systemName: "arrow.up.forward")
+                                .frame(minWidth: 44, minHeight: 44)
                         }
-                        .frame(minHeight: 48)
+                        .buttonStyle(.bordered)
+                        .disabled(store.hasActiveTimelineScrub || store.hasActiveCoachMarkGeometryPreview
+                                  || store.isRoomPresentationBusy)
+                        .help("Compare video and 3D replay")
+                        .accessibilityLabel("Compare video and 3D replay")
+                        .accessibilityHint("Opens the source video beside an authored 3D replay")
                     }
-                    .buttonStyle(.bordered)
-                    .disabled(store.hasActiveTimelineScrub || store.hasActiveCoachMarkGeometryPreview
-                              || store.isRoomPresentationBusy)
-                    .accessibilityHint("Opens source video beside an authored 3D replay, not automatic conversion")
+                    if let openAnnotations {
+                        Button(action: openAnnotations) {
+                            Image(systemName: "pencil.and.outline")
+                                .frame(minWidth: 44, minHeight: 44)
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(ReplayAnnotationEntryPolicy.blockReason(in: store) != nil)
+                        .help("Annotate in 3D")
+                        .accessibilityLabel("Annotate in 3D")
+                        .accessibilityHint("Pauses at this replay time and opens drawing tools on the 3D pitch")
+                        if let blockReason = ReplayAnnotationEntryPolicy.blockReason(in: store) {
+                            Text(blockReason).font(.caption).foregroundStyle(ReplayTheme.orange)
+                        }
+                    }
                 }
 
                 if scenario.kind == .shapeLab {
@@ -423,22 +461,6 @@ private struct ScenarioWorkspace: View {
                         MetricTile(value: "1", label: "Local origin")
                         MetricTile(value: "0", label: "Running required")
                     }
-                }
-
-                if scenario.kind == .realWorldReplay && ReplayReferenceLibrary.reference(for: scenario.id) == nil {
-                    HStack(alignment: .top, spacing: 12) {
-                        Image(systemName: "cube.transparent")
-                            .font(.title2).foregroundStyle(ReplayTheme.cyan)
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text("Demo match · no video loaded").font(.headline)
-                            Text("Replay authored player paths, switch POVs and add 3D marks. These movements are simulated, not measured from footage.")
-                                .font(.subheadline).foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    .padding(16)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(ReplayTheme.cyan.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
                 }
 
                 TacticalPreview(
@@ -452,28 +474,6 @@ private struct ScenarioWorkspace: View {
                     shapeFocusStage: scenario.kind == .shapeLab ? store.shapeFocusStage : nil
                 )
                 .frame(height: scenario.kind == .shapeLab ? 310 : 290)
-
-                if let openAnnotations {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Button(action: openAnnotations) {
-                            Label("Annotate in 3D", systemImage: "pencil.and.outline")
-                                .font(.headline)
-                                .frame(maxWidth: .infinity, minHeight: 44)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(ReplayTheme.orange)
-                        .foregroundStyle(.black)
-                        .disabled(ReplayAnnotationEntryPolicy.blockReason(in: store) != nil)
-                        .accessibilityHint("Pauses at this replay time and opens drawing tools on the 3D pitch.")
-                        Text(ReplayAnnotationEntryPolicy.blockReason(in: store)
-                            ?? (scenario.kind == .realWorldReplay
-                                ? "Add timed marks to this 3D replay. Source video is separate."
-                                : "Add timed marks to the 3D pitch at this replay time."))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
 
                 if scenario.kind == .shapeLab {
                     ShapeFocusDashboard(openRoom: openRoom)
@@ -521,6 +521,7 @@ private enum ShapeFocusStep: Int, CaseIterable, Identifiable {
 
 private struct ShapeFocusDashboard: View {
     @Environment(ReplayStore.self) private var store
+    @State private var showsSafetyInfo = false
 
     let openRoom: () -> Void
 
@@ -663,15 +664,17 @@ private struct ShapeFocusDashboard: View {
                     systemImage: "person.crop.circle",
                     color: ReplayTheme.cyan
                 )
+                Button { showsSafetyInfo = true } label: {
+                    Image(systemName: "info.circle")
+                        .frame(minWidth: 44, minHeight: 44)
+                }
+                .buttonStyle(.plain)
+                .help("Room safety")
+                .accessibilityLabel("Room safety")
+                .popover(isPresented: $showsSafetyInfo) {
+                    RoomSafetyInfo()
+                }
             }
-
-            Label(
-                "Station markers stay on this device. Use a clear 5 m × 3 m area, confirm it is safe, and never run in the headset.",
-                systemImage: "checkmark.shield.fill"
-            )
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
         }
         .padding(18)
         .background(ReplayTheme.panel, in: RoundedRectangle(cornerRadius: 22))
@@ -845,10 +848,11 @@ struct DashboardTransport: View {
                 Button {
                     store.skip(by: -1)
                 } label: {
-                    Text("−1s")
-                        .font(.caption.monospacedDigit().weight(.black))
+                    Image(systemName: "gobackward.1")
+                        .frame(minWidth: 36, minHeight: 36)
                 }
                 .buttonStyle(.bordered)
+                .help("Back one second")
                 .accessibilityLabel("Back one second")
                 .disabled(!store.canChangePlaybackView)
 
@@ -861,16 +865,18 @@ struct DashboardTransport: View {
                 .buttonStyle(.borderedProminent)
                 .tint(ReplayTheme.signal)
                 .foregroundStyle(.black)
+                .help(playbackLabel)
                 .accessibilityLabel(playbackLabel)
                 .disabled(!store.canChangePlaybackView)
 
                 Button {
                     store.skip(by: 1)
                 } label: {
-                    Text("+1s")
-                        .font(.caption.monospacedDigit().weight(.black))
+                    Image(systemName: "goforward.1")
+                        .frame(minWidth: 36, minHeight: 36)
                 }
                 .buttonStyle(.bordered)
+                .help("Forward one second")
                 .accessibilityLabel("Forward one second")
                 .disabled(!store.canChangePlaybackView)
 
@@ -1182,7 +1188,7 @@ struct DashboardPlayerRailContent {
     let scenario: ReplayScenario
 
     var isSelectingStation: Bool { scenario.kind == .shapeLab }
-    var title: String { isSelectingStation ? "Role stations" : "Home XI · quick POV" }
+    var title: String { isSelectingStation ? "Role stations" : "Quick POV" }
     var instruction: String { isSelectingStation ? "Choose your room role." : "Select a player to enter POV." }
 
     var players: [PlayerTrack] {
@@ -1228,6 +1234,7 @@ private func roomEntryGestureHint(for store: ReplayStore) -> String? {
 
 private struct RoomRail: View {
     @Environment(ReplayStore.self) private var store
+    @State private var showsRoomInfo = false
 
     let openRoom: () -> Void
 
@@ -1237,25 +1244,8 @@ private struct RoomRail: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 12) {
-                Eyebrow(text: "Your review")
-                Label("Local experience", systemImage: "visionpro")
-                    .font(.title3.weight(.bold))
-                Text("Replay, switch players and annotate. Reviews stay on this device.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(20)
-
-            Rectangle().fill(ReplayTheme.hairline).frame(height: 1)
-
             VStack(alignment: .leading, spacing: 10) {
                 Eyebrow(text: playerRail.title)
-                Text(playerRail.instruction)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
 
                 ScrollView {
                     VStack(spacing: 5) {
@@ -1278,13 +1268,29 @@ private struct RoomRail: View {
             Spacer(minLength: 8)
 
             VStack(alignment: .leading, spacing: 10) {
-                Label("Stationary experience", systemImage: "figure.stand")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(ReplayTheme.signal)
-                Text("Stay seated or planted. Never run, tackle, or kick while wearing Vision Pro. Positioning uses headset location—not foot tracking.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Eyebrow(text: "Room")
+                    Spacer()
+                    Button { showsRoomInfo = true } label: {
+                        Image(systemName: "info.circle")
+                            .frame(minWidth: 44, minHeight: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Room safety and status")
+                    .accessibilityLabel("Room safety and status")
+                    .popover(isPresented: $showsRoomInfo) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            RoomSafetyInfo()
+                            if !store.statusMessage.isEmpty {
+                                Text(store.statusMessage)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 18)
+                                    .padding(.bottom, 18)
+                            }
+                        }
+                    }
+                }
 
                 Button(action: openRoom) {
                     Label(roomEntryTitle, systemImage: "visionpro")
@@ -1298,18 +1304,14 @@ private struct RoomRail: View {
                 .foregroundStyle(.black)
                 .disabled(store.isRoomPresentationBusy)
                 .disabled(store.hasActiveTimelineScrub || store.hasActiveCoachMarkGeometryPreview)
+                .help(roomEntryHint ?? "Open spatial replay")
 
-                if let roomEntryHint {
-                    Text(roomEntryHint)
+                if let hint = roomEntryGestureHint(for: store) {
+                    Text(hint)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(ReplayTheme.orange)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-
-                Text(store.statusMessage)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(18)
             .background(Color.black.opacity(0.22))
@@ -1346,6 +1348,20 @@ private struct RoomRail: View {
     }
 }
 
+private struct RoomSafetyInfo: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Room safety").font(.headline)
+            Text("Stay seated or planted. Keep a clear 5 m × 3 m area for physical stations. Never run, tackle, or kick while wearing Vision Pro.")
+            Text("Station markers stay on this device. Positioning uses headset location, not foot tracking.")
+                .foregroundStyle(.secondary)
+        }
+        .font(.subheadline)
+        .padding(18)
+        .frame(width: 300, alignment: .leading)
+    }
+}
+
 private struct DashboardPlayerRow: View {
     @Environment(ReplayStore.self) private var store
 
@@ -1363,13 +1379,15 @@ private struct DashboardPlayerRow: View {
                     .frame(width: 30, height: 30)
                     .background(selected ? ReplayTheme.signal : Color.white.opacity(0.08), in: Circle())
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(player.role)
-                        .font(.subheadline.weight(.bold))
-                        .fixedSize(horizontal: false, vertical: true)
                     Text(player.displayName)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
+                    if isStation {
+                        Text(player.role)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
                 Spacer(minLength: 4)
                 Image(systemName: selected ? (isStation ? "checkmark.circle.fill" : "viewfinder") : "chevron.right")

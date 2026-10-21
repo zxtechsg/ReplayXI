@@ -79,6 +79,7 @@ final class ReplayStore {
     var coachFocusPerspectiveID: String?
     var coachLockEnabled = false
     var followsCoach = true
+    private(set) var povLookRequest: ReplayPOVLookRequest?
     var isLocallyPaused = false
     var localRole: SquadRole = .coach
     /// Render-owned, transient pitch-local ball sample for the Mac preview.
@@ -926,6 +927,21 @@ final class ReplayStore {
         viewMode = .firstPerson
         statusMessage = "Squad Player POV locked to \(selectedScenario.player(id: id)?.role ?? id)"
         emitSnapshot()
+    }
+
+    @discardableResult
+    func facePOVTowards(_ target: SIMD3<Float>) -> Bool {
+        guard allowsPlaybackViewChange(), localRole == .coach,
+              triangleLockMode != .place, let player = activePerspective,
+              target.y.isFinite, (0...12).contains(target.y),
+              Self.isPointOnPitch(.init(x: target.x, z: target.z)),
+              ReplayPOVLookRequest.heading(from: presentedPlayerPose(for: player, at: playhead).position,
+                                           to: target) != nil else { return false }
+        isPlaying = false
+        viewMode = .firstPerson
+        povLookRequest = .init(scenarioID: selectedScenarioID, playerID: player.id, target: target)
+        statusMessage = "POV aligned · free look"
+        return true
     }
 
     func releaseSquad() {

@@ -216,10 +216,14 @@ final class ReplayXILocalCoachService {
         }
         // Catch a headset-side seek/edit that occurred since the last pulse.
         publishStateIfChanged()
+        let previousStatus = store.statusMessage
         let result = apply(command)
-        peer.send(.init(type: "result", id: message.id, ok: result, detail: store.statusMessage))
-        lastState = nil
         publishStateIfChanged()
+        let detail = result ? store.statusMessage
+            : store.statusMessage == previousStatus ? "Edit not applied. Check the selected mark and replay time."
+            : store.statusMessage
+        peer.send(.init(type: "result", id: message.id, ok: result,
+            detail: detail, stateRevision: revision))
     }
 
     private func admitCommand() -> Bool {
@@ -273,6 +277,28 @@ final class ReplayXILocalCoachService {
         case "pov":
             guard let id = command.playerID, store.selectedScenario.player(id: id) != nil else { return false }
             store.broadcastPerspective(id); return store.coachFocusPerspectiveID == id
+        case "lookAt":
+            let target: SIMD3<Float>
+            switch command.lookTarget {
+            case "ball":
+                let ball = store.selectedScenario.ball.pose(at: store.playhead)
+                if let rendered = store.macRenderedBallSample,
+                   rendered.scenarioID == store.selectedScenarioID,
+                   abs(rendered.time - store.playhead) < 0.05 {
+                    target = rendered.position
+                } else { target = [ball.position.x, ball.height, ball.position.z] }
+            case "player":
+                guard let id = command.playerID, let player = store.selectedScenario.player(id: id) else { return false }
+                let point = store.presentedPlayerPose(for: player, at: store.playhead).position
+                target = [point.x, 1.5, point.z]
+            case "markStart", "markEnd":
+                guard let id = command.markID, let mark = store.marks.first(where: { $0.id == id }) else { return false }
+                let geometry = store.presentedCoachMarkGeometry(mark, at: store.playhead)
+                let point = command.lookTarget == "markStart" ? geometry.start : geometry.end
+                target = [point.x, 0.5, point.z]
+            default: return false
+            }
+            return store.facePOVTowards(target)
         case "create":
             guard let kindRaw = command.kind, let kind = CoachMarkKind(rawValue: kindRaw), kind.requiresTwoPitchPoints,
                   let start = command.start?.pitchPoint, let end = command.end?.pitchPoint,

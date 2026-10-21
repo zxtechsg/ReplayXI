@@ -7,7 +7,7 @@ final class ReplayDashboardClarityTests: XCTestCase {
         let scenario = try scenario(id: "real-world-match-replay")
         let rail = DashboardPlayerRailContent(scenario: scenario)
         XCTAssertFalse(rail.isSelectingStation)
-        XCTAssertEqual(rail.title, "Home XI · quick POV")
+        XCTAssertEqual(rail.title, "Quick POV")
         XCTAssertEqual(rail.instruction, "Select a player to enter POV.")
         XCTAssertEqual(rail.players.map(\.id), scenario.homePlayers.map(\.id))
         XCTAssertEqual(rail.players.count, 11)

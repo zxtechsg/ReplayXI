@@ -52,18 +52,15 @@ struct PlaybackViewOverlayHUD: View {
                     isExpanded.toggle()
                 }
             } label: {
-                HStack(spacing: 10) {
+                HStack(spacing: 8) {
                     Image(systemName: store.viewMode.systemImage)
                         .font(.headline.weight(.black))
                         .foregroundStyle(ReplayTheme.signal)
                         .frame(width: symbolLayout.modeIconWidth,
                             height: PlaybackControlDeckPresentation.minimumSpatialHitTarget)
-
-                    VStack(alignment: .leading, spacing: 1) {
-                        Eyebrow(text: "View & Overlays", color: ReplayTheme.signal)
-                        Text(store.viewMode.title)
-                            .font(.subheadline.weight(.black))
-                            .lineLimit(1)
+                    if store.viewMode == .firstPerson {
+                        Text("POV")
+                            .font(.caption.weight(.bold))
                     }
 
                     HStack(spacing: 5) {
@@ -73,7 +70,7 @@ struct PlaybackViewOverlayHUD: View {
                     }
                     .accessibilityHidden(true)
 
-                    Spacer(minLength: 4)
+                    Spacer(minLength: 0)
 
                     Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
                         .font(.caption.weight(.black))
@@ -91,6 +88,7 @@ struct PlaybackViewOverlayHUD: View {
             .accessibilityValue(overlayAccessibilityValue)
             .accessibilityHint(isExpanded ? "Collapses controls" : "Expands controls")
             .accessibilityAddTraits(isExpanded ? .isSelected : [])
+            .help("\(store.viewMode.title) view · \(isExpanded ? "collapse" : "open") view, overlays and room controls")
 
             if isExpanded {
                 Rectangle()
@@ -115,47 +113,46 @@ struct PlaybackViewOverlayHUD: View {
                     }
                     if store.viewMode == .tacticalTable || store.viewMode == .touchline {
                         Button(action: resetWorldPlacement) {
-                            Label("Bring pitch here", systemImage: "viewfinder")
+                            Image(systemName: "sportscourt")
+                                .font(.title3.weight(.semibold))
                                 .frame(maxWidth: .infinity, minHeight: 56)
                         }
                         .buttonStyle(.bordered)
                         .disabled(!canPlacePitch || surfaceControls?.hasPlacement == true)
-                        .help("Places the pitch in front of you and keeps it fixed in the room")
+                        .help(pitchPlacementHelp)
+                        .accessibilityLabel("Bring pitch here")
+                        .accessibilityHint(pitchPlacementHelp)
                     }
                 }
 
                 if section == .space {
-                    Button(action: recenterControls) {
-                        Label("Recenter controls", systemImage: "viewfinder")
-                            .font(.subheadline.weight(.semibold))
-                            .frame(maxWidth: .infinity, minHeight: 60)
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(!PlaybackAttachmentPlacement.canRecenter(
-                        isDrawing: store.isDrawing,
-                        isScrubbing: store.hasActiveTimelineScrub,
-                        isEditingGeometry: store.hasActiveCoachMarkGeometryPreview
-                    ))
-                    .accessibilityHint("Places the workspace in front of you, then leaves it fixed in the room")
-                    if store.viewMode == .tacticalTable || store.viewMode == .touchline {
-                        Text("Pinch both hands. Move together to place the pitch; spread or close to resize.")
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.76))
-                            .fixedSize(horizontal: false, vertical: true)
-                        if surfaceControls?.hasPlacement == true {
-                            Text("Surface pitch fixed. Reset its surface placement to use the two-hand gesture.")
-                                .font(.caption)
-                                .foregroundStyle(.yellow)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        Button(action: resetWorldPlacement) {
-                            Label("Bring pitch here", systemImage: "viewfinder")
-                                .font(.subheadline.weight(.semibold))
+                    HStack(spacing: 6) {
+                        Button(action: recenterControls) {
+                            Image(systemName: "viewfinder")
+                                .font(.title3.weight(.semibold))
                                 .frame(maxWidth: .infinity, minHeight: 60)
                         }
                         .buttonStyle(.bordered)
-                        .disabled(!canPlacePitch || surfaceControls?.hasPlacement == true)
-                        .accessibilityHint("Places a level pitch in front of you and keeps it fixed in the room")
+                        .disabled(!PlaybackAttachmentPlacement.canRecenter(
+                            isDrawing: store.isDrawing,
+                            isScrubbing: store.hasActiveTimelineScrub,
+                            isEditingGeometry: store.hasActiveCoachMarkGeometryPreview
+                        ))
+                        .help("Recenter controls. Places the workspace in front of you, then leaves it fixed in the room")
+                        .accessibilityLabel("Recenter controls")
+                        .accessibilityHint("Places the workspace in front of you, then leaves it fixed in the room")
+                        if store.viewMode == .tacticalTable || store.viewMode == .touchline {
+                            Button(action: resetWorldPlacement) {
+                                Image(systemName: "sportscourt")
+                                    .font(.title3.weight(.semibold))
+                                    .frame(maxWidth: .infinity, minHeight: 60)
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(!canPlacePitch || surfaceControls?.hasPlacement == true)
+                            .help(pitchPlacementHelp)
+                            .accessibilityLabel("Bring pitch here")
+                            .accessibilityHint(pitchPlacementHelp)
+                        }
                     }
                     environmentChoices
                     if store.viewMode == .tacticalTable,
@@ -164,13 +161,7 @@ struct PlaybackViewOverlayHUD: View {
                 }
 
                 if section == .overlays {
-                    // Three labelled pills truncate at accessibility sizes.
-                    // Keep full labels and targets instead of shrinking text.
-                    if dynamicTypeSize.isAccessibilitySize {
-                        VStack(spacing: 6) { overlayChoices }
-                    } else {
-                        HStack(spacing: 6) { overlayChoices }
-                    }
+                    HStack(spacing: 6) { overlayChoices }
                 }
             }
         }
@@ -207,15 +198,14 @@ struct PlaybackViewOverlayHUD: View {
 
     private var environmentChoices: some View {
         VStack(alignment: .leading, spacing: 5) {
-            Eyebrow(text: "Surroundings", color: ReplayTheme.cyan)
             HStack(spacing: 6) {
                 ForEach(ReplayEnvironmentMode.allCases) { mode in
                     Button {
                         store.setPlaying(false, broadcast: false)
                         environmentModeRawValue = mode.rawValue
                     } label: {
-                        Label(mode.title, systemImage: mode.systemImage)
-                            .font(.subheadline.weight(.semibold))
+                        Image(systemName: mode.systemImage)
+                            .font(.title3.weight(.semibold))
                             .frame(maxWidth: .infinity, minHeight: 60)
                             .foregroundStyle(environmentModeRawValue == mode.rawValue ? .black : .white)
                             .background(environmentModeRawValue == mode.rawValue
@@ -223,6 +213,9 @@ struct PlaybackViewOverlayHUD: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(!store.canChangePlaybackView)
+                    .help(mode == .room ? "Room: shows your real surroundings" :
+                        "Stadium: hides passthrough. Stay seated or planted")
+                    .accessibilityLabel("\(mode.title) surroundings")
                     .accessibilityAddTraits(environmentModeRawValue == mode.rawValue ? .isSelected : [])
                     .accessibilityHint(mode == .room
                         ? "Shows your real surroundings" : "Hides passthrough. Stay seated or planted")
@@ -260,6 +253,13 @@ struct PlaybackViewOverlayHUD: View {
         return values.joined(separator: ", ")
     }
 
+    private var pitchPlacementHelp: String {
+        if surfaceControls?.hasPlacement == true {
+            return "Surface pitch fixed. Reset its surface placement to use the two-hand gesture."
+        }
+        return "Bring pitch here. Places a level pitch in front of you and keeps it fixed in the room. Pinch both hands: move together to place; spread or close to resize."
+    }
+
     private func compactOverlayBadge(_ badge: PlaybackOverlayBadge) -> some View {
         Image(systemName: badge.systemImage)
             .font(.caption.weight(.black))
@@ -281,23 +281,18 @@ struct PlaybackViewOverlayHUD: View {
         return Button {
             store.setViewMode(mode)
         } label: {
-            VStack(spacing: 2) {
-                Image(systemName: mode.systemImage)
-                    .font(.headline.weight(.bold))
-                Text(shortViewTitle(mode))
-                    .font(.subheadline.weight(.bold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
-            }
-            .frame(
-                maxWidth: .infinity,
-                minHeight: PlaybackControlDeckPresentation.minimumSpatialHitTarget
-            )
+            Image(systemName: mode.systemImage)
+                .font(.title3.weight(.bold))
+                .frame(
+                    maxWidth: .infinity,
+                    minHeight: PlaybackControlDeckPresentation.minimumSpatialHitTarget
+                )
         }
         .buttonStyle(.borderedProminent)
         .tint(isSelected ? ReplayTheme.signal : .white.opacity(0.10))
         .foregroundStyle(isSelected ? Color.black : Color.white)
         .disabled(!store.canChangePlaybackView)
+        .help("\(mode.title) view. \(PlaybackControlDeckPresentation.cameraActionHint(mode, currentMode: store.viewMode))")
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(mode.title) view")
         .accessibilityHint(store.canChangePlaybackView
@@ -319,9 +314,8 @@ struct PlaybackViewOverlayHUD: View {
     ) -> some View {
         let resolvedAccessibilityName = accessibilityName ?? title
         return Button(action: action) {
-            Label(title, systemImage: isVisible ? systemImage : "eye.slash")
-                .font(.caption.weight(.black))
-                .lineLimit(1)
+            Image(systemName: systemImage)
+                .font(.title3.weight(.bold))
                 .frame(
                     maxWidth: .infinity,
                     minHeight: PlaybackControlDeckPresentation.minimumSpatialHitTarget
@@ -331,18 +325,10 @@ struct PlaybackViewOverlayHUD: View {
         .tint(isVisible ? color : .white.opacity(0.10))
         .foregroundStyle(isVisible ? Color.black : Color.white)
         .disabled(!isEnabled || store.hasActiveCoachMarkGeometryPreview || store.hasActiveTimelineScrub)
+        .help("\(resolvedAccessibilityName): \(isVisible ? onValue : offValue). Select to turn \(isVisible ? "off" : "on")")
         .accessibilityLabel(resolvedAccessibilityName)
         .accessibilityValue(isVisible ? onValue : offValue)
         .accessibilityHint("Turns \(resolvedAccessibilityName.lowercased()) \(isVisible ? "off" : "on")")
         .accessibilityAddTraits(isVisible ? .isSelected : [])
-    }
-
-    private func shortViewTitle(_ mode: ReplayViewMode) -> String {
-        switch mode {
-        case .firstPerson: "POV"
-        case .tacticalTable: "Tactical"
-        case .touchline: "Touchline"
-        case .positional: "Position"
-        }
     }
 }

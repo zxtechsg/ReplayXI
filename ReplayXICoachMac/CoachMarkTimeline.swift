@@ -9,6 +9,7 @@ struct CoachMarkTimeline: View {
     let select: (ReplayXIWireMark) -> Void
     let seek: (Double, Bool) -> Void
     let trim: (ReplayXIWireMark, Double, Double?) -> Void
+    let retime: (ReplayXIWireMark, Double, Double) -> Void
     private let labelWidth: CGFloat = 135
 
     var body: some View {
@@ -84,13 +85,15 @@ struct CoachMarkTimeline: View {
                         trimHandle(mark, start: false, width: width).offset(x: min(width - 10, end - 5))
                     }
                     ForEach(mark.keyframes, id: \.self) { key in
-                        Button { select(mark); seek(key, true) } label: {
-                            Image(systemName: "diamond.fill").font(.system(size: 10)).foregroundStyle(.cyan)
-                                .frame(width: 22, height: 20).contentShape(Rectangle())
-                        }.buttonStyle(.plain)
+                        TimelineKeyHandle(time: key, width: width, duration: duration,
+                            revision: state.revision, draggable: selected && !mark.authored && state.canEdit,
+                            select: { select(mark); seek(key, true) },
+                            commit: { value in
+                                guard CoachWorkspace.validKeyMove(from: key, to: value,
+                                    keys: mark.keyframes, duration: duration) else { return }
+                                retime(mark, key, value)
+                            })
                         .position(x: min(max(key / duration * width, 11), width - 11), y: 35)
-                        .help("Pose at \(CoachWorkspace.clock(key))")
-                        .accessibilityLabel("Jump to \(mark.label), pose at \(CoachWorkspace.clock(key))")
                     }
                     Rectangle().fill(.white).frame(width: 1, height: 46)
                         .offset(x: min(max(playhead / duration, 0), 1) * width).allowsHitTesting(false)
@@ -117,6 +120,46 @@ struct CoachMarkTimeline: View {
         }
         .help(start ? "Drag In point" : "Drag Out point")
         .accessibilityLabel(start ? "Trim annotation In" : "Trim annotation Out")
+    }
+}
+
+private struct TimelineKeyHandle: View {
+    let time: Double
+    let width: CGFloat
+    let duration: Double
+    let revision: UInt64
+    let draggable: Bool
+    let select: () -> Void
+    let commit: (Double) -> Void
+    @GestureState private var delta: CGFloat = 0
+    @State private var startRevision: UInt64?
+    @State private var invalidated = false
+
+    var body: some View {
+        Image(systemName: "diamond.fill")
+            .font(.system(size: 11)).foregroundStyle(.cyan)
+            .frame(width: 24, height: 24).contentShape(Rectangle())
+            .offset(x: delta)
+            .onTapGesture(perform: select)
+            .gesture(DragGesture(minimumDistance: 3)
+                .updating($delta) { value, offset, _ in
+                    if draggable { offset = value.translation.width }
+                }
+                .onChanged { _ in
+                    if startRevision == nil { startRevision = revision; invalidated = false }
+                }
+                .onEnded { value in
+                    defer { startRevision = nil; invalidated = false }
+                    guard draggable, !invalidated, startRevision == revision else { return }
+                    commit(CoachWorkspace.timelineTime(
+                        x: time / max(0.01, duration) * width + value.translation.width,
+                        width: width, duration: duration))
+                })
+            .onChange(of: revision) { _, next in
+                if let startRevision, startRevision != next { invalidated = true }
+            }
+            .help(draggable ? "Drag pose to retime · click to seek" : "Click to seek to saved pose")
+            .accessibilityLabel("Pose at \(CoachWorkspace.clock(time))")
     }
 }
 
