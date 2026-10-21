@@ -1,0 +1,50 @@
+Replay XI 182 — 22 Oct 2026
+
+Implemented
+- Compact AVP icon controls with native help and accessibility labels.
+- Controls recenter once on study/view/POV changes, then remain room-fixed and movable.
+- Selected annotations own a direct trim/key timeline; all tracks are in the tool submenu.
+- Separate origin/end player links preserve offsets. Freeze is explicit when keys exist.
+- Mac: serialized edits, acknowledged state revisions, pending-context edit guards,
+  upright POV/picking math, direct key dragging, clearer 2D ball, compact native bars.
+- Mac can align virtual POV once toward ball/player/mark; free look remains active.
+- Home copy trimmed; five studies have concise Coach notes and optional info/safety help.
+- Running wrists/palms corrected. Player A skin weights restore modest finger curl.
+- Native capture found a stale render-root reference after study switches. A shared
+  non-observable render reference fixes paused POV becoming permanently black.
+
+Final verification
+- AVP regression suite: 104 passed, 0 failed.
+- Final editor/symbol/timeline suite: 27 passed, 0 failed (overlaps regression suite).
+- Final scene/POV/world/timeline/editor suite: 31 passed, 0 failed (overlaps above).
+- Mac non-rendering suite: 36 passed, 0 failed.
+- Hand agent: 5 hand/gait checks, 10 asset admission checks, plus A/B close-up checks passed.
+- Simulator Debug, native visionOS Release unsigned, and Mac Debug builds passed.
+- Native editor and global track PNGs were inspected; sampled hand close-ups inspected.
+- Native app capture traversed counterattack, volley, rebound, overlap/header and
+  underlap/cutback: full tactical playback, two POVs, touchline, and keyed arc editing.
+- The opt-in DEBUG tour uses transient reviews and normal store actions. It neither
+  bypasses pairing nor reads gaze. Tests and normal launches cannot start the tour.
+
+Recording
+/Users/zx/Movies/ReplayXI-Tests-2026-10-22/ReplayXI-AVP-walkthrough-182.mp4
+3840 x 2160, approximately 60 fps. Actual visionOS 27 Simulator app framebuffer.
+Only trailing idle frames were trimmed; no replacement or generated frames.
+Source: ReplayXI-AVP-verified-182.mov. Earlier takes in the folder are diagnostic,
+including the pre-fix black-POV repro, and are not the final walkthrough.
+
+Limits
+- This is scripted simulator QA, not headset hand/gaze interaction validation.
+- Mac was locked; manual mouse/hover checks could not be completed.
+- Two Mac render-host tests were excluded after earlier host hangs:
+  testNative3DEditorSnapshot and testPairedCoachWindowRendersAtDesktopAndMinimumSizes.
+- Hands are loosely curled, not tight fists; Player B thumb remains extended in a close-up.
+- Pre-existing project/signing/plist edits and unrelated untracked files were preserved.
+
+Evidence bundles (workspace-relative)
+.codex-derived/Replay182IntegratedFinal.xcresult
+.codex-derived/Replay182VisualVerified.xcresult
+.codex-derived/Replay182SceneFinal.xcresult
+.codex-derived/Coach182Integrated3.xcresult
+.codex-derived/Hands182Agent/Candidate182CurlCaptures/
+.codex-derived/avp182-verified-contact.jpg
