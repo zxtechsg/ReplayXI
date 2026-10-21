@@ -1,9 +1,36 @@
+import RealityKit
 import XCTest
 import simd
 @testable import ReplayXI
 
 @MainActor
 final class ReplayPOVLook182Tests: XCTestCase {
+    func testRenderAndPollingCallbacksShareReplacementSceneReference() {
+        let reference = ReplayMatchSceneReference()
+        let render: (Entity?) -> Void = { reference.root = $0 }
+        let poll: () -> Entity? = { reference.root }
+        let first = Entity(), next = Entity()
+        first.name = "match-root-first"
+        next.name = "match-root-next"
+        render(first)
+        XCTAssertTrue(poll() === first)
+        render(next)
+        XCTAssertTrue(poll() === next)
+        render(nil)
+        XCTAssertNil(poll())
+    }
+
+    func testScenarioObserverDoesNotEraseTheRendererOwnedRoot() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(contentsOf: root.appendingPathComponent(
+            "ReplayXI/Immersive/FootballImmersiveView.swift"), encoding: .utf8)
+        let start = try XCTUnwrap(source.range(of: ".onChange(of: store.selectedScenarioID)"))
+        let end = try XCTUnwrap(source.range(of: ".onChange(of: store.viewMode)",
+            range: start.upperBound..<source.endIndex))
+        XCTAssertFalse(source[start.upperBound..<end.lowerBound].contains("currentMatchRoot = nil"))
+        XCTAssertTrue(source.contains("currentMatchRoot.name == \"match-root-\\(store.selectedScenarioID)\""))
+    }
+
     func testHeadingUsesPitchYawAndRejectsDegenerateTargets() {
         let origin = PitchPoint(x: 3, z: -8)
         XCTAssertEqual(ReplayPOVLookRequest.heading(from: origin, to: [3, 1, 2]) ?? .nan,

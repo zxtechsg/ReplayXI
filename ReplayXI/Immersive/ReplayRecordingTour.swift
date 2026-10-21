@@ -6,7 +6,7 @@ import Foundation
 @MainActor
 enum ReplayRecordingTour {
     static func run(store: ReplayStore, roomID: UUID,
-                    ready: () -> Bool, povReady: () -> Bool,
+                    ready: () -> Bool, povReady: () -> Bool, povDiagnostics: () -> String,
                     selectMark: (UUID?) -> Void) async {
         func valid() -> Bool {
             !Task.isCancelled && store.roomPresentation.acceptsInteraction(for: roomID)
@@ -20,13 +20,15 @@ enum ReplayRecordingTour {
                 if povReady() { return await wait(0.35) }
                 guard await wait(0.2) else { return false }
             }
-            NSLog("ReplayXI capture: POV entry did not become ready for %@", store.selectedScenarioID)
+            NSLog("ReplayXI capture: POV entry did not become ready for %@: %@",
+                  store.selectedScenarioID, povDiagnostics())
             return false
         }
         guard await wait(3) else { return }
         let ids = ["final-36-counter-v2", "final-81-volley-v2", "final-108-rebound-v2",
                    "city-45-overlap-header", "city-57-underlap-cutback"]
-        for id in ids {
+        let quick = ReplayLaunchConfiguration.current.automationArguments.contains("--replayxi-tour-quick")
+        for id in quick ? Array(ids.prefix(2)) : ids {
             guard valid() else { return }
             selectMark(nil)
             store.setPlaying(false, broadcast: false)
@@ -42,7 +44,7 @@ enum ReplayRecordingTour {
             store.seek(to: 0, broadcast: false)
             store.setPlaybackRate(1, broadcast: false)
             store.setPlaying(true, broadcast: false)
-            guard await wait(store.selectedScenario.duration + 0.5) else { return }
+            guard await wait(quick ? 1 : store.selectedScenario.duration + 0.5) else { return }
 
             store.seek(to: 1, broadcast: false)
             store.openLocalPlayerPOV(store.selectedScenario.defaultPerspectiveID)

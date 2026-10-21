@@ -25,8 +25,10 @@ struct SpatialAnnotationEditor: View {
                 Text(String(format: "%.2f", mark.revealTime))
                 Spacer()
                 if mark.hasKeyframes {
+                    keyStep(-1)
                     Label("\(mark.keyframes?.count ?? 0)", systemImage: "diamond.fill")
                         .foregroundStyle(ReplayTheme.cyan)
+                    keyStep(1)
                 } else if mark.followsPlayerTracks {
                     Image(systemName: "link").foregroundStyle(ReplayTheme.cyan)
                 }
@@ -40,6 +42,23 @@ struct SpatialAnnotationEditor: View {
         .padding(12)
         .background(ReplayTheme.orange.opacity(0.06), in: RoundedRectangle(cornerRadius: 17))
         .onChange(of: mark.id) { _, _ in linking = nil }
+    }
+
+    private func keyStep(_ direction: Int) -> some View {
+        let times = (mark.keyframes ?? []).map(\.time)
+        let time = direction < 0
+            ? times.last { $0 < store.playhead - CoachMark.keyframeTimeTolerance }
+            : times.first { $0 > store.playhead + CoachMark.keyframeTimeTolerance }
+        return Button {
+            if let time { store.seek(to: time, broadcast: false) }
+        } label: {
+            Image(systemName: direction < 0 ? "chevron.left" : "chevron.right")
+                .frame(width: 44, height: 44)
+        }
+        .buttonStyle(.plain)
+        .disabled(time == nil || !store.canChangePlaybackView)
+        .help(direction < 0 ? "Previous position key" : "Next position key")
+        .accessibilityLabel(direction < 0 ? "Previous position key" : "Next position key")
     }
 
     private var header: some View {
@@ -147,7 +166,7 @@ struct SpatialAnnotationTracks: View {
     var body: some View {
         VStack(spacing: 8) {
             HStack {
-                Image(systemName: "timeline.selection").foregroundStyle(ReplayTheme.cyan)
+                Image(systemName: "list.bullet.rectangle").foregroundStyle(ReplayTheme.cyan)
                 Text("Annotations").font(.subheadline.weight(.semibold))
                 Spacer()
                 Text(String(format: "0 — %.2fs", store.selectedScenario.duration))

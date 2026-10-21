@@ -35,7 +35,11 @@ struct FootballImmersiveView: View {
     @State private var povReference: ReplayPOVReference?
     @State private var appliedLookRequestID: UUID?
     @State private var povEntryStartedAt: TimeInterval?
-    @State private var currentMatchRoot: Entity?
+    @State private var matchSceneReference = ReplayMatchSceneReference()
+    private var currentMatchRoot: Entity? {
+        get { matchSceneReference.root }
+        nonmutating set { matchSceneReference.root = newValue }
+    }
     @State private var worldPlacement = ReplayWorldPlacement()
     @State private var reviewViewerTransform: simd_float4x4?
     @State private var reviewControlsAnchor: AnchorEntity?
@@ -257,6 +261,9 @@ struct FootballImmersiveView: View {
             didRunRecordingTour = true
             await ReplayRecordingTour.run(store: store, roomID: roomPresentationID,
                 ready: { isMatchSceneReady }, povReady: { hasCurrentPOVReference },
+                povDiagnostics: {
+                    "world=\(worldTracking.hasResolvedWorldStartup), root=\(currentMatchRoot?.name ?? "nil"), ref=\(povReference?.playerID ?? "nil"), player=\(store.activePerspectiveID)"
+                },
                 selectMark: { selectedAnnotationID = $0 })
             #endif
         }
@@ -431,7 +438,9 @@ struct FootballImmersiveView: View {
             selectedAnnotationID = nil
             povReference = nil
             povEntryStartedAt = nil
-            currentMatchRoot = nil
+            // RealityView owns this reference. Its replacement update may
+            // precede this observer; clearing it here strands paused POV.
+            // Capture already rejects a root from another scenario by name.
             worldPlacement.reset()
         }
         .onChange(of: store.viewMode) { _, _ in
@@ -4440,7 +4449,7 @@ private struct ImmersiveControlDeck: View {
             annotationToolChoices
             Spacer(minLength: 6)
             Button(action: openAnnotationTracks) {
-                Image(systemName: "timeline.selection").frame(width: 44, height: 44)
+                Image(systemName: "list.bullet.rectangle").frame(width: 44, height: 44)
             }
             .buttonStyle(.bordered)
             .help("All annotation tracks")

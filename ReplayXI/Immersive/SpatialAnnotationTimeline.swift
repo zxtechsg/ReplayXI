@@ -172,9 +172,12 @@ struct SpatialAnnotationTimeline: View {
         if let drag, drag.handle == .key(time) { shown = min(max(time + drag.delta, 0), duration) }
         if let drag, drag.handle == .move { shown += window.start - mark.revealTime }
         return Image(systemName: "diamond.fill")
-            .font(.system(size: 12, weight: .black)).foregroundStyle(ReplayTheme.cyan)
+            .font(.system(size: 12, weight: .black))
+            .foregroundStyle(abs(time - store.playhead) < CoachMark.keyframeTimeTolerance
+                ? ReplayTheme.signal : ReplayTheme.cyan)
             .frame(width: 44, height: 44).contentShape(Rectangle())
             .offset(x: 22 + width * CGFloat(shown / duration), y: 40)
+            .zIndex(abs(time - store.playhead) < CoachMark.keyframeTimeTolerance ? 2 : 1)
             .gesture(editGesture(.key(time), width: width))
             .onTapGesture {
                 guard store.canChangePlaybackView else { return }
