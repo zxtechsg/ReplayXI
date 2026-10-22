@@ -175,6 +175,11 @@ struct SpatialAnnotationTracks: View {
                     .buttonStyle(.bordered).help("Close timeline").accessibilityLabel("Close timeline")
                     .disabled(!store.canChangePlaybackView)
             }
+            if store.selectedScenario.kind == .realWorldReplay, marks.count > 1 {
+                Text("Marks may be hidden. Select one here to show it.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if marks.isEmpty {
                 Image(systemName: "pencil.and.outline").foregroundStyle(.secondary).frame(height: 48)
                     .accessibilityLabel("Draw a mark to add a track")

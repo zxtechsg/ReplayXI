@@ -327,6 +327,21 @@ enum PitchSceneFactory {
         }
     }
 
+    /// One checkpoint per live rig, not a pose history. Annotation/HUD changes
+    /// at a paused timestamp must not re-evaluate and rewrite every far joint.
+    private struct ProceduralPoseInput: Equatable {
+        let track: PlayerTrack
+        let time: TimeInterval
+        let locomotion: PlayerLocomotionSample
+        let lookTarget: SIMD3<Float>?
+        let ballAction: ReplayAthleteBallActionPose?
+        let stationaryPose: PlayerPose?
+        let interaction: ReplayAthleteInteractionCue?
+        let presentationPose: PlayerPose?
+        let allowsOffBallPose: Bool
+        let goalkeeperReadiness: ReplayGoalkeeperReadiness.Sample?
+    }
+
     private final class AnnotationSceneCache {
         weak var root: Entity?
         weak var marksRoot: Entity?
@@ -363,6 +378,12 @@ enum PitchSceneFactory {
         // searches from the 30 Hz path. Entries are explicitly invalidated when
         // a near rig is detached; the root-level LRU bounds the remaining life.
         private var athleteRigBindings: [ObjectIdentifier: ReplayAthleteJointBinding] = [:]
+        private var appliedProceduralPoses: [ObjectIdentifier: ProceduralPoseInput] = [:]
+        var proceduralPoseCheckpointCount: Int { appliedProceduralPoses.count }
+        #if DEBUG
+        var proceduralPoseEvaluations = 0
+        var proceduralPoseCacheHits = 0
+        #endif
         private(set) var athleteBindingHierarchyResolutionCount = 0
         private(set) var athleteBindingInvalidationCount = 0
         var lastAccess: UInt64 = 0
@@ -398,9 +419,31 @@ enum PitchSceneFactory {
         }
 
         func invalidateAthleteBinding(for rig: Entity) {
+            invalidateProceduralPose(for: rig)
             if athleteRigBindings.removeValue(forKey: ObjectIdentifier(rig)) != nil {
                 athleteBindingInvalidationCount &+= 1
             }
+        }
+
+        func hasAppliedProceduralPose(_ input: ProceduralPoseInput, to rig: Entity) -> Bool {
+            guard appliedProceduralPoses[ObjectIdentifier(rig)] == input else { return false }
+            #if DEBUG
+            proceduralPoseCacheHits &+= 1
+            #endif
+            return true
+        }
+
+        func recordProceduralPose(_ input: ProceduralPoseInput, for rig: Entity) {
+            let key = ObjectIdentifier(rig)
+            guard athleteRigBindings[key]?.root === rig else { return }
+            appliedProceduralPoses[key] = input
+            #if DEBUG
+            proceduralPoseEvaluations &+= 1
+            #endif
+        }
+
+        func invalidateProceduralPose(for rig: Entity) {
+            appliedProceduralPoses.removeValue(forKey: ObjectIdentifier(rig))
         }
 
         func containsAthleteBinding(for rig: Entity) -> Bool {
@@ -466,6 +509,7 @@ enum PitchSceneFactory {
 
         private func pruneDetachedAthleteBindings() {
             athleteRigBindings = athleteRigBindings.filter { $0.value.root.parent != nil }
+            appliedProceduralPoses = appliedProceduralPoses.filter { athleteRigBindings[$0.key] != nil }
         }
 
         func matches(_ incoming: [CoachMark], count: Int) -> Bool {
@@ -506,6 +550,14 @@ enum PitchSceneFactory {
     }
 
     #if DEBUG
+    static func proceduralPoseWork(for root: Entity) -> (evaluations: Int, cacheHits: Int, checkpoints: Int) {
+        guard let cache = annotationSceneCaches[ObjectIdentifier(root)], cache.root === root else {
+            return (0, 0, 0)
+        }
+        return (cache.proceduralPoseEvaluations, cache.proceduralPoseCacheHits,
+                cache.proceduralPoseCheckpointCount)
+    }
+
     struct PresentationMaterialDiagnostics: Equatable {
         let laneWrites: Int
         let triangleWrites: Int
@@ -4530,6 +4582,12 @@ enum PitchSceneFactory {
         goalkeeperReadiness: ReplayGoalkeeperReadiness.Sample?
     ) {
         guard let binding = athleteBinding(for: fullRig, cache: cache) else { return }
+        let input = ProceduralPoseInput(track: track, time: time, locomotion: locomotion,
+            lookTarget: lookTargetWorldPosition, ballAction: ballAction,
+            stationaryPose: stationaryPose, interaction: interaction,
+            presentationPose: presentationPose, allowsOffBallPose: allowsOffBallPose,
+            goalkeeperReadiness: goalkeeperReadiness)
+        guard cache?.hasAppliedProceduralPose(input, to: fullRig) != true else { return }
         let pose = ReplayAthleteMotion.locomotionPose(
             for: track,
             at: time,
@@ -4546,6 +4604,7 @@ enum PitchSceneFactory {
             goalkeeperReadiness: goalkeeperReadiness
         )
         ReplayAthleteMotion.apply(pose, to: binding)
+        cache?.recordProceduralPose(input, for: fullRig)
     }
 
     private static func athleteBinding(
@@ -4623,6 +4682,9 @@ enum PitchSceneFactory {
               let fullRig = directChild(named: "full-rig", of: player),
               let binding = athleteBinding(for: fullRig, cache: cache)
         else { return }
+        // The impact blends over the base gait. Reusing this modified pose on
+        // the next paused update would accumulate the blend and cause drift.
+        cache?.invalidateProceduralPose(for: fullRig)
         ReplayAthleteMotion.apply(ragdoll: pose, influence: influence, to: binding)
     }
 

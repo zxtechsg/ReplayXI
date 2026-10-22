@@ -4,6 +4,16 @@ import Foundation
 /// step with CoachMark: the show boundary is inclusive; hide is exclusive.
 enum CoachWorkspace {
     static let keyTimeTolerance = 0.000_001
+
+    static func zoneRadius(start: ReplayXIWirePoint, end: ReplayXIWirePoint) -> Float {
+        max(1.1, hypot(end.x - start.x, end.z - start.z))
+    }
+
+    static func zoneBounds(centre: CGPoint, edge: CGPoint, minimumRadius: CGFloat) -> CGRect {
+        let radius = max(minimumRadius, hypot(edge.x - centre.x, edge.y - centre.y))
+        return CGRect(x: centre.x - radius, y: centre.y - radius, width: radius * 2, height: radius * 2)
+    }
+
     static func isVisible(_ mark: ReplayXIWireMark, at time: Double) -> Bool {
         mark.showAt <= time && (mark.hideAt.map { time < $0 } ?? true)
     }

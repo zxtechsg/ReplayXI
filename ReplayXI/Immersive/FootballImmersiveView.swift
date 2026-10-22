@@ -2246,7 +2246,6 @@ private struct ImmersiveControlDeck: View {
     @State private var annotationConfirmation: String?
     @State private var showsEventStrip = false
     @State private var showsPlayerGrid = false
-    @State private var eventPage = 0
     @State private var orderedReviewMarks: [CoachMark] = []
     @State private var indexedReviewEvents: [PlaybackReviewEvent] = []
     @State private var timelineTickClusters: [PlaybackEventRailLayout.TimelineTickCluster] = []
@@ -2560,7 +2559,6 @@ private struct ImmersiveControlDeck: View {
             isClearAnnotationsPending = false
             inlinePanel = nil
             showsAnnotationTools = false
-            eventPage = 0
             annotationConfirmation = nil
             rebuildReviewIndex()
         }
@@ -4572,12 +4570,6 @@ private struct ImmersiveControlDeck: View {
         }
         orderedReviewMarks = marks
         indexedReviewEvents = events
-        // Deleting the only event on the last page must not leave an empty
-        // shelf. Paging remains local presentation state, never squad state.
-        eventPage = PlaybackEventRailLayout.clampedPage(
-            eventPage,
-            eventCount: events.count
-        )
         rebuildTimelineTickClusters(events: events)
     }
 
@@ -4621,26 +4613,6 @@ private struct ImmersiveControlDeck: View {
               abs(width - timelineTrackWidth) >= 0.5 else { return }
         timelineTrackWidth = width
         rebuildTimelineTickClusters()
-    }
-
-    private var eventPageCount: Int {
-        PlaybackEventRailLayout.pageCount(eventCount: reviewEvents.count)
-    }
-
-    private var clampedEventPage: Int {
-        PlaybackEventRailLayout.clampedPage(eventPage, eventCount: reviewEvents.count)
-    }
-
-    private var visibleReviewEvents: [PlaybackReviewEvent] {
-        let range = PlaybackEventRailLayout.visibleRange(
-            eventCount: reviewEvents.count,
-            page: eventPage
-        )
-        return Array(reviewEvents[range])
-    }
-
-    private var visibleEventRangeLabel: String {
-        PlaybackEventRailLayout.rangeLabel(eventCount: reviewEvents.count, page: eventPage)
     }
 
     private var selectedAnnotation: CoachMark? {
@@ -4793,11 +4765,6 @@ private struct ImmersiveControlDeck: View {
             showsAnnotationTools = false
             showsToolsShelf = false
             showsEventStrip = true
-            eventPage = PlaybackEventRailLayout.page(
-                nearestTo: store.playhead,
-                events: reviewEvents,
-                time: { $0.time }
-            )
         } label: {
             Label("Timeline", systemImage: "list.bullet.rectangle.fill")
                 .font(.subheadline.weight(.black))
@@ -4853,193 +4820,6 @@ private struct ImmersiveControlDeck: View {
         })
     }
 
-    private var annotationEventRow: some View {
-        HStack(spacing: PlaybackEventRailLayout.horizontalSpacing) {
-            Button {
-                guard store.canChangePlaybackView else { return }
-                showsEventStrip = false
-            } label: {
-                Image(systemName: "xmark")
-                    .frame(
-                        minWidth: PlaybackControlDeckPresentation.minimumSpatialHitTarget,
-                        minHeight: PlaybackControlDeckPresentation.minimumSpatialHitTarget
-                    )
-            }
-            .buttonStyle(.bordered)
-            .disabled(!store.canChangePlaybackView)
-            .fixedSize()
-            .accessibilityLabel("Close timeline")
-            .accessibilityHint(store.canChangePlaybackView
-                ? "Closes timestamped cues and annotations"
-                : "Finish the current gesture first")
-
-            VStack(alignment: .leading, spacing: 2) {
-                Eyebrow(text: "Timeline", color: ReplayTheme.cyan)
-                Text(visibleEventRangeLabel)
-                    .font(.caption2.monospacedDigit().weight(.black))
-                    .foregroundStyle(.white.opacity(0.58))
-            }
-            .frame(width: PlaybackEventRailLayout.headingWidth, alignment: .leading)
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("Timeline, \(visibleEventRangeLabel)")
-
-            eventPageButton(direction: -1)
-
-            HStack(spacing: PlaybackEventRailLayout.chipSpacing) {
-                ForEach(visibleReviewEvents) { event in
-                    reviewEventButton(event)
-                }
-            }
-            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
-            .layoutPriority(1)
-
-            eventPageButton(direction: 1)
-
-            if store.localRole == .coach {
-                Button {
-                    showsEventStrip = false
-                    showsAnnotationTools = true
-                    showsToolsShelf = false
-                    showsPlaybackAnnotations = true
-                } label: {
-                    Label("DRAW", systemImage: "pencil.and.outline")
-                        .font(.subheadline.weight(.black))
-                        .lineLimit(1)
-                        .frame(
-                            width: 100,
-                            height: PlaybackControlDeckPresentation.minimumSpatialHitTarget
-                        )
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(ReplayTheme.orange)
-                .foregroundStyle(.black)
-                .frame(
-                    minWidth: PlaybackEventRailLayout.drawWidth,
-                    minHeight: PlaybackControlDeckPresentation.minimumSpatialHitTarget
-                )
-                .fixedSize()
-                .accessibilityLabel("Draw annotation")
-                .accessibilityHint("Returns to the annotation tools")
-            }
-        }
-    }
-
-    private func eventPageButton(direction: Int) -> some View {
-        let movesBackward = direction < 0
-        let destination = clampedEventPage + direction
-        let isAvailable = destination >= 0 && destination < eventPageCount
-
-        return Button {
-            guard isAvailable else { return }
-            withAnimation(.easeOut(duration: 0.18)) {
-                eventPage = destination
-            }
-        } label: {
-            Image(systemName: movesBackward ? "chevron.left" : "chevron.right")
-                .font(.headline.weight(.black))
-                .frame(
-                    minWidth: PlaybackControlDeckPresentation.minimumSpatialHitTarget,
-                    minHeight: PlaybackControlDeckPresentation.minimumSpatialHitTarget
-                )
-        }
-        .buttonStyle(.bordered)
-        .fixedSize()
-        .disabled(!isAvailable || store.hasActiveCoachMarkGeometryPreview)
-        .accessibilityLabel(movesBackward ? "Previous timeline page" : "Next timeline page")
-        .accessibilityValue(visibleEventRangeLabel)
-        .accessibilityHint(
-            isAvailable
-                ? "Shows the adjacent group of match cues and annotations"
-                : "No more events in this direction"
-        )
-    }
-
-    @ViewBuilder
-    private func reviewEventButton(_ event: PlaybackReviewEvent) -> some View {
-        switch event {
-        case .cue(let cue):
-            Button {
-                guard store.canChangePlaybackView else { return }
-                selectedAnnotationID = nil
-                jump(to: cue)
-            } label: {
-                eventChipLabel(
-                    time: cue.time,
-                    title: cue.kicker,
-                    systemImage: "flag.fill"
-                )
-            }
-            .buttonStyle(.plain)
-            .background(.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 15))
-            .overlay {
-                RoundedRectangle(cornerRadius: 15)
-                    .stroke(.white.opacity(0.11), lineWidth: 1)
-            }
-            .hoverEffect(.highlight)
-            .disabled(!store.canChangePlaybackView)
-            .accessibilityLabel("Cue at \(formatTime(cue.time)), \(cue.headline)")
-
-        case .mark(let mark):
-            Button {
-                guard store.canChangePlaybackView else { return }
-                guard jump(to: mark) else { return }
-                showsPlaybackAnnotations = true
-                selectedAnnotationID = mark.id
-                showsDecisionStrip = false
-            } label: {
-                eventChipLabel(
-                    time: mark.revealTime,
-                    title: mark.kind.title,
-                    systemImage: mark.kind.systemImage
-                )
-            }
-            .buttonStyle(.plain)
-            .background(
-                annotationColor(for: mark.kind).opacity(0.24),
-                in: RoundedRectangle(cornerRadius: 15)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: 15)
-                    .stroke(annotationColor(for: mark.kind).opacity(0.34), lineWidth: 1)
-            }
-            .hoverEffect(.highlight)
-            .disabled(!store.canChangePlaybackView)
-            .accessibilityLabel("\(mark.kind.title) annotation at \(formatTime(mark.revealTime))")
-            .accessibilityHint(mark.label)
-        }
-    }
-
-    private func eventChipLabel(
-        time: TimeInterval,
-        title: String,
-        systemImage: String
-    ) -> some View {
-        HStack(spacing: 9) {
-            Image(systemName: systemImage)
-                .font(.headline.weight(.black))
-                .frame(width: 24)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(formatTime(time))
-                    .font(.caption2.monospacedDigit().weight(.black))
-                    .foregroundStyle(.white.opacity(0.62))
-                Text(title.uppercased())
-                    .font(.caption.weight(.black))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.78)
-                    .foregroundStyle(.white)
-            }
-
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 13)
-        .frame(
-            width: PlaybackEventRailLayout.chipWidth,
-            height: PlaybackControlDeckPresentation.minimumSpatialHitTarget
-        )
-        .contentShape(RoundedRectangle(cornerRadius: 15))
-    }
-
     private func selectedAnnotationInspector(_ mark: CoachMark) -> some View {
         SpatialAnnotationEditor(mark: mark,
             onTimeline: {
@@ -5059,102 +4839,6 @@ private struct ImmersiveControlDeck: View {
             .id(mark.id)
     }
 
-    private func annotationGeometryButton(_ mark: CoachMark) -> some View {
-        Button {
-            guard mark.canRecordPose(at: store.playhead) else { return }
-            toggleInlinePanel(.annotationGeometry(mark.id))
-        } label: {
-            Label("Adjust", systemImage: "arrow.up.and.down.and.arrow.left.and.right")
-                .font(.subheadline.weight(.black))
-                .lineLimit(1)
-                .minimumScaleFactor(0.78)
-                .frame(
-                    minWidth: 112,
-                    minHeight: PlaybackControlDeckPresentation.minimumSpatialHitTarget
-                )
-        }
-        .buttonStyle(.bordered)
-        .tint(annotationColor(for: mark.kind))
-        .disabled(!mark.canRecordPose(at: store.playhead))
-        .accessibilityLabel("Adjust annotation endpoints")
-        .accessibilityHint(
-            mark.keyframeCapacityBlockReason(at: store.playhead)
-                ?? "Steer either endpoint on the pitch, then raise an endpoint or the complete stroke in quarter-metre steps"
-        )
-        .accessibilityAddTraits(
-            inlinePanel == .annotationGeometry(mark.id) ? .isSelected : []
-        )
-        .accessibilityAction(named: "Move \(annotationMovementTargetName(.start, kind: mark.kind)) left") {
-            nudgeAnnotation(mark, endpoint: .start, x: -0.25, z: 0)
-        }
-        .accessibilityAction(named: "Move \(annotationMovementTargetName(.start, kind: mark.kind)) right") {
-            nudgeAnnotation(mark, endpoint: .start, x: 0.25, z: 0)
-        }
-        .accessibilityAction(named: "Move \(annotationMovementTargetName(.start, kind: mark.kind)) upfield") {
-            nudgeAnnotation(mark, endpoint: .start, x: 0, z: 0.25)
-        }
-        .accessibilityAction(named: "Move \(annotationMovementTargetName(.start, kind: mark.kind)) back") {
-            nudgeAnnotation(mark, endpoint: .start, x: 0, z: -0.25)
-        }
-        .accessibilityAction(named: "Move \(annotationMovementTargetName(.end, kind: mark.kind)) left") {
-            nudgeAnnotation(mark, endpoint: .end, x: -0.25, z: 0)
-        }
-        .accessibilityAction(named: "Move \(annotationMovementTargetName(.end, kind: mark.kind)) right") {
-            nudgeAnnotation(mark, endpoint: .end, x: 0.25, z: 0)
-        }
-        .accessibilityAction(named: "Move \(annotationMovementTargetName(.end, kind: mark.kind)) upfield") {
-            nudgeAnnotation(mark, endpoint: .end, x: 0, z: 0.25)
-        }
-        .accessibilityAction(named: "Move \(annotationMovementTargetName(.end, kind: mark.kind)) back") {
-            nudgeAnnotation(mark, endpoint: .end, x: 0, z: -0.25)
-        }
-    }
-
-    private func annotationTrackingButton(_ mark: CoachMark) -> some View {
-        Button {
-            toggleInlinePanel(.annotationTracking(mark.id))
-        } label: {
-            Label(annotationTrackingButtonTitle(mark), systemImage: "link")
-                .font(.subheadline.weight(.black))
-                .lineLimit(1)
-                .minimumScaleFactor(0.78)
-                .frame(
-                    minWidth: 116,
-                    minHeight: PlaybackControlDeckPresentation.minimumSpatialHitTarget
-                )
-        }
-        .buttonStyle(.bordered)
-        .tint(annotationColor(for: mark.kind))
-        .accessibilityLabel("Annotation player tracking")
-        .accessibilityValue(annotationTrackingAccessibilityValue(mark))
-        .accessibilityHint(mark.hasKeyframes
-            ? "Shows how to switch saved positions to player tracking"
-            : "Opens both teams. Choose a shirt to follow or fix the mark to the pitch")
-        .accessibilityAddTraits(
-            inlinePanel == .annotationTracking(mark.id) ? .isSelected : []
-        )
-    }
-
-    private func annotationTrackingButtonTitle(_ mark: CoachMark) -> String {
-        guard let playerID = annotationTrackingPlayerID(mark),
-              let player = store.selectedScenario.player(id: playerID) else {
-            return mark.followsPlayerTracks ? "Tracks" : "Follow"
-        }
-        return "Follow #\(player.shirtNumber)"
-    }
-
-    private func annotationTrackingAccessibilityValue(_ mark: CoachMark) -> String {
-        if let value = AnnotationTrackingPolicy.keyframeAccessibilityValue(mark) { return value }
-        guard mark.followsPlayerTracks else { return "Fixed to pitch" }
-        if let playerID = annotationTrackingPlayerID(mark),
-           let player = store.selectedScenario.player(id: playerID) {
-            let target = annotationTrackingEndpoint == .start ? "Origin" : annotationTrackingEndpoint == .end ? "End" : "Both points"
-            return "\(target) follow \(FootballReferenceScenarios.teamTitle(player.team, in: store.selectedScenario)) number \(player.shirtNumber)"
-        }
-        return "Annotation points currently use different player tracks"
-    }
-
-    @discardableResult
     private func nudgeAnnotation(
         _ mark: CoachMark,
         endpoint: CoachMarkEndpoint,
@@ -5231,66 +4915,6 @@ private struct ImmersiveControlDeck: View {
         return appliedDelta
     }
 
-    @ViewBuilder
-    private func annotationIdentity(_ mark: CoachMark) -> some View {
-        if store.localRole == .coach,
-           isCoachCreated(mark),
-           mark.kind != .playerLabel {
-            Button {
-                toggleInlinePanel(.annotationLabel(mark.id))
-            } label: {
-                HStack(spacing: 8) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Eyebrow(
-                            text: mark.kind.title,
-                            color: annotationColor(for: mark.kind)
-                        )
-                        Text(mark.label)
-                            .font(.headline.weight(.black))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.72)
-                    }
-
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.caption2.weight(.black))
-                        .foregroundStyle(annotationColor(for: mark.kind))
-                        .frame(width: 24, height: 24)
-                        .background(
-                            annotationColor(for: mark.kind).opacity(0.14),
-                            in: RoundedRectangle(cornerRadius: 8)
-                        )
-                }
-                .padding(.horizontal, 9)
-                .frame(minHeight: PlaybackControlDeckPresentation.minimumSpatialHitTarget)
-                .contentShape(RoundedRectangle(cornerRadius: 12))
-                .background(.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 12))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(annotationColor(for: mark.kind).opacity(0.34), lineWidth: 1)
-                }
-            }
-            .buttonStyle(.plain)
-            .layoutPriority(1)
-            .accessibilityLabel("Annotation label")
-            .accessibilityValue(mark.label)
-            .accessibilityHint("Opens tactical label choices in the control deck")
-            .accessibilityAddTraits(
-                inlinePanel == .annotationLabel(mark.id) ? .isSelected : []
-            )
-        } else {
-            VStack(alignment: .leading, spacing: 2) {
-                Eyebrow(
-                    text: mark.kind.title,
-                    color: annotationColor(for: mark.kind)
-                )
-                Text(mark.label)
-                    .font(.headline.weight(.black))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
-            }
-        }
-    }
-
     private func isCoachCreated(_ mark: CoachMark) -> Bool {
         !store.selectedScenario.coachMarks.contains { $0.id == mark.id }
     }
@@ -5310,21 +4934,6 @@ private struct ImmersiveControlDeck: View {
             currentMarks: store.marks,
             presentation: store.playerPresentation
         )
-    }
-
-    private func annotationDurationLabel(_ mark: CoachMark) -> String {
-        guard let hideTime = mark.hideTime else { return "To end" }
-        let duration = max(hideTime - mark.revealTime, 0)
-        return duration == duration.rounded()
-            ? "\(Int(duration))s"
-            : "\(duration.formatted(.number.precision(.fractionLength(1))))s"
-    }
-
-    private func canMoveAnnotation(
-        _ mark: CoachMark,
-        to time: TimeInterval
-    ) -> Bool {
-        PlaybackAnnotationMovePolicy.canMove(mark, to: time, in: store)
     }
 
     private var directPlaybackRates: [Double] { ReplayStore.availablePlaybackRates }

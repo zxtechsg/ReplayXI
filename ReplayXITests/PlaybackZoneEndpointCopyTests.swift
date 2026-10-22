@@ -23,20 +23,20 @@ final class PlaybackZoneEndpointCopyTests: XCTestCase {
         XCTAssertFalse(endTarget.contains("opposite corner"))
     }
 
-    func testQuickActionsAndMovementFeedbackUseTheSameKindAwareNames() throws {
+    func testActiveJoystickActionsAndMovementFeedbackUseTheSameKindAwareNames() throws {
         let source = try deckSource()
-        let actions = try slice(source, after: "private func annotationGeometryButton(",
-                                before: "private func annotationTrackingButton(")
-        XCTAssertEqual(actions.components(separatedBy:
-            "annotationMovementTargetName(.start, kind: mark.kind)").count - 1, 4)
-        XCTAssertEqual(actions.components(separatedBy:
-            "annotationMovementTargetName(.end, kind: mark.kind)").count - 1, 4)
+        let actions = try slice(source, after: "private func annotationEndpointGeometryRow(",
+                                before: "private func annotationElevationControls(")
+        XCTAssertTrue(actions.contains("nudgeAnnotation(mark, endpoint: .start, x: x, z: z)"))
+        XCTAssertTrue(actions.contains("nudgeAnnotation(mark, endpoint: .end, x: x, z: z)"))
+        XCTAssertTrue(actions.contains("accessibilityTarget: annotationStartPointAccessibilityTarget(for: mark.kind)"))
+        XCTAssertTrue(actions.contains("accessibilityTarget: annotationEndPointAccessibilityTarget(for: mark.kind)"))
         XCTAssertTrue(source.contains("case .start: kind == .space ? \"zone centre\" : \"start\""))
         XCTAssertTrue(source.contains("case .end: kind == .space ? \"zone edge\" : \"arrow point\""))
         let nudge = try slice(source, after: "private func nudgeAnnotation(",
                               before: "private func nudgeAnnotationElevation(")
         let commit = try slice(source, after: "private func commitAnnotationPreview(",
-                               before: "private func annotationIdentity(")
+                               before: "private func isCoachCreated(")
         for callback in [nudge, commit] {
             XCTAssertTrue(callback.contains("annotationMovementTargetName(endpoint, kind: mark.kind).uppercased()"))
             XCTAssertTrue(callback.contains("hypot(appliedDelta.x, appliedDelta.z)"))

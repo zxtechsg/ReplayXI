@@ -20,6 +20,40 @@ enum CoachSceneGeometry {
         (1 - t) * (1 - t) * a + 2 * (1 - t) * t * c + t * t * b
     }
 
+    struct AnnotationFrame {
+        let position: SIMD3<Float>
+        let target: SIMD3<Float>
+        let farPlane: Double
+    }
+
+    static func annotationFrame(_ mark: ReplayXIWireMark, size: CGSize,
+                                fieldOfView: CGFloat) -> AnnotationFrame {
+        let a = SIMD3<Float>(mark.start.x, mark.startHeight, mark.start.z)
+        let b = SIMD3<Float>(mark.end.x, mark.endHeight, mark.end.z)
+        let centre: SIMD3<Float>
+        let radius: Float
+        if mark.kind == "space" {
+            centre = [a.x, (a.y + b.y) / 2, a.z]
+            // The endpoint sets a radius, not a bounding-box corner. Include
+            // the torus thickness and editing handles in the framed sphere.
+            radius = max(5, CoachWorkspace.zoneRadius(start: mark.start, end: mark.end) * 1.1 + 0.8)
+        } else {
+            let c = mark.controlPoint.map { SIMD3<Float>($0.x, $0.y, $0.z) } ?? (a + b) / 2
+            let minimum = simd_min(a, simd_min(b, c)), maximum = simd_max(a, simd_max(b, c))
+            centre = (minimum + maximum) / 2
+            radius = max(5, simd_distance(minimum, maximum) / 2 + 1.5)
+        }
+        let aspect = size.width.isFinite && size.height.isFinite && size.width > 0 && size.height > 0
+            ? Float(size.width / size.height) : 1
+        let fov = fieldOfView.isFinite && (1..<179).contains(fieldOfView)
+            ? fieldOfView : overviewFieldOfView
+        let vertical = Float(fov) * .pi / 360
+        let halfAngle = min(vertical, atan(tan(vertical) * aspect))
+        let distance = radius / sin(halfAngle) * 1.08
+        return AnnotationFrame(position: centre + simd_normalize(SIMD3<Float>(0.55, 0.95, 1)) * distance,
+            target: centre, farPlane: max(500, Double(distance + radius + 5)))
+    }
+
     static func planeIntersection(near a: SIMD3<Float>, far b: SIMD3<Float>, height: Float) -> SIMD3<Float>? {
         let ray = b - a
         guard height.isFinite, abs(ray.y) > 0.0001 else { return nil }
@@ -124,10 +158,9 @@ final class CoachSceneView: SCNView {
     private let cameraNode = SCNNode()
     private let ballNode = SCNNode(geometry: SCNSphere(radius: 0.35))
     private let drawNode = SCNNode(geometry: SCNSphere(radius: 0.55))
-    private var players: [String: SCNNode] = [:]
-    private var marks: [UUID: CoachSceneMark] = [:]
+    private var players: [String: CoachScenePlayer] = [:]
+    private let marks = CoachSceneMarkCache()
     private var stalePlayerIDs: [String] = []
-    private var staleMarkIDs: [UUID] = []
     private var configuration: CoachSceneSurface?
     private var resetRevision: Int?
     private var scenarioID: String?
@@ -217,31 +250,18 @@ final class CoachSceneView: SCNView {
         SCNTransaction.begin(); SCNTransaction.animationDuration = 0
         for player in next.state.players {
             let node = players[player.id] ?? makePlayer(player)
-            node.simdPosition = [player.position.x, 0, player.position.z]
-            node.eulerAngles.y = CGFloat((player.facingDegrees ?? 0) * .pi / 180)
+            node.update(player)
         }
         stalePlayerIDs.removeAll(keepingCapacity: true)
         for id in players.keys where !next.state.players.contains(where: { $0.id == id }) {
             stalePlayerIDs.append(id)
         }
-        for id in stalePlayerIDs { players.removeValue(forKey: id)?.removeFromParentNode() }
+        for id in stalePlayerIDs { players.removeValue(forKey: id)?.root.removeFromParentNode() }
         ballNode.simdPosition = [next.state.ball.x, max(0.11, next.state.ball.y), next.state.ball.z]
         drawNode.isHidden = next.drawStart == nil
         if let start = next.drawStart { drawNode.simdPosition = [start.x, 0.1, start.z] }
-        for mark in next.state.marks {
-            let node = marks[mark.id] ?? {
-                let result = CoachSceneMark(); marks[mark.id] = result
-                world.rootNode.addChildNode(result.root); return result
-            }()
-            node.update(mark, selected: mark.id == next.selectedMarkID,
-                        editable: next.state.canEdit && !mark.authored,
-                        visible: CoachWorkspace.isVisible(mark, at: next.state.playhead))
-        }
-        staleMarkIDs.removeAll(keepingCapacity: true)
-        for id in marks.keys where !next.state.marks.contains(where: { $0.id == id }) {
-            staleMarkIDs.append(id)
-        }
-        for id in staleMarkIDs { marks.removeValue(forKey: id)?.root.removeFromParentNode() }
+        marks.update(next.state.marks, selectedID: next.selectedMarkID,
+            editable: next.state.canEdit, time: next.state.playhead, parent: world.rootNode)
         if let drag { preview(drag) }
         if next.playerView, let player = next.state.players.first(where: { $0.id == next.state.perspectiveID }) {
             cameraNode.simdPosition = [player.position.x, 1.72, player.position.z]
@@ -250,14 +270,15 @@ final class CoachSceneView: SCNView {
             cameraNode.look(at: .init(target.x, target.y, target.z),
                             up: .init(0, 1, 0), localFront: .init(0, 0, -1))
             pointOfView = cameraNode
-            for (id, node) in players { node.isHidden = id == player.id }
-        } else { for node in players.values { node.isHidden = false } }
+            for (id, node) in players { node.root.isHidden = id == player.id }
+        } else { for node in players.values { node.root.isHidden = false } }
         SCNTransaction.commit()
         needsDisplay = true
     }
 
     private func overview() {
         cameraNode.simdPosition = CoachSceneGeometry.overviewPosition
+        cameraNode.camera?.zFar = 500
         let target = CoachSceneGeometry.overviewTarget
         cameraNode.look(at: .init(target.x, target.y, target.z),
                         up: .init(0, 1, 0), localFront: .init(0, 0, -1))
@@ -267,13 +288,11 @@ final class CoachSceneView: SCNView {
     }
 
     private func focus(_ mark: ReplayXIWireMark) {
-        let a = SIMD3<Float>(mark.start.x, mark.startHeight, mark.start.z)
-        let b = SIMD3<Float>(mark.end.x, mark.endHeight, mark.end.z)
-        let c = mark.controlPoint.map { SIMD3<Float>($0.x, $0.y, $0.z) } ?? (a + b) / 2
-        let minimum = simd_min(a, simd_min(b, c)), maximum = simd_max(a, simd_max(b, c))
-        let centre = (minimum + maximum) / 2
-        let radius = max(5, simd_distance(minimum, maximum) / 2)
-        cameraNode.simdPosition = centre + simd_normalize(SIMD3<Float>(0.55, 0.95, 1)) * radius * 2.5
+        let frame = CoachSceneGeometry.annotationFrame(mark, size: bounds.size,
+            fieldOfView: cameraNode.camera?.fieldOfView ?? CoachSceneGeometry.overviewFieldOfView)
+        let centre = frame.target
+        cameraNode.simdPosition = frame.position
+        cameraNode.camera?.zFar = frame.farPlane
         cameraNode.look(at: .init(centre.x, centre.y, centre.z),
                         up: .init(0, 1, 0), localFront: .init(0, 0, -1))
         pointOfView = cameraNode
@@ -281,22 +300,11 @@ final class CoachSceneView: SCNView {
         defaultCameraController.clearRoll()
     }
 
-    private func makePlayer(_ player: ReplayXIWirePlayer) -> SCNNode {
-        let root = SCNNode(); root.name = "player:\(player.id)"
-        let body = SCNNode(geometry: SCNCapsule(capRadius: 0.29, height: 1.25))
-        body.position.y = 0.8
-        body.geometry?.firstMaterial?.diffuse.contents = player.team == "home" ? NSColor.systemBlue : NSColor.systemRed
-        root.addChildNode(body)
-        let head = SCNNode(geometry: SCNSphere(radius: 0.20)); head.position.y = 1.63
-        head.geometry?.firstMaterial?.diffuse.contents = NSColor(calibratedWhite: 0.7, alpha: 1)
-        root.addChildNode(head)
-        let text = SCNText(string: "\(player.number)", extrusionDepth: 0)
-        text.font = .monospacedDigitSystemFont(ofSize: 1.8, weight: .bold)
-        text.flatness = 0.3; text.firstMaterial?.diffuse.contents = NSColor.white
-        let number = SCNNode(geometry: text); number.position = .init(-0.5, 2.05, 0)
-        number.constraints = [SCNBillboardConstraint()]; root.addChildNode(number)
-        players[player.id] = root; world.rootNode.addChildNode(root)
-        return root
+    private func makePlayer(_ player: ReplayXIWirePlayer) -> CoachScenePlayer {
+        let result = CoachScenePlayer()
+        players[player.id] = result
+        world.rootNode.addChildNode(result.root)
+        return result
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -399,7 +407,98 @@ final class CoachSceneView: SCNView {
     }
 }
 
-private final class CoachSceneMark {
+/// Lightweight preview geometry, with identity updates even when a study
+/// reuses a player ID. Unchanged wire frames do not rewrite native properties.
+final class CoachScenePlayer {
+    let root = SCNNode()
+    private let body = SCNNode(geometry: SCNCapsule(capRadius: 0.29, height: 1.25))
+    private let number = SCNText(string: "", extrusionDepth: 0)
+    private var previous: ReplayXIWirePlayer?
+
+    init() {
+        body.position.y = 0.8
+        root.addChildNode(body)
+        let head = SCNNode(geometry: SCNSphere(radius: 0.20))
+        head.position.y = 1.63
+        head.geometry?.firstMaterial?.diffuse.contents = NSColor(calibratedWhite: 0.7, alpha: 1)
+        root.addChildNode(head)
+        number.font = .monospacedDigitSystemFont(ofSize: 1.8, weight: .bold)
+        number.flatness = 0.3
+        number.firstMaterial?.diffuse.contents = NSColor.white
+        let label = SCNNode(geometry: number)
+        label.position = .init(-0.5, 2.05, 0)
+        label.constraints = [SCNBillboardConstraint()]
+        root.addChildNode(label)
+    }
+
+    func update(_ player: ReplayXIWirePlayer) {
+        guard previous != player else { return }
+        if previous?.id != player.id { root.name = "player:\(player.id)" }
+        if previous?.team != player.team {
+            body.geometry?.firstMaterial?.diffuse.contents = player.team == "home"
+                ? NSColor.systemBlue : NSColor.systemRed
+        }
+        if previous?.number != player.number { number.string = "\(player.number)" }
+        if previous?.position != player.position {
+            root.simdPosition = [player.position.x, 0, player.position.z]
+        }
+        if previous == nil || previous?.facingDegrees != player.facingDegrees {
+            root.eulerAngles.y = CGFloat((player.facingDegrees ?? 0) * .pi / 180)
+        }
+        previous = player
+    }
+}
+
+/// Only displayed marks own SceneKit geometry. Seeking recreates a newly
+/// visible mark from the current wire pose, never from a stale hidden frame.
+final class CoachSceneMarkCache {
+    private var nodes: [UUID: CoachSceneMark] = [:]
+
+    subscript(id: UUID) -> CoachSceneMark? { nodes[id] }
+    var count: Int { nodes.count }
+
+    func update(_ marks: [ReplayXIWireMark], selectedID: UUID?, editable: Bool,
+                time: TimeInterval, parent: SCNNode) {
+        var retained = Set<UUID>()
+        for mark in marks {
+            let visible = CoachWorkspace.isVisible(mark, at: time)
+            let selected = mark.id == selectedID
+            guard visible || selected else { continue }
+            retained.insert(mark.id)
+            let node: CoachSceneMark
+            if let existing = nodes[mark.id] {
+                node = existing
+            } else {
+                node = CoachSceneMark()
+                nodes[mark.id] = node
+                parent.addChildNode(node.root)
+            }
+            node.update(mark, selected: selected, editable: editable && !mark.authored, visible: visible)
+        }
+        for id in Array(nodes.keys) where !retained.contains(id) {
+            nodes.removeValue(forKey: id)?.root.removeFromParentNode()
+        }
+    }
+}
+
+final class CoachSceneMark {
+    /// Wire timing, anchors and encoded edit history do not alter an already
+    /// resolved pose. Compare only fields used by this renderer.
+    private struct RenderInput: Equatable {
+        let id: UUID
+        let kind: String
+        let start: ReplayXIWirePoint
+        let end: ReplayXIWirePoint
+        let startHeight: Float
+        let endHeight: Float
+        let control: ReplayXIWirePoint3?
+        let label: String
+        let authored: Bool
+        let selected: Bool
+        let editable: Bool
+        let visible: Bool
+    }
+
     let root = SCNNode()
     private var segments: [SCNNode] = []
     private let tip = SCNNode(geometry: SCNCone(topRadius: 0, bottomRadius: 0.65, height: 1.65))
@@ -407,14 +506,11 @@ private final class CoachSceneMark {
     private var handles: [String: SCNNode] = [:]
     private var guides: [SCNNode] = []
     private let label = SCNNode()
-    private var previous: ReplayXIWireMark?
-    private var previousFlags: (selected: Bool, editable: Bool, visible: Bool)?
+    private var previous: RenderInput?
+    var segmentCount: Int { segments.count }
+    private(set) var geometryUpdateCount = 0
 
     init() {
-        for _ in 0..<32 {
-            let node = Self.segment(from: .zero, to: [0, 1, 0], radius: 0.16, color: .systemOrange)
-            segments.append(node); root.addChildNode(node)
-        }
         root.addChildNode(tip); root.addChildNode(zone)
         let text = SCNText(string: "", extrusionDepth: 0)
         text.font = .systemFont(ofSize: 1.1, weight: .semibold)
@@ -434,9 +530,12 @@ private final class CoachSceneMark {
     }
 
     func update(_ mark: ReplayXIWireMark, selected: Bool, editable: Bool, visible: Bool) {
-        guard previous != mark || previousFlags?.selected != selected ||
-                previousFlags?.editable != editable || previousFlags?.visible != visible else { return }
-        previous = mark; previousFlags = (selected, editable, visible)
+        let input = RenderInput(id: mark.id, kind: mark.kind, start: mark.start, end: mark.end,
+            startHeight: mark.startHeight, endHeight: mark.endHeight, control: mark.controlPoint,
+            label: mark.label, authored: mark.authored, selected: selected, editable: editable, visible: visible)
+        guard previous != input else { return }
+        geometryUpdateCount &+= 1
+        previous = input
         root.name = "mark:\(mark.id.uuidString)"
         root.isHidden = !visible && !selected
         root.opacity = visible ? 1 : 0.25
@@ -454,12 +553,17 @@ private final class CoachSceneMark {
             guide.isHidden = !selected || c == nil
             if let c { Self.place(guide, from: index == 0 ? a : b, to: c) }
         }
-        let count = mark.kind == "arc" && c != nil ? 32 : 1
+        let count = mark.kind == "space" || mark.kind == "playerLabel" ? 0
+            : mark.kind == "arc" && c != nil ? 32 : 1
+        while segments.count > count { segments.removeLast().removeFromParentNode() }
+        while segments.count < count {
+            let node = Self.segment(from: .zero, to: [0, 1, 0], radius: 0.16, color: .systemOrange)
+            node.name = "path-segment-\(segments.count)"
+            segments.append(node); root.addChildNode(node)
+        }
         var last = a, direction = b - a
         let color: NSColor = selected ? .systemYellow : mark.authored ? .systemCyan : .systemOrange
         for (index, node) in segments.enumerated() {
-            node.isHidden = index >= count || mark.kind == "space" || mark.kind == "playerLabel"
-            guard !node.isHidden else { continue }
             let t = Float(index + 1) / Float(count)
             let p = c.map { CoachSceneGeometry.arcPoint(from: a, to: b, control: $0, t: t) } ?? b
             direction = p - last; Self.place(node, from: last, to: p)
@@ -470,8 +574,9 @@ private final class CoachSceneMark {
         if simd_length_squared(direction) > 0.0001 { tip.simdOrientation = simd_quatf(from: [0, 1, 0], to: simd_normalize(direction)) }
         tip.geometry?.firstMaterial?.diffuse.contents = color
         zone.isHidden = mark.kind != "space"
-        zone.simdPosition = (a + b) / 2
-        zone.simdScale = [max(0.5, abs(a.x - b.x) / 2), 1, max(0.5, abs(a.z - b.z) / 2)]
+        zone.simdPosition = [a.x, (a.y + b.y) / 2, a.z]
+        let radius = CoachWorkspace.zoneRadius(start: mark.start, end: mark.end)
+        zone.simdScale = [radius, 1, radius]
         zone.geometry?.firstMaterial?.diffuse.contents = color
         for (name, node) in handles {
             node.isHidden = !selected || !editable || mark.kind == "playerLabel" || (name == "control" && c == nil)

@@ -237,16 +237,16 @@ final class PlaybackControlDeckClarityTests: XCTestCase {
     }
 
     func testAnnotationDurationChoicesUseTheSameBoundsAsTheStore() throws {
-        let source = try immersiveSource()
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         let choice = try String(contentsOf: root.appendingPathComponent(
             "ReplayXI/Immersive/AnnotationTimingEditor.swift"), encoding: .utf8)
         XCTAssertTrue(choice.contains("CoachMarkTimingPolicy.windowFits"))
         XCTAssertTrue(choice.contains(".disabled(!canEdit || !isDirty || draft.validationMessage(duration: duration) != nil)"))
         XCTAssertTrue(choice.contains("store.setCoachMarkWindow"))
-        let move = try sourceSlice(source,
-            after: "private func canMoveAnnotation(", before: "private var directPlaybackRates")
-        XCTAssertTrue(move.contains("PlaybackAnnotationMovePolicy.canMove(mark, to: time, in: store)"))
+        let timeline = try String(contentsOf: root.appendingPathComponent(
+            "ReplayXI/Immersive/SpatialAnnotationTimeline.swift"), encoding: .utf8)
+        XCTAssertTrue(timeline.contains("SpatialAnnotationTimelineMath.movedStart(mark: edit.mark"))
+        XCTAssertTrue(timeline.contains("store.retimeCoachMark(id: edit.mark.id, to: start)"))
         let projectRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent()
         let movePolicy = try String(contentsOf: projectRoot.appendingPathComponent(
@@ -259,7 +259,7 @@ final class PlaybackControlDeckClarityTests: XCTestCase {
         let inspector = try sourceSlice(
             source,
             after: "private func selectedAnnotationInspector(_ mark: CoachMark) -> some View",
-            before: "private func annotationGeometryButton(_ mark: CoachMark) -> some View"
+            before: "private func nudgeAnnotation("
         )
         XCTAssertTrue(inspector.contains("SpatialAnnotationEditor(mark: mark"))
 

@@ -7,42 +7,35 @@ final class PlaybackTimelineVisibilityHintTests: XCTestCase {
     private let hint = "Marks may be hidden. Select one here to show it."
 
     func testHintUsesTheCachedMarkCountOnlyInsideTimeline() throws {
-        let source = try immersiveSource()
-        let strip = try slice(source, after: "private var annotationEventStrip:",
-                              before: "private var annotationEventRow:")
+        let source = try editorSource()
+        let strip = try XCTUnwrap(source.components(separatedBy: "struct SpatialAnnotationTracks: View").last)
         XCTAssertEqual(source.components(separatedBy: hint).count - 1, 1)
         XCTAssertTrue(strip.contains("if store.selectedScenario.kind == .realWorldReplay,"))
-        XCTAssertTrue(strip.contains("orderedReviewMarks.count > 1"))
+        XCTAssertTrue(strip.contains("marks.count > 1"))
         XCTAssertTrue(strip.contains("Text(\"\(hint)\")"))
         XCTAssertFalse(strip.contains("visibleAnnotationIDs"))
         XCTAssertFalse(strip.contains("isVisible(at:"))
         XCTAssertFalse(strip.contains("PlaybackSceneRenderBudget"))
-        XCTAssertTrue(strip.contains("annotationEventRow"))
+        XCTAssertTrue(strip.contains("SpatialAnnotationTimeline(mark: mark, showsTitle: true)"))
+        let host = try immersiveSource()
+        XCTAssertTrue(host.contains("SpatialAnnotationTracks(marks: orderedMarks"))
+        XCTAssertFalse(host.contains("private var annotationEventRow:"))
+        XCTAssertFalse(host.contains("private func eventPageButton("))
     }
 
-    func testHintGrowsVerticallyWithoutChangingTheTimelineRow() throws {
+    func testHintGrowsVerticallyAboveTheLazyTrackList() throws {
         let source = try immersiveSource()
-        let strip = try slice(source, after: "private var annotationEventStrip:",
-                              before: "private var annotationEventRow:")
-        XCTAssertTrue(strip.contains("VStack(alignment: .leading, spacing: 6)"))
+        let editor = try editorSource()
+        let strip = try slice(editor, after: "if store.selectedScenario.kind == .realWorldReplay,",
+                              before: "if marks.isEmpty")
         XCTAssertTrue(strip.contains(".font(.caption)"))
         XCTAssertTrue(strip.contains(".fixedSize(horizontal: false, vertical: true)"))
         XCTAssertFalse(strip.contains("lineLimit"))
         XCTAssertFalse(strip.contains("minimumScaleFactor"))
         XCTAssertFalse(strip.contains("height:"))
-        let row = try slice(source, after: "private var annotationEventRow:",
-                            before: "private func eventPageButton(")
-        for preserved in [
-            "HStack(spacing: PlaybackEventRailLayout.horizontalSpacing)",
-            "Text(visibleEventRangeLabel)",
-            "eventPageButton(direction: -1)",
-            "eventPageButton(direction: 1)",
-            "ForEach(visibleReviewEvents)",
-            "reviewEventButton(event)",
-            "minHeight: PlaybackControlDeckPresentation.minimumSpatialHitTarget"
-        ] {
-            XCTAssertTrue(row.contains(preserved), preserved)
-        }
+        XCTAssertTrue(editor.contains("LazyVStack(spacing: 4)"))
+        XCTAssertTrue(editor.contains("ForEach(marks)"))
+        XCTAssertTrue(editor.contains(".frame(height: min(CGFloat(marks.count) * 88, 264))"))
         let attachment = try slice(source, after: "Attachment(id: \"coach-console\")",
                                    before: "if store.selectedScenario.kind != .shapeLab")
         XCTAssertTrue(attachment.contains(".frame(width: controlDeckLayout.attachmentWidth)"))
@@ -94,6 +87,12 @@ final class PlaybackTimelineVisibilityHintTests: XCTestCase {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         return try String(contentsOf: root.appendingPathComponent(
             "ReplayXI/Immersive/FootballImmersiveView.swift"), encoding: .utf8)
+    }
+
+    private func editorSource() throws -> String {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        return try String(contentsOf: root.appendingPathComponent(
+            "ReplayXI/Immersive/SpatialAnnotationEditor.swift"), encoding: .utf8)
     }
 
     private func slice(_ source: String, after start: String, before end: String) throws -> String {

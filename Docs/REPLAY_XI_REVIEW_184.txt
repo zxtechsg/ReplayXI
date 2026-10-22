@@ -1,0 +1,62 @@
+Replay XI 184 — review of pass 183 — 22 Oct 2026
+
+Findings and fixes
+- Mac zone rendering was corrected in 183, but its Frame action still used
+  endpoint-box bounds. This targeted the wrong centre and cropped large circles.
+  The new frame uses the whole circle, including its thickness and handles.
+- The same camera action ignored viewport shape. Narrow windows clipped arcs
+  and control handles. Framing now uses both horizontal and vertical field of
+  view, and extends the far clip plane for large zones. Overview restores it.
+- Mark rendering compared the entire wire record, including encoded edit history
+  and timing. Timing-only changes rewrote native geometry despite an unchanged
+  visible pose. Its checkpoint now contains only rendering inputs. Visibility,
+  edit permissions, selection, labels and pose changes still invalidate it.
+- The removed paged UI left 84 lines of unused layout/paging implementation
+  and four obsolete tests. Removed those; retained all live tick clustering,
+  metadata indexing, direct timeline and annotation editor behavior.
+- The old full-window render test passed on unsupported placeholder images.
+  Inspected output: ImageRenderer produced a prohibition symbol; cacheDisplay
+  omitted the native 3D view and inspector. Removed these false pixel checks.
+  Renamed the test to describe native window layout only. Added separate native
+  SceneKit captures of the actual Frame action at wide and narrow sizes.
+- Space height now uses the mean endpoint height, matching AVP rendering.
+
+Verification
+- Three new tests failed before the fixes: circular zone framing, narrow arc
+  framing and unnecessary writes on nonvisual metadata changes.
+- Final Mac suite: 49 passed, zero failures/skips, no test exclusions.
+- AVP targeted regression: 98 passed, zero failures/skips. Includes all five
+  reference studies, paused/reverse pose checks, cache bounds, both skin detail
+  budgets, annotation editing, network command and timeline checks.
+- Native visionOS Release and Mac Release builds: passed, unsigned.
+- Native SCNRenderer images inspected: complete zone visible at 1000x700 and
+  400x700. Projection tests also cover a large zone beyond the old far plane.
+- git diff --check: passed.
+
+Prior claims reviewed
+- Confirmed the 183 test receipts: 88 AVP and 42 Mac tests passed.
+- Recomputed the saved CPU comparison from its five studies and three views.
+  Mean of 15 per-case paused update medians: 1.814278 ms to 0.464889 ms,
+  a 74.4% reduction. Forward/reverse medians were about unchanged.
+- This remains Debug Simulator PitchSceneFactory.update CPU in Lightweight
+  mode, excluding renderer, UI, GPU, compositor and physical headset work.
+- No confirmed error found in the procedural-pose checkpoint or its impact
+  invalidation. Kept these optimizations and reran their regression coverage.
+
+Limits
+- Full paired-window composited visual QA remains incomplete. Native window
+  layout and standalone 3D renders are distinct checks; placeholder PNGs do
+  not count as visual evidence. The UI tool did not reliably target the live
+  fixture among multiple installed/running app copies.
+- No headset FPS, power, memory or lower minimum hardware claim.
+- Existing project/signing/plist changes preserved and excluded from this change.
+
+Evidence (workspace-relative)
+.codex-derived/Coach184Repro.xcresult
+.codex-derived/Coach184Complete.xcresult
+.codex-derived/Coach184ZoneAttachments/
+.codex-derived/Replay184Verified.xcresult
+.codex-derived/Coach184Release.log
+.codex-derived/Replay184DeviceRelease.log
+.codex-derived/Replay183BaselineAttachments/
+.codex-derived/Replay183VerifiedSceneAttachments/

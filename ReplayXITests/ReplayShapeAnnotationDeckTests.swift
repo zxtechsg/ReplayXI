@@ -189,8 +189,6 @@ final class ReplayShapeAnnotationDeckTests: XCTestCase {
         let source = try immersiveSource()
         let sections = [
             ("private func inlinePanelHeader(", "private var inlineChoiceDivider:"),
-            ("private var annotationEventStrip:", "private func eventPageButton("),
-            ("private func selectedAnnotationInspector(", "private func annotationGeometryButton("),
             ("private var shapeAnnotationDeck:", "private var shapeFocusStatusDeck:")
         ]
         for (start, end) in sections {
@@ -199,6 +197,14 @@ final class ReplayShapeAnnotationDeckTests: XCTestCase {
             XCTAssertTrue(navigation.contains(".disabled(!store.canChangePlaybackView)"), start)
             XCTAssertTrue(navigation.contains("Finish the current gesture first"), start)
         }
+        let inspector = try slice(source, after: "private func selectedAnnotationInspector(",
+            before: "private func nudgeAnnotation(")
+        XCTAssertTrue(inspector.contains("SpatialAnnotationEditor(mark: mark"))
+        XCTAssertTrue(inspector.contains("guard store.canChangePlaybackView else { return }"))
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let editor = try String(contentsOf: root.appendingPathComponent(
+            "ReplayXI/Immersive/SpatialAnnotationEditor.swift"), encoding: .utf8)
+        XCTAssertTrue(editor.contains(".disabled(!store.canChangePlaybackView)"))
         let host = try slice(source, after: "private func annotationWorkflowHost<Content: View>", before: "private var playbackToolsButton:")
         for observer in ["store.selectedScenarioID", "store.reviewIndexVersion", "selectedAnnotationID", "store.playhead"] {
             XCTAssertTrue(host.contains(".onChange(of: \(observer))"), observer)

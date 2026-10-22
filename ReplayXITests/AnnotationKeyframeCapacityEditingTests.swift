@@ -169,12 +169,14 @@ final class AnnotationKeyframeCapacityEditingTests: XCTestCase {
         let deck = try source("ReplayXI/Immersive/FootballImmersiveView.swift")
         XCTAssertEqual(deck.components(separatedBy: "disabledReason: mark.keyframeCapacityBlockReason(at: store.playhead)").count - 1, 2)
         XCTAssertTrue(deck.contains("disabledReason ?? \"Finish the active endpoint adjustment first.\""))
-        for start in ["private func canNudgeAnnotationElevation(", "private func annotationJoystickIsEnabled(",
-                      "private func annotationGeometryButton("] {
+        for start in ["private func canNudgeAnnotationElevation(", "private func annotationJoystickIsEnabled("] {
             let lower = try XCTUnwrap(deck.range(of: start)?.lowerBound)
             let next = try XCTUnwrap(deck.range(of: "\n    private ", range: deck.index(after: lower)..<deck.endIndex)?.lowerBound)
             XCTAssertTrue(deck[lower..<next].contains("mark.canRecordPose(at: store.playhead)"), start)
         }
+        let editor = try source("ReplayXI/Immersive/SpatialAnnotationEditor.swift")
+        XCTAssertTrue(editor.contains(".disabled(mark.followsPlayerTracks || !mark.canRecordPose(at: store.playhead))"))
+        XCTAssertTrue(editor.contains("store.captureCoachMarkKeyframe(id: mark.id)"))
         let pad = try source("ReplayXI/Immersive/AnnotationCurveAdjustmentPad.swift")
         XCTAssertTrue(pad.contains("Text(capacityBlockReason)"))
         XCTAssertTrue(pad.contains("capacityBlockReason ?? \"Finish or cancel the current gesture first\""))

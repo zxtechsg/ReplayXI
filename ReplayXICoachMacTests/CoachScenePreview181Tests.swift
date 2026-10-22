@@ -5,6 +5,35 @@ import simd
 
 final class CoachScenePreview181Tests: XCTestCase {
     @MainActor
+    func testFramedCircularZoneSnapshotsAtWideAndNarrowSizes() throws {
+        var state = fixtureState(revision: 7)
+        let id = UUID()
+        state.marks = [.init(id: id, kind: "space", start: .init(x: 0, z: 0), end: .init(x: 30, z: 0),
+            startHeight: 0, endHeight: 0, label: "Press area", showAt: 0, hideAt: nil,
+            keyframes: [], authored: false, controlPoint: nil, encodedMark: Data())]
+        for width in [1000, 400] {
+            let size = CGSize(width: width, height: 700)
+            let view = CoachSceneView(frame: NSRect(origin: .zero, size: size))
+            view.update(.init(state: state, selectedMarkID: id, drawingEnabled: false, drawStart: nil,
+                resetRevision: 0, playerView: false, focusRevision: 1, select: { _ in }, onPlayer: { _ in },
+                onPitchClick: { _ in }, onPose: { _, _, _, _ in }))
+            let camera = try XCTUnwrap(view.pointOfView)
+            let frame = CoachSceneGeometry.annotationFrame(state.marks[0], size: size, fieldOfView: 60)
+            XCTAssertEqual(camera.simdPosition, frame.position)
+            XCTAssertEqual(camera.camera?.zFar, frame.farPlane)
+            let renderer = SCNRenderer(device: nil, options: nil)
+            renderer.scene = view.scene; renderer.pointOfView = camera
+            renderer.autoenablesDefaultLighting = true
+            let image = renderer.snapshot(atTime: 0, with: size, antialiasingMode: .multisampling4X)
+            let bitmap = try XCTUnwrap(NSBitmapImageRep(data: try XCTUnwrap(image.tiffRepresentation)))
+            let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+            let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
+            attachment.name = "Coach-Zone184-\(width)x700.png"; attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+    }
+
+    @MainActor
     func testNative3DEditorSnapshot() throws {
         var state = fixtureState(revision: 7)
         let id = UUID()

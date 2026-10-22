@@ -180,25 +180,23 @@ final class PlaybackAnnotationMoveAvailabilityTests: XCTestCase {
         store.cancelTimelineScrub()
     }
 
-    func testVisibleMoveUsesTheLivePolicyAndGuardsItsCallbackAndHint() throws {
+    func testVisibleTrackMoveGuardsItsLiveContextBeforeCommitting() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         let source = try String(contentsOf: root.appendingPathComponent(
-            "ReplayXI/Immersive/FootballImmersiveView.swift"), encoding: .utf8)
-        let lower = try XCTUnwrap(source.range(of: "Label(PlaybackAnnotationMovePolicy.compactHint(")?.lowerBound)
-        let upper = try XCTUnwrap(source.range(of: "private func annotationGeometryButton(",
-            range: lower..<source.endIndex)?.lowerBound)
-        let move = String(source[lower..<upper])
-        XCTAssertTrue(source.contains("PlaybackAnnotationMovePolicy.canMove(mark, to: time, in: store)"))
-        XCTAssertTrue(move.contains(".disabled(!canMoveAnnotation(mark, to: store.playhead))"))
-        let gate = move.range(of: "guard canMoveAnnotation(mark, to: store.playhead) else { return }")?.lowerBound
-        let pause = try XCTUnwrap(move.range(of: "store.setPlaying(false, broadcast: false)")?.lowerBound)
-        XCTAssertNotNil(gate, "A delayed callback must recheck availability before pausing")
-        if let gate { XCTAssertLessThan(gate, pause) }
-        let hintStart = try XCTUnwrap(move.range(of: ".accessibilityHint(")?.lowerBound)
-        let hint = move[hintStart...]
-        XCTAssertTrue(hint.contains("PlaybackAnnotationMovePolicy.guidance(mark, to: store.playhead, in: store)"))
-        XCTAssertTrue(move.contains(".help(PlaybackAnnotationMovePolicy.guidance(mark, to: store.playhead, in: store))"))
-        XCTAssertFalse(hint.contains("Choose a different time or shorten the annotation duration"))
+            "ReplayXI/Immersive/SpatialAnnotationTimeline.swift"), encoding: .utf8)
+        XCTAssertTrue(source.contains(".gesture(editGesture(.move, width: width))"))
+        XCTAssertTrue(source.contains(".help(\"Drag to move this mark in time\")"))
+        let commit = try XCTUnwrap(source.range(of: "private func commitDrag()")?.lowerBound)
+        let move = String(source[commit...])
+        for guardText in ["guard editable", "edit.scenarioID == store.selectedScenarioID",
+                          "edit.view == store.viewMode", "!store.isPlaying",
+                          "store.marks.first(where: { $0.id == edit.mark.id }) == edit.mark"] {
+            XCTAssertTrue(move.contains(guardText), guardText)
+        }
+        let gate = try XCTUnwrap(move.range(of: "guard editable")?.lowerBound)
+        let mutation = try XCTUnwrap(move.range(of: "store.retimeCoachMark(id: edit.mark.id, to: start)")?.lowerBound)
+        XCTAssertLessThan(gate, mutation)
+        XCTAssertTrue(move.contains("SpatialAnnotationTimelineMath.movedStart(mark: edit.mark"))
     }
 
     private func assertStoreRejectsMove(_ mark: CoachMark, in store: ReplayStore,

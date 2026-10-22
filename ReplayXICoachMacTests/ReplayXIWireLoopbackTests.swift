@@ -591,7 +591,7 @@ final class ReplayXIWireLoopbackTests: XCTestCase {
         listener.cancel()
     }
 
-    func testPairedCoachWindowRendersAtDesktopAndMinimumSizes() async throws {
+    func testPairedCoachWindowLaysOutAtDesktopAndMinimumSizes() async throws {
         print("Mac window QA: starting fixture")
         let listener = try NWListener(using: .tcp, on: .any)
         let ready = expectation(description: "fixture listener ready")
@@ -631,55 +631,33 @@ final class ReplayXIWireLoopbackTests: XCTestCase {
         XCTAssertEqual(link.state?.marks.count, 2)
         XCTAssertEqual(link.state?.players.count, 3)
 
-        let output = URL(fileURLWithPath: "/private/tmp/replayxi-mac-qa", isDirectory: true)
-        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         for (width, height) in [(1360, 840), (1060, 700)] {
-            print("Mac window QA: rendering \(width)")
+            print("Mac window QA: laying out \(width)")
             let view = CoachWindow(selectedMarkID: Self.previewState.marks.first?.id).environment(link)
                 .frame(width: CGFloat(width), height: CGFloat(height))
-            let renderer = ImageRenderer(content: view)
-            renderer.scale = 1
-            renderer.proposedSize = ProposedViewSize(width: CGFloat(width), height: CGFloat(height))
-            let image = try XCTUnwrap(renderer.nsImage)
-            print("Mac window QA: image renderer done")
-            let bitmap = try XCTUnwrap(NSBitmapImageRep(data: try XCTUnwrap(image.tiffRepresentation)))
-            XCTAssertEqual(bitmap.pixelsWide, width)
-            XCTAssertEqual(bitmap.pixelsHigh, height)
-            let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
-            XCTAssertGreaterThan(png.count, 10_000)
-            try png.write(to: output.appendingPathComponent("replayxi-coach-\(width)x\(height).png"))
-
             let host = NSHostingView(rootView: view)
             host.frame = NSRect(x: 0, y: 0, width: width, height: height)
-            host.layoutSubtreeIfNeeded()
-            host.displayIfNeeded()
-            let hosted = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
-            host.cacheDisplay(in: host.bounds, to: hosted)
-            print("Mac window QA: host cache done")
-            let hostedPNG = try XCTUnwrap(hosted.representation(using: .png, properties: [:]))
-            try hostedPNG.write(to: output.appendingPathComponent("replayxi-coach-host-\(width)x\(height).png"))
-
-            // Bitmap snapshots verify layout, but system glass/inspector layers
-            // require a compositor screenshot for visual QA.
+            // ImageRenderer and cacheDisplay emit placeholders for SceneKit,
+            // native buttons and inspector layers. PNG dimensions/byte counts
+            // cannot validate those pixels. Check layout here; use a native
+            // compositor capture for visual QA and SCNRenderer for 3D geometry.
             let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: width, height: height),
                 styleMask: [.titled, .closable], backing: .buffered, defer: false)
             window.title = "Replay XI Coach · QA sample data"
             window.contentView = host
+            defer { window.orderOut(nil) }
             // Do not activate another copy of the app while a demo is open.
             // A window-backed view can draw without taking keyboard focus.
             window.orderFront(nil)
             host.layoutSubtreeIfNeeded()
-            print("Mac window QA: native window ready")
+            XCTAssertTrue(host.window === window)
+            XCTAssertEqual(host.bounds.width, CGFloat(width), accuracy: 1)
+            XCTAssertEqual(host.bounds.height, CGFloat(height), accuracy: 1)
+            print("Mac window QA: native window ready \(width)x\(height)")
             if let seconds = Double(ProcessInfo.processInfo.environment["REPLAYXI_QA_HOLD_SECONDS"] ?? ""), seconds > 0 {
                 // Opt-in only: leave the sample window visible for a CUA capture.
                 try? await Task.sleep(for: .seconds(min(seconds, 30)))
             }
-            host.displayIfNeeded()
-            let windowBitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
-            host.cacheDisplay(in: host.bounds, to: windowBitmap)
-            try XCTUnwrap(windowBitmap.representation(using: .png, properties: [:])).write(to:
-                output.appendingPathComponent("replayxi-coach-window-host-\(width)x\(height).png"))
-            window.orderOut(nil)
             print("Mac window QA: native window done")
         }
         link.disconnect()

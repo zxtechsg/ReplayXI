@@ -963,8 +963,8 @@ private struct PitchMap: View {
                     let visible = CoachWorkspace.isVisible(mark, at: state.playhead)
                     Path { path in
                         if mark.kind == "space" {
-                            path.addEllipse(in: CGRect(x: min(a.x, b.x), y: min(a.y, b.y),
-                                width: abs(b.x - a.x), height: abs(b.y - a.y)))
+                            path.addEllipse(in: CoachWorkspace.zoneBounds(centre: a, edge: b,
+                                minimumRadius: 1.1 * rect.width / 68))
                         } else if let control {
                             path.move(to: a)
                             path.addQuadCurve(to: b, control: screen(control, rect))

@@ -169,6 +169,7 @@ final class ReplaySceneWorkDiagnosticsTests: XCTestCase {
             let loadsBefore = nativeReferenceLoadCounts()
             let playerBefore = PitchSceneFactory.playerSceneCacheDiagnostics(for: root)
             let bindingsBefore = PitchSceneFactory.proceduralAthleteBindingCacheDiagnostics(for: root)
+            let poseWorkBefore = PitchSceneFactory.proceduralPoseWork(for: root)
             ReplayAthleteMotion.resetBallActionSampleCountForTesting()
             PitchSceneFactory.resetAnnotationSceneWorkForTesting()
             PitchSceneFactory.resetProceduralVisibilityWorkForTesting()
@@ -184,6 +185,7 @@ final class ReplaySceneWorkDiagnosticsTests: XCTestCase {
             let loadsAfter = nativeReferenceLoadCounts()
             let playerAfter = PitchSceneFactory.playerSceneCacheDiagnostics(for: root)
             let bindingsAfter = PitchSceneFactory.proceduralAthleteBindingCacheDiagnostics(for: root)
+            let poseWorkAfter = PitchSceneFactory.proceduralPoseWork(for: root)
             let annotation = PitchSceneFactory.annotationSceneWork
             let inferredActionSamples = ReplayAthleteMotion.ballActionSampleCount
             XCTAssertEqual(loadsAfter, loadsBefore)
@@ -212,6 +214,8 @@ final class ReplaySceneWorkDiagnosticsTests: XCTestCase {
                 "poseRefreshes": playerAfter.poseRefreshes - playerBefore.poseRefreshes,
                 "bindingHierarchyResolutions": bindingsAfter.hierarchyResolutions - bindingsBefore.hierarchyResolutions,
                 "bindingInvalidations": bindingsAfter.invalidations - bindingsBefore.invalidations,
+                "proceduralPoseEvaluations": poseWorkAfter.evaluations - poseWorkBefore.evaluations,
+                "proceduralPoseCacheHits": poseWorkAfter.cacheHits - poseWorkBefore.cacheHits,
                 "inferredBallActionSamples": inferredActionSamples,
                 "annotationSyncs": annotation.syncCalls, "annotationTreeBuilds": annotation.markTreeBuilds,
                 "proceduralVisibilityNodeVisits": PitchSceneFactory.proceduralVisibilityNodeVisits,

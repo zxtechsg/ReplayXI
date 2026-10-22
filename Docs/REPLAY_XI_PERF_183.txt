@@ -1,0 +1,66 @@
+Replay XI 183 — bug/performance pass — 22 Oct 2026
+
+Changes
+- Cache one complete procedural-pose input per live AVP rig. Paused annotation
+  and HUD updates skip duplicate motion evaluation and joint writes. Checkpoints
+  are bounded by the existing 32-binding cap and removed with detached rigs.
+- Invalidate the checkpoint after an impact blend: repeated paused impacts must
+  rebuild the base pose, not accumulate a blend over the previous result.
+- Mac allocates geometry only for visible or selected annotations. Hidden history
+  owns no SceneKit nodes; reverse seeks rebuild from the current received pose.
+- Straight Mac marks use one path segment instead of 32 (96.875% fewer path
+  segments, not a measured total-memory or GPU-time reduction). Arcs retain all
+  32 segments. Zones and player labels allocate no path segments.
+- Mac skips unchanged player-property writes and refreshes number/team metadata
+  when a study reuses a player ID. Previously those fields stayed stale.
+- Fix Mac 2D and 3D space marks: start is the centre, end defines a circular
+  radius, minimum 1.1 m, matching the AVP renderer. Previously Mac used opposite
+  bounding-box corners and displayed an offset ellipse.
+- Remove 391 lines of unreachable paged-timeline and old annotation controls.
+  Replace obsolete source checks with checks of the active track/editor routes.
+  Keep movement, key-capacity, timing, close and gesture-ownership coverage.
+- Put the hidden-mark guidance in the actual track list, where it can be seen.
+
+Measured scope
+- Debug visionOS 26.5 Simulator; PitchSceneFactory.update CPU only, no renderer.
+- Five native-ball reference studies, three views, forward/reverse/paused.
+- Lightweight rendering: four-skin budget, with procedural background players.
+- Mean of the 15 per-case median update times:
+                    Before       After
+  Forward           3.381 ms     3.399 ms
+  Reverse           3.385 ms     3.409 ms
+  Paused            1.814 ms     0.465 ms   (74.4% lower)
+- Across 900 paused updates: zero procedural-pose evaluations, 16,500 cache hits.
+- Active CPU cost was about unchanged in this single before/after run. These are
+  unpaced CPU diagnostics, not FPS, battery/power measurements or device results.
+- The default Full squad setting, 60 Hz playback cadence, mesh quality, player
+  tracks, native contacts, animation and existing skin admission caps are unchanged.
+- Both detail choices passed the existing 20-case squad/resource/rewind diagnostic.
+  The 74.4% figure does not describe Full squad or overall app CPU.
+
+Verification
+- AVP targeted regression: 88 passed, 0 failed.
+- Mac non-rendering regression: 42 passed, 0 failed.
+- Native visionOS Release build, unsigned: passed.
+- Exact rig/joint equality after repeated paused updates and reverse seeks.
+  Floating player-label transforms permit 10 micrometres of native bounds-query
+  rounding; this does not relax rig/joint equality.
+- Retained-geometry, current-pose restoration, deleted selections, zone bounds,
+  and reused player identity have new tests.
+- git diff --check: passed.
+
+Limits
+- Not a full-repository test run. No headset GPU/compositor/FPS/power profile.
+- No lower minimum hardware or OS requirement is claimed.
+- Two previously hanging Mac render-host tests remain excluded:
+  testNative3DEditorSnapshot and testPairedCoachWindowRendersAtDesktopAndMinimumSizes.
+- Existing project/signing/plist edits and unrelated files were preserved.
+
+Evidence (workspace-relative)
+.codex-derived/Replay183Baseline.xcresult
+.codex-derived/Replay183BaselineAttachments/
+.codex-derived/Replay183Verified.xcresult
+.codex-derived/Replay183VerifiedSceneAttachments/
+.codex-derived/Replay183VerifiedSquadAttachments/
+.codex-derived/Coach183Regression.xcresult
+.codex-derived/Replay183DeviceRelease.log
