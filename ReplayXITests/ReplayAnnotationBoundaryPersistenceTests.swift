@@ -105,7 +105,9 @@ final class ReplayAnnotationBoundaryPersistenceTests: XCTestCase {
                     let context = "\(player.id) at \(time), to \(destination)"
                     store.beginDrawing(.run)
                     XCTAssertNil(store.registerPitchTap(origin), context)
-                    let mark = try XCTUnwrap(store.registerPitchTap(destination), context)
+                    let created = try XCTUnwrap(store.registerPitchTap(destination), context)
+                    XCTAssertTrue(store.setCoachMarkTracking(id: created.id, playerID: player.id), context)
+                    let mark = try XCTUnwrap(store.marks.first { $0.id == created.id }, context)
                     XCTAssertEqual(mark.start, origin, context)
                     XCTAssertEqual(mark.end, destination, context)
                     XCTAssertEqual(mark.revealTime, time, context)
@@ -152,7 +154,9 @@ final class ReplayAnnotationBoundaryPersistenceTests: XCTestCase {
                 )
                 store.beginDrawing(.run)
                 _ = store.registerPitchTap(origin)
-                let mark = try XCTUnwrap(store.registerPitchTap(destination))
+                let created = try XCTUnwrap(store.registerPitchTap(destination))
+                XCTAssertTrue(store.setCoachMarkTracking(id: created.id, playerID: player.id))
+                let mark = try XCTUnwrap(store.marks.first { $0.id == created.id })
                 XCTAssertEqual(
                     mark.endTrackAnchor?.offset,
                     PitchPoint(x: destination.x - origin.x, z: destination.z - origin.z),
@@ -172,6 +176,7 @@ final class ReplayAnnotationBoundaryPersistenceTests: XCTestCase {
         store.beginDrawing(.run)
         _ = store.registerPitchTap(origin)
         let created = try XCTUnwrap(store.registerPitchTap(PitchPoint(x: -33.75, z: 35)))
+        XCTAssertTrue(store.setCoachMarkTracking(id: created.id, playerID: runner.id))
         XCTAssertTrue(store.updateCoachMarkGeometry(id: created.id, start: origin, end: touchline))
         let edited = try XCTUnwrap(store.marks.first { $0.id == created.id })
         XCTAssertEqual(edited.end, touchline)
@@ -230,7 +235,9 @@ final class ReplayAnnotationBoundaryPersistenceTests: XCTestCase {
         XCTAssertEqual(start, PitchPoint(x: 30.8, z: 32.7), file: file, line: line)
         store.beginDrawing(.run)
         XCTAssertNil(store.registerPitchTap(start), file: file, line: line)
-        let mark = try XCTUnwrap(store.registerPitchTap(destination), file: file, line: line)
+        let created = try XCTUnwrap(store.registerPitchTap(destination), file: file, line: line)
+        XCTAssertTrue(store.setCoachMarkTracking(id: created.id, playerID: runner.id), file: file, line: line)
+        let mark = try XCTUnwrap(store.marks.first { $0.id == created.id }, file: file, line: line)
         XCTAssertFalse(store.isDrawing, file: file, line: line)
         XCTAssertEqual(mark.startTrackAnchor?.playerID, runner.id, file: file, line: line)
         XCTAssertEqual(mark.endTrackAnchor?.playerID, runner.id, file: file, line: line)

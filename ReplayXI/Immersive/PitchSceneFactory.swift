@@ -1311,6 +1311,8 @@ enum PitchSceneFactory {
                    let athlete = makeDetailedRig(for: player) {
                     athlete.root.name = "full-rig"
                     entity.addChild(athlete.root)
+                    ReplayHoverAffordance.install(on: athlete.root,
+                        using: entity.components[ReplayHoverAffordance.Group.self]?.id)
                     sceneState?.retainAthleteBinding(athlete.joints)
                 }
                 if needsDetailedRig,
@@ -1325,6 +1327,8 @@ enum PitchSceneFactory {
                         locomotion: locomotion
                     ) {
                         entity.addChild(imported.root)
+                        ReplayHoverAffordance.install(on: imported.root,
+                            using: entity.components[ReplayHoverAffordance.Group.self]?.id)
                         sceneState?.importedAthlete = imported
                     }
                 }
@@ -1397,6 +1401,8 @@ enum PitchSceneFactory {
                    ) {
                     if let skin = try? ReplayTripoAthleteProvider.makePreferred(for: player, detail: admittedSkinDetail) {
                         entity.addChild(skin.root)
+                        ReplayHoverAffordance.install(on: skin.root,
+                            using: entity.components[ReplayHoverAffordance.Group.self]?.id)
                         sceneState.skinnedAthletes[player.id] = skin
                     } else {
                         sceneState.skinnedAthleteFailedVariants.insert(
@@ -1437,6 +1443,8 @@ enum PitchSceneFactory {
                    let athlete = makeDetailedRig(for: player) {
                     athlete.root.name = "full-rig"
                     entity.addChild(athlete.root)
+                    ReplayHoverAffordance.install(on: athlete.root,
+                        using: entity.components[ReplayHoverAffordance.Group.self]?.id)
                     sceneState?.retainAthleteBinding(athlete.joints)
                 }
                 // Player POV retains only its capped procedural neighbours;
@@ -2015,6 +2023,7 @@ enum PitchSceneFactory {
     ) -> PlayerSceneBuild {
         let root = Entity()
         root.name = "player-\(player.id)"
+        defer { ReplayHoverAffordance.install(on: root) }
         var tableMarkerBinding: ReplayAthleteJointBinding?
 
         // A single invisible capsule makes the complete player selectable,
@@ -3512,6 +3521,7 @@ enum PitchSceneFactory {
         #endif
         let root = Entity()
         root.name = "mark-\(mark.id.uuidString)"
+        defer { ReplayHoverAffordance.install(on: root) }
         let color: UIColor
         switch mark.kind {
         case .run: color = UIColor(red: 1.0, green: 0.42, blue: 0.12, alpha: 0.92)
@@ -4732,12 +4742,12 @@ enum PitchSceneFactory {
         case .tacticalTable:
             // Keep the playing surface horizontal. A wearer-local surface
             // placement can replace this default without tilting the pitch.
-            root.scale = SIMD3<Float>(repeating: 0.0255)
+            root.scale = SIMD3<Float>(repeating: 0.040)
             root.orientation = simd_quatf(angle: 0, axis: [0, 1, 0])
             root.position = [0, 0.92, -3.15]
 
         case .touchline:
-            root.scale = SIMD3<Float>(repeating: 0.060)
+            root.scale = SIMD3<Float>(repeating: 0.085)
             root.orientation = simd_quatf(angle: .pi / 2, axis: [0, 1, 0])
             root.position = [0, 0.02, -4.1]
 

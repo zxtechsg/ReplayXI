@@ -3,45 +3,33 @@ import XCTest
 
 @MainActor
 final class AnnotationTrackingKeyframeAvailabilityTests: XCTestCase {
-    func testKeyframedFollowControlsUseAKeyAwareGate() throws {
+    func testTrackingRosterIsReplacedByLiveEditor() throws {
         let source = try immersiveSource()
-        let button = try slice(source, after: "private func annotationTrackingPlayerButton(",
-                               before: "private func annotationTrackingPlayerID(")
-        XCTAssertTrue(button.contains(".disabled(!annotationTrackingIsEnabled(mark))"),
-                      "Keyframed marks must not expose shirts that Store refuses to follow")
-        let callback = try slice(source, after: "private func setAnnotationTracking(",
-                                 before: "private func annotationLabelShelf(")
-        XCTAssertTrue(callback.contains("guard annotationTrackingIsEnabled(mark) else { return }"))
+        XCTAssertFalse(source.contains("private func annotationTrackingPlayerButton("))
+        let route = try slice(source, after: "case .annotationTracking(let markID):",
+            before: "case .annotationActions(let markID):")
+        XCTAssertTrue(route.contains("selectedAnnotationInspector(mark)"))
+        XCTAssertFalse(route.contains("freezeCoachMarkKeyframes"))
     }
 
-    func testKeyedMarkRequiresExplicitFreezeBeforeFollowingEitherTeam() throws {
+    func testKeyedMarkFollowsEitherTeamWithoutLosingEarlierPoses() throws {
         for team in [FootballTeam.home, .away] {
             let (store, mark) = try keyedFixture()
             let player = try XCTUnwrap(store.selectedScenario.players.first { $0.team == team })
-            let original = store.marks
-            XCTAssertTrue(store.canChangePlaybackView, "The existing UI gate is true for this rejected action")
-            XCTAssertFalse(AnnotationTrackingPolicy.canSetTracking(mark, canChangePlaybackView: store.canChangePlaybackView))
-            XCTAssertFalse(store.setCoachMarkTracking(id: mark.id, playerID: player.id))
-            XCTAssertEqual(store.marks, original)
-            XCTAssertTrue(store.freezeCoachMarkKeyframes(id: mark.id))
-            let frozen = try XCTUnwrap(store.marks.first { $0.id == mark.id })
-            XCTAssertFalse(frozen.hasKeyframes)
-            XCTAssertTrue(AnnotationTrackingPolicy.canSetTracking(frozen, canChangePlaybackView: store.canChangePlaybackView))
-            XCTAssertFalse(AnnotationTrackingPolicy.canSetTracking(frozen, canChangePlaybackView: false))
-            XCTAssertEqual(frozen.start, mark.sampled(at: store.playhead).start)
-            XCTAssertEqual(frozen.end, mark.sampled(at: store.playhead).end)
+            XCTAssertTrue(AnnotationTrackingPolicy.canSetTracking(mark, canChangePlaybackView: true))
+            XCTAssertFalse(AnnotationTrackingPolicy.canSetTracking(mark, canChangePlaybackView: false))
+            let displayed = store.presentedCoachMarkGeometry(mark, at: store.playhead)
             XCTAssertTrue(store.setCoachMarkTracking(id: mark.id, playerID: player.id))
             let tracked = try XCTUnwrap(store.marks.first { $0.id == mark.id })
-            let displayed = store.presentedCoachMarkGeometry(tracked, at: store.playhead)
-            XCTAssertEqual(displayed.start.x, frozen.start.x, accuracy: 0.001)
-            XCTAssertEqual(displayed.start.z, frozen.start.z, accuracy: 0.001)
-            XCTAssertEqual(displayed.end.x, frozen.end.x, accuracy: 0.001)
-            XCTAssertEqual(displayed.end.z, frozen.end.z, accuracy: 0.001)
+            XCTAssertEqual(tracked.keyframes?.map(\.time), [2, 3, 4])
+            XCTAssertEqual(tracked.keyframes?.first, mark.keyframes?.first)
+            XCTAssertEqual(tracked.keyframes?.last, mark.keyframes?.last)
+            XCTAssertEqual(tracked.sampled(at: 3).startTrackAnchor?.playerID, player.id)
+            XCTAssertEqual(tracked.sampled(at: 3).endTrackAnchor?.playerID, player.id)
+            XCTAssertEqual(store.presentedCoachMarkGeometry(tracked, at: 3).start, displayed.start)
             XCTAssertEqual(store.playhead, 3)
             XCTAssertTrue(store.undoAnnotationEdit())
-            XCTAssertEqual(store.marks.first { $0.id == mark.id }, frozen)
-            XCTAssertTrue(store.undoAnnotationEdit())
-            XCTAssertEqual(store.marks, original, "Freeze and Follow remain separate explicit Undo actions")
+            XCTAssertEqual(store.marks.first { $0.id == mark.id }, mark)
         }
     }
 
@@ -65,24 +53,14 @@ final class AnnotationTrackingKeyframeAvailabilityTests: XCTestCase {
                        "Finish or cancel the current gesture first")
     }
 
-    func testKeyframedShelfLinksToExistingTimingWithoutMutationOrSelectionLoss() throws {
+    func testOldTimingRouteOpensLiveInspectorWithoutMutatingKeys() throws {
         let source = try immersiveSource()
-        let shelf = try slice(source, after: "private func annotationTrackingShelf(",
-                              before: "private func annotationTrackingTeamRow(")
-        let notice = try slice(shelf, after: "AnnotationTrackingKeyframeNotice(",
-                               before: "} else {")
-        XCTAssertTrue(notice.contains("toggleInlinePanel(.annotationDuration(mark.id))"))
-        XCTAssertTrue(notice.contains("guard store.canChangePlaybackView else { return }"))
-        XCTAssertFalse(notice.contains("selectedAnnotationID ="))
-        XCTAssertFalse(shelf.contains("freezeCoachMarkKeyframes"), "Opening Follow must never erase position keys")
-        XCTAssertTrue(shelf.contains("if mark.hasKeyframes {"))
-        XCTAssertTrue(shelf.contains("} else {\n                    annotationTrackingTeamRow("))
-        let status = try slice(source, after: "private func annotationTrackingSummary(",
-                               before: "private func setAnnotationTracking(")
-        XCTAssertTrue(status.contains("AnnotationTrackingPolicy.keyframeStatus(mark)"))
-        let voiceOver = try slice(source, after: "private func annotationTrackingAccessibilityValue(",
-                                  before: "private func nudgeAnnotation(")
-        XCTAssertTrue(voiceOver.contains("AnnotationTrackingPolicy.keyframeAccessibilityValue(mark)"))
+        let route = try slice(source, after: "case .annotationDuration(let markID):",
+            before: "case .annotationGeometry(let markID):")
+        XCTAssertTrue(route.contains("selectedAnnotationInspector(mark)"))
+        XCTAssertFalse(route.contains("freezeCoachMarkKeyframes"))
+        XCTAssertFalse(route.contains("AnnotationTimingEditor("))
+        XCTAssertFalse(source.contains("private func annotationDurationShelf("))
     }
 
     func testOrdinaryTrackingRemainsAvailableButPlayerLabelsCannotTrack() throws {

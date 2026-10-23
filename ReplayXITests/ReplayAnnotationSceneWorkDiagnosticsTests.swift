@@ -177,10 +177,12 @@ final class ReplayAnnotationSceneWorkDiagnosticsTests: XCTestCase {
         XCTAssertEqual(previewWork.syncCalls, 60)
         XCTAssertEqual(previewWork.semanticRevisions, 60)
         XCTAssertEqual(previewWork.markTreeBuilds, 0)
-        XCTAssertEqual(previewWork.trackedGeometryUpdates, 0)
+        XCTAssertEqual(previewWork.trackedGeometryUpdates, 60)
         // One changed endpoint per sample must not rewrite the other intact
         // bindings. Resource/tracking correctness is checked independently.
-        XCTAssertEqual(previewWork.revisionGeometryUpdates, 60)
+        // Live edits now record a pose. The sampled-pose path writes exactly
+        // once, without a redundant base-pose write in the revision path.
+        XCTAssertEqual(previewWork.revisionGeometryUpdates, 0)
         XCTAssertEqual(previewWork.unchangedRevisionGeometryUpdates, 0)
         XCTAssertLessThanOrEqual(resources(in: marksRoot).enabledModels,
                                  PlaybackSceneRenderBudget.normalAnnotationDrawLimit)

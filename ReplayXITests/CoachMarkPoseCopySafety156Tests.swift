@@ -150,8 +150,7 @@ final class CoachMarkPoseCopySafety156Tests: XCTestCase {
                 XCTAssertEqual(copy.curve, source.resolvedCurve.stabilized(start: position, end: expectedEnd))
                 XCTAssertEqual(copy.author, "Coach")
                 XCTAssertEqual(copy.revealTime, playhead)
-                XCTAssertEqual(copy.hideTime, CoachMarkTimingPolicy.defaultHideTime(
-                    revealTime: playhead, replayDuration: scenario.duration))
+                XCTAssertNil(copy.hideTime)
                 XCTAssertNil(copy.startTrackAnchor)
                 XCTAssertNil(copy.endTrackAnchor)
                 XCTAssertNil(copy.keyframes)

@@ -159,7 +159,8 @@ final class AnnotationCurveAdjustmentControllerTests: XCTestCase {
         XCTAssertTrue(source.contains("annotationToolButton(.arc, label: \"Arc\")"))
         XCTAssertTrue(source.contains("annotationEndpointGeometryRow(mark)"))
         XCTAssertTrue(source.contains("if mark.kind == .arc"))
-        XCTAssertTrue(source.contains("AnnotationCurveAdjustmentPad(markID: mark.id"))
+        XCTAssertTrue(source.contains("AnnotationArcPointEditor(markID: mark.id"))
+        XCTAssertFalse(source.contains("AnnotationCurveAdjustmentPad(markID: mark.id"))
         let pad = try String(contentsOf: root.appendingPathComponent(
             "ReplayXI/Immersive/AnnotationCurveAdjustmentPad.swift"), encoding: .utf8)
         XCTAssertTrue(pad.contains("controller.finish(in: store, markID: markID, translation: value.translation, mode: mode, fine: fine)"))

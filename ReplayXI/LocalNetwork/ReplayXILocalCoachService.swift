@@ -56,6 +56,9 @@ final class ReplayXILocalCoachService {
     }
 
     static func failureMessage(_ error: NWError, simulatorOnly: Bool) -> String {
+        if case .dns(-65570) = error {
+            return "Local Network blocked. Allow Replay XI in Settings → Privacy & Security → Local Network, then restart Mac link."
+        }
         if simulatorOnly, case .posix(.EADDRINUSE) = error {
             return "Simulator link busy. Stop Mac link in the other Replay XI Simulator, then retry."
         }
@@ -91,7 +94,7 @@ final class ReplayXILocalCoachService {
                             self.stop()
                             self.status = Self.failureMessage(error, simulatorOnly: simulatorOnly)
                         } else {
-                            self.status = "Mac link waiting: \(error.localizedDescription)"
+                            self.status = Self.failureMessage(error, simulatorOnly: simulatorOnly)
                         }
                     default: break
                     }
@@ -427,8 +430,8 @@ final class ReplayXILocalCoachService {
                     let p = displayedPose.resolvedCurve.controlPoint(for: displayedPose)
                     return ReplayXIWirePoint3(x: p.x, y: p.y, z: p.z)
                 }() : nil, encodedMark: encoded,
-                startPlayerID: mark.startTrackAnchor?.playerID,
-                endPlayerID: mark.endTrackAnchor?.playerID)
+                startPlayerID: posed.startTrackAnchor?.playerID,
+                endPlayerID: posed.endTrackAnchor?.playerID)
         }
         let retainedIDs = Set(snapshot.marks.map(\.id))
         encodedMarks = encodedMarks.filter { retainedIDs.contains($0.key) }

@@ -4,9 +4,9 @@ import SwiftUI
 /// an action onto another mark. Domain eligibility remains owned by the Store.
 enum PlaybackAnnotationActionsRoute {
     static func accessibilityHint(isSpatial: Bool, isAuthored: Bool) -> String {
-        if !isSpatial { return "Opens Erase for this label" }
+        if !isSpatial { return "Opens Delete everywhere for this label" }
         return isAuthored ? "Opens Copy pose here. The match annotation stays unchanged."
-            : "Opens Copy pose here and Erase"
+            : "Opens Copy pose here and Delete everywhere"
     }
 
     static func panelAfterSelectionChange(_ panel: PlaybackInlinePanel?, selectedID: UUID?) -> PlaybackInlinePanel? {
@@ -55,7 +55,8 @@ struct AnnotationActionsFeedback: Equatable {
 
 /// Real in-deck submenu; isolated for native text/layout captures.
 struct AnnotationActionsShelf: View {
-    static let copyHint = "Creates a fixed copy at the current time, without tracking or position keys."
+    static let copyHint = "Creates a fixed copy at this replay time. The original stays unchanged."
+    @State private var confirmsDelete = false
     let color: Color
     let isAuthored: Bool
     let showsCopy: Bool
@@ -116,15 +117,24 @@ struct AnnotationActionsShelf: View {
             .accessibilityHint(Self.copyHint)
         }
         if !isAuthored {
-            Button(role: .destructive, action: erase) {
-                Label("Erase", systemImage: "eraser.fill")
+            Button(role: .destructive) { confirmsDelete = true } label: {
+                Label("Delete everywhere", systemImage: "trash")
                     .font(.subheadline.weight(.semibold))
                     .frame(minHeight: PlaybackControlDeckPresentation.minimumSpatialHitTarget)
             }
             .buttonStyle(.bordered)
             .disabled(!canErase)
-            .accessibilityLabel("Delete annotation")
-            .accessibilityHint("Erases this annotation and opens Undo")
+            .accessibilityHint("Removes the whole mark, including earlier playback")
+            if confirmsDelete {
+                Text("Remove this mark at every time? Use End here to keep its past.")
+                    .font(.subheadline).fixedSize(horizontal: false, vertical: true)
+                Button(role: .destructive, action: erase) {
+                    Text("Delete").frame(minHeight: PlaybackControlDeckPresentation.minimumSpatialHitTarget)
+                }.disabled(!canErase)
+                Button { confirmsDelete = false } label: {
+                    Text("Keep mark").frame(minHeight: PlaybackControlDeckPresentation.minimumSpatialHitTarget)
+                }
+            }
         }
     }
 }

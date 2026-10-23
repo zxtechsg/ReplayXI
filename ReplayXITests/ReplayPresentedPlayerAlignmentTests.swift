@@ -83,8 +83,7 @@ final class ReplayPresentedPlayerAlignmentTests: XCTestCase {
             let body = try XCTUnwrap(root.findEntity(named: "player-\(player.id)"))
             let number = try XCTUnwrap(root.findEntity(named: "player-label-\(player.id)"))
             assertXZ(body.position, expected)
-            assertXZ(number.position, expected)
-            XCTAssertTrue(number.isEnabled)
+            XCTAssertFalse(number.isEnabled, "The named coach card replaces the ordinary number tag")
 
             let labelRoot = try XCTUnwrap(root.findEntity(named: "mark-\(label.id.uuidString)"))
             let labelCard = try XCTUnwrap(labelRoot.findEntity(named: "annotation-label"))
@@ -141,7 +140,9 @@ final class ReplayPresentedPlayerAlignmentTests: XCTestCase {
         let origin = store.presentedPlayerPose(for: player, at: store.playhead).position
         store.beginDrawing(.run)
         XCTAssertNil(store.registerPitchTap(origin))
-        return try XCTUnwrap(store.registerPitchTap(PitchPoint(x: origin.x - 3, z: origin.z + 4)))
+        let created = try XCTUnwrap(store.registerPitchTap(PitchPoint(x: origin.x - 3, z: origin.z + 4)))
+        XCTAssertTrue(store.setCoachMarkTracking(id: created.id, playerID: player.id))
+        return try XCTUnwrap(store.marks.first { $0.id == created.id })
     }
 
     func testNewLabelsAndRunSnapToFallenPlayerInsteadOfUprightTelemetry() throws {
@@ -214,7 +215,9 @@ final class ReplayPresentedPlayerAlignmentTests: XCTestCase {
         let origin = store.presentedPlayerPose(for: player, at: 15).position
         store.beginDrawing(.run)
         _ = store.registerPitchTap(origin)
-        let mark = try XCTUnwrap(store.registerPitchTap(PitchPoint(x: 33.5, z: 29)))
+        let created = try XCTUnwrap(store.registerPitchTap(PitchPoint(x: 33.5, z: 29)))
+        XCTAssertTrue(store.setCoachMarkTracking(id: created.id, playerID: player.id))
+        let mark = try XCTUnwrap(store.marks.first { $0.id == created.id })
         XCTAssertGreaterThan(
             mark.resolvedGeometry(in: store.selectedScenario, at: 15).end.x,
             ReplayStore.pitchHalfWidth,
@@ -243,7 +246,9 @@ final class ReplayPresentedPlayerAlignmentTests: XCTestCase {
         let origin = store.presentedPlayerPose(for: player, at: store.playhead).position
         store.beginDrawing(.run)
         _ = store.registerPitchTap(origin)
-        let mark = try XCTUnwrap(store.registerPitchTap(PitchPoint(x: origin.x, z: 52)))
+        let created = try XCTUnwrap(store.registerPitchTap(PitchPoint(x: origin.x, z: 52)))
+        XCTAssertTrue(store.setCoachMarkTracking(id: created.id, playerID: player.id))
+        let mark = try XCTUnwrap(store.marks.first { $0.id == created.id })
         XCTAssertGreaterThan(
             mark.resolvedGeometry(in: store.selectedScenario, at: store.playhead).end.z,
             ReplayStore.pitchHalfLength

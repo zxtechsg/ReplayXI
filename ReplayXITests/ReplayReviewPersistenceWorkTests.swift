@@ -298,7 +298,7 @@ final class ReplayReviewPersistenceWorkTests: XCTestCase {
 
     func testFutureSchemaStaysReadOnlyAndDoesNotPrimeEncodingCache() throws {
         let url = try temporaryURL()
-        let bytes = Data("{\"version\":3,\"unknown\":true}".utf8)
+        let bytes = Data("{\"version\":4,\"unknown\":true}".utf8)
         try bytes.write(to: url, options: .atomic)
         let library = ReplayReviewLibrary(scenarios: DemoScenarios.catalogue, fileURL: url)
         let state = ReplayStore().makeSavedReviewState()

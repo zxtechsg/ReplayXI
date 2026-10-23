@@ -57,8 +57,9 @@ final class AnnotationTimingEditorVisualTests: XCTestCase {
             XCTAssertTrue(store.captureCoachMarkKeyframe(id: mark.id))
         }
         if let previewTime {
+            XCTAssertTrue(store.setCoachMarkDuration(id: mark.id, duration: 8))
             store.seek(to: previewTime)
-            XCTAssertFalse(mark.isVisible(at: store.playhead))
+            XCTAssertFalse(try XCTUnwrap(store.marks.first { $0.id == mark.id }).isVisible(at: store.playhead))
         }
         let session = AnnotationTimingDraftSession()
         if pendingDrafts || selectedKeyTime != nil {

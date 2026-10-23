@@ -63,7 +63,7 @@ final class PlaybackToolsShelfTextMetricsTests: XCTestCase {
             "ReplayXI/Immersive/FootballImmersiveView.swift"), encoding: .utf8)
         let fixtures: [(start: String, end: String, title: String, symbol: String, weight: String, key: String)] = [
             ("private var annotationEventsButton:", "private var decisionReviewButton:",
-                "Timeline", "list.bullet.rectangle.fill", "black", "timeline"),
+                "Marks", "list.bullet.rectangle.fill", "black", "timeline"),
             ("private var decisionReviewButton:", "private var annotationEventStrip:",
                 "Decisions", "eye.fill", "black", "decisions"),
             ("private var settingsToolButton:", "private func inlinePanelShelf(",

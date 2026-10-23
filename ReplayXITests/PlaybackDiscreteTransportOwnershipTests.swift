@@ -18,24 +18,15 @@ final class PlaybackDiscreteTransportOwnershipTests: XCTestCase {
         XCTAssertTrue(control.contains(".accessibilityLabel(label)"))
     }
 
-    func testEventChipCallbacksCheckOwnershipBeforeChangingSelectionOrVisibility() throws {
+    func testMarkListChecksOwnershipBeforeChangingSelectionOrVisibility() throws {
         let source = try immersiveSource()
-        let events = try slice(source, after: "private func reviewEventButton(", before: "private func eventChipLabel(")
-        let cue = try slice(events, after: "case .cue(let cue):", before: "case .mark(let mark):")
-        let markStart = try XCTUnwrap(events.range(of: "case .mark(let mark):")?.lowerBound)
-        let mark = String(events[markStart...])
-
-        assertAdmissionBefore("selectedAnnotationID = nil", in: cue)
-        assertAdmissionBefore("showsPlaybackAnnotations = true", in: mark)
-        assertAdmissionBefore("selectedAnnotationID = mark.id", in: mark)
-        assertAdmissionBefore("showsDecisionStrip = false", in: mark)
-        let resolvedJump = try XCTUnwrap(mark.range(of: "guard jump(to: mark) else { return }")?.lowerBound)
-        for effect in ["showsPlaybackAnnotations = true", "selectedAnnotationID = mark.id", "showsDecisionStrip = false"] {
-            XCTAssertLessThan(resolvedJump, try XCTUnwrap(mark.range(of: effect)?.lowerBound),
-                              "Resolve the current mark before changing presentation")
+        let events = try slice(source, after: "private var annotationEventStrip:",
+            before: "private func selectedAnnotationInspector(")
+        let admission = try XCTUnwrap(events.range(of: "guard store.canChangePlaybackView, jump(to: mark) else { return }")?.lowerBound)
+        for effect in ["selectedAnnotationID = mark.id", "showsEventStrip = false",
+                       "showsPlaybackAnnotations = true"] {
+            XCTAssertLessThan(admission, try XCTUnwrap(events.range(of: effect)?.lowerBound))
         }
-        XCTAssertTrue(cue.contains(".disabled(!store.canChangePlaybackView)"))
-        XCTAssertTrue(mark.contains(".disabled(!store.canChangePlaybackView)"))
     }
 
     func testCueMarkStepAndAccessibilityCallbacksRejectCompetingTimelineActions() throws {

@@ -25,19 +25,14 @@ final class PlaybackSubmenuGestureAffordanceTests: XCTestCase {
                    precedes: "store.updateCoachMarkLabel", in: label)
     }
 
-    func testFollowPitchAndPlayerChoicesUseTheSameOwnershipGate() throws {
+    func testLiveEditorUsesGestureOwnershipAndHasNoTrackingRoster() throws {
         let source = try immersiveSource()
-        let shelf = try slice(source, after: "private func annotationTrackingShelf(", before: "private func annotationTrackingTeamRow(")
-        XCTAssertTrue(shelf.contains(".disabled(isFixedToPitch || !annotationTrackingIsEnabled(mark))"))
-        XCTAssertTrue(shelf.contains(".accessibilityHint(store.canChangePlaybackView"))
-        XCTAssertTrue(shelf.contains("Finish or cancel the current gesture first"))
-        let button = try slice(source, after: "private func annotationTrackingPlayerButton(", before: "private func annotationTrackingPlayerID(")
-        XCTAssertTrue(button.contains(".disabled(!annotationTrackingIsEnabled(mark))"))
-        XCTAssertTrue(button.contains(".accessibilityHint(AnnotationTrackingPolicy.playerHint(mark,"))
-        XCTAssertTrue(button.contains("canChangePlaybackView: store.canChangePlaybackView"))
-        let callback = try slice(source, after: "private func setAnnotationTracking(", before: "private func annotationLabelShelf(")
-        assertGate("guard annotationTrackingIsEnabled(mark) else { return }",
-                   precedes: "store.setCoachMarkTracking", in: callback)
+        XCTAssertFalse(source.contains("private func annotationTrackingShelf("))
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let editor = try String(contentsOf: root.appendingPathComponent(
+            "ReplayXI/Immersive/SpatialAnnotationEditor.swift"), encoding: .utf8)
+        XCTAssertTrue(editor.contains(".disabled(!store.canChangePlaybackView)"))
+        XCTAssertTrue(editor.contains("Drag an end onto a player"))
     }
 
     func testHeldScrubRejectsPOVLabelAndTrackingWithoutLosingCommitOrCancel() throws {

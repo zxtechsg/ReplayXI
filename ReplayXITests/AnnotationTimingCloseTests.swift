@@ -107,32 +107,21 @@ final class AnnotationTimingCloseTests: XCTestCase {
         XCTAssertEqual(store.makeSavedReviewState(), before)
     }
 
-    func testCloseIsFixedAboveScrollAndUsesExistingGuardedResolutionRoute() throws {
+    func testLiveEditorCloseKeepsTheGestureGateWithoutAnOnHeadsetTimingEditor() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         let editor = try String(contentsOf: root.appendingPathComponent(
-            "ReplayXI/Immersive/AnnotationTimingEditor.swift"), encoding: .utf8)
-        let close = try XCTUnwrap(editor.range(of: "Button(action: close)")?.lowerBound)
-        let scroll = try XCTUnwrap(editor.range(of: "ScrollView(.vertical)")?.lowerBound)
-        XCTAssertLessThan(close, scroll)
-        let header = editor[close..<scroll]
-        XCTAssertTrue(header.contains(".accessibilityLabel(\"Close timing controls\")"))
-        XCTAssertTrue(header.contains("minimumSpatialHitTarget"))
-        XCTAssertTrue(header.contains(".disabled(!store.canChangePlaybackView)"))
-        XCTAssertFalse(header.contains(".disabled(!canLeaveEditor)"), "Dirty drafts must be able to request Close")
-
+            "ReplayXI/Immersive/SpatialAnnotationEditor.swift"), encoding: .utf8)
+        XCTAssertTrue(editor.contains("action(\"Close\", \"xmark\", onClose)"))
+        XCTAssertTrue(editor.contains(".disabled(!store.canChangePlaybackView)"))
         let deck = try String(contentsOf: root.appendingPathComponent(
             "ReplayXI/Immersive/FootballImmersiveView.swift"), encoding: .utf8)
-        XCTAssertTrue(deck.contains("close: requestTimingSafeClose"))
-        let start = try XCTUnwrap(deck.range(of: "private func requestTimingSafeClose()")?.lowerBound)
-        let end = try XCTUnwrap(deck.range(of: "private var timingDeckRoute:")?.lowerBound)
+        XCTAssertFalse(deck.contains("AnnotationTimingEditor("))
+        let start = try XCTUnwrap(deck.range(of: "private func selectedAnnotationInspector(")?.lowerBound)
+        let end = try XCTUnwrap(deck.range(of: "private func nudgeAnnotation(")?.lowerBound)
         let handler = deck[start..<end]
         XCTAssertTrue(handler.contains("guard store.canChangePlaybackView else { return }"))
-        XCTAssertTrue(handler.contains("guard timingDraftSession.hasUnsavedChanges else { inlinePanel = nil; return }"))
-        XCTAssertTrue(handler.contains("destination.panel = nil"))
-        XCTAssertTrue(handler.contains("timingNavigation.protect(destination)"))
-        for forbidden in ["selectedAnnotationID =", "store.seek", ".apply(", ".discard(", "releaseOwnership"] {
-            XCTAssertFalse(handler.contains(forbidden), "Close must not directly change selection, time or draft data")
-        }
+        XCTAssertFalse(handler.contains("store.seek"))
+        XCTAssertFalse(handler.contains("freezeCoachMarkKeyframes"))
     }
 
     private func fixture(dirty: Bool = false) throws -> (ReplayStore, CoachMark, AnnotationTimingDraftSession) {
@@ -142,6 +131,7 @@ final class AnnotationTimingCloseTests: XCTestCase {
         store.beginDrawing(.arc)
         _ = store.registerPitchTap(.init(x: -20, z: -20))
         let created = try XCTUnwrap(store.registerPitchTap(.init(x: -16, z: -14)))
+        XCTAssertTrue(store.setCoachMarkDuration(id: created.id, duration: 8))
         XCTAssertTrue(store.captureCoachMarkKeyframe(id: created.id))
         store.seek(to: 6)
         XCTAssertTrue(store.captureCoachMarkKeyframe(id: created.id))

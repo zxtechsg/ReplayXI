@@ -1,12 +1,11 @@
 import Foundation
 
-/// Saved positions and player tracking are mutually exclusive motion sources.
-/// Reflect the Store's rule before inviting an action it cannot perform.
+/// Timed tracking changes preserve the earlier saved poses.
 enum AnnotationTrackingPolicy {
-    static let keyframeHint = "Open Timing and choose Freeze here before following a player."
+    static let keyframeHint = "Linking a player is saved at this replay time; earlier poses are kept."
 
     static func canSetTracking(_ mark: CoachMark, canChangePlaybackView: Bool) -> Bool {
-        canChangePlaybackView && mark.kind.requiresTwoPitchPoints && !mark.hasKeyframes
+        canChangePlaybackView && mark.kind.requiresTwoPitchPoints
     }
 
     static func keyframeStatus(_ mark: CoachMark) -> String? {
@@ -22,7 +21,7 @@ enum AnnotationTrackingPolicy {
     }
 
     static func playerHint(_ mark: CoachMark, canChangePlaybackView: Bool) -> String {
-        if mark.hasKeyframes { return keyframeHint }
+        if canChangePlaybackView && mark.hasKeyframes { return keyframeHint }
         return canChangePlaybackView
             ? "Keeps both annotation points at their current offsets from this player"
             : "Finish or cancel the current gesture first"

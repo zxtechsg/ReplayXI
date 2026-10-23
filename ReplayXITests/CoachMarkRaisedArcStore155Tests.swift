@@ -215,7 +215,7 @@ final class CoachMarkRaisedArcStore155Tests: XCTestCase {
         ]
         for attempt in attempts {
             XCTAssertFalse(attempt())
-            XCTAssertEqual(store.statusMessage, "Add a position key between these poses")
+            XCTAssertEqual(store.statusMessage, "Move in smaller steps, or adjust motion in Mac coach")
             XCTAssertEqual(store.makeSavedReviewState(), before)
             XCTAssertEqual(store.annotationUndoTitle, undo)
         }
@@ -263,7 +263,7 @@ final class CoachMarkRaisedArcStore155Tests: XCTestCase {
         let before = store.marks
         XCTAssertFalse(store.updateCoachMarkGeometry(id: mark.id, start: .zero,
                                                      end: .init(x: 0, z: -2)))
-        XCTAssertEqual(store.statusMessage, "Add a position key between these poses")
+        XCTAssertEqual(store.statusMessage, "Move in smaller steps, or adjust motion in Mac coach")
         XCTAssertEqual(store.marks, before)
 
         var old = legacy(start: .zero, end: .init(x: 2, z: 0))
@@ -273,7 +273,7 @@ final class CoachMarkRaisedArcStore155Tests: XCTestCase {
         XCTAssertTrue(store.appendRemoteCoachMark(old), "All-legacy crossing data stays readable")
         store.seek(to: 4, broadcast: false)
         XCTAssertFalse(store.nudgeCoachMarkCurve(id: old.id, bendDelta: 0.25, liftDelta: 0))
-        XCTAssertEqual(store.statusMessage, "Add a position key between these poses")
+        XCTAssertEqual(store.statusMessage, "Move in smaller steps, or adjust motion in Mac coach")
         XCTAssertEqual(try current(old.id, in: store), old)
     }
 

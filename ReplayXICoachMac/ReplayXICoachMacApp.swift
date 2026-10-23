@@ -3,7 +3,7 @@ import SwiftUI
 @main
 struct ReplayXICoachMacApp: App {
     @State private var link = ReplayXIMacLink()
-    @AppStorage("ReplayXI.coachConnectionTarget") private var connectionTarget = "simulator"
+    @AppStorage(ReplayXIMacLink.connectionTargetKey) private var connectionTarget = ReplayXIMacLink.defaultConnectionTarget
 
     var body: some Scene {
         WindowGroup("Replay XI Coach") {

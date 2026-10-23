@@ -116,7 +116,7 @@ final class CoachMarkKeyframeTests: XCTestCase {
         XCTAssertNil(store.marks.last?.keyframes)
         let layout = PlaybackControlDeckLayout.resolve(preset: .standard, usesAccessibilityText: false)
         let large = layout.resized(by: 1.5)
-        XCTAssertEqual(large.uniformScale, 1.5)
+        XCTAssertEqual(large.uniformScale, layout.uniformScale * 1.5)
         XCTAssertEqual(large.forwardOffset, layout.forwardOffset)
         XCTAssertEqual(large.verticalOffset, layout.verticalOffset)
         XCTAssertEqual(large.attachmentWidth, layout.attachmentWidth)

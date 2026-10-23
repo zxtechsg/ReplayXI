@@ -84,13 +84,17 @@ final class ReplayAnnotationEditing181Tests: XCTestCase {
             start: .init(x: -9, z: -10), end: mark.end,
             startElevation: 0.2, endElevation: 0.8, recordMotion: true))
         let linked = try XCTUnwrap(store.marks.first { $0.id == mark.id })
-        XCTAssertFalse(linked.hasKeyframes)
+        XCTAssertTrue(linked.hasKeyframes)
         XCTAssertNotNil(linked.startTrackAnchor)
         XCTAssertTrue(store.setCoachMarkEndpointTracking(id: mark.id, endpoint: .start, playerID: nil))
+        store.seek(to: 3)
         XCTAssertTrue(store.captureCoachMarkKeyframe(id: mark.id))
-        let keys = store.marks
-        XCTAssertFalse(store.setCoachMarkEndpointTracking(id: mark.id, endpoint: .end, playerID: player.id))
-        XCTAssertEqual(store.marks, keys)
+        let keys = try XCTUnwrap(store.marks.first { $0.id == mark.id }).keyframes
+        store.seek(to: 4)
+        XCTAssertTrue(store.setCoachMarkEndpointTracking(id: mark.id, endpoint: .end, playerID: player.id))
+        let updated = try XCTUnwrap(store.marks.first { $0.id == mark.id })
+        XCTAssertEqual(updated.keyframes?.dropLast().map { $0 }, keys)
+        XCTAssertEqual(updated.sampled(at: 4).endTrackAnchor?.playerID, player.id)
     }
 
     func testWireEndpointAndMotionCommandsKeepRevisionAndTimeGates() throws {

@@ -177,7 +177,7 @@ final class AnimatedAnnotationSpatialSelectionTests: XCTestCase {
         XCTAssertTrue(fixture.store.setCoachMarkTracking(id: fixture.markID, playerID: "red-lb"))
         let tracked = try fixture.mark()
         XCTAssertTrue(tracked.followsPlayerTracks)
-        XCTAssertFalse(tracked.hasKeyframes)
+        XCTAssertTrue(tracked.hasKeyframes, "Player linking is recorded at the playhead")
         for time in [6.0, 4.0] {
             fixture.selectedAnnotationID = nil
             fixture.store.seek(to: time, broadcast: false)

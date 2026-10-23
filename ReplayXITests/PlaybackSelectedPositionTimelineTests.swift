@@ -111,8 +111,8 @@ final class PlaybackSelectedPositionTimelineTests: XCTestCase {
         XCTAssertFalse(overlay.contains("store.marks.map"))
         let immersive = try String(contentsOf: root.appendingPathComponent(
             "ReplayXI/Immersive/FootballImmersiveView.swift"), encoding: .utf8)
-        XCTAssertTrue(immersive.contains("PlaybackSelectedPositionTimeline(annotationID: selectedAnnotationID"))
-        XCTAssertTrue(immersive.contains("PlaybackSelectedPositionTimelineCache.accessibilitySummary"))
+        XCTAssertFalse(immersive.contains("PlaybackSelectedPositionTimeline(annotationID: selectedAnnotationID"))
+        XCTAssertFalse(immersive.contains("PlaybackSelectedPositionTimelineCache.accessibilitySummary"))
     }
 
     func testNativeOverlayUpdatesKeysWithoutChangingScrubPlayhead() throws {

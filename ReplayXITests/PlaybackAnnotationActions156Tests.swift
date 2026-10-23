@@ -20,9 +20,9 @@ final class PlaybackAnnotationActions156Tests: XCTestCase {
         XCTAssertNil(closed.panel)
         XCTAssertTrue(closed.showsAnnotations)
         XCTAssertEqual(PlaybackAnnotationActionsRoute.accessibilityHint(isSpatial: false, isAuthored: false),
-                       "Opens Erase for this label")
+                       "Opens Delete everywhere for this label")
         XCTAssertFalse(PlaybackAnnotationActionsRoute.accessibilityHint(isSpatial: true, isAuthored: true).contains("Erase"))
-        XCTAssertTrue(PlaybackAnnotationActionsRoute.accessibilityHint(isSpatial: true, isAuthored: false).contains("Erase"))
+        XCTAssertTrue(PlaybackAnnotationActionsRoute.accessibilityHint(isSpatial: true, isAuthored: false).contains("Delete everywhere"))
     }
 
     func testSelectionObserverRetainsOnlyAlreadyMatchedAnnotationPanels() {
@@ -183,7 +183,7 @@ final class PlaybackAnnotationActions156Tests: XCTestCase {
             "ReplayXI/Immersive/FootballImmersiveView.swift"), encoding: .utf8)
         XCTAssertTrue(source.contains("PlaybackAnnotationActionsRoute.keepsSelectedInsertion("))
         XCTAssertTrue(source.contains("PlaybackAnnotationActionsRoute.panelAfterSelectionChange("))
-        XCTAssertTrue(source.contains(".accessibilityLabel(\"Annotation actions\")"))
+        XCTAssertTrue(source.contains("onActions: { toggleAnnotationActions(id: mark.id) }"))
         XCTAssertTrue(source.contains("inlinePanel = .annotationGeometry(copied.id)"))
         let start = try XCTUnwrap(source.range(of: "private func toggleAnnotationActions(id:")?.lowerBound)
         let end = try XCTUnwrap(source.range(of: "private func copyAnnotationPose(id:")?.lowerBound)

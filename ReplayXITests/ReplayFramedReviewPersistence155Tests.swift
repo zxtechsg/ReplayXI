@@ -86,7 +86,7 @@ final class ReplayFramedReviewPersistence155Tests: XCTestCase {
         }
 
         let futureURL = try makeURL()
-        let future = Data("{\"version\":3,\"savedReviews\":\"future payload\",\"unknown\":true}".utf8)
+        let future = Data("{\"version\":4,\"savedReviews\":\"future payload\",\"unknown\":true}".utf8)
         let backup = try encoded(Document(version: 1, savedReviews: [], autosavedReview: nil))
         try future.write(to: futureURL)
         try backup.write(to: futureURL.appendingPathExtension("backup"))

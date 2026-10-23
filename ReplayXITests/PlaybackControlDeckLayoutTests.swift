@@ -36,10 +36,10 @@ final class PlaybackControlDeckLayoutTests: XCTestCase {
 
         for layout in [near, standard, large] {
             XCTAssertGreaterThanOrEqual(layout.attachmentWidth, 1_200)
-            XCTAssertLessThanOrEqual(layout.attachmentWidth, 1_420)
+            XCTAssertLessThanOrEqual(layout.attachmentWidth, 1_500)
             XCTAssertTrue((-1.45 ... -0.90).contains(layout.forwardOffset))
             XCTAssertTrue((-0.60 ... -0.35).contains(layout.verticalOffset))
-            XCTAssertTrue((0.90 ... 1.25).contains(layout.uniformScale))
+            XCTAssertTrue((1.10 ... 1.30).contains(layout.uniformScale))
         }
     }
 
@@ -62,7 +62,7 @@ final class PlaybackControlDeckLayoutTests: XCTestCase {
             XCTAssertGreaterThan(accessible.forwardOffset, normal.forwardOffset)
             XCTAssertGreaterThanOrEqual(accessible.attachmentWidth, 1_420)
             XCTAssertTrue((-1.30 ... -0.90).contains(accessible.forwardOffset))
-            XCTAssertLessThanOrEqual(accessible.uniformScale, 1.31)
+            XCTAssertLessThanOrEqual(accessible.uniformScale, 1.44)
         }
     }
 
@@ -73,12 +73,12 @@ final class PlaybackControlDeckLayoutTests: XCTestCase {
                 usesAccessibilityText: false
             )
 
-            XCTAssertGreaterThanOrEqual(layout.attachmentWidth, 500)
-            XCTAssertLessThanOrEqual(layout.attachmentWidth, 600)
+            XCTAssertGreaterThanOrEqual(layout.attachmentWidth, 700)
+            XCTAssertLessThanOrEqual(layout.attachmentWidth, 760)
             XCTAssertLessThan(layout.horizontalOffset, -0.45)
             XCTAssertGreaterThan(layout.verticalOffset, 0.15)
             XCTAssertTrue((-1.25 ... -0.90).contains(layout.forwardOffset))
-            XCTAssertTrue((0.90 ... 1.15).contains(layout.uniformScale))
+            XCTAssertTrue((1.10 ... 1.20).contains(layout.uniformScale))
         }
     }
 

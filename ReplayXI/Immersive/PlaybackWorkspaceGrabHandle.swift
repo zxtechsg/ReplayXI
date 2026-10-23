@@ -1,47 +1,27 @@
 import RealityKit
 import UIKit
 
-/// A separate spatial target beside the console: it cannot steal a timeline
-/// or button pinch, and its bounds do not depend on an open shelf's height.
+/// App-owned grab bars styled as simple white capsules, with generous hit boxes.
 @MainActor
 enum PlaybackWorkspaceGrabHandle {
     static let name = "playback-workspace-grab-handle"
-    static let size = SIMD3<Float>(0.108, 0.088, 0.012)
-
+    static let size = SIMD3<Float>(0.22, 0.065, 0.025)
+    struct Target: Component { let panelID: String }
+    struct Offset: Component { var value: SIMD3<Float> }
     private struct Presentation: Component, Equatable {
         let isAvailable: Bool
         let isMoving: Bool
     }
 
-    static func make() -> Entity {
+    static func make(panelID: String = "coach-console") -> Entity {
         let handle = ModelEntity(
-            mesh: .generateBox(size: size, cornerRadius: 0.005),
-            materials: [UnlitMaterial(color: UIColor(white: 0.13, alpha: 1))]
-        )
-        handle.name = name
+            mesh: .generateBox(size: [0.16, 0.008, 0.006], cornerRadius: 0.003),
+            materials: [UnlitMaterial(color: .white)])
+        handle.name = panelID == "coach-console" ? name : name + "-" + panelID
+        handle.components.set(Target(panelID: panelID))
         handle.components.set(CollisionComponent(shapes: [.generateBox(size: size)]))
         handle.components.set(InputTargetComponent())
-        handle.components.set(HoverEffectComponent())
-        PlaybackAttachmentPlacement.faceViewer(handle)
-
-        let text = ModelEntity(
-            mesh: .generateText("Move", extrusionDepth: 0.0002,
-                font: .systemFont(ofSize: 0.020, weight: .semibold)),
-            materials: [UnlitMaterial(color: .white)]
-        )
-        let bounds = text.visualBounds(relativeTo: text)
-        text.position = [-bounds.center.x, -0.022 - bounds.center.y, size.z / 2 + 0.001]
-        handle.addChild(text)
-
-        let dotMesh = MeshResource.generateSphere(radius: 0.003)
-        let dotMaterial = UnlitMaterial(color: UIColor(white: 0.78, alpha: 1))
-        for x in [-Float(0.011), 0, 0.011] {
-            for y in [Float(0.010), 0.021] {
-                let dot = ModelEntity(mesh: dotMesh, materials: [dotMaterial])
-                dot.position = [x, y, size.z / 2 + 0.001]
-                handle.addChild(dot)
-            }
-        }
+        handle.components.set(ReplayHoverAffordance.highlight)
         update(handle, isAvailable: true, isMoving: false)
         return handle
     }
@@ -49,7 +29,7 @@ enum PlaybackWorkspaceGrabHandle {
     static func ancestor(of entity: Entity) -> Entity? {
         var current: Entity? = entity
         while let candidate = current {
-            if candidate.name == name { return candidate }
+            if candidate.components[Target.self] != nil { return candidate }
             current = candidate.parent
         }
         return nil
@@ -62,24 +42,17 @@ enum PlaybackWorkspaceGrabHandle {
         var input = handle.components[InputTargetComponent.self] ?? InputTargetComponent()
         input.isEnabled = isAvailable
         handle.components.set(input)
-        handle.components.set(OpacityComponent(opacity: isAvailable ? 1 : 0.35))
-        if var model = handle.components[ModelComponent.self] {
-            model.materials = [UnlitMaterial(color: isMoving
-                ? UIColor(red: 0.08, green: 0.40, blue: 0.44, alpha: 1)
-                : UIColor(white: 0.13, alpha: 1))]
-            handle.components.set(model)
-        }
+        handle.components.set(OpacityComponent(opacity: isAvailable ? 1 : 0.30))
         var accessibility = AccessibilityComponent()
         accessibility.isAccessibilityElement = true
-        accessibility.label = "Move controls"
+        accessibility.label = "Move panel"
         accessibility.value = isAvailable
-            ? "Pinch and drag towards you or away. Cards stay in place after release and turn to face you."
-            : "Finish or cancel the current gesture first."
+            ? "Pinch the white bar and drag. Moving closer keeps the same panel size."
+            : "Finish the current edit first."
         handle.components.set(accessibility)
     }
 
     static func position(for layout: PlaybackControlDeckLayout) -> SIMD3<Float> {
-        let halfWidth = Float(layout.attachmentWidth) * 0.001 * layout.uniformScale / 2
-        return [halfWidth + 0.075, layout.verticalOffset, layout.forwardOffset]
+        [0, layout.verticalOffset - 0.20, layout.forwardOffset]
     }
 }

@@ -175,8 +175,9 @@ final class AnnotationKeyframeCapacityEditingTests: XCTestCase {
             XCTAssertTrue(deck[lower..<next].contains("mark.canRecordPose(at: store.playhead)"), start)
         }
         let editor = try source("ReplayXI/Immersive/SpatialAnnotationEditor.swift")
-        XCTAssertTrue(editor.contains(".disabled(mark.followsPlayerTracks || !mark.canRecordPose(at: store.playhead))"))
-        XCTAssertTrue(editor.contains("store.captureCoachMarkKeyframe(id: mark.id)"))
+        XCTAssertFalse(editor.contains("store.captureCoachMarkKeyframe(id: mark.id)"), "Fine keys are Mac-only")
+        let pointEditor = try source("ReplayXI/Immersive/AnnotationArcPointEditor.swift")
+        XCTAssertTrue(pointEditor.contains("mark.canRecordPose(at: store.playhead)"))
         let pad = try source("ReplayXI/Immersive/AnnotationCurveAdjustmentPad.swift")
         XCTAssertTrue(pad.contains("Text(capacityBlockReason)"))
         XCTAssertTrue(pad.contains("capacityBlockReason ?? \"Finish or cancel the current gesture first\""))

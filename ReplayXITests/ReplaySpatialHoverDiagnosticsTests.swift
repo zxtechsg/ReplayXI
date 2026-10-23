@@ -122,7 +122,7 @@ final class ReplaySpatialHoverDiagnosticsTests: XCTestCase {
             XCTAssertTrue(handle.isEnabledInHierarchy)
             XCTAssertEqual(AnnotationSceneAffordance.targetAncestor(of: handle),
                            AnnotationSceneTarget(markID: mark.id, role: role))
-            XCTAssertGreaterThan(inheritedModels(for: handle).count, 0)
+            XCTAssertGreaterThan(groupLinkedModels(for: handle, scope: root).count, 0)
             records.append(record(handle, scope: root, semanticID: role.rawValue, role: "handle-control"))
         }
         let player = try XCTUnwrap(root.findEntity(named: "player-\(scenario.defaultPerspectiveID)"))

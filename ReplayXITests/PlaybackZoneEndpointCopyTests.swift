@@ -18,7 +18,7 @@ final class PlaybackZoneEndpointCopyTests: XCTestCase {
         XCTAssertTrue(endTitle.contains("case .run, .pass, .arc, .danger: \"ARROW TIP\""))
         XCTAssertTrue(endTitle.contains("case .playerLabel: \"PLAYER\""))
         let endTarget = try slice(source, after: "private func annotationEndPointAccessibilityTarget(",
-                                  before: "private func annotationTrackingShelf(")
+                                  before: "private func annotationLabelShelf(")
         XCTAssertTrue(endTarget.contains("kind == .space ? \"zone edge\" : \"arrow point\""))
         XCTAssertFalse(endTarget.contains("opposite corner"))
     }

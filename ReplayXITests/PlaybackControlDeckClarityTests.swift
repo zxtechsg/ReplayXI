@@ -196,7 +196,7 @@ final class PlaybackControlDeckClarityTests: XCTestCase {
             after: "private var controls: some View",
             before: "private var environmentChoices: some View")
         XCTAssertTrue(hud.contains("Image(systemName: store.viewMode.systemImage)"))
-        XCTAssertTrue(hud.contains("Text(\"POV\")"))
+        XCTAssertTrue(hud.contains("Text(\"View · "))
         XCTAssertFalse(hud.contains("Eyebrow(text: \"View & Overlays\""))
         XCTAssertTrue(hud.contains(".help("))
         XCTAssertTrue(hud.contains(".accessibilityLabel(\"View and overlays\")"))
@@ -223,7 +223,7 @@ final class PlaybackControlDeckClarityTests: XCTestCase {
         XCTAssertTrue(button.contains("store.hasActiveTimelineScrub"))
         let shelf = try sourceSlice(source,
             after: "private var annotationEditShelf: some View",
-            before: "private func annotationDurationShelf")
+            before: "private func annotationActionsShelf")
         XCTAssertTrue(shelf.contains("store.annotationUndoTitle"))
         XCTAssertTrue(shelf.contains("store.annotationRedoTitle"))
         XCTAssertTrue(shelf.contains("store.canUndoAnnotationEdit"))
@@ -254,41 +254,24 @@ final class PlaybackControlDeckClarityTests: XCTestCase {
         XCTAssertTrue(movePolicy.contains("CoachMarkTimingPolicy.windowFits"))
     }
 
-    func testSelectedCoachMarkExposesRetractableEndpointLinksWithFreezeGate() throws {
+    func testSelectedMarkUsesLiveControlsInsteadOfKeyframeOrPlayerPickerPanels() throws {
         let source = try immersiveSource()
-        let inspector = try sourceSlice(
-            source,
+        let inspector = try sourceSlice(source,
             after: "private func selectedAnnotationInspector(_ mark: CoachMark) -> some View",
-            before: "private func nudgeAnnotation("
-        )
+            before: "private func nudgeAnnotation(")
         XCTAssertTrue(inspector.contains("SpatialAnnotationEditor(mark: mark"))
-
+        XCTAssertTrue(inspector.contains("guard store.canChangePlaybackView else { return }"))
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         let editor = try String(contentsOf: root.appendingPathComponent(
             "ReplayXI/Immersive/SpatialAnnotationEditor.swift"), encoding: .utf8)
-        let header = try sourceSlice(editor, after: "private var header: some View",
-            before: "private func endpointButton(")
-        XCTAssertTrue(header.contains("endpointButton(.start)"))
-        XCTAssertTrue(header.contains("endpointButton(.end)"))
-        XCTAssertTrue(header.contains("if editable, mark.kind.requiresTwoPitchPoints"))
-
-        let endpoint = try sourceSlice(editor, after: "private func endpointButton(",
-            before: "private func playerLinks(")
-        XCTAssertTrue(endpoint.contains("linking = linking == endpoint ? nil : endpoint"))
-        XCTAssertTrue(endpoint.contains(".accessibilityLabel(\"Link "))
-        XCTAssertTrue(endpoint.contains(".frame(minWidth: 44, minHeight: 44)"))
-
-        let links = try sourceSlice(editor, after: "private func playerLinks(",
-            before: "private func action(")
-        XCTAssertTrue(links.contains("if mark.hasKeyframes"))
-        XCTAssertTrue(links.contains("Button(\"Freeze here\")"))
-        XCTAssertTrue(links.contains("store.freezeCoachMarkKeyframes(id: mark.id)"))
-        XCTAssertTrue(links.contains("Freeze the current pose before linking"))
-        XCTAssertTrue(links.contains("ForEach(store.selectedScenario.players) { player in"))
-        XCTAssertTrue(links.contains("store.setCoachMarkEndpointTracking(id: mark.id, endpoint: endpoint,"))
-        XCTAssertTrue(links.contains("playerID: player.id"))
-        XCTAssertTrue(links.contains("playerID: nil"), "Pitch-fixed must remain available.")
-        XCTAssertTrue(links.contains("linking = nil"), "Choosing a player or pitch must retract the picker.")
+        for label in ["Start here", "End here", "Shape & height", "More"] {
+            XCTAssertTrue(editor.contains(label))
+        }
+        XCTAssertTrue(editor.contains("Drag an end onto a player"))
+        XCTAssertTrue(editor.contains("Mac coach for fine timing"))
+        XCTAssertFalse(editor.contains("freezeCoachMarkKeyframes"))
+        XCTAssertFalse(editor.contains("SpatialAnnotationTimeline("))
+        XCTAssertFalse(editor.contains("ForEach(store.selectedScenario.players)"))
     }
 
     private func immersiveSource() throws -> String {

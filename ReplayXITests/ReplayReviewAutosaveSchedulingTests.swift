@@ -75,7 +75,7 @@ final class ReplayReviewAutosaveSchedulingTests: XCTestCase {
 
     func testFutureSchemaDoesNotScheduleWorkersOrOverwriteItsFile() throws {
         let (url, _) = try makeFixture()
-        let original = Data("{\"version\":3}".utf8)
+        let original = Data("{\"version\":4}".utf8)
         try original.write(to: url)
         let library = ReplayReviewLibrary(scenarios: DemoScenarios.all, fileURL: url)
         XCTAssertTrue(library.isReadOnly)

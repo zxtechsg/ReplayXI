@@ -1,6 +1,13 @@
 import Foundation
 import simd
 
+/// Present (even with nil endpoints) means this key owns the binding state.
+/// Missing on older files keeps their original fixed-pitch keyframe behavior.
+struct CoachMarkKeyframeTracking: Codable, Hashable, Sendable {
+    let start: CoachMarkTrackAnchor?
+    let end: CoachMarkTrackAnchor?
+}
+
 struct CoachMarkKeyframe: Codable, Hashable, Sendable {
     var time: TimeInterval
     let start: PitchPoint
@@ -8,6 +15,7 @@ struct CoachMarkKeyframe: Codable, Hashable, Sendable {
     let startElevation: Float
     let endElevation: Float
     let curve: CoachMarkCurve?
+    let tracking: CoachMarkKeyframeTracking?
 
     init(time: TimeInterval, mark: CoachMark) {
         self.time = time
@@ -15,6 +23,7 @@ struct CoachMarkKeyframe: Codable, Hashable, Sendable {
         startElevation = mark.resolvedStartElevation
         endElevation = mark.resolvedEndElevation
         curve = mark.kind == .arc ? mark.resolvedCurve : nil
+        tracking = .init(start: mark.startTrackAnchor, end: mark.endTrackAnchor)
     }
 }
 
@@ -34,7 +43,7 @@ extension CoachMark {
 
     func keyframeCapacityBlockReason(at time: TimeInterval) -> String? {
         guard time.isFinite, time >= 0, !canRecordPose(at: time) else { return nil }
-        return "\(Self.maximumKeyframes) positions saved. Select a key or delete one."
+        return "\(Self.maximumKeyframes) edits saved. Use Mac coach to adjust saved poses."
     }
 
     private func keyframeIndex(at time: TimeInterval) -> Int? {
@@ -81,6 +90,12 @@ extension CoachMark {
         func mix(_ x: Float, _ y: Float) -> Float { x + (y - x) * t }
         func point(_ x: PitchPoint, _ y: PitchPoint) -> PitchPoint {
             .init(x: mix(x.x, y.x), z: mix(x.z, y.z))
+        }
+        func binding(_ from: CoachMarkTrackAnchor?, _ to: CoachMarkTrackAnchor?) -> CoachMarkTrackAnchor? {
+            // Bind/unbind is a timed event. While the same player is bound,
+            // interpolate its offset so moving a linked handle stays smooth.
+            guard let from, let to, from.playerID == to.playerID else { return from }
+            return .init(playerID: from.playerID, offset: point(from.offset, to.offset))
         }
         var resolvedCurve: CoachMarkCurve?
         if let x = a.curve, let y = b.curve {
@@ -137,8 +152,9 @@ extension CoachMark {
         return CoachMark(id: id, kind: kind, start: point(a.start, b.start), end: point(a.end, b.end),
             startElevation: mix(a.startElevation, b.startElevation), endElevation: mix(a.endElevation, b.endElevation),
             curve: resolvedCurve, label: label, revealTime: revealTime, hideTime: hideTime,
-            author: author, playerID: playerID, startTrackAnchor: startTrackAnchor,
-            endTrackAnchor: endTrackAnchor, keyframes: frames)
+            author: author, playerID: playerID,
+            startTrackAnchor: binding(a.tracking?.start, b.tracking?.start),
+            endTrackAnchor: binding(a.tracking?.end, b.tracking?.end), keyframes: frames)
     }
 
     func recordingPose(at time: TimeInterval) -> CoachMark {
@@ -154,7 +170,7 @@ extension CoachMark {
     func hasValidKeyframes(duration: TimeInterval) -> Bool {
         guard let frames = keyframes else { return true }
         guard !frames.isEmpty, frames.count <= Self.maximumKeyframes, kind != .playerLabel,
-              !followsPlayerTracks else { return false }
+              (!followsPlayerTracks || frames.contains { $0.tracking != nil }) else { return false }
         var previous: TimeInterval = -1
         for frame in frames {
             guard frame.time.isFinite, frame.time >= 0, frame.time <= duration, frame.time > previous,

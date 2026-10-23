@@ -1,7 +1,7 @@
 import CoreGraphics
 
 /// Six tools get a separate row from the instruction at every text size.
-/// Existing label/hit sizes are kept instead of squeezing in a sixth tool.
+/// Text stays visible and the pinch target stays large.
 struct PlaybackDrawToolLayout: Equatable, Sendable {
     let usesStackedShelves: Bool
     let labelWidth: CGFloat
@@ -17,11 +17,11 @@ struct PlaybackDrawToolLayout: Equatable, Sendable {
     static func resolve(usesAccessibilityText: Bool) -> PlaybackDrawToolLayout {
         PlaybackDrawToolLayout(
             usesStackedShelves: true,
-            labelWidth: usesAccessibilityText ? 88 : 70,
-            labelMinimumHeight: usesAccessibilityText ? 84 : 48,
+            labelWidth: usesAccessibilityText ? 144 : 120,
+            labelMinimumHeight: usesAccessibilityText ? 96 : 80,
             instructionMinimumScale: 1,
-            cancelLabelWidth: usesAccessibilityText ? 60 : 28,
-            cancelLabelMinimumHeight: usesAccessibilityText ? 60 : 48
+            cancelLabelWidth: 80,
+            cancelLabelMinimumHeight: usesAccessibilityText ? 96 : 80
         )
     }
 }

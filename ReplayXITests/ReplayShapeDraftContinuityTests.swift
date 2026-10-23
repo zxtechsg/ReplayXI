@@ -47,7 +47,7 @@ final class ReplayShapeDraftContinuityTests: XCTestCase {
             let mark = try XCTUnwrap(store.registerPitchTap(PitchPoint(x: 28, z: 34)))
             XCTAssertEqual(mark.revealTime, originalTime)
             XCTAssertEqual(mark.startTrackAnchor?.playerID, player.id)
-            XCTAssertEqual(mark.endTrackAnchor?.playerID, player.id)
+            XCTAssertNil(mark.endTrackAnchor, "An endpoint away from players stays pitch-fixed")
             XCTAssertEqual(store.presentedCoachMarkGeometry(mark, at: originalTime).start, start)
             XCTAssertTrue(ReplayStore.isValidReviewMark(mark, for: store.selectedScenario))
             XCTAssertTrue(store.saveReview(named: "Original drawing moment"))

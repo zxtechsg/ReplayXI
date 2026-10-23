@@ -131,21 +131,23 @@ final class PlaybackWorkspaceMoveTests: XCTestCase {
         XCTAssertNotNil(handle.components[CollisionComponent.self])
         XCTAssertTrue(try XCTUnwrap(handle.components[InputTargetComponent.self]).isEnabled)
         XCTAssertTrue(try XCTUnwrap(handle.components[AccessibilityComponent.self]).isAccessibilityElement)
-        let child = try XCTUnwrap(handle.children.first)
+        XCTAssertNotNil(handle.components[ModelComponent.self])
+        XCTAssertTrue(handle.children.isEmpty)
+        let child = Entity()
+        handle.addChild(child)
         XCTAssertTrue(PlaybackWorkspaceGrabHandle.ancestor(of: child) === handle)
         for preset in PlaybackControlDeckPreset.allCases {
             for accessibility in [false, true] {
                 let layout = PlaybackControlDeckLayout.resolve(preset: preset, usesAccessibilityText: accessibility)
                 let position = PlaybackWorkspaceGrabHandle.position(for: layout)
-                let leftEdge = position.x - PlaybackWorkspaceGrabHandle.size.x * layout.uniformScale / 2
-                let consoleRightEdge = Float(layout.attachmentWidth) * 0.001 * layout.uniformScale / 2
-                XCTAssertGreaterThan(leftEdge, consoleRightEdge)
+                XCTAssertEqual(position.x, 0)
+                XCTAssertLessThan(position.y, layout.verticalOffset)
                 XCTAssertEqual(position.z, layout.forwardOffset)
             }
         }
         PlaybackWorkspaceGrabHandle.update(handle, isAvailable: false, isMoving: false)
         XCTAssertFalse(try XCTUnwrap(handle.components[InputTargetComponent.self]).isEnabled)
-        XCTAssertEqual(try XCTUnwrap(handle.components[OpacityComponent.self]).opacity, 0.35)
+        XCTAssertEqual(try XCTUnwrap(handle.components[OpacityComponent.self]).opacity, 0.30)
         PlaybackWorkspaceGrabHandle.update(handle, isAvailable: true, isMoving: true)
         XCTAssertTrue(try XCTUnwrap(handle.components[InputTargetComponent.self]).isEnabled)
     }
@@ -165,7 +167,7 @@ final class PlaybackWorkspaceMoveTests: XCTestCase {
         XCTAssertTrue(move.contains("isDrawing: store.isDrawing || annotationStroke != nil"))
         XCTAssertTrue(move.contains("isScrubbing: store.hasActiveTimelineScrub"))
         XCTAssertTrue(move.contains("isEditingGeometry: store.hasActiveCoachMarkGeometryPreview"))
-        XCTAssertTrue(move.contains("value.convert(value.translation3D, from: .local, to: anchor)"))
+        XCTAssertTrue(move.contains("value.convert(value.translation3D, from: .local, to: workspace)"))
         XCTAssertFalse(move.contains("store.seek"))
         XCTAssertFalse(move.contains("store.setViewMode"))
         XCTAssertTrue(source.contains(".onChange(of: canMoveWorkspace)"))

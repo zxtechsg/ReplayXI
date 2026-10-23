@@ -221,9 +221,11 @@ final class PlaybackAnnotationMoveAvailabilityTests: XCTestCase {
         store.beginDrawing(.pass)
         XCTAssertNil(store.registerPitchTap(PitchPoint(x: 2, z: 3)))
         let mark = try XCTUnwrap(store.registerPitchTap(PitchPoint(x: 8, z: 12)))
+        XCTAssertTrue(store.setCoachMarkDuration(id: mark.id, duration: 8))
         XCTAssertFalse(store.isDrawing)
-        XCTAssertEqual(mark.hideTime, 13)
-        return (store, mark)
+        let timed = try currentMark(mark.id, in: store)
+        XCTAssertEqual(timed.hideTime, 13)
+        return (store, timed)
     }
 
     private func currentMark(_ id: UUID, in store: ReplayStore) throws -> CoachMark {

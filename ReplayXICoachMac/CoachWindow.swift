@@ -2,7 +2,7 @@ import SwiftUI
 
 struct CoachWindow: View {
     @Environment(ReplayXIMacLink.self) private var link
-    @AppStorage("ReplayXI.coachConnectionTarget") private var connectionTarget = "simulator"
+    @AppStorage(ReplayXIMacLink.connectionTargetKey) private var connectionTarget = ReplayXIMacLink.defaultConnectionTarget
     @State private var deviceID = ""
     @State private var selectedMarkID: UUID?
     @State private var drawKind = "run"
@@ -108,7 +108,7 @@ struct CoachWindow: View {
                     systemImage: connectionTarget == "simulator" ? "desktopcomputer" : "visionpro",
                     description: Text(connectionTarget == "simulator"
                         ? "On this Mac, open Replay XI in Vision Pro Simulator. Choose Start Mac link, then enter its PIN above."
-                        : "Open Replay XI on Vision Pro and choose Start Mac link. Use the same local network and enter its PIN above."))
+                        : "1. On Vision Pro, open Replay XI → Start Mac link.\n2. Allow Local Network access on both devices.\n3. Use the same Wi-Fi, select your headset above, then enter its PIN.\n\nIf nothing appears: check Settings → Privacy & Security → Local Network on both devices, then Rescan. Guest Wi-Fi, VPNs and client isolation can block discovery. No certificate pairing is required."))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
@@ -462,7 +462,7 @@ struct CoachWindow: View {
                     .toggleStyle(.button)
                     .help(mark.keyframes.isEmpty ? "Record moves: seek, then drag a point to save its pose" : "Motion active. Freeze here in Motion poses to return to static editing.")
                     .accessibilityLabel("Record moves at playhead")
-                    .disabled(!mark.keyframes.isEmpty || mark.startPlayerID != nil || mark.endPlayerID != nil)
+                    .disabled(!mark.keyframes.isEmpty)
             }
             Button {
                 drawingEnabled = false; drawStart = nil; pendingDrawKind = nil
@@ -660,12 +660,12 @@ struct CoachWindow: View {
                     DisclosureGroup("Motion poses · \(mark.keyframes.count)", isExpanded: $showKeys) {
                     VStack(alignment: .leading, spacing: 8) {
                     Toggle("Record moves at playhead", isOn: $recordMotion)
-                        .disabled(!mark.keyframes.isEmpty || mark.startPlayerID != nil || mark.endPlayerID != nil || mark.authored)
+                        .disabled(!mark.keyframes.isEmpty || mark.authored)
                     Text("Seek, then drag a point. Its pose is saved at that time. Click a diamond to return.")
                         .font(.caption).foregroundStyle(.secondary)
                     HStack {
                         Button("Capture at playhead") { link.send(.init(name: "captureKey", markID: mark.id)) }
-                        .disabled(mark.authored || !state.canEdit || inspectorConflict || mark.startPlayerID != nil || mark.endPlayerID != nil)
+                        .disabled(mark.authored || !state.canEdit || inspectorConflict)
                     }
                     ForEach(mark.keyframes, id: \.self) { time in
                         Button {
@@ -912,8 +912,8 @@ struct CoachWindow: View {
                 .accessibilityLabel("Link \(title.lowercased()) to #\(closest.number) \(closest.name)")
             }
         }
-        .disabled(mark.authored || !state.canEdit || inspectorConflict || !mark.keyframes.isEmpty)
-        .help(mark.keyframes.isEmpty ? "Keep this point's current offset from a player" : "Saved poses are kept. Freeze motion before linking a player.")
+        .disabled(mark.authored || !state.canEdit || inspectorConflict)
+        .help("Link or unlink this endpoint at the playhead. Earlier bindings and saved poses are kept.")
     }
 }
 

@@ -1366,7 +1366,9 @@ final class ReplayXITests: XCTestCase {
         let store = ReplayStore(scenarios: [scenario])
         store.seek(to: 12.5, broadcast: false)
         store.beginDrawing(.playerLabel)
-        let mark = try XCTUnwrap(store.labelPlayer("red-lb"))
+        let created = try XCTUnwrap(store.labelPlayer("red-lb"))
+        XCTAssertTrue(store.setCoachMarkDuration(id: created.id, duration: 8))
+        let mark = try XCTUnwrap(store.marks.first { $0.id == created.id })
         let root = PitchSceneFactory.makeMatchRoot(for: scenario)
 
         PitchSceneFactory.update(
@@ -1410,7 +1412,7 @@ final class ReplayXITests: XCTestCase {
         PitchSceneFactory.update(
             root: root,
             scenario: scenario,
-            time: try XCTUnwrap(mark.hideTime) + 0.01,
+            time: scenario.duration,
             viewMode: .tacticalTable,
             perspectiveID: scenario.defaultPerspectiveID,
             marks: store.marks,
@@ -2474,11 +2476,7 @@ final class ReplayXITests: XCTestCase {
         XCTAssertEqual(mark.end, end)
         XCTAssertEqual(mark.label, "Release the lane")
         XCTAssertEqual(mark.revealTime, 12.25, accuracy: 0.000_1)
-        XCTAssertEqual(
-            try XCTUnwrap(mark.hideTime),
-            12.25 + ReplayStore.coachAnnotationDisplayDuration,
-            accuracy: 0.000_1
-        )
+        XCTAssertNil(mark.hideTime, "Live marks last until End here")
         XCTAssertEqual(mark.author, "Coach")
         XCTAssertEqual(store.marks.last, mark)
         XCTAssertEqual(store.marks.count, fixtureMarkCount + 1)
@@ -2529,9 +2527,11 @@ final class ReplayXITests: XCTestCase {
         store.seek(to: 4.25, broadcast: false)
         store.beginDrawing(.pass)
         XCTAssertNil(store.registerPitchTap(PitchPoint(x: 3, z: 6)))
-        let original = try XCTUnwrap(
+        let created = try XCTUnwrap(
             store.registerPitchTap(PitchPoint(x: 11, z: 18))
         )
+        XCTAssertTrue(store.setCoachMarkDuration(id: created.id, duration: 8))
+        let original = try XCTUnwrap(store.marks.first { $0.id == created.id })
         let originalWindow = try XCTUnwrap(original.hideTime) - original.revealTime
         broadcasts.removeAll()
 
@@ -2721,11 +2721,7 @@ final class ReplayXITests: XCTestCase {
         XCTAssertEqual(mark.end, expectedPosition)
         XCTAssertEqual(mark.label, "#\(player.shirtNumber) \(player.displayName) · \(player.positionCode)")
         XCTAssertEqual(mark.revealTime, 12.25, accuracy: 0.000_1)
-        XCTAssertEqual(
-            try XCTUnwrap(mark.hideTime),
-            12.25 + ReplayStore.coachAnnotationDisplayDuration,
-            accuracy: 0.000_1
-        )
+        XCTAssertNil(mark.hideTime, "Live labels last until End here")
         XCTAssertEqual(mark.author, "Coach")
         XCTAssertEqual(store.marks.last, mark)
         XCTAssertEqual(store.marks.count, fixtureMarkCount + 1)

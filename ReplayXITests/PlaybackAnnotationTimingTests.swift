@@ -33,10 +33,10 @@ final class PlaybackAnnotationTimingTests: XCTestCase {
         XCTAssertTrue(mark.isVisible(at: store.selectedScenario.duration))
     }
 
-    func testDefaultWindowIsEightSecondsUntilItReachesTheEnd() throws {
+    func testHeadsetDefaultWindowLastsUntilExplicitEnd() throws {
         let store = ReplayStore()
         store.seek(to: 5)
-        XCTAssertEqual(try draw(store).hideTime, 13)
+        XCTAssertNil(try draw(store).hideTime)
         store.seek(to: store.selectedScenario.duration - 8)
         XCTAssertNil(try draw(store).hideTime)
     }
@@ -45,6 +45,7 @@ final class PlaybackAnnotationTimingTests: XCTestCase {
         let store = ReplayStore()
         store.seek(to: 8)
         let mark = try draw(store)
+        XCTAssertTrue(store.setCoachMarkDuration(id: mark.id, duration: 8))
         let before = store.marks
         XCTAssertFalse(store.retimeCoachMark(id: mark.id, to: store.selectedScenario.duration - 1))
         XCTAssertEqual(store.marks, before)

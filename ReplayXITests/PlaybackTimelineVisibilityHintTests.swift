@@ -4,40 +4,28 @@ import XCTest
 
 @MainActor
 final class PlaybackTimelineVisibilityHintTests: XCTestCase {
-    private let hint = "Marks may be hidden. Select one here to show it."
+    private let hint = "Select a mark to edit. Fine timeline editing is on Mac coach."
 
-    func testHintUsesTheCachedMarkCountOnlyInsideTimeline() throws {
+    func testListShowsVisibilityAndRoutesFineEditingToMac() throws {
         let source = try editorSource()
         let strip = try XCTUnwrap(source.components(separatedBy: "struct SpatialAnnotationTracks: View").last)
-        XCTAssertEqual(source.components(separatedBy: hint).count - 1, 1)
-        XCTAssertTrue(strip.contains("if store.selectedScenario.kind == .realWorldReplay,"))
-        XCTAssertTrue(strip.contains("marks.count > 1"))
-        XCTAssertTrue(strip.contains("Text(\"\(hint)\")"))
-        XCTAssertFalse(strip.contains("visibleAnnotationIDs"))
-        XCTAssertFalse(strip.contains("isVisible(at:"))
-        XCTAssertFalse(strip.contains("PlaybackSceneRenderBudget"))
-        XCTAssertTrue(strip.contains("SpatialAnnotationTimeline(mark: mark, showsTitle: true)"))
-        let host = try immersiveSource()
-        XCTAssertTrue(host.contains("SpatialAnnotationTracks(marks: orderedMarks"))
-        XCTAssertFalse(host.contains("private var annotationEventRow:"))
-        XCTAssertFalse(host.contains("private func eventPageButton("))
+        XCTAssertTrue(strip.contains(hint))
+        XCTAssertTrue(strip.contains("Visible now"))
+        XCTAssertTrue(strip.contains("Hidden now"))
+        XCTAssertTrue(strip.contains("mark.isVisible(at: store.playhead)"))
+        XCTAssertFalse(strip.contains("SpatialAnnotationTimeline("))
+        XCTAssertTrue(try immersiveSource().contains("SpatialAnnotationTracks(marks: orderedMarks"))
     }
 
-    func testHintGrowsVerticallyAboveTheLazyTrackList() throws {
-        let source = try immersiveSource()
+    func testListKeepsLargeTargetsAndThreeVisibleRows() throws {
         let editor = try editorSource()
-        let strip = try slice(editor, after: "if store.selectedScenario.kind == .realWorldReplay,",
-                              before: "if marks.isEmpty")
-        XCTAssertTrue(strip.contains(".font(.caption)"))
-        XCTAssertTrue(strip.contains(".fixedSize(horizontal: false, vertical: true)"))
-        XCTAssertFalse(strip.contains("lineLimit"))
-        XCTAssertFalse(strip.contains("minimumScaleFactor"))
-        XCTAssertFalse(strip.contains("height:"))
-        XCTAssertTrue(editor.contains("LazyVStack(spacing: 4)"))
+        XCTAssertTrue(editor.contains("LazyVStack(spacing: 10)"))
         XCTAssertTrue(editor.contains("ForEach(marks)"))
-        XCTAssertTrue(editor.contains(".frame(height: min(CGFloat(marks.count) * 88, 264))"))
+        XCTAssertTrue(editor.contains(".frame(minHeight: 80)"))
+        XCTAssertTrue(editor.contains(".frame(height: min(CGFloat(marks.count) * 94, 282))"))
+        let source = try immersiveSource()
         let attachment = try slice(source, after: "Attachment(id: \"coach-console\")",
-                                   before: "if store.selectedScenario.kind != .shapeLab")
+            before: "if store.selectedScenario.kind != .shapeLab")
         XCTAssertTrue(attachment.contains(".frame(width: controlDeckLayout.attachmentWidth)"))
         XCTAssertFalse(attachment.contains("height:"))
     }

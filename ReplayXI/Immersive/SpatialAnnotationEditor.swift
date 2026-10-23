@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The selected tool owns its timeline. Secondary edits expand in place.
+/// Live headset editing. Fine timing and pose management belong on Mac.
 struct SpatialAnnotationEditor: View {
     @Environment(ReplayStore.self) private var store
     let mark: CoachMark
@@ -8,152 +8,73 @@ struct SpatialAnnotationEditor: View {
     let onAdjust: () -> Void
     let onActions: () -> Void
     let onClose: () -> Void
-    @State private var linking: CoachMarkElevationTarget?
 
     private var editable: Bool {
         store.localRole == .coach && !store.selectedScenario.coachMarks.contains(where: { $0.id == mark.id })
     }
-    private var currentKey: CoachMarkKeyframe? {
-        mark.keyframes?.first { abs($0.time - store.playhead) < CoachMark.keyframeTimeTolerance }
-    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            header
-            SpatialAnnotationTimeline(mark: mark)
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 12) {
+                Label(mark.label, systemImage: mark.kind.systemImage).font(.headline)
+                Spacer()
+                action("All marks", "list.bullet", onTimeline)
+                action("Close", "xmark", onClose)
+            }
+            if editable {
+                Text("Edits are saved at \(store.playhead.formatted(.number.precision(.fractionLength(2))))s. Use Mac coach for fine timing.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+                if mark.kind.requiresTwoPitchPoints {
+                    Text(mark.kind == .arc
+                        ? "Drag an end onto a player to follow them. Drag away to release. Drag the cyan point to bend the curve in 3D."
+                        : "Drag an end onto a player to follow them. Drag it away to release.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 12) { edits }
+                    VStack(alignment: .leading, spacing: 12) { edits }
+                }
+            } else {
+                Text("Match overlay · use More to make an editable copy.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+                if store.localRole == .coach { action("More", "ellipsis", onActions) }
+            }
             HStack {
-                Text(String(format: "%.2f", mark.revealTime))
+                Label("Starts \(time(mark.revealTime))", systemImage: "play.fill")
                 Spacer()
-                if mark.hasKeyframes {
-                    keyStep(-1)
-                    Label("\(mark.keyframes?.count ?? 0)", systemImage: "diamond.fill")
-                        .foregroundStyle(ReplayTheme.cyan)
-                    keyStep(1)
-                } else if mark.followsPlayerTracks {
-                    Image(systemName: "link").foregroundStyle(ReplayTheme.cyan)
-                }
-                Spacer()
-                Text(mark.hideTime.map { String(format: "%.2f", $0) } ?? "End")
-            }
-            .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-            .padding(.horizontal, 22)
-            if let linking { playerLinks(linking) }
+                Text(mark.hideTime.map { "Ends \(time($0))" } ?? "Visible until replay ends")
+            }.font(.subheadline.monospacedDigit()).foregroundStyle(.secondary)
         }
-        .padding(12)
-        .background(ReplayTheme.orange.opacity(0.06), in: RoundedRectangle(cornerRadius: 17))
-        .onChange(of: mark.id) { _, _ in linking = nil }
-    }
-
-    private func keyStep(_ direction: Int) -> some View {
-        let times = (mark.keyframes ?? []).map(\.time)
-        let time = direction < 0
-            ? times.last { $0 < store.playhead - CoachMark.keyframeTimeTolerance }
-            : times.first { $0 > store.playhead + CoachMark.keyframeTimeTolerance }
-        return Button {
-            if let time { store.seek(to: time, broadcast: false) }
-        } label: {
-            Image(systemName: direction < 0 ? "chevron.left" : "chevron.right")
-                .frame(width: 44, height: 44)
-        }
-        .buttonStyle(.plain)
-        .disabled(time == nil || !store.canChangePlaybackView)
-        .help(direction < 0 ? "Previous position key" : "Next position key")
-        .accessibilityLabel(direction < 0 ? "Previous position key" : "Next position key")
-    }
-
-    private var header: some View {
-        HStack(spacing: 8) {
-            action("list.bullet.rectangle", "All annotation tracks", onTimeline)
-            Label(mark.label, systemImage: mark.kind.systemImage)
-                .font(.subheadline.weight(.semibold)).lineLimit(1)
-            Spacer(minLength: 0)
-            if editable, mark.kind.requiresTwoPitchPoints {
-                action("diamond", "Save position at this time") {
-                    _ = store.captureCoachMarkKeyframe(id: mark.id)
-                }
-                .disabled(mark.followsPlayerTracks || !mark.canRecordPose(at: store.playhead))
-                action("minus.circle", "Delete position at this time") {
-                    if let key = currentKey { _ = store.removeCoachMarkKeyframe(id: mark.id, at: key.time) }
-                }
-                .disabled(currentKey == nil)
-                endpointButton(.start)
-                endpointButton(.end)
-                action("slider.horizontal.3", "Adjust shape and height", onAdjust)
-            }
-            if store.localRole == .coach {
-                action("ellipsis", "Annotation actions", onActions)
-            }
-            action("xmark", "Close annotation", onClose)
-        }
+        .padding(18)
+        .background(ReplayTheme.orange.opacity(0.06), in: RoundedRectangle(cornerRadius: 20))
         .disabled(!store.canChangePlaybackView)
     }
 
-    private func endpointButton(_ endpoint: CoachMarkElevationTarget) -> some View {
-        let start = endpoint == .start
-        let anchor = start ? mark.startTrackAnchor : mark.endTrackAnchor
-        let player = anchor.flatMap { store.selectedScenario.player(id: $0.playerID) }
-        return Button {
-            linking = linking == endpoint ? nil : endpoint
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: start ? "circle.lefthalf.filled" : "circle.righthalf.filled")
-                if let player { Text("\(player.shirtNumber)").font(.caption.monospacedDigit()) }
-            }
-            .frame(minWidth: 44, minHeight: 44)
+    @ViewBuilder private var edits: some View {
+        action("Start here", "play.fill") { _ = store.startCoachMarkHere(id: mark.id) }
+            .spatialHelp("Show this mark from the current replay time")
+        action("End here", "stop.fill") { _ = store.endCoachMarkHere(id: mark.id) }
+            .disabled(store.playhead <= mark.revealTime)
+            .spatialHelp("Hide from this time; keep earlier playback")
+        if mark.kind.requiresTwoPitchPoints {
+            action("Shape & height", "move.3d", onAdjust)
+                .spatialHelp("Move endpoints or bend the curve left, right, up and down")
         }
-        .buttonStyle(.bordered)
-        .tint(anchor == nil ? .white.opacity(0.10) : ReplayTheme.cyan)
-        .foregroundStyle(anchor == nil ? Color.white : Color.black)
-        .help("\(start ? "Origin" : "End") · \(player.map { "#\($0.shirtNumber)" } ?? "fixed to pitch")")
-        .accessibilityLabel("Link \(start ? "origin" : "end") to a player")
-        .accessibilityValue(player.map { "#\($0.shirtNumber) \($0.displayName)" } ?? "Pitch fixed")
+        action("More", "ellipsis", onActions)
+            .spatialHelp("Copy this pose or delete the mark everywhere")
     }
 
-    @ViewBuilder
-    private func playerLinks(_ endpoint: CoachMarkElevationTarget) -> some View {
-        if mark.hasKeyframes {
-            HStack {
-                Text("Saved poses keep their motion.").font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                Button("Freeze here") { _ = store.freezeCoachMarkKeyframes(id: mark.id) }
-                    .help("Freeze the current pose before linking. Undo restores the keys.")
-            }
-        } else {
-            ScrollView(.horizontal) {
-                HStack(spacing: 6) {
-                    Button {
-                        _ = store.setCoachMarkEndpointTracking(id: mark.id, endpoint: endpoint, playerID: nil)
-                        linking = nil
-                    } label: {
-                        Image(systemName: "pin.fill").frame(width: 44, height: 44)
-                    }
-                    .help("Keep this endpoint fixed to the pitch")
-                    .accessibilityLabel("Pitch fixed")
-                    ForEach(store.selectedScenario.players) { player in
-                        Button {
-                            _ = store.setCoachMarkEndpointTracking(id: mark.id, endpoint: endpoint,
-                                                                  playerID: player.id)
-                            linking = nil
-                        } label: {
-                            Text("#\(player.shirtNumber)")
-                                .font(.subheadline.monospacedDigit().weight(.semibold))
-                                .frame(minWidth: 48, minHeight: 44)
-                        }
-                        .tint(player.team == .home ? ReplayTheme.cyan : ReplayTheme.orange)
-                        .help("\(player.displayName) · \(player.positionCode)")
-                        .accessibilityLabel("Link to #\(player.shirtNumber), \(player.displayName)")
-                    }
-                }
-                .buttonStyle(.bordered)
-            }
-        }
-    }
-
-    private func action(_ icon: String, _ help: String, _ action: @escaping () -> Void) -> some View {
+    private func action(_ title: String, _ icon: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: icon).frame(width: 60, height: 60)
-        }
-        .buttonStyle(.bordered).help(help).accessibilityLabel(help)
+            Label(title, systemImage: icon).font(.headline)
+                .frame(minHeight: PlaybackControlDeckPresentation.minimumSpatialHitTarget)
+                .padding(.horizontal, 8)
+        }.buttonStyle(.bordered)
+    }
+
+    private func time(_ value: TimeInterval) -> String {
+        value.formatted(.number.precision(.fractionLength(2))) + "s"
     }
 }
 
@@ -164,37 +85,39 @@ struct SpatialAnnotationTracks: View {
     let onClose: () -> Void
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Image(systemName: "list.bullet.rectangle").foregroundStyle(ReplayTheme.cyan)
-                Text("Annotations").font(.subheadline.weight(.semibold))
+                Label("Annotations", systemImage: "pencil.tip").font(.headline)
                 Spacer()
-                Text(String(format: "0 — %.2fs", store.selectedScenario.duration))
-                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                Button(action: onClose) { Image(systemName: "xmark").frame(width: 44, height: 44) }
-                    .buttonStyle(.bordered).help("Close timeline").accessibilityLabel("Close timeline")
-                    .disabled(!store.canChangePlaybackView)
+                Button(action: onClose) {
+                    Label("Close", systemImage: "xmark").frame(minHeight: 80)
+                }.buttonStyle(.bordered)
             }
-            if store.selectedScenario.kind == .realWorldReplay, marks.count > 1 {
-                Text("Marks may be hidden. Select one here to show it.")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            Text("Select a mark to edit. Fine timeline editing is on Mac coach.")
+                .font(.subheadline).foregroundStyle(.secondary)
             if marks.isEmpty {
-                Image(systemName: "pencil.and.outline").foregroundStyle(.secondary).frame(height: 48)
-                    .accessibilityLabel("Draw a mark to add a track")
+                Label("Use the pen to add a mark.", systemImage: "pencil.tip")
+                    .foregroundStyle(.secondary).frame(height: 80)
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 4) {
+                    LazyVStack(spacing: 10) {
                         ForEach(marks) { mark in
-                            SpatialAnnotationTimeline(mark: mark, showsTitle: true) { onSelect(mark) }
+                            Button { onSelect(mark) } label: {
+                                HStack {
+                                    Label(mark.label, systemImage: mark.kind.systemImage).font(.headline)
+                                    Spacer()
+                                    Text(mark.isVisible(at: store.playhead) ? "Visible now" : "Hidden now")
+                                        .font(.subheadline).foregroundStyle(.secondary)
+                                    Image(systemName: "chevron.right")
+                                }.padding(.horizontal, 14).frame(minHeight: 80)
+                            }.buttonStyle(.bordered)
                         }
                     }
-                }
-                .frame(height: min(CGFloat(marks.count) * 88, 264))
+                }.frame(height: min(CGFloat(marks.count) * 94, 282))
             }
         }
-        .padding(12)
-        .background(ReplayTheme.cyan.opacity(0.06), in: RoundedRectangle(cornerRadius: 17))
+        .padding(18)
+        .background(ReplayTheme.cyan.opacity(0.06), in: RoundedRectangle(cornerRadius: 20))
+        .disabled(!store.canChangePlaybackView)
     }
 }

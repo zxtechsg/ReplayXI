@@ -1,0 +1,119 @@
+Replay XI 185 — spatial controls, live edits and discovery — 24 Oct 2026
+
+Implemented
+- Larger, separate, expanded View panel with Player POV / Tactical / Touchline
+  text. Larger playback deck, 80-point minimum primary targets, full-width
+  scrubber, replay-time label and a labelled pen control.
+- Floating text tips use visionOS compositor hover effects. Selectable player
+  models, marks, labels and handles share a white gaze highlight with their
+  existing hit targets. Late-loaded LOD meshes join the same highlight group.
+- Independent white capsule grab bars below the two panels. These are
+  app-owned controls, not actual system-window chrome. Dragging closer keeps
+  physical size unchanged.
+- Panels follow headset translation as a body-position proxy. Their heading
+  stays fixed until recenter; turning the head does not rotate the panels.
+- Larger default Tactical and Touchline pitch. Two-hand span changes scale;
+  midpoint movement translates. Separate Size and Distance buttons remain
+  available. Surface-bound pitch placement retains its existing ownership.
+- AVP fine-keyframe/timeline controls removed from the live editing UI. Changes
+  record at replay time. Start here, End here and Delete everywhere are distinct;
+  deletion requires confirmation. New headset marks stay until explicitly ended.
+- Direct endpoint drags bind/unbind nearby players independently and preserve
+  earlier binding states. Mac retains fine timing and pose management.
+- Curve bend supports free XYZ movement, labelled X/Z pad and Raise/Lower Y.
+
+Correctness / compatibility
+- Fixed preview-to-commit drift by recomputing from the original gesture pose.
+  Preview state remains out of saved/shared data; each commit is one undo step.
+- Live endpoint, height, curve and player-link edits seed prior pose history.
+  Bind/unbind is a timed step; offsets interpolate while the player is unchanged.
+- Freeze now freezes displayed geometry and removes tracking as well as keys.
+- End here supports long clips and short live intervals; past visibility remains.
+- Old review keys without binding data stay fixed. They can receive new timed
+  links without rewriting earlier keys. New XYZ, linked-motion and long-window
+  reviews use schema 3; older apps must not flatten or discard these features.
+- Wire protocol 3 requires both apps to update together, with an explicit hint.
+
+Performance / cleanup
+- Removed the superseded AVP key/timing/roster UI paths and duplicate preview
+  writes. Retained the previous paused-scene and Mac geometry-cache fixes.
+- Resolve current bindings only (at most two players), not every historical
+  linked player. Reuse the sampled pose instead of repeating curve/key sampling.
+- Endpoint snap search retains one candidate. Gaze feedback adds no polling,
+  per-frame material changes, geometry or extra collision targets.
+- No new claim of lower minimum hardware, headset FPS, power or memory use.
+
+Mac discovery finding
+- The old default selected Simulator and therefore skipped headset browsing.
+  Both selectors now use one shared headset default with a new preference key.
+- The local Mac test build also logged Bonjour PolicyDenied (-65570). This is
+  local-network privacy denial for that build, not a certificate error. Both
+  Info.plists already declare _replayxi-coach._tcp and local-network usage text.
+- Waiting, permission denial, no-device timeout and stale-browser callbacks now
+  produce useful feedback. A connection timeout preserves the actual reason.
+- The link uses local TCP with a single-use PIN; no TLS certificate pairing.
+  Allow Local Network for both apps, start Mac link on AVP, use the same LAN,
+  Rescan, select the headset and enter its PIN. Guest/AP isolation or VPN routing
+  can still prevent discovery. No privacy settings or certificates were changed.
+- Stable signing identity matters for macOS privacy. User signing/project edits
+  were preserved. The installed adhoc copies and the new test build do not prove
+  what permission a separately signed release has.
+- Apple reference: https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy
+
+Verification
+- Final targeted AVP regression: 386 passed, zero failures/skips. Covers live
+  binding history, legacy keys, XYZ, save schema, long windows, gesture ownership,
+  body-follow math, size/distance independence, hover groups and text layout.
+- Final Mac suite: 52 passed, zero failures/skips, no exclusions.
+- Native visionOS and Mac Release builds passed, unsigned.
+- Native UI captures inspected: labelled view panel, playback/scrubber,
+  XYZ editor, selected mark editor and three-row mark list. These prove layout,
+  not eye-gaze behavior. UIKit snapshots disable compositor-only tooltip phases.
+- Seven native RealityRenderer tests passed. The enlarged pitch uses a wider
+  fixed audit camera; this does not alter the user's camera or prove AVP comfort.
+- Broader AVP regression: 1,876 passed, zero failures, 2 skipped, in 589.8s.
+  This excludes the 16 independently reproduced baseline failures and the
+  near-capacity persistence benchmark; it is not an unfiltered green suite.
+- git diff --check passed. Existing project/plist/signing edits were not staged.
+
+Baseline / limits
+- An earlier full run was not green. Sixteen animation/asset/pose test failures
+  were reproduced on unchanged HEAD 38e76da, in an isolated source archive.
+  These remain outside this UI/live-edit change; no all-tests-green claim.
+- Broad rerun excludes those 16 confirmed failures and the near-capacity
+  synchronous persistence benchmark (the earlier full run took about 89 min).
+- No physical Vision Pro was available. The named Vision Pro was a Simulator.
+  Real gaze, two-hand ergonomics, body-follow comfort and physical LAN pairing
+  still need device QA. No fabricated on-headset or end-to-end pairing result.
+- A Mac test initially blocked reading source files under Documents. Replaced
+  that test with shared runtime constants; did not grant or bypass permissions.
+- Existing project/signing/plist changes and unrelated files remain excluded.
+
+Confirmed pre-existing test failures (unchanged HEAD comparison)
+ReplayCutRunPhase138Tests/testActualCutReleaseAndProtectedContactNearLowFloorBonesAndRewind()
+ReplaySlowRunIntegration151Tests/testActualFiveDemoSlowRunAdmissionProtectedActorsAndRewind151()
+ReplayArmTransition157Tests/testActualReboundArmNativeStagesAndShrinkingEpsilonNearLow()
+ReplayJointTransition139Tests/testArg10NativeJointStageBaselineContactCoreAndExactRewind()
+ReplayCityHeaderHandoff142Tests/testCityToeSourceSpansAndBootMotion144()
+ReplayShortScenarioPolish170Tests/testCounterattackFullSquadRecoveryContactsGroundingAndRewind()
+ReplayShortScenarioPolish170Tests/testCutbackFullSquadRecoveryContactsGroundingAndRewind()
+ReplayJointTransition139Tests/testFra5NativeJointStageBaselineBothControlsAndExactRewind()
+ReplayShortScenarioPolish170Tests/testHeaderFullSquadRecoveryContactsGroundingAndRewind()
+ReplayHeaderHandoff141Tests/testMeaningfulHeaderAndFullSupportCoreIndependentBaselineReceipts()
+ReplayShortScenarioPolish170Tests/testReboundFullSquadRecoveryContactsGroundingAndRewind()
+ReplayArmTransition157Tests/testRecordedArg10ContactCoresRemainExactAgainstUnsmoothedControlAndRewind()
+ReplayJointTransition139Tests/testShippingSceneOptsInOnlyForTrackDerivedLocomotion()
+ReplayShapeAthletePresentationTests/testSkinnedStationsMatchStandingReferenceAndReturnAfterProblemAndSeek()
+ReplayShortScenarioPolish170Tests/testVolleyFullSquadRecoveryContactsGroundingAndRewind()
+ReplayAthleteOffBallVisualTests/testActualSquadLowSkinsMatchedPOV147()
+
+Evidence (workspace-relative unless absolute)
+.codex-derived/Replay185RegressionVerified.xcresult
+.codex-derived/Replay185SceneVerified.xcresult
+.codex-derived/Coach185Verified.xcresult
+.codex-derived/Replay185VerifiedUI/
+.codex-derived/Replay185DeviceVerified.log
+.codex-derived/Coach185ReleaseVerified.log
+.codex-derived/Replay185BroadVerified.xcresult
+/tmp/replay185-baseline.R7UIsJ/Baseline.xcresult
+/tmp/replay185-baseline.R7UIsJ/OffBall147.xcresult

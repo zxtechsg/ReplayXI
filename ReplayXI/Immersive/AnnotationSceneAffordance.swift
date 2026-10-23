@@ -579,6 +579,7 @@ enum AnnotationSceneAffordance {
 
     private static func makeHandle(name: String, label: String) -> Entity {
         let root = Entity()
+        defer { ReplayHoverAffordance.install(on: root) }
         root.name = name
         root.components.set(InputTargetComponent(allowedInputTypes: .all))
         root.components.set(
@@ -615,6 +616,7 @@ enum AnnotationSceneAffordance {
 
     private static func makeAttachedPlayerSelectionRoot() -> Entity {
         let root = Entity()
+        defer { ReplayHoverAffordance.install(on: root) }
         root.components.set(InputTargetComponent(allowedInputTypes: .all))
         root.components.set(
             CollisionComponent(
@@ -808,6 +810,9 @@ enum AnnotationSceneAffordance {
         }
         if let control = selection.children.first(where: { isControlHandleName($0.name) }) {
             control.name = controlTargetPrefix + mark.id.uuidString
+            restyle(control,
+                core: UnlitMaterial(color: .cyan, applyPostProcessToneMap: false),
+                glow: UnlitMaterial(color: UIColor.cyan.withAlphaComponent(0.28), applyPostProcessToneMap: false))
             setAccessibility(on: control, label: "Third point of arc annotation", value: "Drag in three dimensions")
         }
         if let attached = selection.children.first(where: { isAttachedTargetName($0.name) }) {

@@ -32,7 +32,7 @@ final class CoachMarkPoseCopy156Tests: XCTestCase {
             XCTAssertEqual(copy.startElevation, source.startElevation)
             XCTAssertEqual(copy.endElevation, source.endElevation)
             XCTAssertEqual(copy.revealTime, 5)
-            XCTAssertEqual(copy.hideTime, 13)
+            XCTAssertNil(copy.hideTime)
             assertFixed(copy)
             XCTAssertEqual(store.marks, originals + [copy])
             XCTAssertFalse(store.isPlaying)

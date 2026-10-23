@@ -6,6 +6,19 @@ import XCTest
 /// Native captures of the actual inline editor; no immersive glass or mocked marks.
 @MainActor
 final class ReplaySpatialEditor182VisualTests: XCTestCase {
+    func testLargeViewPanelPlaybackAndXYZEditor185() throws {
+        let store = ReplayStore()
+        store.prepareForLocalExperience()
+        let mark = try addMark(.arc, at: 1, start: .init(x: -8, z: -10),
+                              end: .init(x: 4, z: 8), to: store)
+        try capture(PlaybackViewOverlayHUD(showsPlaybackAnnotations: .constant(true),
+            emphasizesBall: .constant(true), recenterControls: {}, usesSpatialGlass: false)
+            .environment(store), width: 700, name: "view-panel-labelled-185")
+        try capture(playbackTransportForTesting(width: 1360)
+            .environment(store), width: 1400, name: "playback-large-185")
+        try capture(AnnotationArcPointEditor(markID: mark.id, color: ReplayTheme.cyan)
+            .environment(store), width: 1360, name: "arc-xyz-185")
+    }
     func testEndpointAndTimelineSymbolsExist() {
         for name in ["list.bullet.rectangle", "minus.circle", "diamond",
                      "circle.lefthalf.filled", "circle.righthalf.filled", "slider.horizontal.3"] {
@@ -56,6 +69,7 @@ final class ReplaySpatialEditor182VisualTests: XCTestCase {
                                         name: String) throws {
         let view = content
             .environment(\.colorScheme, .dark)
+            .environment(\.hidesSpatialHelpForSnapshot, true)
             .padding(20)
             .frame(width: width, alignment: .topLeading)
             .background(ReplayTheme.navy)

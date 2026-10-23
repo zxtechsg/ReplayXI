@@ -49,7 +49,7 @@ final class PlaybackCompactSpeedTextMetricsTests: XCTestCase {
         for category in categories where !category.isAccessibilityCategory {
             let record = metrics(for: category)
             XCTAssertEqual(record.widthLimit, 74)
-            XCTAssertEqual(record.heightLimit, 60)
+            XCTAssertEqual(record.heightLimit, 80)
             XCTAssertEqual(record.minimumScale, 0.8)
             for rate in record.rates {
                 XCTAssertLessThanOrEqual(rate.minimumWidth, record.widthLimit,
@@ -69,7 +69,7 @@ final class PlaybackCompactSpeedTextMetricsTests: XCTestCase {
         XCTAssertTrue(button.contains(".font(.headline.monospacedDigit().weight(.bold))"))
         XCTAssertFalse(button.contains("Text(\"Speed\")"))
         XCTAssertFalse(button.contains("VStack(spacing: 1)"))
-        XCTAssertTrue(button.contains(".help(\"Playback speed\")"))
+        XCTAssertTrue(button.contains(".spatialHelp(\"Playback speed · "))
         XCTAssertTrue(button.contains(".lineLimit(1)"))
         XCTAssertTrue(button.contains(".minimumScaleFactor(0.8)"))
         XCTAssertTrue(button.contains(".frame(width: primaryControlLayout.speedLabelWidth,"))
@@ -94,7 +94,8 @@ final class PlaybackCompactSpeedTextMetricsTests: XCTestCase {
             + accessible.drawLabelWidth + accessible.toolsLabelWidth
         // Existing Loop 83 allocation: eight style reserves and row gaps,
         // plus the unchanged 230 pt minimum rail. Not rendered button padding.
-        let row = fixedTransport + compactLabels + 8 * 48 + 8 * 8 + 230
+        // The scrubber now has its own full-width row.
+        let row = fixedTransport + compactLabels + 8 * 48 + 8 * 8
         for preset in PlaybackControlDeckPreset.allCases {
             let deck = PlaybackControlDeckLayout.resolve(preset: preset, usesAccessibilityText: true)
             XCTAssertLessThanOrEqual(row, deck.contentWidth - 44)

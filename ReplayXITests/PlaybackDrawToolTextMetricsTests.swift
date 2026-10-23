@@ -13,7 +13,7 @@ final class PlaybackDrawToolTextMetricsTests: XCTestCase {
         .accessibilityExtraExtraLarge, .accessibilityExtraExtraExtraLarge
     ]
     private let tools: [(CoachMarkKind, String)] = [
-        (.run, "RUN"), (.pass, "PASS"), (.arc, "ARC"), (.danger, "PRESS"), (.space, "ZONE"), (.playerLabel, "LABEL")
+        (.run, "Run"), (.pass, "Pass"), (.arc, "Arc"), (.danger, "Press"), (.space, "Zone"), (.playerLabel, "Label")
     ]
 
     func testEveryDrawToolHasFiniteNativeMeasurementsAtEveryTextSize() throws {
@@ -46,8 +46,8 @@ final class PlaybackDrawToolTextMetricsTests: XCTestCase {
 
     func testDefaultTextSizeFitsTheExistingDrawLabels() throws {
         for metric in try metrics(for: .large) {
-            XCTAssertLessThanOrEqual(metric.symbolWidth, 70)
-            XCTAssertLessThanOrEqual(metric.stackHeight, 48)
+            XCTAssertLessThanOrEqual(metric.symbolWidth, 120)
+            XCTAssertLessThanOrEqual(metric.stackHeight, 80)
         }
     }
 
@@ -55,11 +55,11 @@ final class PlaybackDrawToolTextMetricsTests: XCTestCase {
         let layout = PlaybackDrawToolLayout.resolve(usesAccessibilityText: false)
         XCTAssertTrue(layout.usesStackedShelves)
         XCTAssertEqual(PlaybackDrawToolLayout.toolCount, tools.count)
-        XCTAssertEqual(layout.labelWidth, 70)
-        XCTAssertEqual(layout.labelMinimumHeight, 48)
+        XCTAssertEqual(layout.labelWidth, 120)
+        XCTAssertEqual(layout.labelMinimumHeight, 80)
         XCTAssertEqual(layout.instructionMinimumScale, 1)
-        XCTAssertEqual(layout.cancelLabelWidth, 28)
-        XCTAssertEqual(layout.cancelLabelMinimumHeight, 48)
+        XCTAssertEqual(layout.cancelLabelWidth, 80)
+        XCTAssertEqual(layout.cancelLabelMinimumHeight, 80)
         XCTAssertEqual(PlaybackDrawToolLayout.drawingInstructionWidth, 190)
         XCTAssertEqual(PlaybackDrawToolLayout.idleInstructionWidth, 180)
     }
@@ -132,7 +132,8 @@ final class PlaybackDrawToolTextMetricsTests: XCTestCase {
         let source = try immersiveSource()
         let tool = try slice(source, after: "private func annotationToolButton(", before: "private var orderedMarks:")
         XCTAssertFalse(tool.contains("Text(label.uppercased())"))
-        XCTAssertTrue(tool.contains(".font(.title2.weight(.semibold))"))
+        XCTAssertTrue(tool.contains("Label(label, systemImage: kind.systemImage)"))
+        XCTAssertTrue(tool.contains(".font(.headline.weight(.semibold))"))
         XCTAssertTrue(tool.contains(".help(\"\\(label) annotation\")"))
         XCTAssertTrue(tool.contains(".accessibilityLabel(\"\\(label) annotation\")"))
         XCTAssertTrue(tool.contains(".frame(width: drawToolLayout.labelWidth)"))
@@ -142,10 +143,10 @@ final class PlaybackDrawToolTextMetricsTests: XCTestCase {
         for title in ["Run", "Pass", "Arc", "Press", "Zone", "Label"] {
             XCTAssertEqual(shelves.components(separatedBy: "label: \"\(title)\"").count - 1, 1)
         }
-        XCTAssertEqual(shelves.components(separatedBy: "if drawToolLayout.usesStackedShelves").count - 1, 2)
+        XCTAssertEqual(shelves.components(separatedBy: "if drawToolLayout.usesStackedShelves").count - 1, 1)
         XCTAssertEqual(shelves.split(separator: "\n").filter {
             $0.trimmingCharacters(in: .whitespaces) == "annotationToolChoices"
-        }.count, 4)
+        }.count, 3)
         XCTAssertTrue(shelves.contains(".minimumScaleFactor(drawToolLayout.instructionMinimumScale)"))
         XCTAssertTrue(shelves.contains(".frame(maxWidth: .infinity, alignment: .leading)"))
         XCTAssertTrue(shelves.contains("store.cancelDrawing()"))
@@ -166,13 +167,15 @@ final class PlaybackDrawToolTextMetricsTests: XCTestCase {
         let layout = PlaybackDrawToolLayout.resolve(usesAccessibilityText: category.isAccessibilityCategory)
         let traits = UITraitCollection(preferredContentSizeCategory: category)
         let headline = UIFont.systemFont(ofSize: UIFont.preferredFont(
-            forTextStyle: .title2, compatibleWith: traits).pointSize, weight: .semibold)
+            forTextStyle: .headline, compatibleWith: traits).pointSize, weight: .semibold)
         return try tools.map { kind, title in
             let image = try XCTUnwrap(UIImage(systemName: kind.systemImage,
                 withConfiguration: UIImage.SymbolConfiguration(font: headline)))
+            let line = CTLineCreateWithAttributedString(NSAttributedString(
+                string: title, attributes: [.font: headline]) as CFAttributedString)
             return Metric(category: category.rawValue, title: title,
-                symbolWidth: Double(image.size.width),
-                stackHeight: Double(image.size.height),
+                symbolWidth: Double(image.size.width) + CTLineGetTypographicBounds(line, nil, nil, nil) + 8,
+                stackHeight: Double(max(image.size.height, headline.lineHeight)),
                 widthLimit: Double(layout.labelWidth), heightLimit: Double(layout.labelMinimumHeight))
         }
     }

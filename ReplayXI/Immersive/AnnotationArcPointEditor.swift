@@ -27,7 +27,9 @@ struct AnnotationArcPointEditor: View {
     }
 
     private var enabled: Bool {
-        store.pendingAnnotationTimingEditID == nil && (session.map {
+        guard let mark = store.marks.first(where: { $0.id == markID }),
+              mark.canRecordPose(at: store.playhead) else { return false }
+        return store.pendingAnnotationTimingEditID == nil && (session.map {
             store.isCoachMarkCurvePreviewOwner(id: markID, gestureID: $0.token)
         } ?? store.canChangePlaybackView)
     }
@@ -40,15 +42,17 @@ struct AnnotationArcPointEditor: View {
                 : AnyLayout(HStackLayout(spacing: 16))
             layout {
                 VStack(alignment: .leading, spacing: 8) {
-                    Label("Third point", systemImage: "move.3d").font(.headline).foregroundStyle(color)
-                    Text("Pinch CURVE and move in 3D").font(.caption).foregroundStyle(.secondary)
-                    Text("X \(metres(point.x)) · Z \(metres(point.z))").font(.caption.monospacedDigit())
+                    Label("Curve bend", systemImage: "move.3d").font(.headline).foregroundStyle(color)
+                    Text("Drag the cyan handle freely in 3D. This pad moves it across the pitch.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                    Text("Across X \(metres(point.x)) · Along Z \(metres(point.z)) m")
+                        .font(.subheadline.monospacedDigit())
                 }.frame(maxWidth: 240, alignment: .leading)
                 ZStack {
                     RoundedRectangle(cornerRadius: 20).fill(color.opacity(0.1))
                     Image(systemName: "arrow.up.and.down.and.arrow.left.and.right").foregroundStyle(color)
                 }
-                .frame(width: 100, height: 100)
+                .frame(width: 140, height: 140)
                 .contentShape(RoundedRectangle(cornerRadius: 20))
                 .gesture(DragGesture(minimumDistance: 0)
                     .updating($dragging) { _, state, _ in state = true }
@@ -66,11 +70,11 @@ struct AnnotationArcPointEditor: View {
                 .accessibilityAction(named: "Forward") { nudge([0, 0, -0.25]) }
                 .accessibilityAction(named: "Back") { nudge([0, 0, 0.25]) }
                 VStack(spacing: 8) {
-                    Text("Height \(metres(point.y)) m").font(.caption.monospacedDigit())
+                    Text("Height Y · \(metres(point.y)) m").font(.headline.monospacedDigit())
                     HStack {
-                        Button { nudge([0, -0.25, 0]) } label: { Image(systemName: "arrow.down").frame(minWidth: 48, minHeight: 48) }
+                        Button { nudge([0, -0.25, 0]) } label: { Label("Lower", systemImage: "arrow.down").frame(minWidth: 100, minHeight: 80) }
                             .accessibilityLabel("Lower third arc point")
-                        Button { nudge([0, 0.25, 0]) } label: { Image(systemName: "arrow.up").frame(minWidth: 48, minHeight: 48) }
+                        Button { nudge([0, 0.25, 0]) } label: { Label("Raise", systemImage: "arrow.up").frame(minWidth: 100, minHeight: 80) }
                             .accessibilityLabel("Raise third arc point")
                     }.buttonStyle(.bordered).tint(color).disabled(!enabled || session != nil)
                 }

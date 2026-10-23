@@ -5,6 +5,9 @@ import Observation
 @MainActor
 @Observable
 final class ReplayXIMacLink {
+    static let connectionTargetKey = "ReplayXI.coachConnectionTarget.v2"
+    static let defaultConnectionTarget = "headset"
+
     struct Device: Identifiable {
         let id: String
         let name: String
@@ -19,6 +22,7 @@ final class ReplayXIMacLink {
     private(set) var isConnecting = false
     var pin = ""
     private var browser: NWBrowser?
+    private var discoveryHintTask: Task<Void, Never>?
     private var peer: ReplayXIWireConnection?
     private var pairTimeout: Task<Void, Never>?
     private var pairingID: UUID?
@@ -68,6 +72,7 @@ final class ReplayXIMacLink {
     }
 
     func stopDiscovery() {
+        discoveryHintTask?.cancel(); discoveryHintTask = nil
         browser?.cancel()
         browser = nil
         devices = []
@@ -89,18 +94,39 @@ final class ReplayXIMacLink {
                     else { name = "Replay XI" }
                     return Device(id: String(describing: result.endpoint), name: name, endpoint: result.endpoint)
                 }.sorted { $0.name < $1.name }
+                if !self.connected, !self.isConnecting, !self.devices.isEmpty {
+                    self.status = "Headset found · select it and enter its PIN"
+                }
             }
         }
         browser.stateUpdateHandler = { [weak self, weak browser] state in
             Task { @MainActor [weak self, weak browser] in
                 guard let self, let browser, self.browser === browser else { return }
-                if case let .failed(error) = state {
-                    self.status = "Discovery failed: \(error.localizedDescription)"
+                switch state {
+                case .waiting(let error), .failed(let error):
+                    if !self.connected, !self.isConnecting {
+                        self.status = Self.discoveryFailure(error)
+                    }
+                    self.discoveryHintTask?.cancel()
+                default: break
                 }
             }
         }
         browser.start(queue: .main)
         self.browser = browser
+        discoveryHintTask = Task { [weak self, weak browser] in
+            try? await Task.sleep(for: .seconds(8))
+            guard !Task.isCancelled, let self, let browser, self.browser === browser,
+                  self.devices.isEmpty, !self.connected, !self.isConnecting else { return }
+            self.status = "No headset found · start Mac link, check Local Network permission and Wi-Fi, then Rescan"
+        }
+    }
+
+    static func discoveryFailure(_ error: NWError) -> String {
+        if case .dns(-65570) = error {
+            return "Local Network blocked · allow Replay XI Coach in System Settings → Privacy & Security → Local Network, then Rescan"
+        }
+        return "Discovery unavailable: \(error.localizedDescription) · check Wi-Fi and Local Network permission, then Rescan"
     }
 
     func retryDiscovery() {
@@ -158,8 +184,15 @@ final class ReplayXIMacLink {
             self.lastAction = "Connection failed: \(detail)"
             self.status = self.lastAction
         }
+        peer.onWaiting = { [weak self, weak peer] detail in
+            guard let self, self.peer === peer else { return }
+            self.lastAction = detail
+            self.status = detail
+        }
         peer.onReady = { [weak self, weak peer] in
             guard let self, self.peer === peer else { return }
+            self.lastAction = ""
+            self.status = "Connected to device · checking PIN…"
             peer?.send(.init(type: "pair", id: requestID, pin: requestedPIN))
         }
         peer.start()
@@ -168,9 +201,11 @@ final class ReplayXIMacLink {
             try? await Task.sleep(for: timeout)
             guard !Task.isCancelled, let self, let peer,
                   self.peer === peer, !self.connected else { return }
-            self.lastAction = self.pairingAccepted
-                ? "Paired, but no replay arrived. Restart Mac link and try again."
-                : "Pairing timed out. Check Start Mac link and the PIN."
+            if self.lastAction.isEmpty {
+                self.lastAction = self.pairingAccepted
+                    ? "Paired, but no replay arrived. Restart Mac link and try again."
+                    : "Pairing timed out. Check Start Mac link and the PIN."
+            }
             peer.close()
         }
     }

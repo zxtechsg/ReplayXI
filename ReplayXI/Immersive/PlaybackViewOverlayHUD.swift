@@ -12,6 +12,8 @@ struct PlaybackViewOverlayHUD: View {
     @Binding var emphasizesBall: Bool
     let recenterControls: () -> Void
     let resetWorldPlacement: () -> Void
+    let resizePitch: (Float) -> Void
+    let movePitch: (Float) -> Void
     var surfaceControls: ReplaySurfacePlacementControls? = nil
     let canPlacePitch: Bool
     private let usesSpatialGlass: Bool
@@ -20,14 +22,18 @@ struct PlaybackViewOverlayHUD: View {
 
     init(showsPlaybackAnnotations: Binding<Bool>, emphasizesBall: Binding<Bool>,
          recenterControls: @escaping () -> Void, resetWorldPlacement: @escaping () -> Void = {},
+         resizePitch: @escaping (Float) -> Void = { _ in },
+         movePitch: @escaping (Float) -> Void = { _ in },
          surfaceControls: ReplaySurfacePlacementControls? = nil,
          canPlacePitch: Bool = true,
-         initialSection: PlaybackViewShelf = .camera, initiallyExpanded: Bool = false,
+         initialSection: PlaybackViewShelf = .camera, initiallyExpanded: Bool = true,
          usesSpatialGlass: Bool = true) {
         self._showsPlaybackAnnotations = showsPlaybackAnnotations
         self._emphasizesBall = emphasizesBall
         self.recenterControls = recenterControls
         self.resetWorldPlacement = resetWorldPlacement
+        self.resizePitch = resizePitch
+        self.movePitch = movePitch
         self.surfaceControls = surfaceControls
         self.canPlacePitch = canPlacePitch
         self.usesSpatialGlass = usesSpatialGlass
@@ -60,10 +66,8 @@ struct PlaybackViewOverlayHUD: View {
                         .foregroundStyle(ReplayTheme.signal)
                         .frame(width: symbolLayout.modeIconWidth,
                             height: PlaybackControlDeckPresentation.minimumSpatialHitTarget)
-                    if store.viewMode == .firstPerson {
-                        Text("POV")
-                            .font(.caption.weight(.bold))
-                    }
+                    Text("View · \(store.viewMode.title)")
+                        .font(.headline.weight(.semibold))
 
                     HStack(spacing: 5) {
                         ForEach(activeOverlayBadges) { badge in
@@ -91,6 +95,7 @@ struct PlaybackViewOverlayHUD: View {
             .accessibilityHint(isExpanded ? "Collapses controls" : "Expands controls")
             .accessibilityAddTraits(isExpanded ? .isSelected : [])
             .help("\(store.viewMode.title) view · \(isExpanded ? "collapse" : "open") view, overlays and room controls")
+            .spatialHelp(isExpanded ? "Collapse view controls" : "Open view controls")
 
             if isExpanded {
                 Rectangle()
@@ -115,22 +120,34 @@ struct PlaybackViewOverlayHUD: View {
                     }
                     if store.viewMode == .tacticalTable || store.viewMode == .touchline {
                         Button(action: resetWorldPlacement) {
-                            Image(systemName: "sportscourt")
+                            Label("Bring pitch here", systemImage: "sportscourt")
                                 .font(.title3.weight(.semibold))
                                 .frame(maxWidth: .infinity, minHeight: 56)
                         }
                         .buttonStyle(.bordered)
                         .disabled(!canPlacePitch || surfaceControls?.hasPlacement == true)
                         .help(pitchPlacementHelp)
+                        .spatialHelp("Place pitch in front of you")
                         .accessibilityLabel("Bring pitch here")
                         .accessibilityHint(pitchPlacementHelp)
+                        HStack(spacing: 10) {
+                            pitchButton("Smaller", "minus.magnifyingglass") { resizePitch(1 / 1.15) }
+                            pitchButton("Bigger", "plus.magnifyingglass") { resizePitch(1.15) }
+                        }
+                        HStack(spacing: 10) {
+                            pitchButton("Closer", "arrow.down") { movePitch(0.3) }
+                            pitchButton("Farther", "arrow.up") { movePitch(-0.3) }
+                        }
+                        Text("Pinch both hands. Spread to enlarge; move together to bring the pitch closer or farther.")
+                            .font(.callout).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
 
                 if section == .space {
                     HStack(spacing: 6) {
                         Button(action: recenterControls) {
-                            Image(systemName: "viewfinder")
+                            Label("Recenter UI", systemImage: "viewfinder")
                                 .font(.title3.weight(.semibold))
                                 .frame(maxWidth: .infinity, minHeight: 60)
                         }
@@ -140,12 +157,12 @@ struct PlaybackViewOverlayHUD: View {
                             isScrubbing: store.hasActiveTimelineScrub,
                             isEditingGeometry: store.hasActiveCoachMarkGeometryPreview
                         ))
-                        .help("Recenter controls. Places the workspace in front of you, then leaves it fixed in the room")
+                        .spatialHelp("Recenter controls in front of you")
                         .accessibilityLabel("Recenter controls")
-                        .accessibilityHint("Places the workspace in front of you, then leaves it fixed in the room")
+                        .accessibilityHint("Follows your position without turning with your head")
                         if store.viewMode == .tacticalTable || store.viewMode == .touchline {
                             Button(action: resetWorldPlacement) {
-                                Image(systemName: "sportscourt")
+                                Label("Bring pitch here", systemImage: "sportscourt")
                                     .font(.title3.weight(.semibold))
                                     .frame(maxWidth: .infinity, minHeight: 60)
                             }
@@ -178,6 +195,16 @@ struct PlaybackViewOverlayHUD: View {
         }
     }
 
+    private func pitchButton(_ title: String, _ icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: icon).font(.headline)
+                .frame(maxWidth: .infinity, minHeight: 80)
+        }.buttonStyle(.bordered)
+            .disabled(!canPlacePitch || surfaceControls?.hasPlacement == true)
+            .spatialHelp(title == "Closer" || title == "Farther"
+                ? "Move pitch without changing its size" : "Change pitch size without moving it")
+    }
+
     @ViewBuilder
     private var overlayChoices: some View {
         overlayChoice(title: "Marks", systemImage: "arrow.up.right",
@@ -206,7 +233,7 @@ struct PlaybackViewOverlayHUD: View {
                         store.setPlaying(false, broadcast: false)
                         environmentModeRawValue = mode.rawValue
                     } label: {
-                        Image(systemName: mode.systemImage)
+                        Label(mode.title, systemImage: mode.systemImage)
                             .font(.title3.weight(.semibold))
                             .frame(maxWidth: .infinity, minHeight: 60)
                             .foregroundStyle(environmentModeRawValue == mode.rawValue ? .black : .white)
@@ -283,7 +310,7 @@ struct PlaybackViewOverlayHUD: View {
         return Button {
             store.setViewMode(mode)
         } label: {
-            Image(systemName: mode.systemImage)
+            Label(mode.title, systemImage: mode.systemImage)
                 .font(.title3.weight(.bold))
                 .frame(
                     maxWidth: .infinity,
@@ -295,6 +322,7 @@ struct PlaybackViewOverlayHUD: View {
         .foregroundStyle(isSelected ? Color.black : Color.white)
         .disabled(!store.canChangePlaybackView)
         .help("\(mode.title) view. \(PlaybackControlDeckPresentation.cameraActionHint(mode, currentMode: store.viewMode))")
+        .spatialHelp("\(mode.title) view")
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(mode.title) view")
         .accessibilityHint(store.canChangePlaybackView
@@ -316,7 +344,7 @@ struct PlaybackViewOverlayHUD: View {
     ) -> some View {
         let resolvedAccessibilityName = accessibilityName ?? title
         return Button(action: action) {
-            Image(systemName: systemImage)
+            Label(title, systemImage: systemImage)
                 .font(.title3.weight(.bold))
                 .frame(
                     maxWidth: .infinity,
@@ -328,6 +356,7 @@ struct PlaybackViewOverlayHUD: View {
         .foregroundStyle(isVisible ? Color.black : Color.white)
         .disabled(!isEnabled || store.hasActiveCoachMarkGeometryPreview || store.hasActiveTimelineScrub)
         .help("\(resolvedAccessibilityName): \(isVisible ? onValue : offValue). Select to turn \(isVisible ? "off" : "on")")
+        .spatialHelp("\(resolvedAccessibilityName) · \(isVisible ? onValue : offValue)")
         .accessibilityLabel(resolvedAccessibilityName)
         .accessibilityValue(isVisible ? onValue : offValue)
         .accessibilityHint("Turns \(resolvedAccessibilityName.lowercased()) \(isVisible ? "off" : "on")")

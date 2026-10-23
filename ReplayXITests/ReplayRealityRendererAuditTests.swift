@@ -155,13 +155,13 @@ final class ReplayRealityRendererAuditTests: XCTestCase {
             viewMode: .touchline, perspectiveID: scenario.defaultPerspectiveID,
             marks: scenario.coachMarks, showsLaneLens: false, isDrawing: false,
             positionalOriginTransform: nil)
-        XCTAssertEqual(match.scale, SIMD3<Float>(repeating: 0.060))
+        XCTAssertEqual(match.scale, SIMD3<Float>(repeating: 0.085))
         XCTAssertEqual(match.position, [0, 0.02, -4.1])
         let pitch = try XCTUnwrap(match.findEntity(named: "pitch"))
         XCTAssertNotNil(pitch.components[ReplayStrategyPitchProvider.Admission.self])
         let fieldSurface = try XCTUnwrap(pitch.findEntity(named: "field-surface"))
-        XCTAssertFalse(fieldSurface.isEnabledInHierarchy,
-                       "Touchline intentionally keeps the room floor visible; only Table/POV show turf")
+        XCTAssertTrue(fieldSurface.isEnabledInHierarchy,
+                      "The tabletop touchline view keeps the scaled pitch surface visible")
         XCTAssertTrue(try XCTUnwrap(pitch.findEntity(named: "pitch-markings-and-goals")).isEnabledInHierarchy)
         let ball = try XCTUnwrap(match.findEntity(named: "ball"))
         XCTAssertTrue(ball.isEnabledInHierarchy)
@@ -191,7 +191,9 @@ final class ReplayRealityRendererAuditTests: XCTestCase {
         XCTAssertEqual(labels.children.filter(\.isEnabledInHierarchy).count, 22)
 
         let camera = PerspectiveCamera()
-        let fieldOfView: Float = 50
+        // The enlarged pitch needs a wider square audit viewport. This is not
+        // the headset's compositor camera or a change to user placement.
+        let fieldOfView: Float = 70
         camera.camera = PerspectiveCameraComponent(near: 0.03, far: 30, fieldOfViewInDegrees: fieldOfView)
         let observer = match.convert(position: [-70, 0, 0], to: nil)
         var cameraPosition = SIMD3<Float>(observer.x, 1.6, observer.z)
@@ -267,8 +269,7 @@ final class ReplayRealityRendererAuditTests: XCTestCase {
             return (foreground, colours.count)
         }
         let touchlinePixels = pixelCounts(frame)
-        // A transparent line-only pitch has no justified turf-area threshold.
-        // Prove instead that the actual timed marks change rendered pixels,
+        // Prove that the actual timed marks change rendered pixels,
         // while preserving every flag and the camera for the positive capture.
         let marksRoot = try XCTUnwrap(match.findEntity(named: "marks-root"))
         let originalMarksEnabled = marksRoot.isEnabled
@@ -339,13 +340,12 @@ final class ReplayRealityRendererAuditTests: XCTestCase {
         try attachJSON(touchlineReport, named: "ReplayXI-RealityRenderer119-TouchlineScene.json")
         try attachPNG(frame, calibration: calibration, named: "ReplayXI-RealityRenderer119-TouchlineScene.png")
 
-        // Separate actual Table presentation proves the admitted turf material.
-        // Do not force a field into Touchline or move its camera for this proof.
+        // Separately capture the actual Table presentation and turf material.
         PitchSceneFactory.update(root: match, scenario: scenario, time: time,
             viewMode: .tacticalTable, perspectiveID: scenario.defaultPerspectiveID,
             marks: scenario.coachMarks, showsLaneLens: false, isDrawing: false,
             positionalOriginTransform: nil)
-        XCTAssertEqual(match.scale, SIMD3<Float>(repeating: 0.0255))
+        XCTAssertEqual(match.scale, SIMD3<Float>(repeating: 0.040))
         XCTAssertTrue(fieldSurface.isEnabledInHierarchy)
         cameraPosition = [0, 1.6, 0]
         cameraTarget = match.position

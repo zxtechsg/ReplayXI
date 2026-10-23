@@ -232,6 +232,18 @@ struct ReplayWorldPlacement: Equatable {
 
     var isActive: Bool { baseline != nil }
 
+    mutating func resize(by factor: Float) {
+        guard !isActive, factor.isFinite, factor > 0 else { return }
+        scale = min(max(scale * factor, 0.30), 3)
+    }
+
+    mutating func move(by delta: SIMD3<Float>, minimumOffsetY: Float = -0.6) {
+        guard !isActive, Self.finite(delta) else { return }
+        offset = [min(max(offset.x + delta.x, -1.5), 1.5),
+                  min(max(offset.y + delta.y, minimumOffsetY), 0.6),
+                  min(max(offset.z + delta.z, -2), 2)]
+    }
+
     mutating func update(left: SIMD3<Float>?, right: SIMD3<Float>?, allowed: Bool,
                          minimumOffsetY: Float = -0.6) {
         guard allowed, let left, let right, Self.finite(left), Self.finite(right) else {

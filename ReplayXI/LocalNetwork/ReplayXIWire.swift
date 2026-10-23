@@ -14,7 +14,7 @@ enum ReplayXIWire {
     static let maximumCommandBytes = 8 * 1024
     static let maximumStateBytes = 16 * 1024 * 1024
     static let compressionThreshold = 128 * 1024
-    static let protocolVersion = 2
+    static let protocolVersion = 3
     static let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
@@ -244,7 +244,7 @@ enum ReplayXIWireError: Error, Equatable {
         switch self {
         case .oversized: "Replay XI message exceeds 4 MB limit"
         case .invalid: "Invalid Replay XI message"
-        case .version: "Replay XI versions differ"
+        case .version: "Replay XI versions differ · update both the headset and Mac apps"
         }
     }
 }
@@ -295,6 +295,7 @@ final class ReplayXIWireConnection {
     var onReady: (() -> Void)?
     var onProtocolError: ((String) -> Void)?
     var onTransportError: ((String) -> Void)?
+    var onWaiting: ((String) -> Void)?
     private var parser: ReplayXIWireParser
     private var closed = false
     private var closingAfterFlush = false
@@ -312,6 +313,12 @@ final class ReplayXIWireConnection {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 if case .ready = state { self.onReady?() }
+                if case let .waiting(error) = state {
+                    let detail = self.connection.currentPath?.unsatisfiedReason == .localNetworkDenied
+                        ? "Local Network blocked · allow Replay XI Coach in Privacy & Security → Local Network"
+                        : "Connection waiting: \(error.localizedDescription) · check Wi-Fi and Local Network permission"
+                    self.onWaiting?(detail)
+                }
                 if case let .failed(error) = state {
                     self.onTransportError?(error.localizedDescription)
                     self.close()

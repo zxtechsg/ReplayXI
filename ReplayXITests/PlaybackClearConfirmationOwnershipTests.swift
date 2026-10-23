@@ -7,7 +7,7 @@ final class PlaybackClearConfirmationOwnershipTests: XCTestCase {
         let source = try immersiveSource()
         let entry = try slice(source,
             after: "private var annotationEditShelf: some View",
-            before: "private func annotationDurationShelf")
+            before: "private func annotationActionsShelf")
         let confirmation = try clearConfirmation(source)
         let gate = ".disabled(clearableCoachAnnotationCount == 0 || !store.canChangePlaybackView)"
         XCTAssertTrue(entry.contains(gate), "The entry already rejects an owned gesture")

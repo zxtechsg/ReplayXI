@@ -5,7 +5,7 @@ import XCTest
 
 @MainActor
 final class CoachMarkTrackBindingTests: XCTestCase {
-    func testRunDrawnFromPlayerFollowsThatTrackWithoutChangingItsShape() throws {
+    func testRunOriginTracksPlayerWhileDestinationStaysWhereItWasDrawn() throws {
         let store = ReplayStore()
         store.selectScenario(id: "eleven-eyes", broadcast: false)
         store.seek(to: 8, broadcast: false)
@@ -18,7 +18,7 @@ final class CoachMarkTrackBindingTests: XCTestCase {
         let mark = try XCTUnwrap(store.registerPitchTap(authoredEnd))
 
         XCTAssertEqual(mark.startTrackAnchor?.playerID, player.id)
-        XCTAssertEqual(mark.endTrackAnchor?.playerID, player.id)
+        XCTAssertNil(mark.endTrackAnchor)
         XCTAssertEqual(
             mark.resolvedGeometry(in: store.selectedScenario, at: 8),
             ResolvedCoachMarkGeometry(start: authoredStart, end: authoredEnd)
@@ -29,8 +29,7 @@ final class CoachMarkTrackBindingTests: XCTestCase {
         let later = mark.resolvedGeometry(in: store.selectedScenario, at: laterTime)
         XCTAssertEqual(later.start.x, laterPlayerPosition.x, accuracy: 0.000_1)
         XCTAssertEqual(later.start.z, laterPlayerPosition.z, accuracy: 0.000_1)
-        XCTAssertEqual(later.end.x - later.start.x, 4, accuracy: 0.000_1)
-        XCTAssertEqual(later.end.z - later.start.z, 7, accuracy: 0.000_1)
+        XCTAssertEqual(later.end, authoredEnd)
     }
 
     func testPassEndpointsCanFollowDifferentPlayers() throws {

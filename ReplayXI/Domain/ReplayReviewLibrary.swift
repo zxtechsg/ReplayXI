@@ -84,7 +84,7 @@ final class ReplayReviewLibrary {
     private struct NamedReviewEncodingCache {
         let reviews: [SavedReplayReview]
         let range: Range<Int>
-        let hasFramedCurves: Bool
+        let requiredVersion: Int
     }
 
     private struct EncodedDocument {
@@ -234,8 +234,8 @@ final class ReplayReviewLibrary {
         struct Header: Decodable { let version: Int }
         let decoder = JSONDecoder()
         let header = try decoder.decode(Header.self, from: data)
-        guard header.version <= 2 else { throw LibraryError.newerVersion }
-        guard header.version == 1 || header.version == 2 else { throw LibraryError.invalidDocument }
+        guard header.version <= 3 else { throw LibraryError.newerVersion }
+        guard (1...3).contains(header.version) else { throw LibraryError.invalidDocument }
         let document = try decoder.decode(Document.self, from: data)
         let reviews = document.savedReviews + (document.autosavedReview.map { [$0] } ?? [])
         guard document.savedReviews.count <= Self.maximumSavedReviews,
@@ -325,14 +325,14 @@ final class ReplayReviewLibrary {
 
     private func persist(reviews: [SavedReplayReview], autosave: SavedReplayReview?, message: String) -> Bool {
         guard !isReadOnly else { return false }
-        let namedHasFrames: Bool
+        let namedVersion: Int
         if let cache = namedReviewEncodingCache, cache.reviews == reviews {
-            namedHasFrames = cache.hasFramedCurves
+            namedVersion = cache.requiredVersion
         } else {
-            namedHasFrames = reviews.contains { Self.hasFramedCurves(in: $0.state) }
+            namedVersion = reviews.reduce(1) { max($0, Self.requiredVersion(for: $1.state)) }
         }
-        let needsVersion2 = namedHasFrames || autosave.map { Self.hasFramedCurves(in: $0.state) } == true
-        let document = Document(version: needsVersion2 ? 2 : 1, savedReviews: reviews, autosavedReview: autosave)
+        let version = max(namedVersion, autosave.map { Self.requiredVersion(for: $0.state) } ?? 1)
+        let document = Document(version: version, savedReviews: reviews, autosavedReview: autosave)
         do {
             let encoded = try encode(document)
             let data = encoded.data
@@ -353,7 +353,7 @@ final class ReplayReviewLibrary {
             }
             adopt(document, data: data)
             namedReviewEncodingCache = NamedReviewEncodingCache(
-                reviews: document.savedReviews, range: encoded.namedReviewRange, hasFramedCurves: namedHasFrames
+                reviews: document.savedReviews, range: encoded.namedReviewRange, requiredVersion: namedVersion
             )
             status = message
             return true
@@ -363,13 +363,27 @@ final class ReplayReviewLibrary {
         }
     }
 
-    private static func hasFramedCurves(in state: SavedReplayState) -> Bool {
-        state.marksByScenario.values.contains { marks in
-            marks.contains { mark in
-                mark.curve?.bendBearingDegrees != nil
-                    || mark.keyframes?.contains { $0.curve?.bendBearingDegrees != nil } == true
+    private static func requiredVersion(for state: SavedReplayState) -> Int {
+        var version = 1
+        for marks in state.marksByScenario.values {
+            for mark in marks {
+                // Older readers ignore these fields or reject the longer
+                // window. Protect the document instead of silently flattening
+                // XYZ curves or dropping timed player links on downgrade.
+                if mark.curve?.controlOffset != nil
+                    || mark.hideTime.map({ $0 - mark.revealTime > CoachMarkTimingPolicy.maximumDuration }) == true {
+                    return 3
+                }
+                if mark.curve?.bendBearingDegrees != nil { version = 2 }
+                for frame in mark.keyframes ?? [] {
+                    if frame.curve?.controlOffset != nil || frame.tracking?.start != nil || frame.tracking?.end != nil {
+                        return 3
+                    }
+                    if frame.curve?.bendBearingDegrees != nil { version = 2 }
+                }
             }
         }
+        return version
     }
 
     private func encode(_ document: Document) throws -> EncodedDocument {

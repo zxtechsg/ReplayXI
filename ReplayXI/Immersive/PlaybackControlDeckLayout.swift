@@ -1,7 +1,7 @@
 import CoreGraphics
 
-/// Comfort presets for the room-anchored Playback console. Offsets are relative
-/// to the captured workspace origin, not the wearer's current head position.
+/// Comfort presets for the position-following console. Distance and physical
+/// size are independent: pulling a panel closer must never shrink it.
 enum PlaybackControlDeckPreset: String, CaseIterable, Hashable, Sendable {
     case near
     case standard
@@ -53,22 +53,22 @@ struct PlaybackControlDeckLayout: Equatable, Sendable {
         let base: PlaybackControlDeckLayout = switch preset {
         case .near:
             PlaybackControlDeckLayout(
-                attachmentWidth: 1_240,
-                uniformScale: 0.98,
+                attachmentWidth: 1_400,
+                uniformScale: 1.15,
                 verticalOffset: -0.44,
                 forwardOffset: -1.00
             )
         case .standard:
             PlaybackControlDeckLayout(
-                attachmentWidth: 1_240,
-                uniformScale: 1,
+                attachmentWidth: 1_400,
+                uniformScale: 1.15,
                 verticalOffset: -0.50,
                 forwardOffset: -1.20
             )
         case .large:
             PlaybackControlDeckLayout(
-                attachmentWidth: 1_340,
-                uniformScale: 1.18,
+                attachmentWidth: 1_500,
+                uniformScale: 1.30,
                 verticalOffset: -0.40,
                 forwardOffset: -1.12
             )
@@ -84,7 +84,7 @@ struct PlaybackControlDeckLayout: Equatable, Sendable {
     }
 }
 
-/// A small room-anchored surface for view and overlay choices.
+/// A separate, position-following surface for view and overlay choices.
 /// Its negative horizontal offset keeps it in the upper-left comfort quadrant
 /// without covering either the replayed player's sightline or the transport.
 struct PlaybackViewHUDLayout: Equatable, Sendable {
@@ -101,37 +101,37 @@ struct PlaybackViewHUDLayout: Equatable, Sendable {
         let base: PlaybackViewHUDLayout = switch preset {
         case .near:
             PlaybackViewHUDLayout(
-                attachmentWidth: 500,
-                horizontalOffset: -0.54,
-                verticalOffset: 0.20,
+                attachmentWidth: 700,
+                horizontalOffset: -0.68,
+                verticalOffset: 0.30,
                 forwardOffset: -1.00,
-                uniformScale: 0.96
+                uniformScale: 1.10
             )
         case .standard:
             PlaybackViewHUDLayout(
-                attachmentWidth: 500,
-                horizontalOffset: -0.64,
-                verticalOffset: 0.22,
+                attachmentWidth: 700,
+                horizontalOffset: -0.76,
+                verticalOffset: 0.32,
                 forwardOffset: -1.18,
-                uniformScale: 1
+                uniformScale: 1.15
             )
         case .large:
             PlaybackViewHUDLayout(
-                attachmentWidth: 540,
-                horizontalOffset: -0.62,
-                verticalOffset: 0.21,
+                attachmentWidth: 760,
+                horizontalOffset: -0.80,
+                verticalOffset: 0.32,
                 forwardOffset: -1.10,
-                uniformScale: 1.10
+                uniformScale: 1.20
             )
         }
 
         guard usesAccessibilityText else { return base }
         return PlaybackViewHUDLayout(
-            attachmentWidth: max(base.attachmentWidth, 600),
+            attachmentWidth: max(base.attachmentWidth + 40, 780),
             horizontalOffset: base.horizontalOffset + 0.04,
             verticalOffset: base.verticalOffset - 0.02,
             forwardOffset: base.forwardOffset + 0.04,
-            uniformScale: min(base.uniformScale * 1.08, 1.20)
+            uniformScale: base.uniformScale * 1.08
         )
     }
 }
@@ -197,8 +197,8 @@ struct PlaybackPrimaryControlLabelLayout: Equatable, Sendable {
             speedLabelWidth: usesAccessibilityText ? 80 : 74,
             playerLabelWidth: usesAccessibilityText ? 168 : 116,
             toolsLabelWidth: usesAccessibilityText ? 88 : 78,
-            drawLabelWidth: 76,
-            compactLabelMinimumHeight: usesAccessibilityText ? 88 : 60,
+            drawLabelWidth: 140,
+            compactLabelMinimumHeight: usesAccessibilityText ? 96 : 80,
             playerMinimumTextScale: usesAccessibilityText ? 1 : 0.82,
             rosterLabelWidth: 72,
             rosterLabelMinimumHeight: usesAccessibilityText ? 72 : 60,

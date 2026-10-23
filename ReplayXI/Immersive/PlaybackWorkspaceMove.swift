@@ -11,6 +11,11 @@ struct PlaybackWorkspaceMove: Equatable {
 
     var isActive: Bool { checkpoint != nil }
 
+    mutating func prepare(at savedOffset: SIMD3<Float>) {
+        guard !isActive, !rejectsCurrentGesture else { return }
+        offset = Self.clamped(savedOffset)
+    }
+
     @discardableResult
     mutating func preview(
         roomID: UUID,
@@ -48,9 +53,9 @@ struct PlaybackWorkspaceMove: Equatable {
         rejectsCurrentGesture = rejectCurrentGesture
     }
 
-    mutating func reset() {
+    mutating func reset(to offset: SIMD3<Float> = .zero) {
         cancel()
-        offset = .zero
+        self.offset = Self.clamped(offset)
     }
 
     /// Bounds keep the workspace reachable, including the nearest preset.

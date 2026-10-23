@@ -11,6 +11,7 @@ final class AnnotationTimingDraftSessionTests: XCTestCase {
         store.beginDrawing(.arc)
         _ = store.registerPitchTap(.init(x: 0, z: 0))
         let created = try XCTUnwrap(store.registerPitchTap(.init(x: 5, z: 5)))
+        XCTAssertTrue(store.setCoachMarkDuration(id: created.id, duration: 8))
         XCTAssertTrue(store.captureCoachMarkKeyframe(id: created.id))
         store.seek(to: 6)
         XCTAssertTrue(store.captureCoachMarkKeyframe(id: created.id))

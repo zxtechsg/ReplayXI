@@ -1386,10 +1386,16 @@ extension CoachMark {
         at time: TimeInterval,
         presentedPlayerPoses: [String: PlayerPose]? = nil
     ) -> ResolvedCoachMarkGeometry {
-        if hasKeyframes {
-            let pose = sampled(at: time)
-            return ResolvedCoachMarkGeometry(start: pose.start, end: pose.end)
-        }
+        sampled(at: time).resolvedSampledGeometry(in: scenario, at: time,
+            presentedPlayerPoses: presentedPlayerPoses)
+    }
+
+    /// Resolve an already sampled pose without repeating keyframe/curve work.
+    func resolvedSampledGeometry(
+        in scenario: ReplayScenario,
+        at time: TimeInterval,
+        presentedPlayerPoses: [String: PlayerPose]? = nil
+    ) -> ResolvedCoachMarkGeometry {
         let sampleTime = time.isFinite
             ? min(max(time, 0), max(scenario.duration, 0))
             : min(max(revealTime, 0), max(scenario.duration, 0))
@@ -1436,6 +1442,10 @@ extension CoachMark {
         if let playerID { result.insert(playerID) }
         if let startTrackAnchor { result.insert(startTrackAnchor.playerID) }
         if let endTrackAnchor { result.insert(endTrackAnchor.playerID) }
+        for frame in keyframes ?? [] {
+            if let anchor = frame.tracking?.start { result.insert(anchor.playerID) }
+            if let anchor = frame.tracking?.end { result.insert(anchor.playerID) }
+        }
         return result
     }
 
@@ -1448,26 +1458,26 @@ extension CoachMark {
         at time: TimeInterval,
         presentedPlayerPoses: [String: PlayerPose]? = nil
     ) -> CoachMark {
-        if hasKeyframes { return sampled(at: time) }
-        let geometry = resolvedGeometry(
+        let pose = sampled(at: time)
+        let geometry = pose.resolvedSampledGeometry(
             in: scenario, at: time, presentedPlayerPoses: presentedPlayerPoses
         )
-        guard geometry.start != start || geometry.end != end else { return self }
+        guard geometry.start != pose.start || geometry.end != pose.end else { return pose }
         return CoachMark(
             id: id,
             kind: kind,
             start: geometry.start,
             end: geometry.end,
-            startElevation: startElevation,
-            endElevation: endElevation,
-            curve: curve,
+            startElevation: pose.startElevation,
+            endElevation: pose.endElevation,
+            curve: pose.curve,
             label: label,
             revealTime: revealTime,
             hideTime: hideTime,
             author: author,
             playerID: playerID,
-            startTrackAnchor: startTrackAnchor,
-            endTrackAnchor: endTrackAnchor
+            startTrackAnchor: pose.startTrackAnchor,
+            endTrackAnchor: pose.endTrackAnchor
         )
     }
 }
