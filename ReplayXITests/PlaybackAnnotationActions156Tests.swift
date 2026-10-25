@@ -177,7 +177,7 @@ final class PlaybackAnnotationActions156Tests: XCTestCase {
             .annotationGeometry(copied.id), selectedID: copied.id), .annotationGeometry(copied.id))
     }
 
-    func testProductionWiringKeepsCopyOffMainBarAndProtectsBeforeOpeningActions() throws {
+    func testProductionWiringKeepsCopyOffMainBarAndGatesLiveActions() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         let source = try String(contentsOf: root.appendingPathComponent(
             "ReplayXI/Immersive/FootballImmersiveView.swift"), encoding: .utf8)
@@ -188,10 +188,12 @@ final class PlaybackAnnotationActions156Tests: XCTestCase {
         let start = try XCTUnwrap(source.range(of: "private func toggleAnnotationActions(id:")?.lowerBound)
         let end = try XCTUnwrap(source.range(of: "private func copyAnnotationPose(id:")?.lowerBound)
         let toggle = source[start..<end]
-        XCTAssertTrue(toggle.contains("timingNavigation.protect(destination)"))
+        XCTAssertTrue(toggle.contains("guard store.canChangePlaybackView, selectedAnnotationID == id"))
+        XCTAssertTrue(toggle.contains("restoreAnnotationRoute(destination)"))
+        XCTAssertFalse(source.contains("timingDraftSession"), "No unused timing draft observers in the live headset deck")
         XCTAssertFalse(toggle.contains("copyCoachMarkPose"))
         let barStart = try XCTUnwrap(source.range(of: "private var matchPlaybackDeck:")?.lowerBound)
-        let barEnd = try XCTUnwrap(source.range(of: "if timingNavigation.request != nil", range: barStart..<source.endIndex)?.lowerBound)
+        let barEnd = try XCTUnwrap(source.range(of: "if isClearAnnotationsPending", range: barStart..<source.endIndex)?.lowerBound)
         XCTAssertFalse(source[barStart..<barEnd].contains("annotationActions"))
         XCTAssertFalse(source[barStart..<barEnd].contains("copyAnnotationPose"))
         let tickStart = try XCTUnwrap(source.range(of: ".onChange(of: store.playhead) { _, playhead in")?.lowerBound)

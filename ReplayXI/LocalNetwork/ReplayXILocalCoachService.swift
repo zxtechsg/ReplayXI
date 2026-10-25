@@ -35,9 +35,16 @@ final class ReplayXILocalCoachService {
     /// Zero lets network tests request an isolated ephemeral loopback port.
     /// There is no launch argument or production override for this value.
     var simulatorPortOverrideForTesting: UInt16?
+    var publisherForTesting: Task<Void, Never>? { publishTask }
+    var peerForTesting: ReplayXIWireConnection? { peer }
     #endif
 
     init(store: ReplayStore) { self.store = store }
+
+    isolated deinit {
+        publishTask?.cancel()
+        listener?.cancel()
+    }
 
     static func listenerParameters(simulatorOnly: Bool,
                                    port: UInt16 = ReplayXIWire.simulatorPort) -> NWParameters {
@@ -114,7 +121,8 @@ final class ReplayXILocalCoachService {
             publishTask = Task { [weak self] in
                 while !Task.isCancelled {
                     try? await Task.sleep(for: .milliseconds(350))
-                    self?.publishStateIfChanged()
+                    guard !Task.isCancelled, let self else { return }
+                    self.publishStateIfChanged()
                 }
             }
         } catch {
@@ -168,7 +176,10 @@ final class ReplayXILocalCoachService {
                 ? "Pairing locked · choose New PIN"
                 : "Mac disconnected · PIN \(self.pin)"
         }
-        peer.onMessage = { [weak self] message in self?.receive(message, from: peer) }
+        peer.onMessage = { [weak self, weak peer] message in
+            guard let self, let peer else { return }
+            self.receive(message, from: peer)
+        }
         peer.start()
         Task { [weak self, weak peer] in
             try? await Task.sleep(for: .seconds(15))
@@ -383,8 +394,12 @@ final class ReplayXILocalCoachService {
         guard isPaired, let peer else { return }
         let snapshot = store.makeSnapshot()
         let scenario = store.selectedScenario
+        // All wire players and linked marks must share one presented squad
+        // sample, including impact holds and ideal-shape overrides.
+        let presentation = store.playerPresentation
+        let poses = presentation.poses(in: scenario, at: store.playhead)
         let players = scenario.players.map { player in
-            let pose = store.presentedPlayerPose(for: player, at: store.playhead)
+            let pose = poses[player.id] ?? presentation.pose(for: player, at: store.playhead)
             let p = pose.position
             return ReplayXIWirePlayer(id: player.id, name: player.displayName,
                 number: player.shirtNumber, team: player.team.rawValue,
@@ -413,7 +428,8 @@ final class ReplayXILocalCoachService {
                 encoded = bytes
             }
             let posed = mark.sampled(at: store.playhead)
-            let presented = store.presentedCoachMarkGeometry(mark, at: store.playhead)
+            let presented = posed.resolvedSampledGeometry(in: scenario,
+                at: store.playhead, presentedPlayerPoses: poses)
             let displayedPose = CoachMark(id: posed.id, kind: posed.kind,
                 start: presented.start, end: presented.end,
                 startElevation: posed.startElevation, endElevation: posed.endElevation,

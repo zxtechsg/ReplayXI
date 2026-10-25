@@ -308,10 +308,12 @@ final class ReplayXIWireConnection {
         parser = ReplayXIWireParser(receivesStates: receivesStates)
     }
 
+    deinit { connection.cancel() }
+
     func start() {
         connection.stateUpdateHandler = { [weak self] state in
             Task { @MainActor [weak self] in
-                guard let self else { return }
+                guard let self, !self.closed else { return }
                 if case .ready = state { self.onReady?() }
                 if case let .waiting(error) = state {
                     let detail = self.connection.currentPath?.unsatisfiedReason == .localNetworkDenied

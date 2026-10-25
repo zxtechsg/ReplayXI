@@ -371,6 +371,12 @@ enum PitchSceneFactory {
         // from RealityKit's child collection on every presentation frame.
         private var playerEntitiesByID: [String: WeakEntityReference] = [:]
         private var playerPoseSamplesByID: [String: PlayerPose] = [:]
+        private struct PlayerPoseInput: Equatable {
+            let time: TimeInterval
+            let players: [PlayerTrack]
+            let presentation: ReplayPlayerPresentation
+        }
+        private var playerPoseInput: PlayerPoseInput?
         private(set) var playerEntityIndexBuildCount = 0
         private(set) var playerPoseRefreshCount = 0
         // A match root owns at most 22 far rigs and four transient near rigs.
@@ -499,11 +505,17 @@ enum PitchSceneFactory {
             at time: TimeInterval,
             presentation: ReplayPlayerPresentation
         ) -> [String: PlayerPose] {
+            // Head/panel movement and annotation edits can redraw a paused
+            // match. Reuse only an exact input match, never time/player IDs
+            // alone: ideal targets, impacts and replacement tracks matter.
+            let input = PlayerPoseInput(time: time, players: players, presentation: presentation)
+            if time.isFinite, playerPoseInput == input { return playerPoseSamplesByID }
             playerPoseSamplesByID.removeAll(keepingCapacity: true)
             for player in players {
                 playerPoseSamplesByID[player.id] = presentation.pose(for: player, at: time)
             }
             playerPoseRefreshCount &+= 1
+            playerPoseInput = time.isFinite ? input : nil
             return playerPoseSamplesByID
         }
 

@@ -191,7 +191,8 @@ final class ReplaySceneWorkDiagnosticsTests: XCTestCase {
             XCTAssertEqual(loadsAfter, loadsBefore)
             XCTAssertEqual(playerAfter.indexedPlayers, scenario.players.count)
             XCTAssertEqual(playerAfter.entityIndexBuilds, playerBefore.entityIndexBuilds)
-            XCTAssertEqual(playerAfter.poseRefreshes - playerBefore.poseRefreshes, times.count)
+            let changedTimes = zip([start] + times, times).filter { $0 != $1 }.count
+            XCTAssertEqual(playerAfter.poseRefreshes - playerBefore.poseRefreshes, changedTimes)
             XCTAssertEqual(inferredActionSamples, 0, "Explicit native contacts must not infer legacy touches again")
             XCTAssertEqual(annotation.syncCalls, times.count)
             XCTAssertEqual(annotation.markTreeBuilds, 0)
@@ -464,7 +465,8 @@ final class ReplaySceneWorkDiagnosticsTests: XCTestCase {
         let visibilityWrites = PitchSceneFactory.proceduralVisibilityModelWrites
         XCTAssertEqual(playerIndexAfter.indexedPlayers, 22)
         XCTAssertEqual(playerIndexAfter.entityIndexBuilds, playerIndexBefore.entityIndexBuilds)
-        XCTAssertEqual(playerIndexAfter.poseRefreshes - playerIndexBefore.poseRefreshes, times.count)
+        let changedTimes = zip([firstTime] + times, times).filter { $0 != $1 }.count
+        XCTAssertEqual(playerIndexAfter.poseRefreshes - playerIndexBefore.poseRefreshes, changedTimes)
         XCTAssertEqual(bindingsAfter.hierarchyResolutions, bindingsBefore.hierarchyResolutions)
         XCTAssertLessThanOrEqual(bindingsAfter.cachedBindings, 24)
         XCTAssertEqual(actionSamples, times.count * scenario.players.count)

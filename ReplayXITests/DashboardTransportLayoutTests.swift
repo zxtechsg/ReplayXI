@@ -13,6 +13,26 @@ final class DashboardTransportLayoutTests: XCTestCase {
         try capture(size: .accessibility5, name: "dashboard-transport-accessibility5")
     }
 
+    func testPairingIconExistsAndSkipButtonsShowSeconds() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let pairing = try String(contentsOf: root.appendingPathComponent(
+            "ReplayXI/LocalNetwork/ReplayXIMacPairingBar.swift"), encoding: .utf8)
+        let images = try NSRegularExpression(pattern: #"Image\(systemName: "([^"]+)"\)"#)
+        let names = images.matches(in: pairing, range: NSRange(pairing.startIndex..., in: pairing))
+        XCTAssertFalse(names.isEmpty)
+        for match in names {
+            let range = try XCTUnwrap(Range(match.range(at: 1), in: pairing))
+            let name = String(pairing[range])
+            XCTAssertNotNil(UIImage(systemName: name), "Missing pairing icon: \(name)")
+        }
+        let dashboard = try String(contentsOf: root.appendingPathComponent(
+            "ReplayXI/UI/ReplayDashboardView.swift"), encoding: .utf8)
+        XCTAssertTrue(dashboard.contains("Text(\"−1s\")"))
+        XCTAssertTrue(dashboard.contains("Text(\"+1s\")"))
+        XCTAssertFalse(dashboard.contains("gobackward.1"))
+        XCTAssertFalse(dashboard.contains("goforward.1"))
+    }
+
     func testTransportUsesMatchTeamAndShortPositionWithFullAccessibleIdentity() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         let source = try String(contentsOf: root.appendingPathComponent("ReplayXI/UI/ReplayDashboardView.swift"), encoding: .utf8)

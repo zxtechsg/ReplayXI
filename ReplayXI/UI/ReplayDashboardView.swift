@@ -848,7 +848,8 @@ struct DashboardTransport: View {
                 Button {
                     store.skip(by: -1)
                 } label: {
-                    Image(systemName: "gobackward.1")
+                    Text("−1s")
+                        .monospacedDigit()
                         .frame(minWidth: 36, minHeight: 36)
                 }
                 .buttonStyle(.bordered)
@@ -872,7 +873,8 @@ struct DashboardTransport: View {
                 Button {
                     store.skip(by: 1)
                 } label: {
-                    Image(systemName: "goforward.1")
+                    Text("+1s")
+                        .monospacedDigit()
                         .frame(minWidth: 36, minHeight: 36)
                 }
                 .buttonStyle(.bordered)

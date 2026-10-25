@@ -5,7 +5,7 @@ struct ReplayXIMacPairingBar: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: "laptopcomputer.and.visionpro")
+            Image(systemName: "laptopcomputer")
             Text("Mac coach")
                 .fontWeight(.semibold)
             Text(service.isPaired ? "Connected" : service.isRunning ? "PIN \(service.pin)" : "Off")

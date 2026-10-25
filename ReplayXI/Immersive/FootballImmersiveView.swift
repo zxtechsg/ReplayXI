@@ -2304,8 +2304,6 @@ private struct ImmersiveControlDeck: View {
     @GestureState private var timelineScrubIsActive = false
     @State private var isClearAnnotationsPending = false
     @State private var inlinePanel: PlaybackInlinePanel?
-    @State private var timingDraftSession = AnnotationTimingDraftSession()
-    @State private var timingNavigation = AnnotationTimingNavigationGate()
     // A rejected action leaves playback running. Keep its source-scoped
     // feedback through transport ticks so it remains readable.
     @State private var annotationActionsFeedback: AnnotationActionsFeedback?
@@ -2375,7 +2373,7 @@ private struct ImmersiveControlDeck: View {
             ) {
             case .physicalStations:
             HStack(spacing: 12) {
-                Button(action: requestTimingSafeExit) {
+                Button(action: exit) {
                     Image(systemName: "xmark")
                 }
                 .buttonStyle(.bordered)
@@ -2412,7 +2410,6 @@ private struct ImmersiveControlDeck: View {
         }
         .onDisappear {
             cancelInterruptedTimelineScrub()
-            releaseTimingDraftOwnership()
         }
         .onChange(of: annotationEntry?.pending, initial: true) { _, _ in consumeAnnotationEntry() }
         .onChange(of: store.roomPresentation) { _, _ in consumeAnnotationEntry() }
@@ -2476,7 +2473,7 @@ private struct ImmersiveControlDeck: View {
                     .padding(.horizontal, 8)
             }
             HStack(spacing: 8) {
-                Button(action: requestTimingSafeExit) {
+                Button(action: exit) {
                     Image(systemName: "xmark")
                         .frame(
                             minWidth: PlaybackControlDeckPresentation.minimumSpatialHitTarget,
@@ -2519,9 +2516,7 @@ private struct ImmersiveControlDeck: View {
                 timelineScrubber
             }
 
-            if timingNavigation.request != nil {
-                timingDraftResolutionShelf
-            } else if isClearAnnotationsPending {
+            if isClearAnnotationsPending {
                 clearAnnotationsConfirmationStrip
             } else if showsPlayerGrid {
                 playerPOVGrid
@@ -2564,7 +2559,7 @@ private struct ImmersiveControlDeck: View {
               annotationEntry.consume(roomID: roomPresentationID, scenarioID: store.selectedScenarioID)
         else { return }
         guard store.localRole == .coach, !store.isDrawing,
-              !timingDraftSession.hasUnsavedChanges, !store.hasActiveCoachMarkGeometryPreview else { return }
+              !store.hasActiveCoachMarkGeometryPreview else { return }
         showsPlaybackAnnotations = true
         selectedAnnotationID = nil
         inlinePanel = nil
@@ -2582,20 +2577,6 @@ private struct ImmersiveControlDeck: View {
         @ViewBuilder content: () -> Content
     ) -> some View {
         content()
-        .onChange(of: timingDraftSession.hasUnsavedChanges, initial: true) { _, isDirty in
-            timingNavigation.observeDraft(isDirty: isDirty, route: timingEditorRoute)
-        }
-        .onChange(of: timingDeckRoute) { _, attempted in
-            guard timingDraftSession.hasUnsavedChanges else { return }
-            timingNavigation.observeDraft(isDirty: true, route: timingEditorRoute)
-            if let retained = timingNavigation.protect(attempted) { restoreTimingRoute(retained) }
-        }
-        .onChange(of: store.annotationTimingNavigationAttempt) { _, _ in
-            guard timingDraftSession.hasUnsavedChanges else { return }
-            timingNavigation.observeDraft(isDirty: true, route: timingEditorRoute)
-            timingNavigation.ask(.retryExternalAction)
-            if let retained = timingNavigation.protectedRoute { restoreTimingRoute(retained) }
-        }
         .onChange(of: store.marks.count) { oldCount, newCount in
             guard store.localRole == .coach,
                   inlinePanel != .annotationEdit,
@@ -2604,7 +2585,7 @@ private struct ImmersiveControlDeck: View {
                   let mark = store.marks.last else { return }
             guard !PlaybackAnnotationActionsRoute.keepsSelectedInsertion(
                 insertedID: mark.id, selectedID: selectedAnnotationID, panel: inlinePanel) else { return }
-            // Drawing lands directly in this tool's timeline and handles.
+            // Drawing lands directly in this tool's live editor and handles.
             selectedAnnotationID = mark.id
             inlinePanel = nil
             showsPlaybackAnnotations = true
@@ -2642,9 +2623,6 @@ private struct ImmersiveControlDeck: View {
             reconcileAnnotationPresentationSelection()
         }
         .onChange(of: selectedAnnotationID) { _, selectedID in
-            // The persistent timing session and route guard own this selection
-            // until its draft is applied or explicitly discarded.
-            if timingDraftSession.hasUnsavedChanges { return }
             // Secondary controls belong to the selection that opened them.
             // Never carry a label, duration, geometry, or tracking shelf onto
             // a new mark.
@@ -3410,8 +3388,7 @@ private struct ImmersiveControlDeck: View {
             AnnotationActionsShelf(color: annotationColor(for: mark.kind),
                 isAuthored: !isCoachCreated(mark), showsCopy: mark.kind != .playerLabel,
                 canCopy: store.canCopyCoachMarkPose(id: mark.id),
-                canErase: store.localRole == .coach && isCoachCreated(mark) && store.canChangePlaybackView
-                    && !timingDraftSession.hasUnsavedChanges,
+                canErase: store.localRole == .coach && isCoachCreated(mark) && store.canChangePlaybackView,
                 canClose: store.canChangePlaybackView,
                 feedback: annotationActionsFeedback?.sourceID == mark.id ? annotationActionsFeedback?.message
                     : (store.marks.count >= ReplayStore.maximumSharedCoachMarks
@@ -3425,18 +3402,13 @@ private struct ImmersiveControlDeck: View {
     private func toggleAnnotationActions(id: UUID) {
         guard store.canChangePlaybackView, selectedAnnotationID == id else { return }
         annotationActionsFeedback = nil
-        let destination = PlaybackAnnotationActionsRoute.destination(id: id, from: timingDeckRoute)
-        timingNavigation.observeDraft(isDirty: timingDraftSession.hasUnsavedChanges, route: timingEditorRoute)
-        if let retained = timingNavigation.protect(destination) {
-            restoreTimingRoute(retained)
-        } else {
-            restoreTimingRoute(destination)
-        }
+        let destination = PlaybackAnnotationActionsRoute.destination(id: id, from: annotationDeckRoute)
+        restoreAnnotationRoute(destination)
     }
 
     private func copyAnnotationPose(id: UUID) {
         guard let copied = PlaybackAnnotationActionsRoute.copyPose(id: id, selectedID: selectedAnnotationID,
-            panel: inlinePanel, timingIsDirty: timingDraftSession.hasUnsavedChanges, in: store,
+            panel: inlinePanel, timingIsDirty: false, in: store,
             onFailure: { annotationActionsFeedback = .init(sourceID: id, message: $0) }) else { return }
         annotationActionsFeedback = nil
         selectedAnnotationID = copied.id
@@ -3452,7 +3424,7 @@ private struct ImmersiveControlDeck: View {
 
     private func eraseAnnotationFromActions(id: UUID) {
         guard PlaybackAnnotationActionsRoute.permitsAction(id: id, selectedID: selectedAnnotationID,
-            panel: inlinePanel, timingIsDirty: timingDraftSession.hasUnsavedChanges),
+            panel: inlinePanel, timingIsDirty: false),
             store.removeCoachMark(id: id) else { return }
         selectedAnnotationID = nil
         showsEventStrip = false
@@ -3461,7 +3433,7 @@ private struct ImmersiveControlDeck: View {
     }
 
 
-    private var timingDeckRoute: AnnotationTimingDeckRoute {
+    private var annotationDeckRoute: AnnotationTimingDeckRoute {
         .init(selection: selectedAnnotationID, panel: inlinePanel,
               showsTools: showsToolsShelf, showsPlayers: showsPlayerGrid,
               showsEvents: showsEventStrip, showsDecisions: showsDecisionStrip,
@@ -3469,14 +3441,7 @@ private struct ImmersiveControlDeck: View {
               showsAnnotations: showsPlaybackAnnotations)
     }
 
-    private var timingEditorRoute: AnnotationTimingDeckRoute {
-        guard let id = timingDraftSession.markID else { return timingDeckRoute }
-        return .init(selection: id, panel: .annotationDuration(id), showsTools: false, showsPlayers: false,
-                     showsEvents: false, showsDecisions: false, showsDrawing: false, showsClear: false,
-                     showsAnnotations: true)
-    }
-
-    private func restoreTimingRoute(_ route: AnnotationTimingDeckRoute) {
+    private func restoreAnnotationRoute(_ route: AnnotationTimingDeckRoute) {
         selectedAnnotationID = route.selection
         inlinePanel = route.panel
         showsToolsShelf = route.showsTools
@@ -3487,47 +3452,6 @@ private struct ImmersiveControlDeck: View {
         isClearAnnotationsPending = route.showsClear
         showsPlaybackAnnotations = route.showsAnnotations
     }
-
-    private var timingDraftResolutionShelf: some View {
-        inlineShelf(color: ReplayTheme.orange) {
-            AnnotationTimingDraftResolutionView(
-                canApply: timingDraftSession.canApply(in: store),
-                needsRetry: timingNavigation.request == .retryExternalAction,
-                keepEditing: { timingNavigation.keepEditing() },
-                discard: { resolveTimingDraft(apply: false) },
-                apply: { resolveTimingDraft(apply: true) })
-        }
-    }
-
-    private func requestTimingSafeExit() {
-        guard timingDraftSession.hasUnsavedChanges else { exit(); return }
-        timingNavigation.observeDraft(isDirty: true, route: timingEditorRoute)
-        timingNavigation.ask(.exit)
-        if let retained = timingNavigation.protectedRoute { restoreTimingRoute(retained) }
-    }
-
-    private func resolveTimingDraft(apply: Bool) {
-        if apply {
-            guard timingDraftSession.apply(in: store) else { return }
-        } else {
-            timingDraftSession.discard(in: store)
-        }
-        releaseTimingDraftOwnership()
-        let request = timingNavigation.consume()
-        switch request {
-        case .some(.route(let route)): restoreTimingRoute(route)
-        case .some(.exit): exit()
-        case .some(.retryExternalAction), .none: break
-        }
-    }
-
-    private func releaseTimingDraftOwnership() {
-        timingDraftSession.releaseOwnership()
-        if let id = timingDraftSession.markID {
-            _ = store.setAnnotationTimingDraftPending(id: id, isPending: false)
-        }
-    }
-
 
     private func annotationGeometryShelf(_ mark: CoachMark) -> some View {
         let mark = mark.sampled(at: store.playhead)
@@ -5029,9 +4953,7 @@ private struct ImmersiveControlDeck: View {
                 }
             }
 
-            if timingNavigation.request != nil {
-                timingDraftResolutionShelf
-            } else if isClearAnnotationsPending {
+            if isClearAnnotationsPending {
                 clearAnnotationsConfirmationStrip
             } else if let inlinePanel, inlinePanel.isAnnotationPanel {
                 inlinePanelShelf(inlinePanel)
@@ -5051,7 +4973,7 @@ private struct ImmersiveControlDeck: View {
 
     private var shapeFocusStatusDeck: some View {
         HStack(spacing: 12) {
-            Button(action: requestTimingSafeExit) {
+            Button(action: exit) {
                 Image(systemName: "xmark")
             }
             .buttonStyle(.bordered)

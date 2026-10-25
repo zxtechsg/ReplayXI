@@ -183,10 +183,13 @@ final class ReplaySquadSkinCost147Tests: XCTestCase {
         let work = PitchSceneFactory.annotationSceneWork
         let visibilityVisits = PitchSceneFactory.proceduralVisibilityNodeVisits
         let visibilityWrites = PitchSceneFactory.proceduralVisibilityModelWrites
-        let timedUpdates = phases.reduce(0) { $0 + $1.1.count }
+        let sampleTimes = phases.flatMap { $0.1 }
+        let timedUpdates = sampleTimes.count
+        let changedTimes = zip([try XCTUnwrap(forward.first)] + sampleTimes, sampleTimes)
+            .filter { $0 != $1 }.count
         XCTAssertEqual(loadCounts(), loadsBefore)
         XCTAssertEqual(indexAfter.entityIndexBuilds, indexBefore.entityIndexBuilds)
-        XCTAssertEqual(indexAfter.poseRefreshes - indexBefore.poseRefreshes, timedUpdates)
+        XCTAssertEqual(indexAfter.poseRefreshes - indexBefore.poseRefreshes, changedTimes)
         XCTAssertEqual(ReplayAthleteMotion.ballActionSampleCount, 0)
         XCTAssertEqual(work.markTreeBuilds, 0)
 

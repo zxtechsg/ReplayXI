@@ -259,6 +259,93 @@ final class ReplayPresentedPlayerAlignmentTests: XCTestCase {
         XCTAssertTrue(store.saveReview(named: "Ideal shape boundary"))
     }
 
+    func testUnlinkingImpactBoundaryRunLaterPreservesSaveableHistory() throws {
+        let store = impactStore()
+        let player = try XCTUnwrap(store.selectedScenario.player(id: "red-lb"))
+        let origin = store.presentedPlayerPose(for: player, at: 15).position
+        store.beginDrawing(.run)
+        _ = store.registerPitchTap(origin)
+        let created = try XCTUnwrap(store.registerPitchTap(.init(x: 33.5, z: 29)))
+        XCTAssertTrue(store.setCoachMarkTracking(id: created.id, playerID: player.id))
+        let original = try XCTUnwrap(store.marks.first { $0.id == created.id })
+        let earlier = store.presentedCoachMarkGeometry(original, at: 15)
+
+        store.seek(to: 15.5, broadcast: false)
+        XCTAssertTrue(store.setCoachMarkTracking(id: created.id, playerID: nil))
+        let unlinked = try XCTUnwrap(store.marks.first { $0.id == created.id })
+        XCTAssertFalse(unlinked.followsPlayerTracks)
+        XCTAssertTrue(unlinked.sampled(at: 15).followsPlayerTracks)
+        XCTAssertEqual(store.presentedCoachMarkGeometry(unlinked, at: 15), earlier)
+        XCTAssertTrue(ReplayStore.isValidReviewMark(unlinked, for: store.selectedScenario))
+        XCTAssertTrue(store.flushReviewAutosave())
+        XCTAssertTrue(store.saveReview(named: "Unlinked impact boundary"))
+        try assertDiskRoundTrip(store, mark: unlinked)
+    }
+
+    func testUnlinkingIdealBoundaryRunLaterPreservesSaveableHistory() throws {
+        let store = ReplayStore()
+        store.prepareForLocalExperience()
+        store.selectScenario(id: "triangle-lock", broadcast: false)
+        store.setShapeFocusStage(.ideal, broadcast: false)
+        let revealTime = store.playhead
+        let player = try XCTUnwrap(store.selectedScenario.player(id: "navy-rb"))
+        let origin = store.presentedPlayerPose(for: player, at: revealTime).position
+        store.beginDrawing(.run)
+        _ = store.registerPitchTap(origin)
+        let created = try XCTUnwrap(store.registerPitchTap(.init(x: origin.x, z: 52)))
+        XCTAssertTrue(store.setCoachMarkTracking(id: created.id, playerID: player.id))
+        store.seek(to: revealTime + 0.5, broadcast: false)
+        XCTAssertTrue(store.setCoachMarkTracking(id: created.id, playerID: nil))
+        let unlinked = try XCTUnwrap(store.marks.first { $0.id == created.id })
+        XCTAssertFalse(unlinked.followsPlayerTracks)
+        XCTAssertTrue(unlinked.sampled(at: revealTime).followsPlayerTracks)
+        XCTAssertTrue(ReplayStore.isValidReviewMark(unlinked, for: store.selectedScenario))
+        XCTAssertTrue(store.flushReviewAutosave())
+        XCTAssertTrue(store.saveReview(named: "Unlinked ideal boundary"))
+        try assertDiskRoundTrip(store, mark: unlinked)
+    }
+
+    func testIdealPlayerLabelValidationKeepsItsAttachedIdentity() throws {
+        let source = try XCTUnwrap(DemoScenarios.scenario(for: .shapeLab))
+        let target = try XCTUnwrap(source.formationTargets.first)
+        let original = try XCTUnwrap(source.player(id: target.playerID))
+        // A raw track outside the pitch must still use the exact authored
+        // ideal target for its label, never a position supplied by the mark.
+        let player = PlayerTrack(id: original.id, displayName: original.displayName,
+            role: original.role, shirtNumber: original.shirtNumber, team: original.team,
+            isGoalkeeper: original.isGoalkeeper,
+            keyframes: [.init(time: 0, position: .init(x: 35, z: 0), facingDegrees: 0)])
+        let scenario = ReplayScenario(id: source.id, kind: source.kind, title: source.title,
+            strapline: source.strapline, matchContext: source.matchContext, objective: source.objective,
+            coachPrompt: source.coachPrompt, proofPoint: source.proofPoint, duration: source.duration,
+            defaultViewMode: source.defaultViewMode, defaultPerspectiveID: player.id,
+            featuredPerspectiveIDs: [player.id], players: [player], ball: source.ball,
+            moments: [], coachMarks: [], formationTargets: source.formationTargets)
+        let label = CoachMark(kind: .playerLabel, start: target.position, end: target.position,
+            label: "Authored target", revealTime: 0, playerID: player.id)
+        XCTAssertGreaterThan(label.resolvedGeometry(in: scenario, at: 0).start.x, ReplayStore.pitchHalfWidth)
+        XCTAssertTrue(ReplayStore.isValidReviewMark(label, for: scenario))
+    }
+
+    private func assertDiskRoundTrip(_ store: ReplayStore, mark: CoachMark) throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let url = folder.appendingPathComponent("reviews.json")
+        let library = ReplayReviewLibrary(scenarios: store.scenarios, fileURL: url)
+        XCTAssertTrue(library.save(named: "Unlinked history", state: store.makeSavedReviewState()))
+        let reopened = ReplayReviewLibrary(scenarios: store.scenarios, fileURL: url)
+        let saved = try XCTUnwrap(reopened.savedReviews.first)
+        XCTAssertEqual(saved.state.marks.first { $0.id == mark.id }, mark)
+        let restored = ReplayStore(scenarios: store.scenarios, reviewLibrary: reopened)
+        XCTAssertTrue(restored.restoreSavedReview(id: saved.id))
+        let restoredMark = try XCTUnwrap(restored.marks.first { $0.id == mark.id })
+        XCTAssertEqual(restoredMark, mark)
+        for time in [mark.revealTime, store.playhead] {
+            XCTAssertEqual(restored.presentedCoachMarkGeometry(restoredMark, at: time),
+                           store.presentedCoachMarkGeometry(mark, at: time))
+        }
+    }
+
     func testAuthoredPresentationNeverAdmitsInvalidIdentityOrUnboundedOffsets() throws {
         let scenario = try focusScenario()
         let player = try XCTUnwrap(scenario.player(id: "red-lb"))

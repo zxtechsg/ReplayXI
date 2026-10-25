@@ -1,0 +1,75 @@
+Replay XI 186 — bug and performance audit — 25 Oct 2026
+
+Fixed
+- Boundary annotations could reject unlinking at a later replay time. Review
+  validation used the latest binding when checking the earlier reveal pose.
+  It now checks the binding sampled at reveal. Impact and ideal-shape cases
+  both failed before the fix and now pass, including disk save/reload.
+- Each accepted Mac-link peer retained itself through its message callback,
+  even after Stop. The callback now captures the peer weakly. A real loopback
+  test checks that the closed peer is released; it failed before the fix.
+- The link publisher could wake forever after its service was released. The
+  service now cancels the task/listener on release, and the loop exits on
+  cancellation or a missing owner. Its release test failed before the fix.
+- Wire connections cancel their transport on release and ignore queued state
+  callbacks after Close.
+- Three dashboard SF Symbol names were missing on the installed visionOS
+  runtime. Mac pairing now uses a supported laptop icon. Skip buttons use
+  visible -1s / +1s text and retain their spoken accessibility labels.
+
+Less work / cleanup
+- Paused scene updates reuse the squad pose dictionary only for identical time,
+  tracks and presentation context. Changes to impact/ideal positions, tracks
+  with reused player IDs, time and rewind invalidate it correctly.
+- Five native demo scenes x three views x 60 held updates: 900 repeated squad
+  refreshes before, zero after. Render/body/panel updates still run as needed.
+- Mac state publication samples one presented squad for both player data and
+  every linked mark. Each mark's keyframe geometry is sampled once, not twice.
+  Loopback tests compare XYZ curves and binding history before/after unlinking
+  and on rewind in both impact and ideal-shape views.
+- Review validation bounds key counts before sampling. Anchor checks no longer
+  build a flattened temporary array or inspect inactive historical players
+  when resolving the reveal pose.
+- Removed 78 net lines of obsolete headset timing-draft navigation, including
+  three unused observers. Live edits, store transaction gates and the Mac's
+  fine timing tools remain intact.
+
+Verification
+- Broad AVP run: 1,883 passed, two skipped, zero failures, with the exclusions
+  below. Final focused rerun after the last edits: 53 passed, zero failures.
+  Includes save/reload, pose-cache invalidation, live edits and network release.
+- Mac non-visual suite: 48 passed, zero failures. Includes real loopback TCP,
+  PIN pairing, scrub coalescing, edit revision gates and wire payload limits.
+- Native dashboard captures inspected at normal and largest accessibility
+  text: both skip labels are visible and unclipped. Symbol existence test
+  passed; the final run has no missing-symbol warnings.
+- Native visionOS and Mac Release builds passed, unsigned.
+- git diff --check passed.
+
+Limits
+- No physical Vision Pro was tested. The timing receipts are DEBUG Simulator
+  update measurements, not headset FPS, battery use, RAM or minimum hardware.
+- Sixteen pre-existing animation/asset/test failures remain. Their IDs and
+  unchanged-baseline evidence are in REPLAY_XI_REVIEW_185.txt. The broad run
+  excludes these and the very slow near-capacity persistence benchmark.
+- The initial Mac run stalled during a snapshot test. A process sample showed
+  XCTest waiting in diagnostic symbolication/file open. The Mac was locked,
+  so its UI could not be inspected. That run was interrupted; the four Mac
+  visual tests were omitted from the successful non-visual rerun. No permission
+  changes, automatic unlocks or all-tests-green claim.
+- Existing signing/project/plist edits and unrelated files were preserved.
+
+Evidence (workspace-relative)
+.codex-derived/Replay186Before.xcresult
+.codex-derived/Replay186Focused.xcresult
+.codex-derived/Replay186LinkBefore.xcresult
+.codex-derived/Replay186LinkVerified.xcresult
+.codex-derived/Replay186BeforeMetrics/
+.codex-derived/Replay186AfterMetrics/
+.codex-derived/Replay186Broad.xcresult
+.codex-derived/Replay186FinalVerified.xcresult
+.codex-derived/Replay186DashboardImages/
+.codex-derived/Coach186Logic.xcresult
+.codex-derived/Coach186Hang.sample
+.codex-derived/Replay186DeviceVerified.log
+.codex-derived/Coach186Release.log

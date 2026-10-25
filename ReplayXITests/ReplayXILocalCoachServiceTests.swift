@@ -4,6 +4,52 @@ import Network
 
 @MainActor
 final class ReplayXILocalCoachServiceTests: XCTestCase {
+    func testReleasingServiceStopsPublisherWithoutExplicitStop() async throws {
+        #if targetEnvironment(simulator)
+        var service: ReplayXILocalCoachService? = ReplayXILocalCoachService(store: ReplayStore())
+        service?.simulatorPortOverrideForTesting = 0
+        service?.start()
+        _ = try await readyPort(try XCTUnwrap(service))
+        let publisher = try XCTUnwrap(service?.publisherForTesting)
+        defer { publisher.cancel(); service?.stop() }
+        let stopped = expectation(description: "Released service stops its publisher")
+        Task { await publisher.value; stopped.fulfill() }
+        weak var releasedService = service
+        service = nil
+        XCTAssertNil(releasedService)
+        await fulfillment(of: [stopped], timeout: 2)
+        #endif
+    }
+
+    func testStoppingPairedServiceReleasesItsPeer() async throws {
+        #if targetEnvironment(simulator)
+        let service = ReplayXILocalCoachService(store: ReplayStore())
+        service.simulatorPortOverrideForTesting = 0
+        service.start()
+        defer { service.stop() }
+        let port = try await readyPort(service)
+        let pin = service.pin
+        let paired = expectation(description: "PIN accepted")
+        let client = ReplayXIWireConnection(NWConnection(host: .ipv4(.loopback), port: port, using: .tcp))
+        defer { client.close() }
+        client.onReady = { [weak client] in client?.send(.init(type: "pair", pin: pin)) }
+        client.onMessage = { message in
+            if message.type == "result", message.ok == true { paired.fulfill() }
+        }
+        client.start()
+        await fulfillment(of: [paired], timeout: 5)
+        weak var releasedPeer = service.peerForTesting
+        XCTAssertNotNil(releasedPeer)
+        // Also break the old self-cycle on a failed regression run.
+        defer { releasedPeer?.onMessage = nil }
+        service.stop()
+        for _ in 0..<50 where releasedPeer != nil {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertNil(releasedPeer, "A closed peer must not retain its own message callback")
+        #endif
+    }
+
     func testStoppingLinkRotatesPairingPINAndIgnoresQueuedListenerStatus() async {
         let service = ReplayXILocalCoachService(store: ReplayStore())
         service.simulatorPortOverrideForTesting = 0
@@ -14,6 +60,86 @@ final class ReplayXILocalCoachServiceTests: XCTestCase {
         XCTAssertNotEqual(service.pin, first)
         XCTAssertFalse(service.isRunning)
         XCTAssertEqual(service.status, "Mac link off")
+    }
+
+    func testWirePlayersAndLinkedXYZArcMatchPresentedImpactAndIdealHistory() async throws {
+        #if targetEnvironment(simulator)
+        for ideal in [false, true] {
+            let store = ReplayStore()
+            store.prepareForLocalExperience()
+            store.selectScenario(id: ideal ? "triangle-lock" : "everyone-with-seven", broadcast: false)
+            if ideal {
+                store.setShapeFocusStage(.ideal, broadcast: false)
+            } else {
+                store.setViewMode(.tacticalTable, broadcast: false)
+                store.seek(to: 15, broadcast: false)
+            }
+            let player = try XCTUnwrap(store.selectedScenario.player(id: ideal ? "navy-rb" : "red-lb"))
+            let time = store.playhead
+            let origin = store.presentedPlayerPose(for: player, at: time).position
+            let mark = try XCTUnwrap(store.addMacCoachMark(kind: .arc,
+                start: origin, end: .init(x: origin.x - 3, z: origin.z - 4),
+                startElevation: 1, endElevation: 2, label: "Linked XYZ"))
+            XCTAssertTrue(store.setCoachMarkTracking(id: mark.id, playerID: player.id))
+            XCTAssertTrue(store.updateCoachMarkArcControlPoint(id: mark.id,
+                point: [origin.x - 2, 5, origin.z - 1]))
+
+            let service = ReplayXILocalCoachService(store: store)
+            service.simulatorPortOverrideForTesting = 0
+            service.start()
+            defer { service.stop() }
+            let port = try await readyPort(service)
+            let pin = service.pin
+            let client = ReplayXIWireConnection(NWConnection(host: .ipv4(.loopback), port: port, using: .tcp))
+            defer { client.close() }
+            var received: ReplayXIWireState?
+            client.onReady = { [weak client] in client?.send(.init(type: "pair", pin: pin)) }
+            client.onMessage = { message in
+                if let state = message.state { received = state }
+            }
+            client.start()
+
+            for offset in [0.0, 0.5, 0.0] {
+                store.seek(to: time + offset, broadcast: false)
+                if offset > 0 { XCTAssertTrue(store.setCoachMarkTracking(id: mark.id, playerID: nil)) }
+                let current = try XCTUnwrap(store.marks.first { $0.id == mark.id })
+                let encoded = try ReplayXIWire.encoder.encode(current)
+                for _ in 0..<100 {
+                    if received?.playhead == store.playhead,
+                       received?.marks.first(where: { $0.id == mark.id })?.encodedMark == encoded { break }
+                    try await Task.sleep(for: .milliseconds(20))
+                }
+                let state = try XCTUnwrap(received)
+                XCTAssertEqual(state.playhead, store.playhead)
+                XCTAssertEqual(state.players.count, store.selectedScenario.players.count)
+                for wirePlayer in state.players {
+                    let track = try XCTUnwrap(store.selectedScenario.player(id: wirePlayer.id))
+                    let expected = store.presentedPlayerPose(for: track, at: state.playhead)
+                    XCTAssertEqual(wirePlayer.position.x, expected.position.x)
+                    XCTAssertEqual(wirePlayer.position.z, expected.position.z)
+                    XCTAssertEqual(wirePlayer.facingDegrees, expected.facingDegrees)
+                }
+                let wireMark = try XCTUnwrap(state.marks.first { $0.id == mark.id })
+                XCTAssertEqual(wireMark.encodedMark, encoded)
+                let pose = current.resolvingTrackGeometry(in: store.selectedScenario, at: state.playhead,
+                    presentedPlayerPoses: store.playerPresentation.poses(in: store.selectedScenario, at: state.playhead))
+                XCTAssertEqual(wireMark.start.x, pose.start.x)
+                XCTAssertEqual(wireMark.start.z, pose.start.z)
+                XCTAssertEqual(wireMark.end.x, pose.end.x)
+                XCTAssertEqual(wireMark.end.z, pose.end.z)
+                XCTAssertEqual(wireMark.startHeight, pose.resolvedStartElevation)
+                XCTAssertEqual(wireMark.endHeight, pose.resolvedEndElevation)
+                let control = pose.resolvedCurve.controlPoint(for: pose)
+                let wireControl = try XCTUnwrap(wireMark.controlPoint)
+                XCTAssertEqual(wireControl.x, control.x, accuracy: 0.0001)
+                XCTAssertEqual(wireControl.y, control.y, accuracy: 0.0001)
+                XCTAssertEqual(wireControl.z, control.z, accuracy: 0.0001)
+                let sampled = current.sampled(at: state.playhead)
+                XCTAssertEqual(wireMark.startPlayerID, sampled.startTrackAnchor?.playerID)
+                XCTAssertEqual(wireMark.endPlayerID, sampled.endTrackAnchor?.playerID)
+            }
+        }
+        #endif
     }
 
     func testSimulatorListenerBindsOnlyLoopbackWithoutBonjour() throws {

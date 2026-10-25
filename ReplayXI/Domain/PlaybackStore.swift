@@ -3363,27 +3363,34 @@ final class ReplayStore {
         // two handles on different planes from that ring.
         let hasCoherentZoneElevation = mark.kind != .space
             || abs(mark.resolvedStartElevation - mark.resolvedEndElevation) <= 0.001
-        let anchors = [mark.startTrackAnchor, mark.endTrackAnchor].compactMap { $0 }
-            + (mark.keyframes ?? []).flatMap { [$0.tracking?.start, $0.tracking?.end].compactMap { $0 } }
-        let hasValidTrackAnchors = anchors.allSatisfy { anchor in
-            scenario.player(id: anchor.playerID) != nil
+        // Bound the key collection before sampling or inspecting its anchors.
+        guard mark.hasValidKeyframes(duration: scenario.duration) else { return false }
+        func acceptsAnchor(_ anchor: CoachMarkTrackAnchor?) -> Bool {
+            guard let anchor else { return true }
+            return scenario.player(id: anchor.playerID) != nil
                 && anchor.offset.x.isFinite
                 && anchor.offset.z.isFinite
                 && abs(anchor.offset.x) <= Self.pitchHalfWidth * 2
                 && abs(anchor.offset.z) <= Self.pitchHalfLength * 2
         }
+        let hasValidTrackAnchors = acceptsAnchor(mark.startTrackAnchor)
+            && acceptsAnchor(mark.endTrackAnchor)
+            && (mark.keyframes ?? []).allSatisfy {
+                acceptsAnchor($0.tracking?.start) && acceptsAnchor($0.tracking?.end)
+            }
         let hasValidRevealTime = mark.revealTime.isFinite
             && mark.revealTime >= 0
             && mark.revealTime <= scenario.duration
         let hasFiniteBoundedResolvedGeometry: Bool
         if hasValidRevealTime {
-            let resolved = mark.resolvedGeometry(
+            let revealPose = mark.sampled(at: mark.revealTime)
+            let resolved = revealPose.resolvedSampledGeometry(
                 in: scenario,
                 at: mark.revealTime
             )
             hasFiniteBoundedResolvedGeometry = Self.isPointOnPitch(resolved.start)
                 && Self.isPointOnPitch(resolved.end)
-                || (hasValidTrackAnchors && Self.hasBoundedAuthoredPresentation(mark, in: scenario))
+                || (hasValidTrackAnchors && Self.hasBoundedAuthoredPresentation(revealPose, in: scenario))
         } else {
             hasFiniteBoundedResolvedGeometry = false
         }
@@ -3400,7 +3407,6 @@ final class ReplayStore {
             && mark.author.count <= Self.maximumCoachMarkLabelLength
             && mark.author.utf8.count <= Self.maximumCoachMarkLabelLength * 4
         guard hasFiniteBoundedGeometry,
-              mark.hasValidKeyframes(duration: scenario.duration),
               hasValidElevation,
               hasValidFramedArc,
               mark.kind == .arc ? (mark.curve?.isValid ?? true) : mark.curve == nil,
@@ -3429,25 +3435,29 @@ final class ReplayStore {
     /// The surrounding validator still checks both stored fallback endpoints,
     /// finite values, identities and absolute offset limits independently.
     private static func hasBoundedAuthoredPresentation(
-        _ mark: CoachMark,
+        _ revealPose: CoachMark,
         in scenario: ReplayScenario
     ) -> Bool {
-        guard mark.followsPlayerTracks else { return false }
+        // Validate the binding at reveal, not the latest edit. Unlinking later
+        // must not invalidate an earlier on-pitch impact or ideal-shape pose.
+        guard revealPose.followsPlayerTracks else { return false }
+        let playerIDs = Set([revealPose.playerID, revealPose.startTrackAnchor?.playerID,
+                             revealPose.endTrackAnchor?.playerID].compactMap { $0 })
 
         func isBounded(in presentation: ReplayPlayerPresentation) -> Bool {
-            let poses = Dictionary(uniqueKeysWithValues: mark.anchoredPlayerIDs.compactMap { id in
+            let poses = Dictionary(uniqueKeysWithValues: playerIDs.compactMap { id in
                 scenario.player(id: id).map {
-                    (id, presentation.pose(for: $0, at: mark.revealTime))
+                    (id, presentation.pose(for: $0, at: revealPose.revealTime))
                 }
             })
-            let resolved = mark.resolvedGeometry(
-                in: scenario, at: mark.revealTime, presentedPlayerPoses: poses
+            let resolved = revealPose.resolvedSampledGeometry(
+                in: scenario, at: revealPose.revealTime, presentedPlayerPoses: poses
             )
             return Self.isPointOnPitch(resolved.start) && Self.isPointOnPitch(resolved.end)
         }
 
         if let impact = PlayerRagdollCue.authoredDemo(for: scenario),
-           impact.isActive(at: mark.revealTime),
+           impact.isActive(at: revealPose.revealTime),
            isBounded(in: ReplayPlayerPresentation(scenario: scenario, viewMode: .tacticalTable)) {
             return true
         }

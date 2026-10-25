@@ -1308,7 +1308,7 @@ struct ReplayScenario: Identifiable, Codable, Hashable, Sendable {
 /// point and the ideal-shape view may move a role onto its teaching target.
 /// Bodies, identity tags and player-bound annotations must sample this same
 /// context instead of independently choosing between those positions.
-struct ReplayPlayerPresentation: Sendable {
+struct ReplayPlayerPresentation: Equatable, Sendable {
     let impactCue: PlayerRagdollCue?
     private let idealTargets: [FormationTarget]
 
