@@ -222,15 +222,20 @@
 				CODE_SIGN_ENTITLEMENTS = ReplayXI/ReplayXI.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 65W87ZCD87;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = ReplayXI/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Replay XI";
+				INFOPLIST_KEY_NSHandsTrackingUsageDescription = "Replay XI uses hand pinches to move and resize the replay pitch. Hand data stays on this device.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect to Replay XI Coach on your local network for live playback and annotation control.";
+				INFOPLIST_KEY_NSWorldSensingUsageDescription = "Replay XI detects floors and tables so you can place the replay pitch on a real surface. Room data stays on this device.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1;
-				PRODUCT_BUNDLE_IDENTIFIER = com.humansbeforemachines.replayxi;
+				PRODUCT_BUNDLE_IDENTIFIER = ReplayXI.zx.zx.NUS;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "xros xrsimulator";
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -239,6 +244,7 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 7;
+				XROS_DEPLOYMENT_TARGET = 26.0;
 			};
 			name = Debug;
 		};
@@ -250,15 +256,20 @@
 				CODE_SIGN_ENTITLEMENTS = ReplayXI/ReplayXI.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 65W87ZCD87;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = ReplayXI/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Replay XI";
+				INFOPLIST_KEY_NSHandsTrackingUsageDescription = "Replay XI uses hand pinches to move and resize the replay pitch. Hand data stays on this device.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect to Replay XI Coach on your local network for live playback and annotation control.";
+				INFOPLIST_KEY_NSWorldSensingUsageDescription = "Replay XI detects floors and tables so you can place the replay pitch on a real surface. Room data stays on this device.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1;
-				PRODUCT_BUNDLE_IDENTIFIER = com.humansbeforemachines.replayxi;
+				PRODUCT_BUNDLE_IDENTIFIER = ReplayXI.zx.zx.NUS;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "xros xrsimulator";
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -267,6 +278,7 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 7;
+				XROS_DEPLOYMENT_TARGET = 26.0;
 			};
 			name = Release;
 		};
